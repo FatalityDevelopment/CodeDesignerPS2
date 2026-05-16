@@ -61,8 +61,8 @@ const SNAP_PREVIEW = 5;
 
             @if (isPcsx2Selected()) {
               <div class="pcsx2-note">
-                PCSX2 selected. Start PCSX2 launches the external app with CLI args from selected game/BIOS.
-                Connect starts CodeDesigner control server; Run sends STARTPCSX2 over socket.
+                PCSX2 selected. Run PCSX2 launches the emulator, starts the CodeDesigner
+                control server, and attaches once PCSX2's PINE and GS stream are up.
               </div>
             }
 
@@ -110,11 +110,8 @@ const SNAP_PREVIEW = 5;
           <div class="acc-body">
             <div class="btn-grid">
 
-              <button id="runBtn" (click)="runClick.emit()">▶ Run</button>
-
-              @if (isPcsx2Selected()) {
-                <button id="startPcsx2Btn" (click)="startPcsx2Click.emit()">▶ Start PCSX2</button>
-              }
+              <button id="runPcsx2Btn" (click)="runPcsx2Click.emit()"
+                      [disabled]="!isPcsx2Selected()">🔌 Run PCSX2</button>
 
               <button id="restartBtn" (click)="restartClick.emit()" [disabled]="!isConnected()">
                 ⟳ Restart
@@ -319,9 +316,8 @@ export class SettingsTabComponent {
   // ── Outputs (emulator settings) ─────────────────────────────────────────────
 
   readonly connectClick       = output<void>();
-  readonly runClick           = output<void>();
+  readonly runPcsx2Click      = output<void>();
   readonly startNetworkClick  = output<void>();
-  readonly startPcsx2Click    = output<void>();
   readonly restartClick       = output<void>();
   readonly snapshotClick      = output<void>();
   readonly snapshotPcsx2Click = output<void>();

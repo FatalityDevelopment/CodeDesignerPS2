@@ -147,6 +147,10 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private _pcsx2ErrOffset = 0;
     /** Unique file paths discovered in PCSX2 console output. */
     private _pcsx2DiscoveredPaths = new Set<string>();
+    /** True once the PCSX2 emu log has reported "GSStream: listening". */
+    private _pcsx2GraphicsReady = false;
+    /** Callbacks waiting for PCSX2's GS stream to come up. */
+    private _pcsx2ReadyWaiters = new Set<() => void>();
     /** Standalone Joker Maker webview, registered from extension.ts after provider setup. */
     private _jokerMakerProvider?: JokerMakerProvider;
 
@@ -330,6 +334,13 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                     break;
                 case 'startPcsx2':
                     this.handleStartPcsx2(
+                        msg.emulatorPath ?? this.selectedEmulatorPath,
+                        msg.biosPath ?? this.selectedBiosPath,
+                        msg.gamePath ?? this.selectedGamePath
+                    );
+                    break;
+                case 'runPcsx2':
+                    this.handleRunPcsx2(
                         msg.emulatorPath ?? this.selectedEmulatorPath,
                         msg.biosPath ?? this.selectedBiosPath,
                         msg.gamePath ?? this.selectedGamePath
@@ -1056,6 +1067,87 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         this.launchControlServerAndConnect(emulatorPath);
     }
 
+    /**
+     * Single-button PCSX2 flow. Reuses an already-running PCSX2 when its PINE
+     * port answers and the bridge attaches cleanly; otherwise kills any
+     * stale/orphaned instance and launches a fresh one, then attaches once
+     * PCSX2 is ready. Replaces the old Start PCSX2 / Connect / Run trio.
+     */
+    private handleRunPcsx2(emulatorPath: string, biosPath: string, gamePath: string): void {
+        const out = getOutputChannel();
+        this.selectedEmulatorPath = emulatorPath;
+        this.selectedBiosPath = biosPath;
+        this.selectedGamePath = gamePath;
+        out.show(true);
+
+        void (async () => {
+            const host = (this.settings.pcsx2?.host ?? '127.0.0.1').trim() || '127.0.0.1';
+            const slot = this.settings.pcsx2?.slot ?? 28011;
+
+            // Bring up the Bridge control socket — needed either way, and
+            // independent of PCSX2. The attach is driven here, so clear any
+            // pending run mode that onSocketConnected would otherwise act on.
+            this._pendingRunMode = null;
+            if (!this.socketClient.isConnected() && !this.emulatorTerminal) {
+                this.launchControlServerAndConnect(emulatorPath);
+            }
+
+            // Reuse an already-running PCSX2 if its PINE port answers and the
+            // bridge can attach — lets users keep their own PCSX2 open.
+            if (await DisasmPanelProvider.probePortListening(slot, host)) {
+                out.info(`A PCSX2 instance is listening on ${host}:${slot} — trying to attach…`);
+                if (await this._waitForSocketConnected(20000) && await this._attachPcsx2()) {
+                    out.info('Attached to the existing PCSX2 instance.');
+                    return;
+                }
+                out.warn('Existing PCSX2 did not attach — replacing it with a fresh instance.');
+            }
+
+            // No reusable instance: kill any stale/orphaned PCSX2, launch fresh.
+            this.terminateOrphanedPcsx2ProcessesIfNeeded('starting a fresh PCSX2', true);
+            if (!this.handleStartPcsx2(emulatorPath, biosPath, gamePath)) { return; }
+
+            out.info('Waiting for PCSX2 to initialize (PINE + GS stream)…');
+            if (await this._waitForPcsx2GraphicsReady(45000)) {
+                out.info('PCSX2 GS stream is listening — PINE and graphics are up.');
+            } else {
+                out.warn('Timed out waiting for PCSX2 GS stream; attaching anyway.');
+            }
+
+            if (!await this._waitForSocketConnected(20000)) {
+                out.error('Control socket never connected — cannot attach PCSX2.');
+                return;
+            }
+            if (!await this._attachPcsx2()) {
+                out.error('Failed to attach to the freshly launched PCSX2.');
+            }
+        })();
+    }
+
+    /**
+     * Sends STARTPCSX2 over the control socket so the bridge attaches to
+     * PCSX2's PINE, then opens the GS viewer. Returns false if the attach
+     * fails (e.g. the targeted PCSX2 is unreachable or unhealthy).
+     */
+    private async _attachPcsx2(): Promise<boolean> {
+        const out = getOutputChannel();
+        const host = (this.settings.pcsx2?.host ?? '127.0.0.1').trim() || '127.0.0.1';
+        const slot = this.settings.pcsx2?.slot ?? 28011;
+        try {
+            out.info(`Sending STARTPCSX2 to control server (${host}:${slot})…`);
+            await this.socketClient.startPcsx2(host, slot);
+        } catch (err: any) {
+            out.warn(`STARTPCSX2 failed: ${err?.message ?? err}`);
+            return false;
+        }
+        void vscode.commands.executeCommand('codedesigner.openGsFrameViewer');
+        this._bridgeMode = true;
+        this._setPauseState(false);
+        this.webview?.postMessage({ command: 'pcsx2ModeChanged', isPcsx2: true });
+        void this.handleFetchArchiveCheats();
+        return true;
+    }
+
     /** Launch the Multiplayer server executable in a VSCode terminal. */
     private handleStartNetwork(): void {
         const out = getOutputChannel();
@@ -1296,8 +1388,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    private terminateOrphanedPcsx2ProcessesIfNeeded(reason: string): void {
-        if (!this._launchedPcsx2InSession) { return; }
+    private terminateOrphanedPcsx2ProcessesIfNeeded(reason: string, force = false): void {
+        if (!force && !this._launchedPcsx2InSession) { return; }
 
         const out = getOutputChannel();
         const platform = process.platform;
@@ -1355,7 +1447,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
      * PCSX2 is located from the emulators list, then auto-detected from the install
      * directory's `pcsx2` subfolder, then standard OS paths — no manual path config needed.
      */
-    private handleStartPcsx2(emulatorPath: string, biosPath: string, gamePath: string): void {
+    private handleStartPcsx2(emulatorPath: string, biosPath: string, gamePath: string): boolean {
         const out = getOutputChannel();
 
         this.selectedEmulatorPath = emulatorPath;
@@ -1382,7 +1474,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             vscode.window.showErrorMessage(
                 'PCSX2 not found. Place PCSX2 in the pcsx2 subfolder of the CodeDesigner install directory, or add it via the emulator selector.'
             );
-            return;
+            return false;
         }
 
         const args: string[] = [];
@@ -1441,7 +1533,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             void this.capturePcsx2PidFromFile(pidPath);
             out.info(`PCSX2 launched. Emu log: ${emuLogPath}`);
             this._launchedPcsx2InSession = true;
-            return;
+            return true;
         }
 
         if (this._pcsx2Terminal) {
@@ -1457,7 +1549,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         terminal.show(true);
         out.info('PCSX2 started via terminal manager.');
         this._launchedPcsx2InSession = true;
-
+        return true;
     }
 
     private async capturePcsx2PidFromFile(pidPath: string): Promise<void> {
@@ -1477,6 +1569,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         this._pcsx2LogOffset = 0;
         this._pcsx2ErrOffset = 0;
         this._pcsx2DiscoveredPaths.clear();
+        this._pcsx2GraphicsReady = false;
         const consume = async (target: 'out' | 'err') => {
             try {
                 const file = target === 'out' ? logPath : (errPath ?? logPath);
@@ -1491,6 +1584,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 if (target === 'out') { this._pcsx2LogOffset = stat.size; } else { this._pcsx2ErrOffset = stat.size; }
                 const chunk = buf.toString('utf8');
                 this.extractAndPersistPcsx2Paths(chunk);
+                this._detectPcsx2GraphicsReady(chunk);
             } catch { /* ignore */ }
         };
         this._pcsx2LogWatcher = fs.watch(logPath, () => { void consume('out'); });
@@ -1513,6 +1607,46 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         const outFile = path.join(root, 'pcsx2-paths.md');
         const lines = ['# PCSX2 discovered paths', '', ...Array.from(this._pcsx2DiscoveredPaths).sort().map(p => `- \`${p}\``), ''];
         void fs.promises.writeFile(outFile, lines.join('\n'), 'utf8');
+    }
+
+    /** Marks PCSX2 graphics-ready when the emu log reports "GSStream: listening". */
+    private _detectPcsx2GraphicsReady(chunk: string): void {
+        if (this._pcsx2GraphicsReady || !/GSStream:\s*listening/i.test(chunk)) { return; }
+        this._pcsx2GraphicsReady = true;
+        const waiters = Array.from(this._pcsx2ReadyWaiters);
+        this._pcsx2ReadyWaiters.clear();
+        for (const w of waiters) { w(); }
+    }
+
+    /**
+     * Resolves true once the PCSX2 emu log reports "GSStream: listening" (PINE
+     * and the GS stream are both up by then), or false if the timeout elapses.
+     */
+    private _waitForPcsx2GraphicsReady(timeoutMs: number): Promise<boolean> {
+        if (this._pcsx2GraphicsReady) { return Promise.resolve(true); }
+        return new Promise<boolean>(resolve => {
+            let settled = false;
+            const finish = (value: boolean) => {
+                if (settled) { return; }
+                settled = true;
+                clearTimeout(timer);
+                this._pcsx2ReadyWaiters.delete(waiter);
+                resolve(value);
+            };
+            const waiter = () => finish(true);
+            const timer = setTimeout(() => finish(false), timeoutMs);
+            this._pcsx2ReadyWaiters.add(waiter);
+        });
+    }
+
+    /** Polls until the control socket reports connected, or the timeout elapses. */
+    private async _waitForSocketConnected(timeoutMs: number): Promise<boolean> {
+        const deadline = Date.now() + timeoutMs;
+        while (Date.now() < deadline) {
+            if (this.socketClient.isConnected()) { return true; }
+            await new Promise(r => setTimeout(r, 200));
+        }
+        return this.socketClient.isConnected();
     }
 
     /**

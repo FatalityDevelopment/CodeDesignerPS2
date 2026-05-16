@@ -235,9 +235,9 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
     });
   }
 
-  run(): void {
+  runPcsx2(): void {
     this.bridge.postMessage({
-      command: 'run',
+      command: 'runPcsx2',
       emulatorPath: this.selectedEmulator,
       biosPath: this.selectedBios,
       gamePath: this.selectedGame,
@@ -246,15 +246,6 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
 
   startNetwork(): void {
     this.bridge.postMessage({ command: 'startNetwork' });
-  }
-
-  startPcsx2(): void {
-    this.bridge.postMessage({
-      command: 'startPcsx2',
-      emulatorPath: this.selectedEmulator,
-      biosPath: this.selectedBios,
-      gamePath: this.selectedGame,
-    });
   }
 
   restart(): void {
