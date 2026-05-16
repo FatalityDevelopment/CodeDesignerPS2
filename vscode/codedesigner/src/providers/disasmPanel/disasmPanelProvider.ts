@@ -137,14 +137,10 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private _launchedPcsx2Pid: number | null = null;
     /** Terminal used for PCSX2 launch/management. */
     private _pcsx2Terminal?: vscode.Terminal;
-    /** Tail watcher for the PCSX2 console log file. */
-    private _pcsx2LogWatcher?: fs.FSWatcher;
-    /** Tail watcher for the PCSX2 console error log file. */
-    private _pcsx2ErrWatcher?: fs.FSWatcher;
-    /** Byte offset already parsed in the PCSX2 console log. */
+    /** Poll timer tailing the PCSX2 emu log. */
+    private _pcsx2LogTimer?: ReturnType<typeof setInterval>;
+    /** Byte offset already parsed in the PCSX2 emu log. */
     private _pcsx2LogOffset = 0;
-    /** Byte offset already parsed in the PCSX2 console error log. */
-    private _pcsx2ErrOffset = 0;
     /** Unique file paths discovered in PCSX2 console output. */
     private _pcsx2DiscoveredPaths = new Set<string>();
     /** True once the PCSX2 emu log has reported "GSStream: listening". */
@@ -1081,6 +1077,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         out.show(true);
 
         void (async () => {
+          try {
             const host = (this.settings.pcsx2?.host ?? '127.0.0.1').trim() || '127.0.0.1';
             const slot = this.settings.pcsx2?.slot ?? 28011;
 
@@ -1132,6 +1129,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             if (!await this._attachPcsx2()) {
                 out.error('Failed to attach to the freshly launched PCSX2.');
             }
+          } catch (err: any) {
+            out.error(`Run PCSX2 failed: ${err?.message ?? err}`);
+          }
         })();
     }
 
@@ -1434,20 +1434,15 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 
         this._launchedPcsx2InSession = false;
         this._launchedPcsx2Pid = null;
-        if (this._pcsx2LogWatcher) {
-            try { this._pcsx2LogWatcher.close(); } catch { /* ignore */ }
-            this._pcsx2LogWatcher = undefined;
-        }
-        if (this._pcsx2ErrWatcher) {
-            try { this._pcsx2ErrWatcher.close(); } catch { /* ignore */ }
-            this._pcsx2ErrWatcher = undefined;
+        if (this._pcsx2LogTimer) {
+            try { clearInterval(this._pcsx2LogTimer); } catch { /* ignore */ }
+            this._pcsx2LogTimer = undefined;
         }
         if (this._pcsx2Terminal) {
             try { this._pcsx2Terminal.dispose(); } catch { /* ignore */ }
             this._pcsx2Terminal = undefined;
         }
         this._pcsx2LogOffset = 0;
-        this._pcsx2ErrOffset = 0;
         this._pcsx2DiscoveredPaths.clear();
     }
 
@@ -1573,34 +1568,35 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    private startPcsx2LogParsing(logPath: string, errPath?: string): void {
-        if (this._pcsx2LogWatcher) { try { this._pcsx2LogWatcher.close(); } catch { /* ignore */ } }
-        if (this._pcsx2ErrWatcher) { try { this._pcsx2ErrWatcher.close(); } catch { /* ignore */ } }
+    private startPcsx2LogParsing(logPath: string): void {
+        if (this._pcsx2LogTimer) { clearInterval(this._pcsx2LogTimer); this._pcsx2LogTimer = undefined; }
         this._pcsx2LogOffset = 0;
-        this._pcsx2ErrOffset = 0;
         this._pcsx2DiscoveredPaths.clear();
         this._pcsx2GraphicsReady = false;
-        const consume = async (target: 'out' | 'err') => {
+
+        // Poll the emu log instead of fs.watch-ing it: the file does not exist
+        // yet when PCSX2 is launching (fs.watch throws ENOENT on a missing
+        // path, which previously aborted the whole run flow), and PCSX2
+        // truncates it on open. Polling tolerates both.
+        const consume = async () => {
             try {
-                const file = target === 'out' ? logPath : (errPath ?? logPath);
-                const curOffset = target === 'out' ? this._pcsx2LogOffset : this._pcsx2ErrOffset;
-                const stat = await fs.promises.stat(file);
-                if (stat.size <= curOffset) { return; }
-                const fh = await fs.promises.open(file, 'r');
-                const len = stat.size - curOffset;
+                const stat = await fs.promises.stat(logPath);
+                // PCSX2 truncates the log when it (re)opens it — restart from 0.
+                if (stat.size < this._pcsx2LogOffset) { this._pcsx2LogOffset = 0; }
+                if (stat.size <= this._pcsx2LogOffset) { return; }
+                const fh = await fs.promises.open(logPath, 'r');
+                const len = stat.size - this._pcsx2LogOffset;
                 const buf = Buffer.alloc(len);
-                await fh.read(buf, 0, len, curOffset);
+                await fh.read(buf, 0, len, this._pcsx2LogOffset);
                 await fh.close();
-                if (target === 'out') { this._pcsx2LogOffset = stat.size; } else { this._pcsx2ErrOffset = stat.size; }
+                this._pcsx2LogOffset = stat.size;
                 const chunk = buf.toString('utf8');
                 this.extractAndPersistPcsx2Paths(chunk);
                 this._detectPcsx2GraphicsReady(chunk);
-            } catch { /* ignore */ }
+            } catch { /* emu log not created yet — keep polling */ }
         };
-        this._pcsx2LogWatcher = fs.watch(logPath, () => { void consume('out'); });
-        if (errPath) {
-            this._pcsx2ErrWatcher = fs.watch(errPath, () => { void consume('err'); });
-        }
+
+        this._pcsx2LogTimer = setInterval(() => { void consume(); }, 500);
     }
 
     private extractAndPersistPcsx2Paths(chunk: string): void {
