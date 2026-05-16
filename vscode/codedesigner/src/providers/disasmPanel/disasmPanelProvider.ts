@@ -127,6 +127,22 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private _globalStoragePath: string = '';
     /** In-flight archive sync promise — reused so concurrent callers don't start duplicate clones. */
     private _archiveSyncPromise: Promise<void> | null = null;
+    /** Monotonic token used to invalidate stale socket retry loops. */
+    private _connectAttemptVersion = 0;
+    /** Timer handle for deferred socket retry; cleared before scheduling a new retry. */
+    private _connectRetryTimer: ReturnType<typeof setTimeout> | undefined;
+    /** Track whether this session launched PCSX2 so we can clean up orphans on disconnect/restart. */
+    private _launchedPcsx2InSession = false;
+    /** PID of a PCSX2 process launched by this VS Code session (if available). */
+    private _launchedPcsx2Pid: number | null = null;
+    /** Terminal used for PCSX2 launch/management. */
+    private _pcsx2Terminal?: vscode.Terminal;
+    /** Tail watcher for the PCSX2 console log file. */
+    private _pcsx2LogWatcher?: fs.FSWatcher;
+    /** Byte offset already parsed in the PCSX2 console log. */
+    private _pcsx2LogOffset = 0;
+    /** Unique file paths discovered in PCSX2 console output. */
+    private _pcsx2DiscoveredPaths = new Set<string>();
     /** Standalone Joker Maker webview, registered from extension.ts after provider setup. */
     private _jokerMakerProvider?: JokerMakerProvider;
 
@@ -1003,6 +1019,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             }
             out.info('Disconnected from server.');
             this.socketClient.disconnect();
+            this.terminateOrphanedPcsx2ProcessesIfNeeded('disconnect');
             this.cleanupProcess();
             return;
         }
@@ -1174,32 +1191,40 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         const out = getOutputChannel();
         const maxAttempts = 20;
         let attempts = 0;
+        const attemptVersion = ++this._connectAttemptVersion;
+        this.clearPendingSocketRetry();
 
         const tryConnect = async () => {
+            if (attemptVersion !== this._connectAttemptVersion) { return; }
             attempts++;
             try {
                 if (!this.socketClient.isConnected()) {
                     await this.socketClient.connect();
                 }
+                if (attemptVersion !== this._connectAttemptVersion) { return; }
+                this.clearPendingSocketRetry();
                 out.info('Socket connected to emulator. Opening memory views…');
                 for (const r of LIVE_REGIONS_DEFAULT) {
                     await this.editorProvider.openLiveMemoryView(
                         r.region, r.address, r.size, r.label);
                 }
             } catch {
+                if (attemptVersion !== this._connectAttemptVersion) { return; }
                 if (attempts < maxAttempts) {
-                    setTimeout(tryConnect, 500);
+                    this.clearPendingSocketRetry();
+                    this._connectRetryTimer = setTimeout(tryConnect, 500);
                 } else {
                     out.warn('Could not connect to emulator socket server.');
                 }
             }
         };
 
-        // Give the emulator ~1 s to start listening before first attempt
-        setTimeout(tryConnect, 1000);
+        this._connectRetryTimer = setTimeout(tryConnect, 1000);
     }
 
     private cleanupProcess(): void {
+        this._connectAttemptVersion++;
+        this.clearPendingSocketRetry();
         this.emulatorTerminal = undefined;
         // Tear down the built-in emulator process if it's still running so a
         // subsequent Run respawns it cleanly.
@@ -1259,6 +1284,61 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         })();
     }
 
+    private clearPendingSocketRetry(): void {
+        if (this._connectRetryTimer) {
+            clearTimeout(this._connectRetryTimer);
+            this._connectRetryTimer = undefined;
+        }
+    }
+
+    private terminateOrphanedPcsx2ProcessesIfNeeded(reason: string): void {
+        if (!this._launchedPcsx2InSession) { return; }
+
+        const out = getOutputChannel();
+        const platform = process.platform;
+        try {
+            if (this._launchedPcsx2Pid && Number.isFinite(this._launchedPcsx2Pid)) {
+                const pid = this._launchedPcsx2Pid;
+                if (platform === "win32") {
+                    child_process.spawnSync("taskkill", ["/F", "/PID", String(pid), "/T"], { stdio: "pipe" });
+                } else {
+                    process.kill(pid, "SIGTERM");
+                }
+                out.info(`[PCSX2] Requested shutdown for launched background PID ${pid} (${reason}).`);
+            }
+            if (platform === "win32") {
+                const kill = child_process.spawnSync("taskkill", ["/F", "/IM", "pcsx2-qt.exe", "/T"], { stdio: "pipe" });
+                const stdout = String(kill.stdout ?? "").trim();
+                const stderr = String(kill.stderr ?? "").trim();
+                if (kill.status === 0) {
+                    out.info(`[PCSX2] Cleared orphan process (${reason}). ${stdout}`.trim());
+                } else if (stdout || stderr) {
+                    out.info(`[PCSX2] No orphan cleanup needed (${reason}): ${(stderr || stdout).replace(/\s+/g, " " )}`);
+                }
+            } else {
+                const kill = child_process.spawnSync("pkill", ["-f", "pcsx2"], { stdio: "pipe" });
+                if (kill.status === 0) {
+                    out.info(`[PCSX2] Cleared orphan process (${reason}).`);
+                }
+            }
+        } catch (err: any) {
+            out.warn(`[PCSX2] Orphan cleanup failed (${reason}): ${err?.message ?? err}`);
+        }
+
+        this._launchedPcsx2InSession = false;
+        this._launchedPcsx2Pid = null;
+        if (this._pcsx2LogWatcher) {
+            try { this._pcsx2LogWatcher.close(); } catch { /* ignore */ }
+            this._pcsx2LogWatcher = undefined;
+        }
+        if (this._pcsx2Terminal) {
+            try { this._pcsx2Terminal.dispose(); } catch { /* ignore */ }
+            this._pcsx2Terminal = undefined;
+        }
+        this._pcsx2LogOffset = 0;
+        this._pcsx2DiscoveredPaths.clear();
+    }
+
     /**
      * Launch the external PCSX2 application using CLI arguments from panel selections.
      * This does not connect sockets by itself; Connect/Run still control CodeDesigner.
@@ -1295,26 +1375,107 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 
         if (resolvedDisc && fs.existsSync(resolvedDisc)) {
             out.info(`PCSX2 game selection: ${resolvedDisc}`);
-            args.push('-batch', resolvedDisc);
+            args.push('--batch', resolvedDisc);
         } else {
             out.warn('No valid game selected for PCSX2 launch; starting without a boot image.');
         }
 
-        args.push('-earlyconsolelog');
-        args.push('-nogui');
+        args.push('--earlyconsolelog');
+        args.push('--nogui');
 
         const preview = [pcsx2Exe, ...args]
             .map(v => v.includes(' ') ? `"${v}"` : v)
             .join(' ');
         out.info(`Starting PCSX2: ${preview}`);
 
+        if (process.platform === 'win32') {
+            const scriptPath = path.join(this.extensionPath, 'scripts', 'launch-pcsx2-hidden.ps1');
+            const logDir = path.join(this._globalStoragePath, 'pcsx2');
+            const logPath = path.join(logDir, 'console.log');
+            const pidPath = path.join(logDir, 'pid.txt');
+            try { fs.mkdirSync(logDir, { recursive: true }); } catch { /* ignore */ }
+            try { fs.writeFileSync(logPath, ''); } catch { /* ignore */ }
+            try { fs.writeFileSync(pidPath, ''); } catch { /* ignore */ }
+
+            if (this._pcsx2Terminal) {
+                try { this._pcsx2Terminal.dispose(); } catch { /* ignore */ }
+                this._pcsx2Terminal = undefined;
+            }
+            const terminal = vscode.window.createTerminal({ name: 'PCSX2 Launcher', shellPath: 'powershell.exe', shellArgs: ['-NoLogo'] });
+            this._pcsx2Terminal = terminal;
+            terminal.show(true);
+            const cmd = `& "${scriptPath}" -ExePath "${pcsx2Exe}" -LogPath "${logPath}" -PidPath "${pidPath}" -ArgList @(${args.map(a => `'${a.replace(/'/g, "''")}'`).join(',')})`;
+            terminal.sendText(cmd, true);
+
+            this.startPcsx2LogParsing(logPath);
+            void this.capturePcsx2PidFromFile(pidPath);
+            out.info(`PCSX2 hidden launcher started via terminal. Log: ${logPath}`);
+            this._launchedPcsx2InSession = true;
+            return;
+        }
+
+        if (this._pcsx2Terminal) {
+            try { this._pcsx2Terminal.dispose(); } catch { /* ignore */ }
+            this._pcsx2Terminal = undefined;
+        }
         const terminal = vscode.window.createTerminal({
             name: 'PCSX2',
             shellPath: pcsx2Exe,
             shellArgs: args,
         });
+        this._pcsx2Terminal = terminal;
         terminal.show(true);
+        out.info('PCSX2 started via terminal manager.');
+        this._launchedPcsx2InSession = true;
 
+    }
+
+    private async capturePcsx2PidFromFile(pidPath: string): Promise<void> {
+        for (let i = 0; i < 40; i++) {
+            try {
+                const text = (await fs.promises.readFile(pidPath, 'utf8')).trim();
+                const pid = Number(text);
+                if (Number.isFinite(pid) && pid > 0) { this._launchedPcsx2Pid = pid; return; }
+            } catch { /* ignore */ }
+            await new Promise(r => setTimeout(r, 100));
+        }
+    }
+
+    private startPcsx2LogParsing(logPath: string): void {
+        if (this._pcsx2LogWatcher) { try { this._pcsx2LogWatcher.close(); } catch { /* ignore */ } }
+        this._pcsx2LogOffset = 0;
+        this._pcsx2DiscoveredPaths.clear();
+        const consume = async () => {
+            try {
+                const stat = await fs.promises.stat(logPath);
+                if (stat.size <= this._pcsx2LogOffset) { return; }
+                const fh = await fs.promises.open(logPath, 'r');
+                const len = stat.size - this._pcsx2LogOffset;
+                const buf = Buffer.alloc(len);
+                await fh.read(buf, 0, len, this._pcsx2LogOffset);
+                await fh.close();
+                this._pcsx2LogOffset = stat.size;
+                const chunk = buf.toString('utf8');
+                this.extractAndPersistPcsx2Paths(chunk);
+            } catch { /* ignore */ }
+        };
+        this._pcsx2LogWatcher = fs.watch(logPath, () => { void consume(); });
+    }
+
+    private extractAndPersistPcsx2Paths(chunk: string): void {
+        const pathPattern = /([A-Za-z]:\\[^\s"']+|\/[^\s"']+)/g;
+        let matched = false;
+        for (const m of chunk.matchAll(pathPattern)) {
+            const p = m[1].trim();
+            if (!p || p.length < 3) { continue; }
+            this._pcsx2DiscoveredPaths.add(p);
+            matched = true;
+        }
+        if (!matched) { return; }
+        const root = this.workspaceRoot || process.cwd();
+        const outFile = path.join(root, 'pcsx2-paths.md');
+        const lines = ['# PCSX2 discovered paths', '', ...Array.from(this._pcsx2DiscoveredPaths).sort().map(p => `- \`${p}\``), ''];
+        void fs.promises.writeFile(outFile, lines.join('\n'), 'utf8');
     }
 
     /**
