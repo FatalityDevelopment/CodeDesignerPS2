@@ -179,6 +179,12 @@ namespace CodeDesigner.Ps2.Bridge
         /// <summary>Human-readable game title (e.g. "SOCOM II"). Used when creating a new Game row.</summary>
         public string? GameTitle { get; set; }
 
+        // Cheats editor fields (CHEATEDITOR_*)
+        /// <summary>Game row ID for the cheats editor (CHEATEDITOR_LISTS / CHEATEDITOR_CREATE).</summary>
+        public int? CheatGameId { get; set; }
+        /// <summary>CheatList row ID for the cheats editor (CHEATEDITOR_GET / SAVE / DELETE).</summary>
+        public int? CheatListId { get; set; }
+
         // Memory Manager fields (MCPMEMORY_LIST / MCPMEMORY_GET / MCPMEMORY_ADD / MCPMEMORY_UPDATE / MCPMEMORY_DELETE / MCPMEMORY_IMPORT / MCPMEMORY_EXPORT)
         /// <summary>Database row ID of the MCP memory entry to operate on.</summary>
         public int? McpMemoryId { get; set; }

@@ -130,6 +130,9 @@ interface CommandMessage {
     GameSerial?: string;
     GameCrc?: string;
     GameTitle?: string;
+    // Cheats editor (CHEATEDITOR_*)
+    CheatGameId?: number;
+    CheatListId?: number;
     // Pad / controller input (PADGETSTATE / PADSETBUTTON / PADSETANALOG / PADSETSTATE / PADGETTYPE)
     /** Unified pad slot index (0–7). */
     PadSlot?: number;
@@ -492,6 +495,12 @@ interface CommandResponse {
     // GETGAMECHEATS results
     GameCheats?: GameCheatInfo[];
     GameTitle?: string;
+    // COMPAT_LIST results
+    CompatGames?: CompatGameInfo[];
+    // CHEATEDITOR_* results
+    CheatEditorGames?: CheatGameInfo[];
+    CheatEditorLists?: CheatListInfo[];
+    CheatEditorList?: CheatListInfo;
     CheatListTitle?: string;
     // PADGETSTATE result
     PadState?: PadStateInfo;
@@ -641,6 +650,49 @@ export interface McpAgentInfo {
     research?:           string;
     createdAt:           string;
     updatedAt:           string;
+}
+
+/**
+ * A single PCSX2 compatibility entry (one game disc) returned by COMPAT_LIST.
+ */
+export interface CompatGameInfo {
+    discId:             number;
+    gameId:             number;
+    title:              string;
+    serial?:            string;
+    crc?:               string;
+    region?:            string;
+    status?:            string;
+    lastTestedVersion?: string;
+    lastTestedDate?:    string;
+    wikiLink?:          string;
+    forumLink?:         string;
+    hasCover:           boolean;
+}
+
+/**
+ * A game that owns at least one cheat list — used by the cheats editor picker.
+ */
+export interface CheatGameInfo {
+    gameId:       number;
+    title:        string;
+    coverSerial?: string;
+    hasCover:     boolean;
+    listCount:    number;
+}
+
+/**
+ * A single cheat list ("build") shown in the cheats editor.
+ */
+export interface CheatListInfo {
+    id:         number;
+    gameId:     number;
+    title:      string;
+    cheatCount: number;
+    region?:    string;
+    serial?:    string;
+    crc?:       string;
+    updatedAt?: string;
 }
 
 /**
@@ -3295,6 +3347,91 @@ export class SocketClient {
     public async mcpMemoryExport(id: number, outputPath: string): Promise<void> {
         const response = await this.sendCommand({ Command: 'MCPMEMORY_EXPORT', McpMemoryId: id, OutputPath: outputPath });
         if (!response.Success) { throw new Error(response.Error || 'MCPMEMORY_EXPORT failed'); }
+    }
+
+    // ── PCSX2 Compatibility List ─────────────────────────────────────────────
+
+    /**
+     * COMPAT_LIST — returns every game disc that carries a PCSX2 compatibility
+     * status. Returns an empty array when the database has not been synced yet.
+     */
+    public async compatList(): Promise<CompatGameInfo[]> {
+        const response = await this.sendCommand({ Command: 'COMPAT_LIST' }, 30000);
+        if (!response.Success) { throw new Error(response.Error || 'COMPAT_LIST failed'); }
+        return response.CompatGames ?? [];
+    }
+
+    /**
+     * COMPAT_SYNC — downloads PCSX2's published compatibility list and upserts
+     * the local database. Returns the human-readable summary message.
+     */
+    public async compatSync(): Promise<string> {
+        const response = await this.sendCommand({ Command: 'COMPAT_SYNC' }, 180000);
+        if (!response.Success) { throw new Error(response.Error || 'COMPAT_SYNC failed'); }
+        return response.Message ?? 'Compatibility list synced.';
+    }
+
+    /**
+     * COMPAT_COVER — returns a game's cover art as a base64 string, downloading
+     * and caching it on first request. Returns null when no cover is available.
+     */
+    public async compatGetCover(serial: string): Promise<string | null> {
+        const response = await this.sendCommand({ Command: 'COMPAT_COVER', GameSerial: serial }, 30000);
+        if (!response.Success) { throw new Error(response.Error || 'COMPAT_COVER failed'); }
+        return response.Data ?? null;
+    }
+
+    // ── Cheats Editor ────────────────────────────────────────────────────────
+
+    /** CHEATEDITOR_GAMES — returns every game that owns at least one cheat list. */
+    public async cheatEditorGames(): Promise<CheatGameInfo[]> {
+        const response = await this.sendCommand({ Command: 'CHEATEDITOR_GAMES' }, 30000);
+        if (!response.Success) { throw new Error(response.Error || 'CHEATEDITOR_GAMES failed'); }
+        return response.CheatEditorGames ?? [];
+    }
+
+    /** CHEATEDITOR_LISTS — returns the cheat lists ("builds") for a game. */
+    public async cheatEditorLists(gameId: number): Promise<CheatListInfo[]> {
+        const response = await this.sendCommand({ Command: 'CHEATEDITOR_LISTS', CheatGameId: gameId });
+        if (!response.Success) { throw new Error(response.Error || 'CHEATEDITOR_LISTS failed'); }
+        return response.CheatEditorLists ?? [];
+    }
+
+    /** CHEATEDITOR_GET — returns a cheat list serialized as editable text. */
+    public async cheatEditorGet(cheatListId: number): Promise<string> {
+        const response = await this.sendCommand({ Command: 'CHEATEDITOR_GET', CheatListId: cheatListId });
+        if (!response.Success) { throw new Error(response.Error || 'CHEATEDITOR_GET failed'); }
+        return response.Data ?? '';
+    }
+
+    /** CHEATEDITOR_SAVE — parses and persists edited cheat-list text. */
+    public async cheatEditorSave(cheatListId: number, text: string): Promise<string> {
+        const response = await this.sendCommand(
+            { Command: 'CHEATEDITOR_SAVE', CheatListId: cheatListId, Data: text }, 30000);
+        if (!response.Success) { throw new Error(response.Error || 'CHEATEDITOR_SAVE failed'); }
+        return response.Message ?? 'Saved.';
+    }
+
+    /** CHEATEDITOR_CREATE — creates a new empty cheat list for a game. */
+    public async cheatEditorCreate(gameId: number, title: string): Promise<CheatListInfo> {
+        const response = await this.sendCommand(
+            { Command: 'CHEATEDITOR_CREATE', CheatGameId: gameId, GameTitle: title });
+        if (!response.Success) { throw new Error(response.Error || 'CHEATEDITOR_CREATE failed'); }
+        return response.CheatEditorList!;
+    }
+
+    /** CHEATEDITOR_DELETE — deletes a cheat list and its cheats. */
+    public async cheatEditorDelete(cheatListId: number): Promise<void> {
+        const response = await this.sendCommand({ Command: 'CHEATEDITOR_DELETE', CheatListId: cheatListId });
+        if (!response.Success) { throw new Error(response.Error || 'CHEATEDITOR_DELETE failed'); }
+    }
+
+    /** CHEATEDITOR_IMPORT — runs the bulk cheat importer against an archive folder. */
+    public async cheatEditorImport(archiveRoot: string): Promise<string> {
+        const response = await this.sendCommand(
+            { Command: 'CHEATEDITOR_IMPORT', FilePath: archiveRoot }, 600000);
+        if (!response.Success) { throw new Error(response.Error || 'CHEATEDITOR_IMPORT failed'); }
+        return response.Message ?? 'Import complete.';
     }
 
     // ── Agent Profile ────────────────────────────────────────────────────────

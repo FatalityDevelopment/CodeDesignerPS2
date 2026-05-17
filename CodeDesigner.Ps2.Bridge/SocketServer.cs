@@ -313,6 +313,8 @@ namespace CodeDesigner.Ps2.Bridge
                 new Services.SnapshotHistoryService(ctx),
                 new Services.SymbolDatabaseService(ctx),
                 new Services.GameDiscService(ctx),
+                new Services.CompatService(ctx),
+                new Services.CheatEditorService(ctx),
                 new Services.HddService(ctx),
                 new Services.ProcessStateService(ctx),
                 new Services.WatchpointTraceService(ctx, _registerService),

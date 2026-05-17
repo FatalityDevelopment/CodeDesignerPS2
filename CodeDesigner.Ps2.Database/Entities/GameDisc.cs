@@ -37,6 +37,27 @@ public class GameDisc
     /// <summary>Absolute path to the ISO image on disk, if known.</summary>
     public string? IsoPath { get; set; }
 
+    // ── PCSX2 compatibility metadata ──────────────────────────────────────────
+    // Sourced from PCSX2's published compatibility list (data.json) and refreshed
+    // by the Bridge COMPAT_SYNC command. Null until a sync has populated them.
+
+    /// <summary>
+    /// PCSX2 compatibility rating, e.g. "Perfect", "Playable", "Ingame", "Menus".
+    /// </summary>
+    public string? CompatStatus { get; set; }
+
+    /// <summary>PCSX2 version this disc was last tested against, e.g. "1.7.0".</summary>
+    public string? LastTestedVersion { get; set; }
+
+    /// <summary>Date this disc's compatibility was last tested.</summary>
+    public System.DateTime? LastTestedDate { get; set; }
+
+    /// <summary>Link to the PCSX2 wiki page for this game, if any.</summary>
+    public string? WikiLink { get; set; }
+
+    /// <summary>Link to the PCSX2 forum thread for this game, if any.</summary>
+    public string? ForumLink { get; set; }
+
     /// <summary>Cheat lists targeting this specific disc version.</summary>
     public List<CheatList> CheatLists { get; set; } = [];
 

@@ -14,6 +14,7 @@ import { PacketViewerProvider } from '../packetViewer/packetViewerProvider';
 import { SnapshotManagerProvider, SnapshotDataDelegate } from '../snapshotManager/snapshotManagerProvider';
 import { DiffViewerProvider } from '../diffViewer/diffViewerProvider';
 import { JokerMakerProvider } from '../jokerMaker/jokerMakerProvider';
+import { CompatBrowserProvider } from '../compatBrowser/compatBrowserProvider';
 import { ArchiveCheat } from '../../webview/disasm-panel/types';
 
 interface EmuSettings {
@@ -172,6 +173,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     ) {
         this._mcpProgressReportEditorProvider = new McpProgressReportEditorProvider(socketClient);
         this._aiConfigProvider        = new AiConfigProvider(_extensionUri, socketClient);
+        this._compatBrowserProvider   = new CompatBrowserProvider(_extensionUri, socketClient);
         this._packetViewerProvider    = new PacketViewerProvider(_extensionUri, socketClient);
 
         const delegate: SnapshotDataDelegate = {
@@ -185,6 +187,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 
     private readonly _mcpProgressReportEditorProvider: McpProgressReportEditorProvider;
     private readonly _aiConfigProvider: AiConfigProvider;
+    private readonly _compatBrowserProvider: CompatBrowserProvider;
     private readonly _packetViewerProvider: PacketViewerProvider;
     private readonly _snapshotManagerProvider: SnapshotManagerProvider;
     private readonly _diffViewerProvider: DiffViewerProvider;
@@ -465,6 +468,14 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 // ── AI Configuration ──────────────────────────────────────
                 case 'openAiConfig':
                     this._aiConfigProvider.open();
+                    break;
+                // ── PS2 Game Compatibility browser ────────────────────────
+                case 'openCompatBrowser':
+                    this._compatBrowserProvider.open();
+                    break;
+                // ── PS2 Cheats editor ─────────────────────────────────────
+                case 'openCheatsEditor':
+                    vscode.commands.executeCommand('codedesigner.openCheatsEditor');
                     break;
                 // ── Packet Viewer ─────────────────────────────────────────
                 case 'openPacketViewer':

@@ -216,8 +216,8 @@ public class BulkCheatParser
             cheatList = existingList;
             cheatList.UpdatedAt = DateTime.UtcNow;
             // Bulk-delete existing cheats without loading them into memory.
-            // CheatLines are deleted first because SQLite does not enforce FK
-            // cascades unless PRAGMA foreign_keys = ON.
+            // CheatLines are removed first so the delete is explicit and order-safe
+            // even though the Cheat->CheatLine FK cascade would also remove them.
             var cheatIds = await _db.Cheats
                 .Where(c => c.CheatListId == cheatList.Id)
                 .Select(c => c.Id)
@@ -254,7 +254,7 @@ public class BulkCheatParser
             {
                 Label = entry.Name,
                 Author = string.IsNullOrWhiteSpace(entry.Author) ? null : entry.Author,
-                Description = string.IsNullOrWhiteSpace(entry.Section) ? null : entry.Section,
+                Section = string.IsNullOrWhiteSpace(entry.Section) ? null : entry.Section,
                 IsEnabled = false,
                 SortOrder = sortOrder++,
             };
