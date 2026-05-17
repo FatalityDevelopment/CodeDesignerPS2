@@ -48,6 +48,10 @@ namespace CodeDesigner.Ps2.Database.Migrations
                         .HasMaxLength(512)
                         .HasColumnType("nvarchar(512)");
 
+                    b.Property<string>("Section")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
                     b.Property<int>("SortOrder")
                         .HasColumnType("int");
 

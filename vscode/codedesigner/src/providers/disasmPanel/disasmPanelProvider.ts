@@ -473,6 +473,10 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 case 'openCompatBrowser':
                     this._compatBrowserProvider.open();
                     break;
+                // ── PS2 Cheats editor ─────────────────────────────────────
+                case 'openCheatsEditor':
+                    vscode.commands.executeCommand('codedesigner.openCheatsEditor');
+                    break;
                 // ── Packet Viewer ─────────────────────────────────────────
                 case 'openPacketViewer':
                     this._packetViewerProvider.open();

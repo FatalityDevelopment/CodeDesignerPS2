@@ -59,9 +59,9 @@ export class CompatBrowserProvider {
                 await this._sendCover(webview, msg['serial'] as string | undefined);
                 break;
             case 'openCheats':
-                // The cheats screen is built in a follow-up PR — acknowledge for now.
-                vscode.window.showInformationMessage(
-                    `Cheats for "${msg['title'] ?? 'this game'}" — coming in a future update.`);
+                // Open the cheats editor, pre-selecting this game by title.
+                vscode.commands.executeCommand(
+                    'codedesigner.openCheatsEditor', msg['title'] as string | undefined);
                 break;
             case 'bootstrapError':
                 getOutputChannel().error('[CompatBrowser] Bootstrap error: ' + msg['error']);

@@ -7,6 +7,7 @@ import { GsViewerProvider } from './providers/gsViewer/gsViewerProvider';
 import { JokerMakerProvider } from './providers/jokerMaker/jokerMakerProvider';
 import { Ps2FileEditorProvider } from './providers/ps2FileEditor/ps2FileEditorProvider';
 import { CompatBrowserProvider } from './providers/compatBrowser/compatBrowserProvider';
+import { CheatsEditorProvider } from './providers/cheatsEditor/cheatsEditorProvider';
 import { SocketClient } from './socketClient';
 
 let socketClient: SocketClient | null = null;
@@ -315,6 +316,16 @@ export function activate(context: vscode.ExtensionContext) {
 		() => compatBrowserProvider.open(),
 	);
 	context.subscriptions.push(openCompatBrowserCommand);
+
+	// ── PS2 Cheats editor ───────────────────────────────────────────────────
+	// Three-panel cheat-code editor; also opened from the compatibility
+	// browser's per-game Cheats button (passing the game title to pre-select).
+	const cheatsEditorProvider = new CheatsEditorProvider(context.extensionUri, socketClient);
+	const openCheatsEditorCommand = vscode.commands.registerCommand(
+		'codedesigner.openCheatsEditor',
+		(gameTitle?: string) => cheatsEditorProvider.open(gameTitle),
+	);
+	context.subscriptions.push(openCheatsEditorCommand);
 
 	// NOTE: File → Open for .elf/.bin/.raw is now handled by the
 	// Ps2FileEditorProvider custom editor registered above (via

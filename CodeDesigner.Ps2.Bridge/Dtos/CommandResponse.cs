@@ -280,6 +280,19 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public List<CompatGameInfo>? CompatGames { get; set; }
+
+        // ── Cheats editor (CHEATEDITOR_*) ──────────────────────────────────────
+        /// <summary>Games owning cheat lists, returned by CHEATEDITOR_GAMES.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public List<CheatGameInfo>? CheatEditorGames { get; set; }
+
+        /// <summary>Cheat lists for a game, returned by CHEATEDITOR_LISTS.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public List<CheatListInfo>? CheatEditorLists { get; set; }
+
+        /// <summary>A single cheat list, returned by CHEATEDITOR_CREATE.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public CheatListInfo? CheatEditorList { get; set; }
     }
 
     /// <summary>
