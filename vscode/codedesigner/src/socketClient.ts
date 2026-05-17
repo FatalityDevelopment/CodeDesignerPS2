@@ -492,6 +492,8 @@ interface CommandResponse {
     // GETGAMECHEATS results
     GameCheats?: GameCheatInfo[];
     GameTitle?: string;
+    // COMPAT_LIST results
+    CompatGames?: CompatGameInfo[];
     CheatListTitle?: string;
     // PADGETSTATE result
     PadState?: PadStateInfo;
@@ -641,6 +643,24 @@ export interface McpAgentInfo {
     research?:           string;
     createdAt:           string;
     updatedAt:           string;
+}
+
+/**
+ * A single PCSX2 compatibility entry (one game disc) returned by COMPAT_LIST.
+ */
+export interface CompatGameInfo {
+    discId:             number;
+    gameId:             number;
+    title:              string;
+    serial?:            string;
+    crc?:               string;
+    region?:            string;
+    status?:            string;
+    lastTestedVersion?: string;
+    lastTestedDate?:    string;
+    wikiLink?:          string;
+    forumLink?:         string;
+    hasCover:           boolean;
 }
 
 /**
@@ -3295,6 +3315,38 @@ export class SocketClient {
     public async mcpMemoryExport(id: number, outputPath: string): Promise<void> {
         const response = await this.sendCommand({ Command: 'MCPMEMORY_EXPORT', McpMemoryId: id, OutputPath: outputPath });
         if (!response.Success) { throw new Error(response.Error || 'MCPMEMORY_EXPORT failed'); }
+    }
+
+    // ── PCSX2 Compatibility List ─────────────────────────────────────────────
+
+    /**
+     * COMPAT_LIST — returns every game disc that carries a PCSX2 compatibility
+     * status. Returns an empty array when the database has not been synced yet.
+     */
+    public async compatList(): Promise<CompatGameInfo[]> {
+        const response = await this.sendCommand({ Command: 'COMPAT_LIST' }, 30000);
+        if (!response.Success) { throw new Error(response.Error || 'COMPAT_LIST failed'); }
+        return response.CompatGames ?? [];
+    }
+
+    /**
+     * COMPAT_SYNC — downloads PCSX2's published compatibility list and upserts
+     * the local database. Returns the human-readable summary message.
+     */
+    public async compatSync(): Promise<string> {
+        const response = await this.sendCommand({ Command: 'COMPAT_SYNC' }, 180000);
+        if (!response.Success) { throw new Error(response.Error || 'COMPAT_SYNC failed'); }
+        return response.Message ?? 'Compatibility list synced.';
+    }
+
+    /**
+     * COMPAT_COVER — returns a game's cover art as a base64 string, downloading
+     * and caching it on first request. Returns null when no cover is available.
+     */
+    public async compatGetCover(serial: string): Promise<string | null> {
+        const response = await this.sendCommand({ Command: 'COMPAT_COVER', GameSerial: serial }, 30000);
+        if (!response.Success) { throw new Error(response.Error || 'COMPAT_COVER failed'); }
+        return response.Data ?? null;
     }
 
     // ── Agent Profile ────────────────────────────────────────────────────────

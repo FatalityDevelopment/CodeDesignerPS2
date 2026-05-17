@@ -64,6 +64,10 @@
         "title": "CodeDesigner: Open Joker Maker"
       },
       {
+        "command": "codedesigner.openCompatBrowser",
+        "title": "CodeDesigner: Open PS2 Game Compatibility"
+      },
+      {
         "command": "codedesigner.pointerManager.addPointer",
         "title": "Add Struct",
         "icon": "$(add)"

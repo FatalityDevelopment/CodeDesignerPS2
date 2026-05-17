@@ -247,6 +247,10 @@ const SNAP_PREVIEW = 5;
                       title="Open the Memory Diff Viewer to compare snapshots">
                 ↔ Diff
               </button>
+              <button (click)="openCompatBrowserClick.emit()"
+                      title="Browse the PCSX2 game compatibility list">
+                🎮 Game Compat
+              </button>
             </div>
           </div>
         }
@@ -339,6 +343,7 @@ export class SettingsTabComponent {
   readonly openLabelManagerClick = output<void>();
   readonly openSnapshotManagerClick = output<void>();
   readonly openDiffViewerClick   = output<void>();
+  readonly openCompatBrowserClick = output<void>();
   readonly openMemoryCardClick   = output<void>();
   readonly openHddClick          = output<void>();
   readonly openMemoryViewClick = output<string>();

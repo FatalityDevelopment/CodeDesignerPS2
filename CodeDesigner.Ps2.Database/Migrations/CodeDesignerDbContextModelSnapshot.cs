@@ -189,6 +189,14 @@ namespace CodeDesigner.Ps2.Database.Migrations
                         .HasMaxLength(16)
                         .HasColumnType("nvarchar(16)");
 
+                    b.Property<string>("CompatStatus")
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<string>("ForumLink")
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
                     b.Property<int>("GameId")
                         .HasColumnType("int");
 
@@ -198,9 +206,20 @@ namespace CodeDesigner.Ps2.Database.Migrations
                     b.Property<string>("IsoPath")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<DateTime?>("LastTestedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("LastTestedVersion")
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
                     b.Property<string>("Serial")
                         .HasMaxLength(32)
                         .HasColumnType("nvarchar(32)");
+
+                    b.Property<string>("WikiLink")
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
 
                     b.HasKey("Id");
 

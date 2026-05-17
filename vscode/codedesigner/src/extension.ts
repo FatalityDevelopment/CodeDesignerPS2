@@ -6,6 +6,7 @@ import { DisasmPanelProvider } from './providers/disasmPanel/disasmPanelProvider
 import { GsViewerProvider } from './providers/gsViewer/gsViewerProvider';
 import { JokerMakerProvider } from './providers/jokerMaker/jokerMakerProvider';
 import { Ps2FileEditorProvider } from './providers/ps2FileEditor/ps2FileEditorProvider';
+import { CompatBrowserProvider } from './providers/compatBrowser/compatBrowserProvider';
 import { SocketClient } from './socketClient';
 
 let socketClient: SocketClient | null = null;
@@ -304,6 +305,16 @@ export function activate(context: vscode.ExtensionContext) {
 	disasmPanelProvider.setJokerMakerProvider(jokerMakerProvider);
 	socketClient.onConnected(()    => jokerMakerProvider.notifyConnectionChanged());
 	socketClient.onDisconnected(() => jokerMakerProvider.notifyConnectionChanged());
+
+	// ── PS2 Game Compatibility browser ──────────────────────────────────────
+	// Standalone webview that mirrors PCSX2's published compatibility list into
+	// the local database and displays it with cover art.
+	const compatBrowserProvider = new CompatBrowserProvider(context.extensionUri, socketClient);
+	const openCompatBrowserCommand = vscode.commands.registerCommand(
+		'codedesigner.openCompatBrowser',
+		() => compatBrowserProvider.open(),
+	);
+	context.subscriptions.push(openCompatBrowserCommand);
 
 	// NOTE: File → Open for .elf/.bin/.raw is now handled by the
 	// Ps2FileEditorProvider custom editor registered above (via

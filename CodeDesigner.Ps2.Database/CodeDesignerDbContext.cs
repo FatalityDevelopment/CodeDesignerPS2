@@ -195,6 +195,10 @@ public class CodeDesignerDbContext : DbContext
             entity.HasKey(d => d.Id);
             entity.Property(d => d.Serial).HasMaxLength(32);
             entity.Property(d => d.CRC).HasMaxLength(16);
+            entity.Property(d => d.CompatStatus).HasMaxLength(32);
+            entity.Property(d => d.LastTestedVersion).HasMaxLength(32);
+            entity.Property(d => d.WikiLink).HasMaxLength(512);
+            entity.Property(d => d.ForumLink).HasMaxLength(512);
 
             entity.HasOne(d => d.Game)
                   .WithMany(g => g.Discs)

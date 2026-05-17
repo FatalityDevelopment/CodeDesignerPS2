@@ -273,6 +273,13 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public GsFrameInfo? GsFrame { get; set; }
+
+        // ── PCSX2 compatibility list (COMPAT_LIST / COMPAT_SYNC) ───────────────
+        /// <summary>
+        /// PCSX2 compatibility entries returned by COMPAT_LIST, ordered by title.
+        /// </summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public List<CompatGameInfo>? CompatGames { get; set; }
     }
 
     /// <summary>
