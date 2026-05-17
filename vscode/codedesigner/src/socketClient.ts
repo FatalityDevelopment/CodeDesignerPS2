@@ -130,6 +130,9 @@ interface CommandMessage {
     GameSerial?: string;
     GameCrc?: string;
     GameTitle?: string;
+    // Cheats editor (CHEATEDITOR_*)
+    CheatGameId?: number;
+    CheatListId?: number;
     // Pad / controller input (PADGETSTATE / PADSETBUTTON / PADSETANALOG / PADSETSTATE / PADGETTYPE)
     /** Unified pad slot index (0–7). */
     PadSlot?: number;
@@ -496,6 +499,10 @@ interface CommandResponse {
     CompatGames?: CompatGameInfo[];
     // COMPAT_DETAILS result
     CompatGame?: CompatGameInfo;
+    // CHEATEDITOR_* results
+    CheatEditorGames?: CheatGameInfo[];
+    CheatEditorLists?: CheatListInfo[];
+    CheatEditorList?: CheatListInfo;
     CheatListTitle?: string;
     // PADGETSTATE result
     PadState?: PadStateInfo;
@@ -663,6 +670,31 @@ export interface CompatGameInfo {
     wikiLink?:          string;
     forumLink?:         string;
     hasCover:           boolean;
+}
+
+/**
+ * A game that owns at least one cheat list — used by the cheats editor picker.
+ */
+export interface CheatGameInfo {
+    gameId:       number;
+    title:        string;
+    coverSerial?: string;
+    hasCover:     boolean;
+    listCount:    number;
+}
+
+/**
+ * A single cheat list ("build") shown in the cheats editor.
+ */
+export interface CheatListInfo {
+    id:         number;
+    gameId:     number;
+    title:      string;
+    cheatCount: number;
+    region?:    string;
+    serial?:    string;
+    crc?:       string;
+    updatedAt?: string;
 }
 
 /**
@@ -3362,6 +3394,57 @@ export class SocketClient {
         });
         if (!response.Success) { throw new Error(response.Error || 'COMPAT_DETAILS failed'); }
         return response.CompatGame ?? null;
+    // ── Cheats Editor ────────────────────────────────────────────────────────
+
+    /** CHEATEDITOR_GAMES — returns every game that owns at least one cheat list. */
+    public async cheatEditorGames(): Promise<CheatGameInfo[]> {
+        const response = await this.sendCommand({ Command: 'CHEATEDITOR_GAMES' }, 30000);
+        if (!response.Success) { throw new Error(response.Error || 'CHEATEDITOR_GAMES failed'); }
+        return response.CheatEditorGames ?? [];
+    }
+
+    /** CHEATEDITOR_LISTS — returns the cheat lists ("builds") for a game. */
+    public async cheatEditorLists(gameId: number): Promise<CheatListInfo[]> {
+        const response = await this.sendCommand({ Command: 'CHEATEDITOR_LISTS', CheatGameId: gameId });
+        if (!response.Success) { throw new Error(response.Error || 'CHEATEDITOR_LISTS failed'); }
+        return response.CheatEditorLists ?? [];
+    }
+
+    /** CHEATEDITOR_GET — returns a cheat list serialized as editable text. */
+    public async cheatEditorGet(cheatListId: number): Promise<string> {
+        const response = await this.sendCommand({ Command: 'CHEATEDITOR_GET', CheatListId: cheatListId });
+        if (!response.Success) { throw new Error(response.Error || 'CHEATEDITOR_GET failed'); }
+        return response.Data ?? '';
+    }
+
+    /** CHEATEDITOR_SAVE — parses and persists edited cheat-list text. */
+    public async cheatEditorSave(cheatListId: number, text: string): Promise<string> {
+        const response = await this.sendCommand(
+            { Command: 'CHEATEDITOR_SAVE', CheatListId: cheatListId, Data: text }, 30000);
+        if (!response.Success) { throw new Error(response.Error || 'CHEATEDITOR_SAVE failed'); }
+        return response.Message ?? 'Saved.';
+    }
+
+    /** CHEATEDITOR_CREATE — creates a new empty cheat list for a game. */
+    public async cheatEditorCreate(gameId: number, title: string): Promise<CheatListInfo> {
+        const response = await this.sendCommand(
+            { Command: 'CHEATEDITOR_CREATE', CheatGameId: gameId, GameTitle: title });
+        if (!response.Success) { throw new Error(response.Error || 'CHEATEDITOR_CREATE failed'); }
+        return response.CheatEditorList!;
+    }
+
+    /** CHEATEDITOR_DELETE — deletes a cheat list and its cheats. */
+    public async cheatEditorDelete(cheatListId: number): Promise<void> {
+        const response = await this.sendCommand({ Command: 'CHEATEDITOR_DELETE', CheatListId: cheatListId });
+        if (!response.Success) { throw new Error(response.Error || 'CHEATEDITOR_DELETE failed'); }
+    }
+
+    /** CHEATEDITOR_IMPORT — runs the bulk cheat importer against an archive folder. */
+    public async cheatEditorImport(archiveRoot: string): Promise<string> {
+        const response = await this.sendCommand(
+            { Command: 'CHEATEDITOR_IMPORT', FilePath: archiveRoot }, 600000);
+        if (!response.Success) { throw new Error(response.Error || 'CHEATEDITOR_IMPORT failed'); }
+        return response.Message ?? 'Import complete.';
     }
 
     // ── Agent Profile ────────────────────────────────────────────────────────

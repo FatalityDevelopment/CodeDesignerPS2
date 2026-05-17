@@ -253,6 +253,7 @@ public class CodeDesignerDbContext : DbContext
             entity.HasKey(c => c.Id);
             entity.Property(c => c.Label).HasMaxLength(512).IsRequired();
             entity.Property(c => c.Author).HasMaxLength(256);
+            entity.Property(c => c.Section).HasMaxLength(256);
 
             entity.HasOne(c => c.CheatList)
                   .WithMany(cl => cl.Cheats)

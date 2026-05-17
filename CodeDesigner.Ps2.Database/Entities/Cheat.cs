@@ -30,6 +30,13 @@ public class Cheat
     /// </summary>
     public string? Description { get; set; }
 
+    /// <summary>
+    /// Optional section / category this cheat belongs to, e.g. "Others".
+    /// Surfaced in the cheat editor as a "[--SectionStart:...--]" group.
+    /// Null when the cheat is not grouped under a section.
+    /// </summary>
+    public string? Section { get; set; }
+
     /// <summary>Author or contributor name as recorded in the archive.</summary>
     public string? Author { get; set; }
 
