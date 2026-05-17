@@ -280,6 +280,10 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public List<CompatGameInfo>? CompatGames { get; set; }
+
+        /// <summary>Single compatibility entry returned by COMPAT_DETAILS.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public CompatGameInfo? CompatGame { get; set; }
     }
 
     /// <summary>

@@ -494,6 +494,8 @@ interface CommandResponse {
     GameTitle?: string;
     // COMPAT_LIST results
     CompatGames?: CompatGameInfo[];
+    // COMPAT_DETAILS result
+    CompatGame?: CompatGameInfo;
     CheatListTitle?: string;
     // PADGETSTATE result
     PadState?: PadStateInfo;
@@ -3347,6 +3349,19 @@ export class SocketClient {
         const response = await this.sendCommand({ Command: 'COMPAT_COVER', GameSerial: serial }, 30000);
         if (!response.Success) { throw new Error(response.Error || 'COMPAT_COVER failed'); }
         return response.Data ?? null;
+    }
+
+    /**
+     * COMPAT_DETAILS — returns the compatibility entry for a single game looked
+     * up by disc serial (preferred) or title. Null when the game is not in the
+     * local compatibility database.
+     */
+    public async compatDetails(opts: { serial?: string; title?: string }): Promise<CompatGameInfo | null> {
+        const response = await this.sendCommand({
+            Command: 'COMPAT_DETAILS', GameSerial: opts.serial, GameTitle: opts.title,
+        });
+        if (!response.Success) { throw new Error(response.Error || 'COMPAT_DETAILS failed'); }
+        return response.CompatGame ?? null;
     }
 
     // ── Agent Profile ────────────────────────────────────────────────────────

@@ -9,11 +9,51 @@
   (controlModeChange)="onControlModeChange($event)"
 />
 
-<div id="panel-tabs">
-  <button class="panel-tab" [class.active]="activeTab === 'settings'" (click)="setTab('settings')">Emulator Settings</button>
-  <button class="panel-tab" [class.active]="activeTab === 'cheats'" (click)="setTab('cheats')">Cheats</button>
-  <button class="panel-tab" [class.active]="activeTab === 'cds'" (click)="setTab('cds')">CDS</button>
-  <button class="panel-tab" [class.active]="activeTab === 'recompile'" (click)="setTab('recompile')">Recompile</button>
+@if (loadedGame) {
+  <div class="loaded-game">
+    <div class="lg-cover">
+      @if (loadedGameCover) {
+        <img class="lg-cover-img" [src]="loadedGameCover" [alt]="loadedGame.title" />
+      } @else {
+        <div class="lg-cover-ph">{{loadedGameInitial}}</div>
+      }
+    </div>
+    <div class="lg-info">
+      <div class="lg-title" [title]="loadedGame.title">{{loadedGame.title}}</div>
+      <div class="lg-meta">
+        @if (loadedGame.region) { <span class="lg-region">{{loadedGame.region}}</span> }
+        @if (loadedGame.crc) {
+          <span class="lg-crc-label">CRC</span>
+          <span class="lg-crc">{{loadedGame.crc}}</span>
+        }
+      </div>
+      <div class="lg-meta lg-meta-sub">
+        @if (loadedGame.status) {
+          <span class="lg-status" [class]="'lg-status-' + loadedStatusClass(loadedGame.status)">
+            {{loadedGame.status}}
+          </span>
+        }
+        @if (loadedGame.lastTestedVersion) {
+          <span>Tested v{{loadedGame.lastTestedVersion}}</span>
+        }
+        @if (loadedGame.lastTestedDate) {
+          <span class="lg-date">{{loadedGame.lastTestedDate}}</span>
+        }
+      </div>
+    </div>
+  </div>
+}
+
+<div id="panel-views" role="tablist">
+  <button class="view-btn" [class.active]="activeTab === 'settings'"
+          (click)="setTab('settings')" title="Emulator settings">🎮</button>
+  <button class="view-btn" [class.active]="activeTab === 'cheats'"
+          (click)="setTab('cheats')" title="Cheats">✨</button>
+  <button class="view-btn" [class.active]="activeTab === 'cds'"
+          (click)="setTab('cds')" title="CDS — Code Designer Source">📄</button>
+  <button class="view-btn" [class.active]="activeTab === 'recompile'"
+          (click)="setTab('recompile')" title="Recompile">🔧</button>
+  <span class="view-label">{{viewLabel}}</span>
 </div>
 
 <div id="tab-settings" class="tab-content" [style.display]="activeTab === 'settings' ? 'block' : 'none'">
@@ -57,8 +97,6 @@
     (openMemoryViewClick)="onOpenMemoryView($event)"
     (openDnsMappingClick)="onOpenDnsMapping()"
     (openNetConfigClick)="onOpenNetConfig()"
-    (openSnapshotManagerClick)="onOpenSnapshotManager()"
-    (openDiffViewerClick)="onOpenDiffViewer()"
     (listEntries)="onMcpMemoryList()"
     (addEntry)="onMcpMemoryAdd($event)"
     (editEntry)="onMcpMemoryEdit($event)"
