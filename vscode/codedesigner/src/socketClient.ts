@@ -497,6 +497,8 @@ interface CommandResponse {
     GameTitle?: string;
     // COMPAT_LIST results
     CompatGames?: CompatGameInfo[];
+    // COMPAT_DETAILS result
+    CompatGame?: CompatGameInfo;
     // CHEATEDITOR_* results
     CheatEditorGames?: CheatGameInfo[];
     CheatEditorLists?: CheatListInfo[];
@@ -3381,6 +3383,17 @@ export class SocketClient {
         return response.Data ?? null;
     }
 
+    /**
+     * COMPAT_DETAILS — returns the compatibility entry for a single game looked
+     * up by disc serial (preferred) or title. Null when the game is not in the
+     * local compatibility database.
+     */
+    public async compatDetails(opts: { serial?: string; title?: string }): Promise<CompatGameInfo | null> {
+        const response = await this.sendCommand({
+            Command: 'COMPAT_DETAILS', GameSerial: opts.serial, GameTitle: opts.title,
+        });
+        if (!response.Success) { throw new Error(response.Error || 'COMPAT_DETAILS failed'); }
+        return response.CompatGame ?? null;
     // ── Cheats Editor ────────────────────────────────────────────────────────
 
     /** CHEATEDITOR_GAMES — returns every game that owns at least one cheat list. */

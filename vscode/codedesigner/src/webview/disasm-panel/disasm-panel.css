@@ -23,54 +23,53 @@ app-disasm-panel {
     min-height: 0;
 }
 
-/* ── Panel tabs ──────────────────────────────────────────────────────────── */
+/* ── View toolbar (icon buttons replacing the old text tabs) ─────────────── */
 
-#panel-tabs {
+#panel-views {
     display: flex;
-    gap: 0;
-    margin: 0 -10px 10px;
-    border-bottom: 1px solid var(--vscode-panel-border, #3e3e42);
-    background: var(--vscode-editorGroupHeader-tabsBackground, #2d2d30);
+    align-items: center;
+    gap: 3px;
+    margin: 8px 0 10px;
+    padding: 3px;
     flex-shrink: 0;
-    overflow-x: auto;
-    scrollbar-width: thin;
-    scrollbar-color: var(--vscode-scrollbarSlider-background, #555) transparent;
+    border: 1px solid var(--vscode-panel-border, #313131);
+    border-radius: 6px;
+    background: rgba(255,255,255,0.018);
 }
 
-#panel-tabs::-webkit-scrollbar {
-    height: 3px;
-}
-
-#panel-tabs::-webkit-scrollbar-thumb {
-    background: var(--vscode-scrollbarSlider-background, #555);
-    border-radius: 2px;
-}
-
-.panel-tab {
+.view-btn {
     flex: 0 0 auto;
-    min-width: 60px;
+    width: 30px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     background: transparent;
-    color: var(--vscode-tab-inactiveForeground, #969696);
-    border: none;
-    border-bottom: 2px solid transparent;
-    padding: 6px 10px;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    padding: 0;
+    font-size: 15px;
     cursor: pointer;
-    font-size: 12px;
-    font-family: var(--vscode-editor-font-family);
-    outline: none;
-    white-space: nowrap;
-    transition: color 0.1s;
+    transition: background 0.1s, border-color 0.1s;
 }
 
-.panel-tab:hover {
-    color: var(--vscode-tab-activeForeground, #ffffff);
-    background: rgba(255,255,255,0.05);
+.view-btn:hover {
+    background: rgba(255,255,255,0.07);
 }
 
-.panel-tab.active {
-    color: var(--vscode-tab-activeForeground, #ffffff);
-    border-bottom-color: var(--vscode-focusBorder, #007acc);
-    background: transparent;
+.view-btn.active {
+    background: var(--vscode-button-background, #2d7f9f);
+    border-color: transparent;
+}
+
+.view-label {
+    margin-left: auto;
+    padding-right: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--vscode-descriptionForeground, #8f8f8f);
 }
 
 .tab-content {
@@ -79,6 +78,108 @@ app-disasm-panel {
     min-height: 0;
     overflow-y: auto;
 }
+
+/* ── Loaded Game card ────────────────────────────────────────────────────── */
+
+.loaded-game {
+    display: flex;
+    gap: 12px;
+    flex-shrink: 0;
+    margin-top: 8px;
+    padding: 10px;
+    border: 1px solid var(--vscode-panel-border, #313131);
+    border-radius: 6px;
+    background: rgba(255,255,255,0.022);
+}
+
+.lg-cover {
+    flex-shrink: 0;
+}
+
+.lg-cover-img,
+.lg-cover-ph {
+    width: 76px;
+    height: 106px;
+    border-radius: 4px;
+    border: 1px solid var(--vscode-panel-border, #454545);
+}
+
+.lg-cover-img {
+    object-fit: cover;
+    background: #000;
+    display: block;
+}
+
+.lg-cover-ph {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(160deg, #2a2a2a, #141414);
+    color: var(--vscode-descriptionForeground, #8f8f8f);
+    font-size: 34px;
+    font-weight: 800;
+}
+
+.lg-info {
+    min-width: 0;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.lg-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--vscode-foreground, #d4d4d4);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.lg-meta {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--vscode-descriptionForeground, #8f8f8f);
+}
+
+.lg-region {
+    padding: 1px 7px;
+    border-radius: 3px;
+    background: #496a8d;
+    border: 1px solid #6d8aab;
+    color: #fff;
+    font-size: 10px;
+}
+
+.lg-crc-label {
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.lg-crc {
+    font-family: var(--vscode-editor-font-family, monospace);
+    color: var(--vscode-foreground, #d4d4d4);
+}
+
+.lg-date { opacity: 0.85; }
+
+.lg-status {
+    padding: 1px 8px;
+    border-radius: 9px;
+    font-size: 10px;
+    font-weight: 700;
+    color: #fff;
+}
+
+.lg-status-perfect  { background: #2e7d32; }
+.lg-status-playable { background: #1565c0; }
+.lg-status-ingame   { background: #ef6c00; }
+.lg-status-menus    { background: #c62828; }
+.lg-status-unknown  { background: #555; }
 
 /* ── Cheats tab ──────────────────────────────────────────────────────────── */
 
@@ -257,81 +358,81 @@ app-cheats-tab {
     margin: 4px 0;
 }
 
+/* ── LIVE strip (emulator status + debug controls) ─────────────────────── */
+
 #emu-status-bar {
     display: flex;
     flex-direction: column;
-    gap: 0;
-    padding: 0;
-    margin: -10px -10px 10px;
-    font-family: monospace;
-    font-size: 12px;
-    font-weight: bold;
-    letter-spacing: 0.04em;
+    gap: 8px;
+    padding: 9px 10px;
     flex-shrink: 0;
+    border-radius: 6px;
+    border: 1px solid;
+    font-family: var(--vscode-font-family, sans-serif);
+    font-size: 12px;
 }
 
 #emu-status-bar.status-connected {
-    background: #1e3a1e;
-    border-bottom: 1px solid #3a5c3a;
-    color: #7ec87e;
+    background: linear-gradient(90deg, #123d18, #173f1e);
+    border-color: #285c2d;
+    color: #7ee787;
 }
 
 #emu-status-bar.status-disconnected {
-    background: #2d2d30;
-    border-bottom: 1px solid #3e3e42;
-    color: #858585;
+    background: #252526;
+    border-color: #313131;
+    color: #8f8f8f;
 }
 
 #emu-status-bar.status-paused {
-    background: #3a1a1a;
-    border-bottom: 1px solid #6a2a2a;
-    color: #e07070;
+    background: linear-gradient(90deg, #3a1a1a, #401d1d);
+    border-color: #6a2a2a;
+    color: #e98f8f;
 }
 
 #emu-status-bar.status-ai-control {
-    background: #3a2800;
-    border-bottom: 1px solid #7a5500;
+    background: linear-gradient(90deg, #3a2800, #402f08);
+    border-color: #7a5500;
     color: #e8a030;
 }
 
 #emu-status-dot {
-    font-size: 10px;
-    animation: none;
+    font-size: 9px;
+    line-height: 1;
 }
 
 #emu-status-bar.status-connected #emu-status-dot {
     animation: live-pulse 1.5s ease-in-out infinite;
-    color: #4ec94e;
+    color: #5cff6d;
 }
 
 #emu-status-bar.status-ai-control #emu-status-dot {
-    animation: none;
     font-size: 14px;
-    line-height: 1;
 }
 
 #emu-status-bar.status-paused #emu-status-dot {
-    animation: none;
-    color: #e07070;
+    color: #e98f8f;
 }
 
 @keyframes live-pulse {
     0%, 100% { opacity: 1; }
-    50% { opacity: 0.35; }
+    50% { opacity: 0.3; }
 }
 
-/* ── Status row (dot + text + mode toggle) ─────────────────────────────── */
+/* ── Status row (dot + label + mode toggle) ────────────────────────────── */
 
 #emu-status-row {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 6px 10px;
-    border-bottom: 1px solid rgba(255,255,255,0.06);
+    gap: 8px;
+    height: 22px;
 }
 
 #emu-status-text {
     flex: 1;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
 }
 
 #emu-mode-toggle {
@@ -341,90 +442,82 @@ app-cheats-tab {
 }
 
 .mode-pill {
-    background: rgba(255,255,255,0.06);
-    border: 1px solid rgba(255,255,255,0.15);
+    background: rgba(255,255,255,0.07);
+    border: 1px solid currentColor;
     color: inherit;
-    padding: 1px 8px;
+    padding: 2px 12px;
     cursor: pointer;
-    font-family: monospace;
-    font-size: 10px;
-    font-weight: bold;
-    letter-spacing: 0.02em;
+    font-family: var(--vscode-font-family, sans-serif);
+    font-size: 11px;
+    font-weight: 600;
     outline: none;
-    opacity: 0.55;
+    opacity: 0.5;
     transition: opacity 0.1s, background 0.1s;
 }
 
 .mode-pill:first-child {
-    border-radius: 2px 0 0 2px;
+    border-radius: 3px 0 0 3px;
     border-right: none;
 }
 
 .mode-pill:last-child {
-    border-radius: 0 2px 2px 0;
+    border-radius: 0 3px 3px 0;
 }
 
 .mode-pill:hover {
     opacity: 0.85;
-    background: rgba(255,255,255,0.12);
+    background: rgba(255,255,255,0.13);
 }
 
 .mode-pill.mode-pill-active {
-    background: rgba(255,255,255,0.18);
+    background: rgba(255,255,255,0.16);
     opacity: 1;
 }
 
 /* ── Debug controls row (pause/resume + step buttons) ──────────────────── */
 
 #emu-debug-row {
-    display: flex;
-    align-items: center;
-    padding: 4px 10px;
-    gap: 4px;
+    display: grid;
+    grid-template-columns: 1.3fr 1fr 1fr 1fr;
+    gap: 6px;
 }
 
 .dbg-btn {
     background: rgba(255,255,255,0.07);
-    border: 1px solid rgba(255,255,255,0.13);
+    border: 1px solid currentColor;
     color: inherit;
-    padding: 2px 8px;
+    height: 28px;
+    padding: 0 6px;
     cursor: pointer;
-    font-family: monospace;
-    font-size: 11px;
-    font-weight: bold;
+    font-family: var(--vscode-font-family, sans-serif);
+    font-size: 12px;
+    font-weight: 600;
     outline: none;
-    border-radius: 2px;
+    border-radius: 3px;
     display: flex;
     align-items: center;
-    gap: 4px;
+    justify-content: center;
+    gap: 5px;
     transition: background 0.1s;
 }
 
 .dbg-btn:hover:not(:disabled) {
-    background: rgba(255,255,255,0.16);
+    background: rgba(255,255,255,0.15);
 }
 
 .dbg-btn:disabled {
-    opacity: 0.35;
+    opacity: 0.4;
     cursor: not-allowed;
 }
 
 .dbg-btn-label {
-    font-size: 10px;
-    opacity: 0.8;
+    font-size: 11px;
 }
 
-#emu-play-pause-btn {
-    flex: 1;
-    justify-content: center;
-}
-
-.dbg-separator {
-    width: 1px;
-    height: 16px;
-    background: rgba(255,255,255,0.15);
-    flex-shrink: 0;
-    margin: 0 2px;
+#emu-step-btn,
+#emu-step-into-btn,
+#emu-step-over-btn {
+    background: rgba(255,255,255,0.03);
 }
 
 .container {
@@ -438,34 +531,40 @@ app-cheats-tab {
 .settings-container {
     display: flex;
     flex-direction: column;
+    gap: 8px;
+    padding-bottom: 12px;
 }
 
-/* ── Accordion sections ──────────────────────────────────────────────────── */
+/* ── Section cards ───────────────────────────────────────────────────────── */
 
 .acc-section {
-    border-bottom: 1px solid var(--vscode-panel-border, rgba(255,255,255,0.08));
+    border: 1px solid var(--vscode-panel-border, #313131);
+    border-radius: 6px;
+    background: rgba(255,255,255,0.018);
+    overflow: hidden;
 }
 
 .acc-header {
     display: flex;
     align-items: center;
-    gap: 5px;
+    gap: 7px;
     width: 100%;
     background: transparent;
     border: none;
-    color: var(--vscode-foreground, #cccccc);
-    padding: 7px 10px;
+    color: var(--vscode-foreground, #d4d4d4);
+    padding: 8px 10px;
     cursor: pointer;
     font-size: 12px;
     font-weight: 600;
-    letter-spacing: 0.03em;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
     text-align: left;
     outline: none;
-    font-family: var(--vscode-editor-font-family);
+    font-family: var(--vscode-font-family, sans-serif);
 }
 
 .acc-header:hover {
-    background: rgba(255,255,255,0.05);
+    background: rgba(255,255,255,0.04);
 }
 
 .acc-chevron {
@@ -473,7 +572,7 @@ app-cheats-tab {
     width: 12px;
     flex-shrink: 0;
     line-height: 1;
-    color: var(--vscode-descriptionForeground, #888);
+    color: var(--vscode-descriptionForeground, #8f8f8f);
 }
 
 .acc-title {
@@ -485,25 +584,26 @@ app-cheats-tab {
 
 .acc-subtitle {
     font-weight: normal;
-    color: var(--vscode-foreground, #cccccc);
-    opacity: 0.75;
+    text-transform: none;
+    color: var(--vscode-foreground, #d4d4d4);
+    opacity: 0.7;
 }
 
 .acc-count {
     font-size: 10px;
     font-weight: normal;
-    color: var(--vscode-descriptionForeground, #888);
+    color: var(--vscode-descriptionForeground, #8f8f8f);
     margin-left: 4px;
 }
 
 .acc-badge-ok {
-    font-size: 9px;
-    color: #4ec94e;
+    font-size: 8px;
+    color: #5cff6d;
     flex-shrink: 0;
 }
 
 .acc-body {
-    padding: 6px 10px 10px;
+    padding: 4px 9px 10px;
 }
 
 /* ── 2-column button grid ────────────────────────────────────────────────── */
@@ -512,6 +612,71 @@ app-cheats-tab {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 6px;
+}
+
+.btn-grid button {
+    height: 30px;
+    padding: 0 8px;
+    font-size: 12px;
+    border-radius: 4px;
+    background: var(--vscode-button-secondaryBackground, #252526);
+    color: var(--vscode-button-secondaryForeground, var(--vscode-foreground, #d4d4d4));
+    border: 1px solid var(--vscode-panel-border, #313131);
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.btn-grid button:hover:not(:disabled) {
+    background: var(--vscode-button-secondaryHoverBackground, #2f2f30);
+    border-color: #4d4d4d;
+}
+
+/* ── Memory views (compact 2-column tool rows) ───────────────────────────── */
+
+.mem-views-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+}
+
+.mem-view-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 32px;
+    padding: 0 8px;
+    border-radius: 4px;
+    background: var(--vscode-button-secondaryBackground, #252526);
+    border: 1px solid var(--vscode-panel-border, #313131);
+    color: var(--vscode-foreground, #d4d4d4);
+    cursor: pointer;
+    font-size: 12px;
+    font-family: var(--vscode-font-family, sans-serif);
+}
+
+.mem-view-btn:hover {
+    background: var(--vscode-button-secondaryHoverBackground, #2f2f30);
+    border-color: #4d4d4d;
+}
+
+.mvb-icon { font-size: 13px; flex-shrink: 0; }
+
+.mvb-label {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mvb-badge {
+    flex-shrink: 0;
+    font-size: 10px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: rgba(255,255,255,0.08);
+    color: var(--vscode-descriptionForeground, #8f8f8f);
 }
 
 /* Show-more toggle (snapshots + memories) */
@@ -566,17 +731,19 @@ select {
     width: 100%;
     background: var(--vscode-input-background);
     color: var(--vscode-input-foreground);
-    border: 1px solid var(--vscode-input-border);
-    padding: 4px;
+    border: 1px solid var(--vscode-input-border, #313131);
+    border-radius: 4px;
+    padding: 5px 6px;
 }
 
 button {
     background: var(--vscode-button-background);
     color: var(--vscode-button-foreground);
     border: none;
-    padding: 8px 16px;
+    border-radius: 4px;
+    padding: 6px 14px;
     cursor: pointer;
-    font-size: 14px;
+    font-size: 12px;
 }
 
 button:hover {

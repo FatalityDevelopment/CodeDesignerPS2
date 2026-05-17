@@ -39,9 +39,10 @@ namespace CodeDesigner.Ps2.Bridge.Services
 
         public void Register(CommandRegistry reg)
         {
-            reg.Add(_ => HandleList(),              "COMPAT_LIST",  "COMPATLIST");
-            reg.Add(_ => HandleSync(),              "COMPAT_SYNC",  "COMPATSYNC");
-            reg.Add(c => HandleCover(c.GameSerial), "COMPAT_COVER", "COMPATCOVER");
+            reg.Add(_ => HandleList(),                "COMPAT_LIST",    "COMPATLIST");
+            reg.Add(_ => HandleSync(),                "COMPAT_SYNC",    "COMPATSYNC");
+            reg.Add(c => HandleCover(c.GameSerial),   "COMPAT_COVER",   "COMPATCOVER");
+            reg.Add(c => HandleDetails(c.GameSerial, c.GameTitle), "COMPAT_DETAILS", "COMPATDETAILS");
         }
 
         private static HttpClient CreateHttpClient()
@@ -112,6 +113,78 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 });
             }
             catch (Exception ex) { return Responses.Error($"COMPAT_LIST error: {ex.Message}"); }
+        }
+
+        // ── COMPAT_DETAILS ────────────────────────────────────────────────────
+
+        /// <summary>
+        /// COMPAT_DETAILS — returns the compatibility entry for a single game,
+        /// looked up by disc serial (preferred) or title. Used by the emulator
+        /// panel's Loaded Game card.
+        /// </summary>
+        private string HandleDetails(string? serial, string? title)
+        {
+            if (_ctx.Db == null)
+                return Responses.Error("Database is not available");
+            if (string.IsNullOrWhiteSpace(serial) && string.IsNullOrWhiteSpace(title))
+                return Responses.Error("GameSerial or GameTitle is required for COMPAT_DETAILS");
+
+            try
+            {
+                var normalizedSerial = string.IsNullOrWhiteSpace(serial)
+                    ? null
+                    : DbLabelRepository.NormalizeSerial(serial!);
+                var trimmedTitle = title?.Trim();
+
+                var query = _ctx.Db.GameDiscs.AsQueryable();
+                query = normalizedSerial != null
+                    ? query.Where(d => d.Serial != null &&
+                                       d.Serial.Replace("_", "-").ToUpper() == normalizedSerial)
+                    : query.Where(d => d.Game.Title == trimmedTitle);
+
+                var raw = query
+                    .Select(d => new
+                    {
+                        d.Id,
+                        d.GameId,
+                        Title  = d.Game.Title,
+                        d.Serial,
+                        d.CRC,
+                        Region = d.GameRegion.Name,
+                        d.CompatStatus,
+                        d.LastTestedVersion,
+                        d.LastTestedDate,
+                        d.WikiLink,
+                        d.ForumLink,
+                        HasCover = d.Game.CoverArt != null,
+                    })
+                    .ToList();
+
+                // Prefer a disc that actually carries compatibility data.
+                var pick = raw.FirstOrDefault(r => r.CompatStatus != null) ?? raw.FirstOrDefault();
+
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success    = true,
+                    Command    = "COMPAT_DETAILS",
+                    CompatGame = pick == null ? null : new CompatGameInfo
+                    {
+                        DiscId            = pick.Id,
+                        GameId            = pick.GameId,
+                        Title             = pick.Title,
+                        Serial            = pick.Serial,
+                        Crc               = pick.CRC,
+                        Region            = pick.Region,
+                        Status            = pick.CompatStatus,
+                        LastTestedVersion = pick.LastTestedVersion,
+                        LastTestedDate    = pick.LastTestedDate?.ToString("yyyy-MM-dd"),
+                        WikiLink          = pick.WikiLink,
+                        ForumLink         = pick.ForumLink,
+                        HasCover          = pick.HasCover,
+                    },
+                });
+            }
+            catch (Exception ex) { return Responses.Error($"COMPAT_DETAILS error: {ex.Message}"); }
         }
 
         // ── COMPAT_SYNC ───────────────────────────────────────────────────────

@@ -280,28 +280,40 @@ const SNAP_PREVIEW = 5;
         </div>
       </div>
 
-      <div style="margin-top:12px; border-top:1px solid var(--vscode-panel-border,#404040); padding-top:12px;">
-        <h4 style="margin:0 0 6px 0; font-size:11px; text-transform:uppercase; opacity:0.7;">Memory Views</h4>
-        <div class="row">
-          <button (click)="openMemoryViewClick.emit('EE RAM')"
-                  title="Open EE RAM memory view (0x00000000)">
-            EE RAM
-          </button>
-          <button (click)="openMemoryViewClick.emit('IOP RAM')"
-                  title="Open IOP RAM memory view (0x1C000000)">
-            IOP RAM
-          </button>
-          <button (click)="openMemoryViewClick.emit('BIOS ROM')"
-                  title="Open BIOS ROM memory view (0x1FC00000)"
-                  style="margin-left:8px">
-            BIOS ROM
-          </button>
-          <button (click)="openMemoryViewClick.emit('Scratchpad')"
-                  title="Open Scratchpad memory view (0x70000000)"
-                  style="margin-left:8px">
-            Scratchpad
-          </button>
-        </div>
+      <!-- ── Memory ───────────────────────────────────────────────────────── -->
+      <div class="acc-section">
+        <button class="acc-header" (click)="memViewOpen.set(!memViewOpen())">
+          <span class="acc-chevron">{{memViewOpen() ? '▾' : '▸'}}</span>
+          <span class="acc-title">Memory</span>
+        </button>
+        @if (memViewOpen()) {
+          <div class="acc-body">
+            <div class="mem-views-grid">
+              <button class="mem-view-btn" (click)="openMemoryViewClick.emit('EE RAM')"
+                      title="Open EE RAM memory view (0x00000000)">
+                <span class="mvb-icon">🧠</span>
+                <span class="mvb-label">EE RAM</span>
+                <span class="mvb-badge">32 MB</span>
+              </button>
+              <button class="mem-view-btn" (click)="openMemoryViewClick.emit('IOP RAM')"
+                      title="Open IOP RAM memory view (0x1C000000)">
+                <span class="mvb-icon">🧠</span>
+                <span class="mvb-label">IOP RAM</span>
+                <span class="mvb-badge">2 MB</span>
+              </button>
+              <button class="mem-view-btn" (click)="openMemoryViewClick.emit('BIOS ROM')"
+                      title="Open BIOS ROM memory view (0x1FC00000)">
+                <span class="mvb-icon">💿</span>
+                <span class="mvb-label">BIOS ROM</span>
+              </button>
+              <button class="mem-view-btn" (click)="openMemoryViewClick.emit('Scratchpad')"
+                      title="Open Scratchpad memory view (0x70000000)">
+                <span class="mvb-icon">📋</span>
+                <span class="mvb-label">Scratchpad</span>
+              </button>
+            </div>
+          </div>
+        }
       </div>
 
     </div>
@@ -370,12 +382,13 @@ export class SettingsTabComponent {
 
   // ── Accordion state ─────────────────────────────────────────────────────────
 
-  readonly connOpen  = signal(true);
-  readonly actOpen   = signal(false);
-  readonly netOpen   = signal(false);
-  readonly snapOpen  = signal(true);
-  readonly toolsOpen = signal(false);
-  readonly memOpen   = signal(false);
+  readonly connOpen    = signal(true);
+  readonly actOpen     = signal(false);
+  readonly netOpen     = signal(false);
+  readonly snapOpen    = signal(true);
+  readonly toolsOpen   = signal(false);
+  readonly memOpen     = signal(false);
+  readonly memViewOpen = signal(true);
 
   // ── Snapshot show-all ────────────────────────────────────────────────────────
 

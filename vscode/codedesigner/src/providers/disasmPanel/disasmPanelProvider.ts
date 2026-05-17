@@ -961,6 +961,58 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         });
         // Restore Follow-AI button state (the editor provider owns the flag).
         this.webview.postMessage({ command: 'followAiState', enabled: this.editorProvider.followAiEnabled });
+        void this.postLoadedGame();
+    }
+
+    /**
+     * Resolve the currently loaded game's rich metadata (region, CRC, PCSX2
+     * compatibility status, cover art) and push it to the panel's Loaded Game
+     * card. Falls back to a bare title when the game is not in the local
+     * compatibility database.
+     */
+    private async postLoadedGame(): Promise<void> {
+        if (!this.webview) { return; }
+
+        let serial: string | undefined;
+        let title: string | undefined = this.selectedGameName || undefined;
+
+        if (this._bridgeMode && this.socketClient.isConnected()) {
+            try {
+                const info = await this.socketClient.getPcsx2GameInfo();
+                const s = (info.ID    ?? '').replace(/\0/g, '').trim();
+                const t = (info.Title ?? '').replace(/\0/g, '').trim();
+                if (s) { serial = s; }
+                if (t) { title = t; }
+            } catch { /* PCSX2 not attached — fall back to the selected game name */ }
+        }
+
+        if (!serial && !title) {
+            this.webview.postMessage({ command: 'loadedGame', game: null });
+            return;
+        }
+
+        try {
+            const game = await this.socketClient.compatDetails({ serial, title });
+            let coverUri = '';
+            const coverSerial = game?.serial ?? serial;
+            if (coverSerial) {
+                try {
+                    const b64 = await this.socketClient.compatGetCover(coverSerial);
+                    if (b64) { coverUri = `data:image/jpeg;base64,${b64}`; }
+                } catch { /* no cover available */ }
+            }
+            this.webview?.postMessage({
+                command: 'loadedGame',
+                game: game ?? { title: title ?? 'Unknown game', serial, hasCover: false },
+                coverUri,
+            });
+        } catch {
+            this.webview?.postMessage({
+                command: 'loadedGame',
+                game: { title: title ?? 'Unknown game', serial, hasCover: false },
+                coverUri: '',
+            });
+        }
     }
 
     private getHtml(webview: vscode.Webview): string {
@@ -1394,6 +1446,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                     this.webview?.postMessage({ command: 'pcsx2ModeChanged', isPcsx2: true });
                     // Auto-fetch archive cheats for the running game.
                     void this.handleFetchArchiveCheats();
+                    // Resolve the loaded game's cover / region / compat status.
+                    void this.postLoadedGame();
                 }
             } catch (err: any) {
                 out.error(`Run failed: ${err?.message ?? err}`);
@@ -2218,6 +2272,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 this.editorProvider.setCurrentGame(this.selectedGameName, this.workspaceRoot, gamePath);
             }
         }
+
+        void this.postLoadedGame();
     }
 
     /**

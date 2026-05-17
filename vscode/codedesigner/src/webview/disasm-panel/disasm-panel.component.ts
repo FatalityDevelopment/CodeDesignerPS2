@@ -74,6 +74,24 @@ interface Pcsx2ModeChangedMsg {
   isPcsx2: boolean;
 }
 
+/** Rich metadata for the currently loaded game (Loaded Game card). */
+export interface LoadedGameInfo {
+  title: string;
+  serial?: string;
+  crc?: string;
+  region?: string;
+  status?: string;
+  lastTestedVersion?: string;
+  lastTestedDate?: string;
+}
+
+/** Message sent by the provider with the loaded game's details + cover art. */
+interface LoadedGameMsg {
+  command: 'loadedGame';
+  game: LoadedGameInfo | null;
+  coverUri?: string;
+}
+
 @Component({
   selector: 'app-disasm-panel',
   standalone: true,
@@ -111,6 +129,10 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
     localStorage.setItem(DisasmPanelComponent.CHEAT_TEXT_KEY, value);
   }
   currentGameName = '';
+  /** Rich loaded-game metadata for the Loaded Game card; null until resolved. */
+  loadedGame: LoadedGameInfo | null = null;
+  /** Cover-art data URI for the loaded game, or '' when unavailable. */
+  loadedGameCover = '';
   private subs: Subscription[] = [];
 
   @ViewChild(SettingsTabComponent) private settingsTab?: SettingsTabComponent;
@@ -183,6 +205,11 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
       this.bridge.on<{ enabled: boolean }>('followAiState').subscribe(msg => {
         this.followAiEnabled = !!msg.enabled;
       }),
+      // Loaded-game card metadata (cover art, region, CRC, compat status)
+      this.bridge.on<LoadedGameMsg>('loadedGame').subscribe(msg => {
+        this.loadedGame = msg.game ?? null;
+        this.loadedGameCover = msg.coverUri ?? '';
+      }),
     );
     this.bridge.postMessage({ command: 'ready' });
   }
@@ -222,6 +249,34 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
 
   setTab(tab: 'settings' | 'cheats' | 'cds' | 'recompile'): void {
     this.activeTab = tab;
+  }
+
+  /** Display name of the active view, shown in the view toolbar. */
+  get viewLabel(): string {
+    switch (this.activeTab) {
+      case 'cheats':    return 'Cheats';
+      case 'cds':       return 'CDS';
+      case 'recompile': return 'Recompile';
+      default:          return 'Emulator';
+    }
+  }
+
+  // ── Loaded Game card helpers ─────────────────────────────────────────────
+
+  /** First letter of the loaded game's title, for the cover placeholder. */
+  get loadedGameInitial(): string {
+    return (this.loadedGame?.title?.trim()[0] ?? '?').toUpperCase();
+  }
+
+  /** CSS modifier for the compatibility-status badge. */
+  loadedStatusClass(status: string | undefined): string {
+    switch ((status ?? '').toLowerCase()) {
+      case 'perfect':  return 'perfect';
+      case 'playable': return 'playable';
+      case 'ingame':   return 'ingame';
+      case 'menus':    return 'menus';
+      default:         return 'unknown';
+    }
   }
 
   // ── Settings tab handlers ────────────────────────────────────────────────

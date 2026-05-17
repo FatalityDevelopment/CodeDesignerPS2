@@ -56,7 +56,6 @@ import {
             {{isPaused() ? '▶' : '⏸'}}
             <span class="dbg-btn-label">{{isPaused() ? 'Resume' : 'Pause'}}</span>
           </button>
-          <div class="dbg-separator"></div>
           <button class="dbg-btn" id="emu-step-btn"
                   (click)="step.emit()" [disabled]="!isPaused()"
                   title="Step — execute one EE instruction">
