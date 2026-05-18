@@ -265,6 +265,8 @@ namespace CodeDesigner.Ps2.Bridge
         public string? DiscordDebugStatus { get; set; }
         /// <summary>Optional Discord image asset key for the active game.</summary>
         public string? DiscordPictureKey { get; set; }
+        /// <summary>Discord application (client) ID for SETDISCORDAPPID.</summary>
+        public string? DiscordApplicationId { get; set; }
 
         // Pad / controller input fields (PADGETSTATE / PADSETBUTTON / PADSETANALOG / PADSETSTATE / PADGETTYPE)
         /// <summary>Unified pad slot index (0–7).</summary>
