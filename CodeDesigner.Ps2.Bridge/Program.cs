@@ -1,7 +1,11 @@
 using System.Text.Json;
+using CodeDesigner.Ps2.Bridge.Services;
 using CodeDesigner.Ps2.Common;
 using CodeDesigner.Ps2.Compression;
+using CodeDesigner.Ps2.Database;
+using CodeDesigner.Ps2.DiscordPresence;
 using CodeDesigner.Ps2.Recompiler;
+using Microsoft.EntityFrameworkCore;
 
 namespace CodeDesigner.Ps2.Bridge
 {
@@ -539,6 +543,8 @@ namespace CodeDesigner.Ps2.Bridge
                 server.Stop();
             };
 
+            StartDiscordPresence(cts.Token);
+
             Console.WriteLine("Server is running. Press Ctrl+C to stop.");
             Console.WriteLine("Runtime commands:");
             Console.WriteLine("  STARTPCSX2  (optional: pcsx2Host, pcsx2Slot)");
@@ -554,6 +560,62 @@ namespace CodeDesigner.Ps2.Bridge
             }
 
             await serverTask;
+        }
+
+        /// <summary>
+        /// Starts the Discord rich-presence worker when an application ID has been
+        /// configured (settings key <see cref="DiscordPresenceService.ApplicationIdKey"/>).
+        /// The worker polls the database for the active game-research context and
+        /// publishes it to Discord. No-op when no application ID is set.
+        /// </summary>
+        private static void StartDiscordPresence(CancellationToken cancellationToken)
+        {
+            DbContextOptions<CodeDesignerDbContext> dbOptions;
+            string? applicationId;
+            try
+            {
+                string connectionString = DatabasePaths.GetDefaultConnectionString();
+                dbOptions = DatabaseInitialiser.BuildDbOptions(connectionString);
+                using var db = new CodeDesignerDbContext(dbOptions);
+                applicationId = db.Settings
+                    .Where(s => s.Key == DiscordPresenceService.ApplicationIdKey)
+                    .Select(s => s.Value)
+                    .FirstOrDefault();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Discord] Rich presence unavailable - could not read settings: {ex.Message}");
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(applicationId))
+            {
+                Console.WriteLine("[Discord] Rich presence disabled - no application ID configured " +
+                                  $"(send the SETDISCORDAPPID command to set '{DiscordPresenceService.ApplicationIdKey}').");
+                return;
+            }
+
+            Console.WriteLine($"[Discord] Rich presence enabled (application ID {applicationId}).");
+
+            _ = Task.Run(async () =>
+            {
+                var dbContextFactory = new BridgeDbContextFactory(dbOptions);
+                var provider = new DatabaseDiscordPresenceDataProvider(dbContextFactory);
+                using var presenceClient = new DiscordPresenceClient(applicationId);
+                var worker = new DiscordPresenceWorker(provider, presenceClient);
+                try
+                {
+                    await worker.RunAsync(TimeSpan.FromSeconds(15), cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    // Bridge is shutting down.
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[Discord] Rich presence stopped: {ex.Message}");
+                }
+            }, cancellationToken);
         }
 
         private static void PrintHelp()

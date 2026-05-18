@@ -31,9 +31,15 @@ Flow:
 - A `DiscordPresenceClient` wrapper around `DiscordRPC`.
 - A polling worker (`DiscordPresenceWorker`) that pushes status updates to Discord.
 
-## Integration notes
+## Integration
 
-1. Register `IDbContextFactory<CodeDesignerDbContext>` and `DatabaseDiscordPresenceDataProvider` in DI.
-2. Ensure your runtime writes the keys above into `Settings`.
-3. Construct `DiscordPresenceClient` with your Discord application ID.
-4. Run `DiscordPresenceWorker.RunAsync(...)` with your chosen poll interval.
+The Bridge hosts this worker automatically. On start-up (default control-server
+mode) it reads the `DiscordPresence.ApplicationId` setting; when that key holds a
+Discord application (client) ID it constructs the provider, client, and worker and
+begins polling every 15 seconds. When the key is missing, rich presence stays off.
+
+To configure it, send the Bridge a `SETDISCORDAPPID` command with the
+`DiscordApplicationId` field set to your Discord application ID, then restart the
+Bridge. The application ID is the only credential needed — Discord's *public key*
+is only used for verifying inbound interaction webhooks, which this feature does
+not use.

@@ -11,12 +11,39 @@ internal sealed class DiscordPresenceService : ICommandService
     private const string DebugStatusKey = "DiscordPresence.DebugStatus";
     private const string PictureKeyKey = "DiscordPresence.PictureKey";
 
+    /// <summary>
+    /// Settings key holding the Discord application (client) ID. Read by the
+    /// Bridge at start-up to decide whether to host the rich-presence worker.
+    /// </summary>
+    internal const string ApplicationIdKey = "DiscordPresence.ApplicationId";
+
     public DiscordPresenceService(IBridgeContext ctx) => _ctx = ctx;
 
     public void Register(CommandRegistry reg)
     {
         reg.Add(c => HandleSetDiscordPresence(c.DiscordGameDiscId, c.DiscordPcAddress, c.DiscordDebugStatus, c.DiscordPictureKey), "SETDISCORDPRESENCE");
         reg.Add(_ => HandleClearDiscordPresence(), "CLEARDISCORDPRESENCE");
+        reg.Add(c => HandleSetDiscordAppId(c.DiscordApplicationId), "SETDISCORDAPPID");
+    }
+
+    private string HandleSetDiscordAppId(string? applicationId)
+    {
+        if (string.IsNullOrWhiteSpace(applicationId))
+            return Responses.Error("DiscordApplicationId is required.");
+
+        var trimmed = applicationId.Trim();
+        if (!trimmed.All(char.IsDigit))
+            return Responses.Error("DiscordApplicationId must be the numeric Discord application (client) ID.");
+
+        try
+        {
+            _ctx.SettingsRepo.SetAsync(ApplicationIdKey, trimmed).GetAwaiter().GetResult();
+            return Responses.Success("Discord application ID saved. Restart the Bridge to apply it.");
+        }
+        catch (Exception ex)
+        {
+            return Responses.Error($"Failed to save Discord application ID: {ex.Message}");
+        }
     }
 
     private string HandleSetDiscordPresence(int? gameDiscId, string? pcAddress, string? debugStatus, string? pictureKey)
