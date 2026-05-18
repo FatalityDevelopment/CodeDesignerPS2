@@ -831,6 +831,8 @@ export class AiConfigPageComponent implements AfterViewInit {
   private _pendingAgentDelete = false;
   /** Agent id to select once the agent list arrives (from an external focus request). */
   private _pendingFocusAgentId: number | null = null;
+  /** Orchestration id to select once the plan list arrives (from an external focus request). */
+  private _pendingFocusOrchId: number | null = null;
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
@@ -1346,6 +1348,12 @@ export class AiConfigPageComponent implements AfterViewInit {
           if (found) { this.selectAgent(found); }
           else       { this._pendingFocusAgentId = agentId; }
         }
+        const orchestrationId = data['orchestrationId'] as number | undefined;
+        if (typeof orchestrationId === 'number') {
+          const found = this.orchestrations().find(o => o.id === orchestrationId);
+          if (found) { this.selectOrchestration(found); }
+          else       { this._pendingFocusOrchId = orchestrationId; }
+        }
         break;
       }
       // ── Orchestration responses ──────────────────────────────────────────
@@ -1357,6 +1365,12 @@ export class AiConfigPageComponent implements AfterViewInit {
         } else {
           this.orchestrations.set(profiles);
           this.setOrchStatus(profiles.length === 0 ? '' : `${profiles.length} profile${profiles.length === 1 ? '' : 's'}`, false);
+          // Honour a deferred focus request now that the plan list is loaded.
+          if (this._pendingFocusOrchId !== null) {
+            const focusOrch = profiles.find(o => o.id === this._pendingFocusOrchId);
+            this._pendingFocusOrchId = null;
+            if (focusOrch) { this.selectOrchestration(focusOrch); break; }
+          }
           const sel = this.orchSelectedId();
           if (sel !== null && !profiles.find(o => o.id === sel)) {
             this.orchSelectedId.set(null);

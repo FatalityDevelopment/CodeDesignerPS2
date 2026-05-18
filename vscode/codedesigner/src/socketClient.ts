@@ -3627,6 +3627,15 @@ export class SocketClient {
     }
 
     /**
+     * MCPORCHESTRATION_DEACTIVATE — clears the active flag on all orchestration
+     * profiles, leaving none active (single-agent mode).
+     */
+    public async mcpOrchestrationDeactivate(): Promise<void> {
+        const response = await this.sendCommand({ Command: 'MCPORCHESTRATION_DEACTIVATE' });
+        if (!response.Success) { throw new Error(response.Error || 'MCPORCHESTRATION_DEACTIVATE failed'); }
+    }
+
+    /**
      * MCPORCHESTRATION_IMPORT — imports an orchestration profile from a Markdown file.
      */
     public async mcpOrchestrationImport(filePath: string): Promise<McpOrchestrationInfo> {

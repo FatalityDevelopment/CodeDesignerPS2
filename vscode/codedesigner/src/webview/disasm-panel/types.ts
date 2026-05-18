@@ -67,3 +67,12 @@ export interface AgentSummary {
   /** Webview URI of the agent's profile picture, or '' when no match. */
   imageUri: string;
 }
+
+/** An orchestration plan, slimmed for the Orchestration list. */
+export interface OrchestrationSummary {
+  id: number;
+  name: string;
+  description: string;
+  /** True when this plan is the active one (only one plan at a time). */
+  isActive: boolean;
+}

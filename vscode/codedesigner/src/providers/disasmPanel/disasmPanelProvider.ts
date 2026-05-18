@@ -535,6 +535,22 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                         agentId: typeof msg.agentId === 'number' ? msg.agentId : undefined,
                     });
                     break;
+                // ── Orchestration plans ───────────────────────────────────
+                case 'requestOrchestrations':
+                    await this.handleRequestOrchestrations();
+                    break;
+                case 'setOrchestrationActive':
+                    await this.handleSetOrchestrationActive(msg.id as number);
+                    break;
+                case 'setMultiAgentMode':
+                    await this.handleSetMultiAgentMode(!!msg.enabled);
+                    break;
+                case 'openAiConfigOrchestration':
+                    this._aiConfigProvider.open({
+                        tab:             'orchestration',
+                        orchestrationId: typeof msg.id === 'number' ? msg.id : undefined,
+                    });
+                    break;
                 // ── PC navigation history ─────────────────────────────────
                 case 'requestNavHistory':
                     await this.handleRequestNavHistory();
@@ -3875,6 +3891,76 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             return;
         }
         await this.handleRequestAgents();
+    }
+
+    /** Fetch the orchestration plans and push a slimmed list to the panel. */
+    private async handleRequestOrchestrations(): Promise<void> {
+        if (!this.socketClient.isConnected()) {
+            this.webview?.postMessage({ command: 'orchestrationsResult', error: 'Not connected to the emulator.' });
+            return;
+        }
+        try {
+            const plans = await this.socketClient.mcpOrchestrationList();
+            const entries = plans.map(p => ({
+                id:          p.id,
+                name:        p.name,
+                description: p.description ?? '',
+                isActive:    !!p.isActive,
+            }));
+            this.webview?.postMessage({ command: 'orchestrationsResult', entries });
+        } catch (err: any) {
+            this.webview?.postMessage({ command: 'orchestrationsResult', error: err?.message ?? String(err) });
+        }
+    }
+
+    /**
+     * Toggle an orchestration plan's active state. Only one plan may be active,
+     * so activating one replaces any other. Clicking the active plan again
+     * deactivates it (single-agent mode).
+     */
+    private async handleSetOrchestrationActive(id: number): Promise<void> {
+        if (!this.socketClient.isConnected()) {
+            this.webview?.postMessage({ command: 'orchestrationsResult', error: 'Not connected to the emulator.' });
+            return;
+        }
+        try {
+            const plans = await this.socketClient.mcpOrchestrationList();
+            const target = plans.find(p => p.id === id);
+            if (target?.isActive) {
+                await this.socketClient.mcpOrchestrationDeactivate();
+            } else {
+                await this.socketClient.mcpOrchestrationSetActive(id);
+            }
+        } catch (err: any) {
+            this.webview?.postMessage({ command: 'orchestrationsResult', error: err?.message ?? String(err) });
+            return;
+        }
+        await this.handleRequestOrchestrations();
+    }
+
+    /**
+     * Multi-agent mode master toggle. Turning it off deactivates the active
+     * plan; turning it on activates the first plan when none is active yet.
+     */
+    private async handleSetMultiAgentMode(enabled: boolean): Promise<void> {
+        if (!this.socketClient.isConnected()) {
+            this.webview?.postMessage({ command: 'orchestrationsResult', error: 'Not connected to the emulator.' });
+            return;
+        }
+        try {
+            const plans = await this.socketClient.mcpOrchestrationList();
+            if (enabled) {
+                if (plans.length > 0 && !plans.some(p => p.isActive)) {
+                    await this.socketClient.mcpOrchestrationSetActive(plans[0].id);
+                }
+            } else {
+                await this.socketClient.mcpOrchestrationDeactivate();
+            }
+        } catch (err: any) {
+            this.webview?.postMessage({ command: 'orchestrationsResult', error: err?.message ?? String(err) });
+            return;
+        }
+        await this.handleRequestOrchestrations();
     }
 
     /** Jump the disassembler editor to a hex or numeric address from the panel. */

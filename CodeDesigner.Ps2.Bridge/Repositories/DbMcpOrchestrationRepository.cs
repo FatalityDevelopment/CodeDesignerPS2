@@ -124,6 +124,16 @@ namespace CodeDesigner.Ps2.Bridge.Repositories
             return profile;
         }
 
+        /// <summary>
+        /// Clears the <c>IsActive</c> flag on every orchestration profile, leaving none active.
+        /// </summary>
+        internal async Task DeactivateAllAsync()
+        {
+            await _db.McpOrchestrations
+                .Where(o => o.IsActive)
+                .ExecuteUpdateAsync(s => s.SetProperty(o => o.IsActive, false));
+        }
+
         // ── Import / export ────────────────────────────────────────────────────
 
         /// <summary>
