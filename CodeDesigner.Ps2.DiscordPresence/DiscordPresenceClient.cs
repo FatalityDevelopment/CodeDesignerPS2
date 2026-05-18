@@ -31,7 +31,7 @@ public sealed class DiscordPresenceClient : IDisposable
         {
             Details = details,
             State = state,
-            Timestamps = Timestamps.FromTime(context.StartedAtUtc.UtcDateTime),
+            Timestamps = new Timestamps(context.StartedAtUtc.UtcDateTime),
             Assets = new Assets
             {
                 LargeImageKey = context.PictureKey ?? "default_game",
