@@ -213,7 +213,6 @@ const NET_POLL_MS = 4000;
           <app-icon class="acc-ico" name="history" [size]="14" />
           <span class="acc-title">
             Snapshots
-            @if (currentGameName()) { <span class="acc-subtitle"> — {{currentGameName()}}</span> }
             @if (snapshots().length) { <span class="acc-count">({{snapshots().length}})</span> }
           </span>
         </button>
