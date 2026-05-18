@@ -9,7 +9,7 @@ import {
   RecompileTabComponent,
 } from './components';
 import type { McpMemoryEntry, McpMemoryListResult, McpMemoryActionResult } from './components';
-import { EmuOption, SnapshotEntry, NavHistoryEntry, RecentLabelEntry, NetworkStatus, AgentSummary } from './types';
+import { EmuOption, SnapshotEntry, NavHistoryEntry, RecentLabelEntry, NetworkStatus, AgentSummary, OrchestrationSummary } from './types';
 import { IconComponent } from '../shared/icon.component';
 import './disasm-panel.css';
 
@@ -130,6 +130,13 @@ interface AgentsResultMsg {
   error?: string;
 }
 
+/** Message sent by the provider with the orchestration plans. */
+interface OrchestrationsResultMsg {
+  command: 'orchestrationsResult';
+  entries?: OrchestrationSummary[];
+  error?: string;
+}
+
 @Component({
   selector: 'app-disasm-panel',
   standalone: true,
@@ -187,6 +194,9 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
   /** AI agent profiles shown in the Agents section. */
   agents: AgentSummary[] = [];
   agentsError = '';
+  /** Orchestration plans shown in the Orchestration section. */
+  orchestrations: OrchestrationSummary[] = [];
+  orchestrationsError = '';
   private subs: Subscription[] = [];
   private mcpPollTimer?: ReturnType<typeof setInterval>;
 
@@ -287,6 +297,11 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
       this.bridge.on<AgentsResultMsg>('agentsResult').subscribe(msg => {
         this.agents = msg.entries ?? [];
         this.agentsError = msg.error ?? '';
+      }),
+      // Orchestration plans for the Orchestration section
+      this.bridge.on<OrchestrationsResultMsg>('orchestrationsResult').subscribe(msg => {
+        this.orchestrations = msg.entries ?? [];
+        this.orchestrationsError = msg.error ?? '';
       }),
     );
     this.bridge.postMessage({ command: 'ready' });
@@ -583,6 +598,25 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
   /** Open the AI Config agents tab, optionally focused on a specific agent. */
   onOpenAiConfigAgents(agentId: number | undefined): void {
     this.bridge.postMessage({ command: 'openAiConfigAgents', agentId });
+  }
+
+  onRequestOrchestrations(): void {
+    this.bridge.postMessage({ command: 'requestOrchestrations' });
+  }
+
+  /** Toggle an orchestration plan's active state (only one active at a time). */
+  onSetOrchestrationActive(id: number): void {
+    this.bridge.postMessage({ command: 'setOrchestrationActive', id });
+  }
+
+  /** Turn multi-agent mode on/off (activates the first plan / deactivates all). */
+  onSetMultiAgentMode(enabled: boolean): void {
+    this.bridge.postMessage({ command: 'setMultiAgentMode', enabled });
+  }
+
+  /** Open the AI Config orchestration tab, optionally focused on a plan. */
+  onOpenAiConfigOrchestration(id: number | undefined): void {
+    this.bridge.postMessage({ command: 'openAiConfigOrchestration', id });
   }
 
   onOpenConverter(): void {

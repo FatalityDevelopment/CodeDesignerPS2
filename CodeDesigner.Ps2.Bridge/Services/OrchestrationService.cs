@@ -19,6 +19,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
             reg.Add(c => HandleMcpOrchestrationImport(c.FilePath),                    "MCPORCHESTRATION_IMPORT",    "MCPORCHESTRATIONIMPORT");
             reg.Add(c => HandleMcpOrchestrationExport(c.McpOrchestrationId, c.OutputPath), "MCPORCHESTRATION_EXPORT", "MCPORCHESTRATIONEXPORT");
             reg.Add(c => HandleMcpOrchestrationSetActive(c.McpOrchestrationId),       "MCPORCHESTRATION_SETACTIVE", "MCPORCHESTRATIONSETACTIVE");
+            reg.Add(_ => HandleMcpOrchestrationDeactivate(),                          "MCPORCHESTRATION_DEACTIVATE", "MCPORCHESTRATIONDEACTIVATE");
         }
 
         // ── MCPORCHESTRATION_LIST ────────────────────────────────────────────
@@ -213,6 +214,25 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 });
             }
             catch (Exception ex) { return Responses.Error($"MCPORCHESTRATION_SETACTIVE error: {ex.Message}"); }
+        }
+
+        // ── MCPORCHESTRATION_DEACTIVATE ──────────────────────────────────────
+
+        private string HandleMcpOrchestrationDeactivate()
+        {
+            if (_ctx.McpOrchestrationRepo is null)
+                return Responses.Error("MCP Orchestration repository is not available");
+            try
+            {
+                _ctx.McpOrchestrationRepo.DeactivateAllAsync().GetAwaiter().GetResult();
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success = true,
+                    Command = "MCPORCHESTRATION_DEACTIVATE",
+                    Message = "All orchestration profiles deactivated.",
+                });
+            }
+            catch (Exception ex) { return Responses.Error($"MCPORCHESTRATION_DEACTIVATE error: {ex.Message}"); }
         }
 
         // ── DTO mapper ────────────────────────────────────────────────────────

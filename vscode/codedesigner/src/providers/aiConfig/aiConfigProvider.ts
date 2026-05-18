@@ -12,10 +12,12 @@ import { McpProgressReportEditorProvider } from '../mcpProgressReportEditor/mcpP
  */
 /** Optional view to focus when opening the AI Configuration panel. */
 export interface AiConfigFocus {
-    /** Tab to switch to (e.g. 'agents'). */
+    /** Tab to switch to (e.g. 'agents', 'orchestration'). */
     tab?: string;
     /** Agent profile id to select once the agents tab is shown. */
     agentId?: number;
+    /** Orchestration plan id to select once the orchestration tab is shown. */
+    orchestrationId?: number;
 }
 
 export class AiConfigProvider {
@@ -41,7 +43,12 @@ export class AiConfigProvider {
         if (this._panel) {
             this._panel.reveal(vscode.ViewColumn.One);
             if (focus) {
-                this._panel.webview.postMessage({ type: 'aiConfigFocus', tab: focus.tab, agentId: focus.agentId });
+                this._panel.webview.postMessage({
+                    type:            'aiConfigFocus',
+                    tab:             focus.tab,
+                    agentId:         focus.agentId,
+                    orchestrationId: focus.orchestrationId,
+                });
             }
             return;
         }
@@ -82,9 +89,10 @@ export class AiConfigProvider {
                 // Apply a pending focus request now that the webview is alive.
                 if (this._pendingFocus) {
                     webview.postMessage({
-                        type:    'aiConfigFocus',
-                        tab:     this._pendingFocus.tab,
-                        agentId: this._pendingFocus.agentId,
+                        type:            'aiConfigFocus',
+                        tab:             this._pendingFocus.tab,
+                        agentId:         this._pendingFocus.agentId,
+                        orchestrationId: this._pendingFocus.orchestrationId,
                     });
                     this._pendingFocus = undefined;
                 }

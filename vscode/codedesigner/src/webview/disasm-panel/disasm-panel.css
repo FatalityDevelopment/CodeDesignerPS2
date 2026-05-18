@@ -1270,6 +1270,92 @@ button:disabled {
     white-space: nowrap;
 }
 
+/* Orchestration — per-plan active toggle */
+.orch-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border-radius: 4px;
+    background: transparent;
+    border: 1px solid transparent;
+    cursor: pointer;
+    color: var(--vscode-descriptionForeground, #8f8f8f);
+}
+
+.orch-toggle:hover {
+    background: rgba(255, 255, 255, 0.07);
+    color: #e8a030;
+}
+
+/* Active plan — amber (AI-control accent). */
+.orch-toggle-on {
+    color: #e8a030;
+}
+
+/* Multi Agent mode row + switch */
+.orch-mode-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+    padding: 2px 2px 8px;
+    border-bottom: 1px solid var(--vscode-panel-border, #313131);
+}
+
+.orch-mode-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--vscode-foreground, #d4d4d4);
+}
+
+.toggle-switch {
+    position: relative;
+    box-sizing: border-box;
+    flex-shrink: 0;
+    width: 38px;
+    height: 20px;
+    padding: 0;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid var(--vscode-panel-border, #313131);
+    cursor: pointer;
+    transition: background 0.12s, border-color 0.12s;
+}
+
+.toggle-switch:hover {
+    background: rgba(255, 255, 255, 0.16);
+}
+
+.toggle-switch.toggle-on {
+    background: linear-gradient(90deg, #7a5500, #9a6e00);
+    border-color: #e8a030;
+}
+
+.toggle-switch.toggle-on:hover {
+    background: linear-gradient(90deg, #8a6200, #ad7c00);
+}
+
+.toggle-knob {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #bdbdbd;
+    transition: left 0.12s, background 0.12s;
+}
+
+.toggle-on .toggle-knob {
+    left: 20px;
+    background: #e8a030;
+}
+
 /* Network server status list */
 .net-status {
     display: flex;

@@ -9,7 +9,7 @@ import {
   signal,
   viewChild,
 } from '@angular/core';
-import { EmuOption, SnapshotEntry, NavHistoryEntry, RecentLabelEntry, NetworkStatus, AgentSummary } from '../types';
+import { EmuOption, SnapshotEntry, NavHistoryEntry, RecentLabelEntry, NetworkStatus, AgentSummary, OrchestrationSummary } from '../types';
 import { IconComponent } from '../../shared/icon.component';
 import { McpMemoryOverlayComponent } from './mcp-memory-overlay.component';
 import type { McpMemoryEntry, McpMemoryListResult, McpMemoryActionResult } from './mcp-memory-overlay.component';
@@ -439,6 +439,64 @@ const NET_POLL_MS = 4000;
         }
       </div>
 
+      <!-- ── Orchestration ────────────────────────────────────────────────── -->
+      <div class="acc-section">
+        <button class="acc-header" (click)="toggleOrch()">
+          <app-icon class="acc-chevron" [name]="orchOpen() ? 'chevrondown' : 'chevronright'" [size]="13" />
+          <app-icon class="acc-ico" name="workflow" [size]="14" />
+          <span class="acc-title">
+            Orchestration
+            @if (orchestrations().length) { <span class="acc-count">({{orchestrations().length}})</span> }
+          </span>
+        </button>
+        @if (orchOpen()) {
+          <div class="acc-body">
+            <div class="orch-mode-row">
+              <span class="orch-mode-label">Multi Agent mode</span>
+              <button class="toggle-switch" [class.toggle-on]="multiAgentMode()"
+                      (click)="setMultiAgentMode.emit(!multiAgentMode())"
+                      [attr.aria-pressed]="multiAgentMode()"
+                      [title]="multiAgentMode() ? 'Multi-agent mode on — click to disable' : 'Multi-agent mode off — click to enable'">
+                <span class="toggle-knob"></span>
+              </button>
+            </div>
+            <div class="list-actions">
+              <button class="list-action-btn" (click)="requestOrchestrations.emit()" title="Refresh orchestration plans">
+                <app-icon name="refreshcw" [size]="12" /><span>Refresh</span>
+              </button>
+              <button class="list-action-btn" (click)="openAiConfigOrchestration.emit(undefined)"
+                      title="Open the AI Config orchestration tab">
+                <app-icon name="bot" [size]="12" /><span>AI Config</span>
+              </button>
+            </div>
+            @if (orchestrationsError()) {
+              <div class="list-error">{{orchestrationsError()}}</div>
+            } @else if (!orchestrations().length) {
+              <div class="snapshot-empty">No orchestration plans</div>
+            } @else {
+              <div class="snapshot-scroll">
+                @for (o of orchestrations(); track o.id) {
+                  <div class="agent-item">
+                    <button class="orch-toggle" [class.orch-toggle-on]="o.isActive"
+                            (click)="setOrchestrationActive.emit(o.id)"
+                            [title]="o.isActive ? 'Active plan — click to deactivate' : 'Activate this plan'">
+                      <app-icon [name]="o.isActive ? 'circlecheck' : 'circle'" [size]="15" />
+                    </button>
+                    <button class="agent-info" (click)="openAiConfigOrchestration.emit(o.id)"
+                            title="Open this plan in AI Config">
+                      <span class="agent-text">
+                        <span class="agent-name">{{o.name}}</span>
+                        @if (o.description) { <span class="agent-desc">{{o.description}}</span> }
+                      </span>
+                    </button>
+                  </div>
+                }
+              </div>
+            }
+          </div>
+        }
+      </div>
+
       <!-- ── Memories ─────────────────────────────────────────────────────── -->
       <!-- Keep the overlay in the DOM (display:none when collapsed) so its   -->
       <!-- loaded entries and state are preserved across open/close cycles.   -->
@@ -522,6 +580,8 @@ export class SettingsTabComponent implements OnDestroy {
   readonly networkStatus     = input<NetworkStatus | null>(null);
   readonly agents            = input<AgentSummary[]>([]);
   readonly agentsError       = input('');
+  readonly orchestrations      = input<OrchestrationSummary[]>([]);
+  readonly orchestrationsError = input('');
 
   // ── Outputs (emulator settings) ─────────────────────────────────────────────
 
@@ -563,6 +623,10 @@ export class SettingsTabComponent implements OnDestroy {
   readonly requestAgents         = output<void>();
   readonly setAgentLead          = output<number>();
   readonly openAiConfigAgents    = output<number | undefined>();
+  readonly requestOrchestrations    = output<void>();
+  readonly setOrchestrationActive   = output<number>();
+  readonly setMultiAgentMode        = output<boolean>();
+  readonly openAiConfigOrchestration = output<number | undefined>();
 
   // ── Outputs (memory relay) ──────────────────────────────────────────────────
 
@@ -586,7 +650,11 @@ export class SettingsTabComponent implements OnDestroy {
   readonly histOpen    = signal(false);
   readonly labelsOpen  = signal(false);
   readonly agentsOpen  = signal(false);
+  readonly orchOpen    = signal(false);
   readonly toolsOpen   = signal(false);
+
+  /** Multi-agent mode is on when any orchestration plan is active. */
+  readonly multiAgentMode = computed(() => this.orchestrations().some(o => o.isActive));
   readonly memOpen     = signal(false);
   readonly memViewOpen = signal(true);
 
@@ -643,6 +711,13 @@ export class SettingsTabComponent implements OnDestroy {
     const open = !this.agentsOpen();
     this.agentsOpen.set(open);
     if (open) { this.requestAgents.emit(); }
+  }
+
+  /** Toggle the Orchestration section; requests the plan list when it opens. */
+  toggleOrch(): void {
+    const open = !this.orchOpen();
+    this.orchOpen.set(open);
+    if (open) { this.requestOrchestrations.emit(); }
   }
 
   /** First letter of an agent's name, for the avatar placeholder. */
