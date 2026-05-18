@@ -20,7 +20,7 @@ public sealed class DiscordPresenceClient : IDisposable
     public void Update(GameResearchContext context)
     {
         var details = $"Researching: {context.GameName}";
-        var state = $"PC: {context.PcAddress}";
+        var state = $"Current: {context.PcAddress}";
 
         if (!string.IsNullOrWhiteSpace(context.DebugStatus))
         {
