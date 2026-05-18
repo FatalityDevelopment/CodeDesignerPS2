@@ -1023,8 +1023,11 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${panel.webview.cspSource};">
 <style>
   html, body {
-    margin: 0; padding: 0;
-    width: 100%; height: 100%;
+    margin: 0;
+    padding: 0;
+    height: 100%;
+  }
+  body {
     background: #1e1e1e;
     display: flex;
     align-items: center;
@@ -1032,8 +1035,10 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     overflow: hidden;
   }
   img {
-    max-width: 50%;
-    max-height: 50%;
+    width: auto;
+    height: auto;
+    max-width: min(280px, 80vw);
+    max-height: min(280px, 80vh);
     object-fit: contain;
   }
 </style>

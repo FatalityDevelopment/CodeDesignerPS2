@@ -1,7 +1,10 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
+import * as os from 'os';
 import { getOutputChannel } from '../../extension';
 import { SocketClient } from '../../socketClient';
 import { getNonce, getWebviewErrorHandlerScript } from '../../utils/nonce';
+import { resolveVimmDownload, downloadVimmRom } from './vimm';
 
 /**
  * Provider for the PS2 Game Compatibility standalone webview tab.
@@ -63,6 +66,12 @@ export class CompatBrowserProvider {
                 vscode.commands.executeCommand(
                     'codedesigner.openCheatsEditor', msg['title'] as string | undefined);
                 break;
+            case 'downloadGame':
+                await this._downloadGame(
+                    webview,
+                    msg['crc'] as string | undefined,
+                    msg['title'] as string | undefined);
+                break;
             case 'bootstrapError':
                 getOutputChannel().error('[CompatBrowser] Bootstrap error: ' + msg['error']);
                 break;
@@ -121,6 +130,91 @@ export class CompatBrowserProvider {
                 (err instanceof Error ? err.message : String(err)));
             // Send an empty cover so the webview stops waiting on this serial.
             webview.postMessage({ type: 'compatCover', serial, dataUri: '' });
+        }
+    }
+
+    // ── ROM download (Vimm's Lair) ────────────────────────────────────────────
+
+    /**
+     * Resolve a game's CRC to a Vimm's Lair ROM and stream it to a user-chosen
+     * file. Vimm has no API, so the vault is searched by CRC and scraped; the
+     * download endpoint only answers requests carrying a vimm.net Referer, so
+     * the extension host (not the browser) must perform the transfer.
+     */
+    private async _downloadGame(
+        webview: vscode.Webview,
+        crc: string | undefined,
+        title: string | undefined,
+    ): Promise<void> {
+        const label = title?.trim() || 'this game';
+
+        if (!crc || !crc.trim()) {
+            webview.postMessage({
+                type: 'compatError',
+                message: `No CRC recorded for ${label} — cannot look it up on Vimm's Lair.`,
+            });
+            return;
+        }
+
+        try {
+            webview.postMessage({
+                type: 'compatStatus',
+                message: `Looking up ${label} on Vimm's Lair…`,
+                busy: false,
+            });
+            const dl = await resolveVimmDownload(crc);
+
+            const target = await vscode.window.showSaveDialog({
+                saveLabel: 'Download ROM',
+                title: `Save ${dl.fileName}`,
+                defaultUri: vscode.Uri.file(
+                    path.join(os.homedir(), 'Downloads', dl.fileName)),
+            });
+            if (!target) {
+                webview.postMessage({ type: 'compatStatus', message: '', busy: false });
+                return;
+            }
+
+            await vscode.window.withProgress({
+                location: vscode.ProgressLocation.Notification,
+                title: `Downloading ${dl.fileName}`,
+                cancellable: true,
+            }, async (progress, token) => {
+                let lastPct = 0;
+                await downloadVimmRom(
+                    dl,
+                    target.fsPath,
+                    ({ receivedBytes, totalBytes }) => {
+                        if (!totalBytes) { return; }
+                        const pct = Math.floor((receivedBytes / totalBytes) * 100);
+                        if (pct <= lastPct) { return; }
+                        const mb = (n: number) => (n / (1024 * 1024)).toFixed(0);
+                        progress.report({
+                            increment: pct - lastPct,
+                            message: `${mb(receivedBytes)} / ${mb(totalBytes)} MB (${pct}%)`,
+                        });
+                        lastPct = pct;
+                    },
+                    () => token.isCancellationRequested,
+                );
+            });
+
+            webview.postMessage({
+                type: 'compatStatus',
+                message: `Downloaded ${dl.fileName}`,
+                busy: false,
+            });
+            vscode.window.showInformationMessage(
+                `Downloaded ${dl.fileName} to ${target.fsPath}`);
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            if (message === 'Download cancelled.') {
+                webview.postMessage({
+                    type: 'compatStatus', message: 'Download cancelled.', busy: false });
+                return;
+            }
+            getOutputChannel().error('[CompatBrowser] ROM download failed: ' + message);
+            webview.postMessage({ type: 'compatError', message: `Download failed: ${message}` });
         }
     }
 

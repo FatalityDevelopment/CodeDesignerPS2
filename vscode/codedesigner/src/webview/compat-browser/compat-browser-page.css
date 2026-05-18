@@ -260,6 +260,16 @@ html, body {
   background: var(--vscode-button-hoverBackground, #006cbd);
 }
 
+.cb-download-btn {
+  background: var(--vscode-testing-iconPassed, #2ea043);
+  color: #fff;
+  border-color: transparent;
+}
+
+.cb-download-btn:hover {
+  filter: brightness(1.12);
+}
+
 /* ── Pager ────────────────────────────────────────────────────────────────── */
 .cb-pager {
   display: flex;
