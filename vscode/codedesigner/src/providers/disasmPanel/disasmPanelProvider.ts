@@ -1002,11 +1002,15 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         // BIOS options come from user configuration only (BIOS files must be provided by the user).
         const biosOptions = (this.settings.bios ?? []).map(b => ({ label: b.name, value: b.path }));
         const gameOptions = (this.settings.games ?? []).map(g => ({ label: g.name, value: g.path }));
+        const iconUri = this.webview.asWebviewUri(
+            vscode.Uri.joinPath(this._extensionUri, 'dist', 'resources', 'codedesigner-emblem.png'),
+        ).toString();
         this.webview.postMessage({
             command: 'init',
             emulators,
             biosOptions,
             gameOptions,
+            iconUri,
             snapshots: this.snapshots,
             selectedGameName: this.selectedGameName,
             isConnected: this.socketClient.isConnected(),
@@ -1101,6 +1105,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         const scriptUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this._extensionUri, 'dist', 'webview', 'disasm-panel.js')
         );
+        const bgLogoUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this._extensionUri, 'dist', 'resources', 'codedesigner-logo.png')
+        );
         const nonce = getNonce();
         return `<!DOCTYPE html>
 <html>
@@ -1111,6 +1118,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                style-src 'unsafe-inline';
                img-src data: ${webview.cspSource};
                script-src ${webview.cspSource} 'nonce-${nonce}';">
+<style>:root { --cd-bg-logo: url("${bgLogoUri}"); }</style>
 <script nonce="${nonce}">${getWebviewErrorHandlerScript()}</script>
 </head>
 <body>

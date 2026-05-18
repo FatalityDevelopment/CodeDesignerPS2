@@ -62,6 +62,7 @@ interface InitMsg {
   emulators: EmuOption[];
   biosOptions: EmuOption[];
   gameOptions: EmuOption[];
+  iconUri?: string;
   snapshots: SnapshotEntry[];
   connectedEmulatorPath?: string;
   selectedGameName?: string;
@@ -197,6 +198,8 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
   /** Orchestration plans shown in the Orchestration section. */
   orchestrations: OrchestrationSummary[] = [];
   orchestrationsError = '';
+  /** Webview URI of the CodeDesigner emblem shown in the panel's top bar. */
+  panelIconUri = '';
   private subs: Subscription[] = [];
   private mcpPollTimer?: ReturnType<typeof setInterval>;
 
@@ -227,6 +230,7 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
         if (msg.emulators?.length)   { this.emulators   = msg.emulators;   }
         if (msg.biosOptions?.length) { this.biosOptions  = msg.biosOptions; }
         if (msg.gameOptions?.length) { this.gameOptions  = msg.gameOptions; }
+        if (msg.iconUri)             { this.panelIconUri = msg.iconUri;     }
         // Always sync snapshot list (may be empty array to clear old entries)
         if (msg.snapshots !== undefined)         { this.snapshots       = msg.snapshots;       }
         if (msg.connectedEmulatorPath)           { this.selectedEmulator = msg.connectedEmulatorPath; }

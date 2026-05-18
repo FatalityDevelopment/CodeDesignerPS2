@@ -987,7 +987,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   }
 
     /**
-     * Open a splash-screen intro panel showing logo2.png.
+     * Open a splash-screen intro panel showing the CodeDesigner logo.
      * Called after all live memory panels are opened so it takes focus.
      * If the panel is already open (e.g. after reconnect), it is simply revealed.
      */
@@ -1009,7 +1009,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         this._introPanel = panel;
         panel.onDidDispose(() => { this._introPanel = undefined; });
         const imgUri = panel.webview.asWebviewUri(
-            vscode.Uri.joinPath(this._extensionUri, 'dist', 'resources', 'logo2.png')
+            vscode.Uri.joinPath(this._extensionUri, 'dist', 'resources', 'codedesigner-logo.png')
         );
         panel.webview.html = `<!DOCTYPE html>
 <html>

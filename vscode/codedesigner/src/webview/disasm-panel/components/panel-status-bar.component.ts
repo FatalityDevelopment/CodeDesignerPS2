@@ -31,8 +31,11 @@ import { IconComponent } from '../../shared/icon.component';
          [class.status-paused]="isPaused()"
          [class.status-ai-control]="isConnected() && !isPaused() && controlMode() === 'ai-control'">
 
-      <!-- Row 1: status indicator + mode toggle -->
+      <!-- Row 1: brand icon + status indicator + mode toggle -->
       <div id="emu-status-row">
+        @if (iconUri()) {
+          <img id="emu-brand-icon" [src]="iconUri()" alt="CodeDesigner" />
+        }
         <span id="emu-status-dot">
           @if (controlMode() === 'ai-control' && isConnected() && !isPaused()) {
             <app-icon name="bot" [size]="15" />
@@ -89,6 +92,8 @@ export class PanelStatusBarComponent {
   readonly isPaused = input(false);
   /** External follow-AI enabled state; syncs the local controlMode signal. */
   readonly followAiEnabled = input(false);
+  /** Webview URI of the CodeDesigner emblem shown at the start of the top bar. */
+  readonly iconUri = input('');
 
   readonly togglePause = output<void>();
   readonly step = output<void>();
