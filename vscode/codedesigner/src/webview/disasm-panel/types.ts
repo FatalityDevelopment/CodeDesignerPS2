@@ -56,3 +56,14 @@ export interface NetworkStatus {
   servers: ServerStatus[];
   capturing: boolean;
 }
+
+/** An AI agent profile, slimmed for the Agents list. */
+export interface AgentSummary {
+  id: number;
+  name: string;
+  description: string;
+  /** True when this agent is the team lead (only one agent at a time). */
+  isLead: boolean;
+  /** Webview URI of the agent's profile picture, or '' when no match. */
+  imageUri: string;
+}

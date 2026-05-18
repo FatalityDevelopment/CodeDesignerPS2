@@ -9,7 +9,7 @@ import {
   signal,
   viewChild,
 } from '@angular/core';
-import { EmuOption, SnapshotEntry, NavHistoryEntry, RecentLabelEntry, NetworkStatus } from '../types';
+import { EmuOption, SnapshotEntry, NavHistoryEntry, RecentLabelEntry, NetworkStatus, AgentSummary } from '../types';
 import { IconComponent } from '../../shared/icon.component';
 import { McpMemoryOverlayComponent } from './mcp-memory-overlay.component';
 import type { McpMemoryEntry, McpMemoryListResult, McpMemoryActionResult } from './mcp-memory-overlay.component';
@@ -385,6 +385,60 @@ const NET_POLL_MS = 4000;
         }
       </div>
 
+      <!-- ── Agents ───────────────────────────────────────────────────────── -->
+      <div class="acc-section">
+        <button class="acc-header" (click)="toggleAgents()">
+          <app-icon class="acc-chevron" [name]="agentsOpen() ? 'chevrondown' : 'chevronright'" [size]="13" />
+          <app-icon class="acc-ico" name="bot" [size]="14" />
+          <span class="acc-title">
+            Agents
+            @if (agents().length) { <span class="acc-count">({{agents().length}})</span> }
+          </span>
+        </button>
+        @if (agentsOpen()) {
+          <div class="acc-body">
+            <div class="list-actions">
+              <button class="list-action-btn" (click)="requestAgents.emit()" title="Refresh agent profiles">
+                <app-icon name="refreshcw" [size]="12" /><span>Refresh</span>
+              </button>
+              <button class="list-action-btn" (click)="openAiConfigAgents.emit(undefined)"
+                      title="Open the AI Config agents tab">
+                <app-icon name="bot" [size]="12" /><span>AI Config</span>
+              </button>
+            </div>
+            @if (agentsError()) {
+              <div class="list-error">{{agentsError()}}</div>
+            } @else if (!agents().length) {
+              <div class="snapshot-empty">No agent profiles</div>
+            } @else {
+              <div class="snapshot-scroll">
+                @for (a of agents(); track a.id) {
+                  <div class="agent-item">
+                    <button class="agent-star" [class.agent-star-on]="a.isLead"
+                            (click)="setAgentLead.emit(a.id)"
+                            [title]="a.isLead ? 'Team Lead — click to clear' : 'Set as Team Lead'">
+                      <app-icon name="star" [size]="14" />
+                    </button>
+                    <button class="agent-info" (click)="openAiConfigAgents.emit(a.id)"
+                            title="Open this agent in AI Config">
+                      @if (a.imageUri) {
+                        <img class="agent-avatar" [src]="a.imageUri" [alt]="a.name" />
+                      } @else {
+                        <span class="agent-avatar agent-avatar-ph">{{ agentInitial(a.name) }}</span>
+                      }
+                      <span class="agent-text">
+                        <span class="agent-name">{{a.name}}</span>
+                        @if (a.description) { <span class="agent-desc">{{a.description}}</span> }
+                      </span>
+                    </button>
+                  </div>
+                }
+              </div>
+            }
+          </div>
+        }
+      </div>
+
       <!-- ── Memories ─────────────────────────────────────────────────────── -->
       <!-- Keep the overlay in the DOM (display:none when collapsed) so its   -->
       <!-- loaded entries and state are preserved across open/close cycles.   -->
@@ -466,6 +520,8 @@ export class SettingsTabComponent implements OnDestroy {
   readonly recentLabels      = input<RecentLabelEntry[]>([]);
   readonly recentLabelsError = input('');
   readonly networkStatus     = input<NetworkStatus | null>(null);
+  readonly agents            = input<AgentSummary[]>([]);
+  readonly agentsError       = input('');
 
   // ── Outputs (emulator settings) ─────────────────────────────────────────────
 
@@ -504,6 +560,9 @@ export class SettingsTabComponent implements OnDestroy {
   readonly requestLabels         = output<void>();
   readonly requestNetworkStatus  = output<void>();
   readonly gotoAddress           = output<string>();
+  readonly requestAgents         = output<void>();
+  readonly setAgentLead          = output<number>();
+  readonly openAiConfigAgents    = output<number | undefined>();
 
   // ── Outputs (memory relay) ──────────────────────────────────────────────────
 
@@ -526,6 +585,7 @@ export class SettingsTabComponent implements OnDestroy {
   readonly snapOpen    = signal(true);
   readonly histOpen    = signal(false);
   readonly labelsOpen  = signal(false);
+  readonly agentsOpen  = signal(false);
   readonly toolsOpen   = signal(false);
   readonly memOpen     = signal(false);
   readonly memViewOpen = signal(true);
@@ -576,6 +636,18 @@ export class SettingsTabComponent implements OnDestroy {
     const open = !this.labelsOpen();
     this.labelsOpen.set(open);
     if (open) { this.requestLabels.emit(); }
+  }
+
+  /** Toggle the Agents section; requests the agent list when it opens. */
+  toggleAgents(): void {
+    const open = !this.agentsOpen();
+    this.agentsOpen.set(open);
+    if (open) { this.requestAgents.emit(); }
+  }
+
+  /** First letter of an agent's name, for the avatar placeholder. */
+  agentInitial(name: string): string {
+    return (name?.trim()[0] ?? '?').toUpperCase();
   }
 
   /** Toggle the Network section; starts/stops Multiplayer server polling. */

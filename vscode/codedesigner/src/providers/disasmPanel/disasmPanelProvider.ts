@@ -522,6 +522,19 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 case 'requestMcpStatus':
                     await this.handleRequestMcpStatus();
                     break;
+                // ── AI agent profiles ─────────────────────────────────────
+                case 'requestAgents':
+                    await this.handleRequestAgents();
+                    break;
+                case 'setAgentLead':
+                    await this.handleSetAgentLead(msg.agentId as number);
+                    break;
+                case 'openAiConfigAgents':
+                    this._aiConfigProvider.open({
+                        tab:     'agents',
+                        agentId: typeof msg.agentId === 'number' ? msg.agentId : undefined,
+                    });
+                    break;
                 // ── PC navigation history ─────────────────────────────────
                 case 'requestNavHistory':
                     await this.handleRequestNavHistory();
@@ -1080,7 +1093,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
                style-src 'unsafe-inline';
-               img-src data:;
+               img-src data: ${webview.cspSource};
                script-src ${webview.cspSource} 'nonce-${nonce}';">
 <script nonce="${nonce}">${getWebviewErrorHandlerScript()}</script>
 </head>
@@ -3788,6 +3801,80 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private async handleRequestMcpStatus(): Promise<void> {
         const online = await DisasmPanelProvider.detectMcpServerRunning();
         this.webview?.postMessage({ command: 'mcpStatus', online });
+    }
+
+    /** Maps an agent name (by keyword) to a bundled Mortal Kombat profile picture. */
+    private static readonly AGENT_IMAGE_MAP: ReadonlyArray<{ file: string; keywords: string[] }> = [
+        { file: 'scorpion.png',    keywords: ['scorpion'] },
+        { file: 'sub-zero.png',    keywords: ['subzero'] },
+        { file: 'raiden.png',      keywords: ['raiden'] },
+        { file: 'liu-kang.png',    keywords: ['liukang', 'liu'] },
+        { file: 'johnny-cage.png', keywords: ['johnnycage', 'johnny', 'cage'] },
+        { file: 'sonya-blade.png', keywords: ['sonyablade', 'sonya'] },
+        { file: 'kano.png',        keywords: ['kano'] },
+        { file: 'kitana.png',      keywords: ['kitana'] },
+        { file: 'mileena.png',     keywords: ['mileena'] },
+    ];
+
+    /** Resolve a webview URI for the agent's profile picture, or '' when no character matches. */
+    private resolveAgentImageUri(name: string): string {
+        const norm = (name ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (!norm || !this.webview) { return ''; }
+        const match = DisasmPanelProvider.AGENT_IMAGE_MAP.find(
+            m => m.keywords.some(k => norm.includes(k)),
+        );
+        if (!match) { return ''; }
+        return this.webview.asWebviewUri(
+            vscode.Uri.joinPath(this._extensionUri, 'media', 'agents', match.file),
+        ).toString();
+    }
+
+    /** Fetch the AI agent profiles and push a slimmed list to the panel. */
+    private async handleRequestAgents(): Promise<void> {
+        if (!this.socketClient.isConnected()) {
+            this.webview?.postMessage({ command: 'agentsResult', error: 'Not connected to the emulator.' });
+            return;
+        }
+        try {
+            const agents = await this.socketClient.mcpAgentList();
+            const entries = agents.map(a => ({
+                id:          a.id,
+                name:        a.name,
+                description: a.description ?? '',
+                isLead:      !!a.isAgentLead,
+                imageUri:    this.resolveAgentImageUri(a.name),
+            }));
+            this.webview?.postMessage({ command: 'agentsResult', entries });
+        } catch (err: any) {
+            this.webview?.postMessage({ command: 'agentsResult', error: err?.message ?? String(err) });
+        }
+    }
+
+    /**
+     * Set (or toggle off) the team-lead agent. Only one agent may be lead, so
+     * the flag is cleared on every other agent first. Clicking the current
+     * lead's star clears the lead entirely.
+     */
+    private async handleSetAgentLead(agentId: number): Promise<void> {
+        if (!this.socketClient.isConnected()) {
+            this.webview?.postMessage({ command: 'agentsResult', error: 'Not connected to the emulator.' });
+            return;
+        }
+        try {
+            const agents = await this.socketClient.mcpAgentList();
+            const target = agents.find(a => a.id === agentId);
+            const makeLead = !(target?.isAgentLead);
+            for (const a of agents) {
+                const shouldBeLead = a.id === agentId && makeLead;
+                if (!!a.isAgentLead !== shouldBeLead) {
+                    await this.socketClient.mcpAgentUpdate(a.id, { isAgentLead: shouldBeLead });
+                }
+            }
+        } catch (err: any) {
+            this.webview?.postMessage({ command: 'agentsResult', error: err?.message ?? String(err) });
+            return;
+        }
+        await this.handleRequestAgents();
     }
 
     /** Jump the disassembler editor to a hex or numeric address from the panel. */

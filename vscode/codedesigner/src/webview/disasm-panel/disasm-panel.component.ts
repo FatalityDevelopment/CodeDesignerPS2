@@ -9,7 +9,7 @@ import {
   RecompileTabComponent,
 } from './components';
 import type { McpMemoryEntry, McpMemoryListResult, McpMemoryActionResult } from './components';
-import { EmuOption, SnapshotEntry, NavHistoryEntry, RecentLabelEntry, NetworkStatus } from './types';
+import { EmuOption, SnapshotEntry, NavHistoryEntry, RecentLabelEntry, NetworkStatus, AgentSummary } from './types';
 import { IconComponent } from '../shared/icon.component';
 import './disasm-panel.css';
 
@@ -123,6 +123,13 @@ interface McpStatusMsg {
   online: boolean;
 }
 
+/** Message sent by the provider with the AI agent profiles. */
+interface AgentsResultMsg {
+  command: 'agentsResult';
+  entries?: AgentSummary[];
+  error?: string;
+}
+
 @Component({
   selector: 'app-disasm-panel',
   standalone: true,
@@ -177,6 +184,9 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
   networkStatus: NetworkStatus | null = null;
   /** True when the CodeDesigner MCP server process is running. */
   mcpOnline = false;
+  /** AI agent profiles shown in the Agents section. */
+  agents: AgentSummary[] = [];
+  agentsError = '';
   private subs: Subscription[] = [];
   private mcpPollTimer?: ReturnType<typeof setInterval>;
 
@@ -272,6 +282,11 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
       // MCP server process status for the badge above the tabs
       this.bridge.on<McpStatusMsg>('mcpStatus').subscribe(msg => {
         this.mcpOnline = !!msg.online;
+      }),
+      // AI agent profiles for the Agents section
+      this.bridge.on<AgentsResultMsg>('agentsResult').subscribe(msg => {
+        this.agents = msg.entries ?? [];
+        this.agentsError = msg.error ?? '';
       }),
     );
     this.bridge.postMessage({ command: 'ready' });
@@ -554,6 +569,20 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
   /** Jump the disassembler editor to a history entry or label address. */
   onGotoAddress(address: string): void {
     this.bridge.postMessage({ command: 'panelGotoAddress', address });
+  }
+
+  onRequestAgents(): void {
+    this.bridge.postMessage({ command: 'requestAgents' });
+  }
+
+  /** Set (or toggle off) the team-lead agent. */
+  onSetAgentLead(agentId: number): void {
+    this.bridge.postMessage({ command: 'setAgentLead', agentId });
+  }
+
+  /** Open the AI Config agents tab, optionally focused on a specific agent. */
+  onOpenAiConfigAgents(agentId: number | undefined): void {
+    this.bridge.postMessage({ command: 'openAiConfigAgents', agentId });
   }
 
   onOpenConverter(): void {

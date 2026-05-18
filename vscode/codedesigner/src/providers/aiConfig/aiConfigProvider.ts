@@ -10,9 +10,19 @@ import { McpProgressReportEditorProvider } from '../mcpProgressReportEditor/mcpP
  * Manages agent profiles (add / edit / delete / import / export)
  * and shows the agent's associated progress reports.
  */
+/** Optional view to focus when opening the AI Configuration panel. */
+export interface AiConfigFocus {
+    /** Tab to switch to (e.g. 'agents'). */
+    tab?: string;
+    /** Agent profile id to select once the agents tab is shown. */
+    agentId?: number;
+}
+
 export class AiConfigProvider {
     private _panel: vscode.WebviewPanel | undefined;
     private readonly _mcpProgressReportEditor: McpProgressReportEditorProvider;
+    /** Focus request applied once the freshly created webview signals 'ready'. */
+    private _pendingFocus: AiConfigFocus | undefined;
 
     constructor(
         private readonly extensionUri: vscode.Uri,
@@ -21,12 +31,22 @@ export class AiConfigProvider {
         this._mcpProgressReportEditor = new McpProgressReportEditorProvider(socketClient);
     }
 
-    /** Open (or reveal) the AI Configuration panel. */
-    public open(): void {
+    /**
+     * Open (or reveal) the AI Configuration panel. When `focus` is given the
+     * panel switches to that tab and selects the requested agent — applied
+     * immediately if the panel already exists, or after the webview's first
+     * 'ready' message when it is freshly created.
+     */
+    public open(focus?: AiConfigFocus): void {
         if (this._panel) {
             this._panel.reveal(vscode.ViewColumn.One);
+            if (focus) {
+                this._panel.webview.postMessage({ type: 'aiConfigFocus', tab: focus.tab, agentId: focus.agentId });
+            }
             return;
         }
+
+        this._pendingFocus = focus;
 
         const panel = vscode.window.createWebviewPanel(
             'codedesigner.aiConfig',
@@ -59,6 +79,15 @@ export class AiConfigProvider {
                 // Initial load — send agent list and orchestration list
                 await this._sendAgentList(webview);
                 await this._sendOrchestrationList(webview);
+                // Apply a pending focus request now that the webview is alive.
+                if (this._pendingFocus) {
+                    webview.postMessage({
+                        type:    'aiConfigFocus',
+                        tab:     this._pendingFocus.tab,
+                        agentId: this._pendingFocus.agentId,
+                    });
+                    this._pendingFocus = undefined;
+                }
                 break;
 
             // ── Agent CRUD ────────────────────────────────────────────────────
