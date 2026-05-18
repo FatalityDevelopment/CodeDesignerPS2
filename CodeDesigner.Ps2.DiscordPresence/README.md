@@ -9,7 +9,8 @@ Discord rich presence support for CodeDesigner game research/debug sessions.
 Required `Settings` keys:
 
 - `DiscordPresence.ActiveGameDiscId` (int, FK to `GameDiscs.Id`)
-- `DiscordPresence.CurrentPcAddress` (string; shown in presence state)
+- `DiscordPresence.CurrentPcAddress` (string; the address the user/AI last
+  navigated to in CodeDesigner, shown in the presence state)
 
 Optional `Settings` keys:
 
@@ -40,7 +41,9 @@ mode) it runs two background loops:
 
 - **`DiscordPresencePublisher`** polls the attached PCSX2 client every 10 s. When
   a game is running it upserts the matching `GameDisc` row and writes the session
-  keys above; when no game is running it clears them.
+  keys above; when no game is running it clears them. The `CurrentPcAddress` it
+  writes is the last entry in the Bridge nav history (where the user/AI last
+  navigated), falling back to the live emulator PC until the first navigation.
 - **`DiscordPresenceWorker`** polls those keys every 15 s and pushes the rich
   presence to Discord — the running game when a session is set, otherwise an idle
   status.

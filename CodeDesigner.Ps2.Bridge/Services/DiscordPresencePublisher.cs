@@ -22,7 +22,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
     /// </summary>
     internal sealed class DiscordPresencePublisher
     {
-        private readonly SocketServer _server;
+        private readonly IBridgeContext _bridge;
         private readonly IDbContextFactory<CodeDesignerDbContext> _dbContextFactory;
 
         // Cache so a steady-state poll does not re-resolve the GameDisc every cycle.
@@ -34,10 +34,10 @@ namespace CodeDesigner.Ps2.Bridge.Services
         private bool _sessionWritten = true;
 
         public DiscordPresencePublisher(
-            SocketServer server,
+            IBridgeContext bridge,
             IDbContextFactory<CodeDesignerDbContext> dbContextFactory)
         {
-            _server = server;
+            _bridge = bridge;
             _dbContextFactory = dbContextFactory;
         }
 
@@ -77,7 +77,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
             bool paused = false;
             bool gameRunning = false;
 
-            var pine = _server.PineClient;
+            var pine = _bridge.PineClient;
             if (pine is not null)
             {
                 try
@@ -111,13 +111,22 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 _resolvedSerial = serial;
             }
 
+            // The presence address tracks where the user/AI last navigated in
+            // CodeDesigner (nav history) rather than the live emulator PC, since
+            // that reflects what is actually being worked on. The live PC is only
+            // a fallback until the first navigation is recorded.
+            var navHistory = _bridge.GetNavHistorySnapshot();
+            string address = navHistory.Count > 0
+                ? navHistory[^1].Address
+                : $"0x{pc:X8}";
+
             var settings = new DbSettingsRepository(db);
             await settings.SetAsync(
                 DatabaseDiscordPresenceDataProvider.ActiveGameDiscIdKey,
                 _resolvedGameDiscId.ToString(CultureInfo.InvariantCulture));
             await settings.SetAsync(
                 DatabaseDiscordPresenceDataProvider.CurrentPcAddressKey,
-                $"0x{pc:X8}");
+                address);
             await settings.SetAsync(
                 DatabaseDiscordPresenceDataProvider.DebugStatusKey,
                 paused ? "Paused" : "Running");
