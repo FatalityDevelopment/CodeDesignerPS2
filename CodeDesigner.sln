@@ -45,6 +45,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.Ps2.Emulator",
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.Ps2.FileFormats", "CodeDesigner.Ps2.FileFormats\CodeDesigner.Ps2.FileFormats.csproj", "{94798A59-159A-D198-44CE-A8628EA54947}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.Ps2.DiscordPresence", "CodeDesigner.Ps2.DiscordPresence\CodeDesigner.Ps2.DiscordPresence.csproj", "{855695E2-6A8D-4FE1-854F-0D4165F5C267}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -297,6 +299,18 @@ Global
 		{94798A59-159A-D198-44CE-A8628EA54947}.Release|x64.Build.0 = Release|Any CPU
 		{94798A59-159A-D198-44CE-A8628EA54947}.Release|x86.ActiveCfg = Release|Any CPU
 		{94798A59-159A-D198-44CE-A8628EA54947}.Release|x86.Build.0 = Release|Any CPU
+		{855695E2-6A8D-4FE1-854F-0D4165F5C267}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{855695E2-6A8D-4FE1-854F-0D4165F5C267}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{855695E2-6A8D-4FE1-854F-0D4165F5C267}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{855695E2-6A8D-4FE1-854F-0D4165F5C267}.Debug|x64.Build.0 = Debug|Any CPU
+		{855695E2-6A8D-4FE1-854F-0D4165F5C267}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{855695E2-6A8D-4FE1-854F-0D4165F5C267}.Debug|x86.Build.0 = Debug|Any CPU
+		{855695E2-6A8D-4FE1-854F-0D4165F5C267}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{855695E2-6A8D-4FE1-854F-0D4165F5C267}.Release|Any CPU.Build.0 = Release|Any CPU
+		{855695E2-6A8D-4FE1-854F-0D4165F5C267}.Release|x64.ActiveCfg = Release|Any CPU
+		{855695E2-6A8D-4FE1-854F-0D4165F5C267}.Release|x64.Build.0 = Release|Any CPU
+		{855695E2-6A8D-4FE1-854F-0D4165F5C267}.Release|x86.ActiveCfg = Release|Any CPU
+		{855695E2-6A8D-4FE1-854F-0D4165F5C267}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
