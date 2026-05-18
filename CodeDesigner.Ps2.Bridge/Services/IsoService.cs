@@ -161,12 +161,13 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 sb.AppendLine($"Total Size: {(iso.IsRawImage ? iso.SectorCount * 2352 : iso.SectorCount * 2048) / (1024 * 1024):N0} MB");
 
                 // Try to read SYSTEM.CNF and get boot info
+                string? bootElf = null;
                 var cnfEntry = iso.FindFile("SYSTEM.CNF");
                 if (cnfEntry != null)
                 {
                     byte[] cnfBytes = iso.ReadFile(cnfEntry.Value);
                     string cnfText = Encoding.Latin1.GetString(cnfBytes);
-                    string? bootElf = SystemCnfParser.ParseBoot2(cnfText);
+                    bootElf = SystemCnfParser.ParseBoot2(cnfText);
                     if (!string.IsNullOrEmpty(bootElf))
                     {
                         sb.AppendLine($"Boot ELF: {bootElf}");
@@ -180,6 +181,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
                     Message = sb.ToString().TrimEnd(),
                     IsoSectorCount = iso.SectorCount,
                     IsoIsRawImage = iso.IsRawImage,
+                    BootElf = bootElf,
                 };
                 return JsonSerializer.Serialize(resp);
             }

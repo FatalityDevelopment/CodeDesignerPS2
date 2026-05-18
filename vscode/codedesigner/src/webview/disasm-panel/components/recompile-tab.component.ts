@@ -9,6 +9,7 @@ import {
 } from '@angular/core';
 import { Subscription } from 'rxjs';
 import { VsCodeBridgeService } from '../../shared/vscode-bridge.service';
+import { IconComponent } from '../../shared/icon.component';
 import { DiscElfEntry } from '../types';
 
 interface ListDiscElfsResultMsg {
@@ -44,11 +45,15 @@ interface BrowseOutputDirectoryResultMsg {
 @Component({
   selector: 'app-recompile-tab',
   standalone: true,
+  imports: [IconComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
   template: `
     <div class="container">
-      <div class="section-label">Static Recompiler</div>
+      <div class="t-head">
+        <app-icon name="code" [size]="14" />
+        <span class="t-head-label">Static Recompiler</span>
+      </div>
       <p class="recompile-help">
         Extracts an ELF from the loaded disc image and generates C++ source files.
         Each game has one main executable (BOOT2, shown with ★); other files are
@@ -56,8 +61,8 @@ interface BrowseOutputDirectoryResultMsg {
       </p>
 
       <div class="row">
-        <button id="recompileListBtn" (click)="onListDiscElfs()" [disabled]="!selectedGame()">
-          Load ELF list from disc
+        <button class="ibtn" id="recompileListBtn" (click)="onListDiscElfs()" [disabled]="!selectedGame()">
+          <app-icon name="disc3" [size]="13" /><span>Load ELF list from disc</span>
         </button>
       </div>
 
@@ -86,9 +91,10 @@ interface BrowseOutputDirectoryResultMsg {
       </div>
 
       <div class="row">
-        <button id="recompileRunBtn" (click)="onRunRecompile()"
+        <button class="ibtn" id="recompileRunBtn" (click)="onRunRecompile()"
                 [disabled]="!selectedGame() || running()">
-          {{running() ? 'Recompiling…' : 'Recompile'}}
+          <app-icon name="zap" [size]="13" />
+          <span>{{running() ? 'Recompiling…' : 'Recompile'}}</span>
         </button>
       </div>
 
@@ -100,7 +106,10 @@ interface BrowseOutputDirectoryResultMsg {
 
       @if (writtenFiles().length > 0) {
         <div class="recompile-files">
-          <div class="section-label">Generated files</div>
+          <div class="t-head">
+            <app-icon name="filecode" [size]="14" />
+            <span class="t-head-label">Generated files</span>
+          </div>
           <ul>
             @for (f of writtenFiles(); track f) {
               <li class="recompile-file-item">{{f}}</li>

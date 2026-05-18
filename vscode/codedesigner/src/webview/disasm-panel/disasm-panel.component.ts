@@ -10,6 +10,7 @@ import {
 } from './components';
 import type { McpMemoryEntry, McpMemoryListResult, McpMemoryActionResult } from './components';
 import { EmuOption, SnapshotEntry } from './types';
+import { IconComponent } from '../shared/icon.component';
 import './disasm-panel.css';
 
 /** Message sent by the provider when connection state changes. */
@@ -101,6 +102,7 @@ interface LoadedGameMsg {
     CheatsTabComponent,
     CdsTabComponent,
     RecompileTabComponent,
+    IconComponent,
   ],
   encapsulation: ViewEncapsulation.None,
   templateUrl: './disasm-panel.component.html',

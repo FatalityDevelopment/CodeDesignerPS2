@@ -2768,6 +2768,18 @@ export class SocketClient {
     }
 
     /**
+     * ISO_GET_INFO — returns the boot-ELF path declared in a disc image's
+     * SYSTEM.CNF (e.g. "cdrom0:\\SLUS_216.06;1"), used to derive the serial.
+     * Returns '' when no SYSTEM.CNF / BOOT2 entry is present.
+     */
+    public async isoBootElf(isoPath: string): Promise<string> {
+        const response = await this.sendCommand(
+            { Command: 'ISO_GET_INFO', IsoPath: isoPath }, 30_000);
+        if (!response.Success) { throw new Error(response.Error || 'ISO_GET_INFO failed'); }
+        return response.BootElf ?? '';
+    }
+
+    /**
      * Extract a named ELF from a PS2 disc image and run the static recompiler on it,
      * generating C++ source files in the specified output directory.
      *
@@ -3394,6 +3406,7 @@ export class SocketClient {
         });
         if (!response.Success) { throw new Error(response.Error || 'COMPAT_DETAILS failed'); }
         return response.CompatGame ?? null;
+    }
     // ── Cheats Editor ────────────────────────────────────────────────────────
 
     /** CHEATEDITOR_GAMES — returns every game that owns at least one cheat list. */

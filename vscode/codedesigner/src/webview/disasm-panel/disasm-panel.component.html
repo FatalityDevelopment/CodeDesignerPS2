@@ -11,6 +11,11 @@
 
 @if (loadedGame) {
   <div class="loaded-game">
+    <div class="lg-head">
+      <app-icon name="disc3" [size]="13" />
+      <span>Loaded Game</span>
+    </div>
+    <div class="lg-body">
     <div class="lg-cover">
       @if (loadedGameCover) {
         <img class="lg-cover-img" [src]="loadedGameCover" [alt]="loadedGame.title" />
@@ -41,18 +46,27 @@
         }
       </div>
     </div>
+    </div>
   </div>
 }
 
 <div id="panel-views" role="tablist">
   <button class="view-btn" [class.active]="activeTab === 'settings'"
-          (click)="setTab('settings')" title="Emulator settings">🎮</button>
+          (click)="setTab('settings')" title="Emulator settings">
+    <app-icon name="gamepad2" [size]="16" />
+  </button>
   <button class="view-btn" [class.active]="activeTab === 'cheats'"
-          (click)="setTab('cheats')" title="Cheats">✨</button>
+          (click)="setTab('cheats')" title="Cheats">
+    <app-icon name="sparkles" [size]="16" />
+  </button>
   <button class="view-btn" [class.active]="activeTab === 'cds'"
-          (click)="setTab('cds')" title="CDS — Code Designer Source">📄</button>
+          (click)="setTab('cds')" title="CDS — Code Designer Source">
+    <app-icon name="filecode" [size]="16" />
+  </button>
   <button class="view-btn" [class.active]="activeTab === 'recompile'"
-          (click)="setTab('recompile')" title="Recompile">🔧</button>
+          (click)="setTab('recompile')" title="Recompile">
+    <app-icon name="code" [size]="16" />
+  </button>
   <span class="view-label">{{viewLabel}}</span>
 </div>
 

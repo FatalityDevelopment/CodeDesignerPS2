@@ -75,6 +75,15 @@ export function activate(context: vscode.ExtensionContext) {
 	const disasmPanelProvider = new DisasmPanelProvider(socketClient, editorProvider, context.extensionUri);
 	disasmPanelProvider.register(context);
 
+	// Emulator Connect/Disconnect toggle — surfaced as a panel header action
+	// (view/title) so the main panel body stays clean.
+	context.subscriptions.push(
+		vscode.commands.registerCommand(
+			'codedesigner.toggleEmulatorConnection',
+			() => disasmPanelProvider.toggleConnectionFromCommand(),
+		),
+	);
+
 	// Register custom editor for PS2 binary files (.elf, .bin, .raw).
 	// This makes VS Code route File → Open for these extensions through
 	// CodeDesigner instead of showing a raw text/hex view.

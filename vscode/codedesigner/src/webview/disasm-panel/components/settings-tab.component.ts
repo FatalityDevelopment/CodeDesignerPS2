@@ -9,6 +9,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { EmuOption, SnapshotEntry } from '../types';
+import { IconComponent } from '../../shared/icon.component';
 import { McpMemoryOverlayComponent } from './mcp-memory-overlay.component';
 import type { McpMemoryEntry, McpMemoryListResult, McpMemoryActionResult } from './mcp-memory-overlay.component';
 
@@ -31,7 +32,7 @@ const SNAP_PREVIEW = 5;
 @Component({
   selector: 'app-settings-tab',
   standalone: true,
-  imports: [McpMemoryOverlayComponent],
+  imports: [McpMemoryOverlayComponent, IconComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
   template: `
@@ -40,7 +41,8 @@ const SNAP_PREVIEW = 5;
       <!-- ── Connection ──────────────────────────────────────────────────── -->
       <div class="acc-section">
         <button class="acc-header" (click)="connOpen.set(!connOpen())">
-          <span class="acc-chevron">{{connOpen() ? '▾' : '▸'}}</span>
+          <app-icon class="acc-chevron" [name]="connOpen() ? 'chevrondown' : 'chevronright'" [size]="13" />
+          <app-icon class="acc-ico" name="link" [size]="14" />
           <span class="acc-title">Connection</span>
           @if (isConnected()) { <span class="acc-badge-ok">●</span> }
         </button>
@@ -91,8 +93,10 @@ const SNAP_PREVIEW = 5;
             </div>
 
             <div class="row">
-              <button id="connectBtn" (click)="connectClick.emit()">
-                {{isConnected() ? 'Disconnect' : 'Connect'}}
+              <button id="runBtn" class="run-btn" (click)="runPcsx2Click.emit()"
+                      [disabled]="!isPcsx2Selected()"
+                      title="Launch the emulator and attach the debugger">
+                <app-icon name="play" [size]="13" /><span>Run</span>
               </button>
             </div>
 
@@ -103,7 +107,8 @@ const SNAP_PREVIEW = 5;
       <!-- ── Actions ─────────────────────────────────────────────────────── -->
       <div class="acc-section">
         <button class="acc-header" (click)="actOpen.set(!actOpen())">
-          <span class="acc-chevron">{{actOpen() ? '▾' : '▸'}}</span>
+          <app-icon class="acc-chevron" [name]="actOpen() ? 'chevrondown' : 'chevronright'" [size]="13" />
+          <app-icon class="acc-ico" name="zap" [size]="14" />
           <span class="acc-title">Actions</span>
         </button>
         @if (actOpen()) {
@@ -111,35 +116,41 @@ const SNAP_PREVIEW = 5;
             <div class="btn-grid">
 
               <button id="runPcsx2Btn" (click)="runPcsx2Click.emit()"
-                      [disabled]="!isPcsx2Selected()">🔌 Run PCSX2</button>
+                      [disabled]="!isPcsx2Selected()">
+                <app-icon name="plugzap" [size]="14" /><span>Run PCSX2</span>
+              </button>
 
               <button id="restartBtn" (click)="restartClick.emit()" [disabled]="!isConnected()">
-                ⟳ Restart
+                <app-icon name="refreshcw" [size]="14" /><span>Restart</span>
               </button>
 
               <button id="importBinBtn" (click)="importBinClick.emit()" [disabled]="!isConnected()">
-                ⬆ Import
+                <app-icon name="upload" [size]="14" /><span>Import</span>
               </button>
 
               @if (!isPcsx2Selected()) {
                 <button id="snapshotBtn" (click)="snapshotClick.emit()" [disabled]="!isConnected()">
-                  📷 Snapshot
+                  <app-icon name="camera" [size]="14" /><span>Snapshot</span>
                 </button>
               } @else {
                 <button id="snapshotPcsx2Btn" (click)="snapshotPcsx2Click.emit()" [disabled]="!isConnected()">
-                  📷 Snapshot
+                  <app-icon name="camera" [size]="14" /><span>Snapshot</span>
                 </button>
                 <button id="saveScreenshotBtn" (click)="saveScreenshotClick.emit()" [disabled]="!isConnected()">
-                  🖼 Screenshot
+                  <app-icon name="image" [size]="14" /><span>Screenshot</span>
                 </button>
                 <button id="previewBtn" (click)="previewClick.emit()"
                         title="Open the live PCSX2 display inside VS Code (requires the GSStreamServer-enabled PCSX2 build)">
-                  🎮 Preview
+                  <app-icon name="monitor" [size]="14" /><span>Preview</span>
                 </button>
               }
 
-              <button id="docsBtn" (click)="docsClick.emit()">📖 Docs</button>
-              <button id="archiveDocsBtn" (click)="archiveDocsClick.emit()">📚 Archive</button>
+              <button id="docsBtn" (click)="docsClick.emit()">
+                <app-icon name="bookopen" [size]="14" /><span>Docs</span>
+              </button>
+              <button id="archiveDocsBtn" (click)="archiveDocsClick.emit()">
+                <app-icon name="library" [size]="14" /><span>Archive</span>
+              </button>
 
             </div>
           </div>
@@ -149,7 +160,8 @@ const SNAP_PREVIEW = 5;
       <!-- ── Network ──────────────────────────────────────────────────────── -->
       <div class="acc-section">
         <button class="acc-header" (click)="netOpen.set(!netOpen())">
-          <span class="acc-chevron">{{netOpen() ? '▾' : '▸'}}</span>
+          <app-icon class="acc-chevron" [name]="netOpen() ? 'chevrondown' : 'chevronright'" [size]="13" />
+          <app-icon class="acc-ico" name="network" [size]="14" />
           <span class="acc-title">Network</span>
         </button>
         @if (netOpen()) {
@@ -158,17 +170,17 @@ const SNAP_PREVIEW = 5;
 
               <button id="startNetworkBtn" (click)="startNetworkClick.emit()"
                       title="Launch the CodeDesigner Multiplayer server">
-                🌐 Start Servers
+                <app-icon name="globe" [size]="14" /><span>Start Servers</span>
               </button>
 
               <button (click)="openPacketViewerClick.emit()"
                       title="Open the Packet Viewer to capture and inspect PS2 network traffic">
-                📡 Packets
+                <app-icon name="radiotower" [size]="14" /><span>Packets</span>
               </button>
 
               <button id="netConfigBtn" (click)="openNetConfigClick.emit()"
                       title="Open the Multiplayer server config.json for editing">
-                ⚙ Config
+                <app-icon name="settings" [size]="14" /><span>Config</span>
               </button>
 
             </div>
@@ -179,7 +191,8 @@ const SNAP_PREVIEW = 5;
       <!-- ── Snapshots ────────────────────────────────────────────────────── -->
       <div class="acc-section">
         <button class="acc-header" (click)="snapOpen.set(!snapOpen())">
-          <span class="acc-chevron">{{snapOpen() ? '▾' : '▸'}}</span>
+          <app-icon class="acc-chevron" [name]="snapOpen() ? 'chevrondown' : 'chevronright'" [size]="13" />
+          <app-icon class="acc-ico" name="history" [size]="14" />
           <span class="acc-title">
             Snapshots
             @if (currentGameName()) { <span class="acc-subtitle"> — {{currentGameName()}}</span> }
@@ -217,7 +230,8 @@ const SNAP_PREVIEW = 5;
       <!-- ── Tools ───────────────────────────────────────────────────────── -->
       <div class="acc-section">
         <button class="acc-header" (click)="toolsOpen.set(!toolsOpen())">
-          <span class="acc-chevron">{{toolsOpen() ? '▾' : '▸'}}</span>
+          <app-icon class="acc-chevron" [name]="toolsOpen() ? 'chevrondown' : 'chevronright'" [size]="13" />
+          <app-icon class="acc-ico" name="wrench" [size]="14" />
           <span class="acc-title">Tools</span>
         </button>
         @if (toolsOpen()) {
@@ -225,35 +239,35 @@ const SNAP_PREVIEW = 5;
             <div class="btn-grid">
               <button (click)="openAiConfigClick.emit()"
                       title="Open the AI Configuration panel to manage agent profiles">
-                🤖 AI Config
+                <app-icon name="bot" [size]="14" /><span>AI Config</span>
               </button>
               <button (click)="openLabelManagerClick.emit()"
                       title="Open the Label Manager to manage address labels">
-                🏷 Labels
+                <app-icon name="tag" [size]="14" /><span>Labels</span>
               </button>
               <button (click)="openMemoryCardClick.emit()"
                       title="Open the Memory Card Manager to browse and edit PS2 memory cards">
-                💾 Mem Card
+                <app-icon name="save" [size]="14" /><span>Mem Card</span>
               </button>
               <button (click)="openHddClick.emit()"
                       title="Open the HDD Image Manager to browse and edit PS2 HDD images">
-                💿 HDD
+                <app-icon name="harddrive" [size]="14" /><span>HDD</span>
               </button>
               <button (click)="openSnapshotManagerClick.emit()"
                       title="Open the Snapshot Manager to browse and manage memory snapshots">
-                📷 Snapshots
+                <app-icon name="camera" [size]="14" /><span>Snapshots</span>
               </button>
               <button (click)="openDiffViewerClick.emit()"
                       title="Open the Memory Diff Viewer to compare snapshots">
-                ↔ Diff
+                <app-icon name="gitcompare" [size]="14" /><span>Diff</span>
               </button>
               <button (click)="openCompatBrowserClick.emit()"
                       title="Browse the PCSX2 game compatibility list">
-                🎮 Game Compat
+                <app-icon name="gamepad2" [size]="14" /><span>Game Compat</span>
               </button>
               <button (click)="openCheatsEditorClick.emit()"
                       title="Open the PS2 cheats editor">
-                🎯 Cheats
+                <app-icon name="sparkles" [size]="14" /><span>Cheats</span>
               </button>
             </div>
           </div>
@@ -265,7 +279,8 @@ const SNAP_PREVIEW = 5;
       <!-- loaded entries and state are preserved across open/close cycles.   -->
       <div class="acc-section">
         <button class="acc-header" (click)="memOpen.set(!memOpen())">
-          <span class="acc-chevron">{{memOpen() ? '▾' : '▸'}}</span>
+          <app-icon class="acc-chevron" [name]="memOpen() ? 'chevrondown' : 'chevronright'" [size]="13" />
+          <app-icon class="acc-ico" name="database" [size]="14" />
           <span class="acc-title">Memories</span>
         </button>
         <div [style.display]="memOpen() ? '' : 'none'">
@@ -283,7 +298,8 @@ const SNAP_PREVIEW = 5;
       <!-- ── Memory ───────────────────────────────────────────────────────── -->
       <div class="acc-section">
         <button class="acc-header" (click)="memViewOpen.set(!memViewOpen())">
-          <span class="acc-chevron">{{memViewOpen() ? '▾' : '▸'}}</span>
+          <app-icon class="acc-chevron" [name]="memViewOpen() ? 'chevrondown' : 'chevronright'" [size]="13" />
+          <app-icon class="acc-ico" name="memorystick" [size]="14" />
           <span class="acc-title">Memory</span>
         </button>
         @if (memViewOpen()) {
@@ -291,24 +307,24 @@ const SNAP_PREVIEW = 5;
             <div class="mem-views-grid">
               <button class="mem-view-btn" (click)="openMemoryViewClick.emit('EE RAM')"
                       title="Open EE RAM memory view (0x00000000)">
-                <span class="mvb-icon">🧠</span>
+                <app-icon class="mvb-icon" name="memorystick" [size]="14" />
                 <span class="mvb-label">EE RAM</span>
                 <span class="mvb-badge">32 MB</span>
               </button>
               <button class="mem-view-btn" (click)="openMemoryViewClick.emit('IOP RAM')"
                       title="Open IOP RAM memory view (0x1C000000)">
-                <span class="mvb-icon">🧠</span>
+                <app-icon class="mvb-icon" name="memorystick" [size]="14" />
                 <span class="mvb-label">IOP RAM</span>
                 <span class="mvb-badge">2 MB</span>
               </button>
               <button class="mem-view-btn" (click)="openMemoryViewClick.emit('BIOS ROM')"
                       title="Open BIOS ROM memory view (0x1FC00000)">
-                <span class="mvb-icon">💿</span>
+                <app-icon class="mvb-icon" name="disc3" [size]="14" />
                 <span class="mvb-label">BIOS ROM</span>
               </button>
               <button class="mem-view-btn" (click)="openMemoryViewClick.emit('Scratchpad')"
                       title="Open Scratchpad memory view (0x70000000)">
-                <span class="mvb-icon">📋</span>
+                <app-icon class="mvb-icon" name="harddrive" [size]="14" />
                 <span class="mvb-label">Scratchpad</span>
               </button>
             </div>

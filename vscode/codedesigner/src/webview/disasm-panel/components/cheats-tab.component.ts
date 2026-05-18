@@ -11,6 +11,7 @@ import {
 } from '@angular/core';
 import { Subscription } from 'rxjs';
 import { VsCodeBridgeService } from '../../shared/vscode-bridge.service';
+import { IconComponent } from '../../shared/icon.component';
 import { ArchiveCheat } from '../types';
 
 interface CheatsAppliedMsg {
@@ -44,6 +45,7 @@ interface ArchiveCheatsUpdatedMsg {
 @Component({
   selector: 'app-cheats-tab',
   standalone: true,
+  imports: [IconComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
   template: `
@@ -51,24 +53,29 @@ interface ArchiveCheatsUpdatedMsg {
 
       <!-- ── Cheat tools ──────────────────────────────────────────────────── -->
       <div class="cheats-tools">
+        <div class="t-head">
+          <app-icon name="sparkles" [size]="14" />
+          <span class="t-head-label">Cheat Tools</span>
+        </div>
         <div class="btn-grid">
           <button class="cheats-tool-btn" (click)="openConverterClick.emit()"
                   title="Open the Cheat Code Converter to encrypt/decrypt cheat codes">
-            ↕ Converter
+            <app-icon name="repeat" [size]="13" /><span>Converter</span>
           </button>
           <button class="cheats-tool-btn" (click)="openPorterClick.emit()"
                   title="Open the Cheat Code Porter to port cheats between game revisions">
-            ⇋ Porter
+            <app-icon name="gitcompare" [size]="13" /><span>Porter</span>
           </button>
           <button class="cheats-tool-btn" (click)="openScannerClick.emit()"
                   title="Open the Memory Scanner to search for values in memory">
-            🔍 Scanner
+            <app-icon name="search" [size]="13" /><span>Scanner</span>
           </button>
-          <button class="cheats-tool-btn" id="jokerMakerBtn" (click)="openJokerMaker()" title="Build a Joker/button-combo code">
-            🕹️ Joker
+          <button class="cheats-tool-btn" id="jokerMakerBtn" (click)="openJokerMaker()"
+                  title="Build a Joker/button-combo code">
+            <app-icon name="gamepad2" [size]="13" /><span>Joker</span>
           </button>
           <button class="cheats-tool-btn" (click)="onOpenHelp()" title="Open the Cheat Engine guide">
-            ? Help
+            <app-icon name="bookopen" [size]="13" /><span>Help</span>
           </button>
         </div>
       </div>
@@ -84,10 +91,11 @@ interface ArchiveCheatsUpdatedMsg {
                 Archive Cheats
               }
             </span>
-            <button class="archive-fetch-btn"
+            <button class="archive-fetch-btn ibtn"
                     (click)="onFetchArchive()"
                     [disabled]="!isConnected() || archiveLoading()">
-              {{ archiveLoading() ? 'Loading…' : 'Refresh' }}
+              <app-icon name="refreshcw" [size]="12" />
+              <span>{{ archiveLoading() ? 'Loading…' : 'Refresh' }}</span>
             </button>
           </div>
 
@@ -101,8 +109,9 @@ interface ArchiveCheatsUpdatedMsg {
 
           @if (archiveCheats().length > 0) {
             <div class="archive-apply-row">
-              <button (click)="onApplyAll()" [disabled]="!isConnected() || !hasEnabledArchiveCheats()">
-                Apply All Enabled
+              <button class="ibtn" (click)="onApplyAll()"
+                      [disabled]="!isConnected() || !hasEnabledArchiveCheats()">
+                <app-icon name="zap" [size]="13" /><span>Apply All Enabled</span>
               </button>
             </div>
             <ul class="archive-list">
@@ -132,8 +141,8 @@ interface ArchiveCheatsUpdatedMsg {
         (input)="cheatText.set($any($event.target).value)"
         placeholder="Paste cheat codes here (GameShark/Action Replay format)&#10;&#10;Example:&#10;#Infinite Health&#10;20123456 000003E8"></textarea>
       <div class="row">
-        <button id="cheatsUpdateBtn" (click)="onApplyCheats()" [disabled]="!isConnected()">
-          Update
+        <button class="ibtn" id="cheatsUpdateBtn" (click)="onApplyCheats()" [disabled]="!isConnected()">
+          <app-icon name="zap" [size]="13" /><span>Update</span>
         </button>
       </div>
       @if (cheatMessage()) {

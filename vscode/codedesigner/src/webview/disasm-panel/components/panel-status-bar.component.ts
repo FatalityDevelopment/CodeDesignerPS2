@@ -8,6 +8,7 @@ import {
   signal,
   effect,
 } from '@angular/core';
+import { IconComponent } from '../../shared/icon.component';
 
 /**
  * PanelStatusBarComponent - Displays emulator connection/pause status and
@@ -20,6 +21,7 @@ import {
 @Component({
   selector: 'app-panel-status-bar',
   standalone: true,
+  imports: [IconComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
   template: `
@@ -53,23 +55,23 @@ import {
           <button class="dbg-btn" id="emu-play-pause-btn"
                   (click)="togglePause.emit()"
                   title="{{isPaused() ? 'Resume emulator' : 'Pause emulator'}}">
-            {{isPaused() ? '▶' : '⏸'}}
+            <app-icon [name]="isPaused() ? 'play' : 'pause'" [size]="12" />
             <span class="dbg-btn-label">{{isPaused() ? 'Resume' : 'Pause'}}</span>
           </button>
           <button class="dbg-btn" id="emu-step-btn"
                   (click)="step.emit()" [disabled]="!isPaused()"
                   title="Step — execute one EE instruction">
-            ▷<span class="dbg-btn-label">Step</span>
+            <app-icon name="play" [size]="11" /><span class="dbg-btn-label">Step</span>
           </button>
           <button class="dbg-btn" id="emu-step-into-btn"
                   (click)="stepInto.emit()" [disabled]="!isPaused()"
                   title="Step Into — follow calls (PCSX2 PINE)">
-            ↓<span class="dbg-btn-label">Into</span>
+            <span class="dbg-glyph">↓</span><span class="dbg-btn-label">Into</span>
           </button>
           <button class="dbg-btn" id="emu-step-over-btn"
                   (click)="stepOver.emit()" [disabled]="!isPaused()"
                   title="Step Over — skip calls (PCSX2 PINE)">
-            ↷<span class="dbg-btn-label">Over</span>
+            <span class="dbg-glyph">↷</span><span class="dbg-btn-label">Over</span>
           </button>
         </div>
       }
