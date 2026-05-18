@@ -135,6 +135,8 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
   loadedGame: LoadedGameInfo | null = null;
   /** Cover-art data URI for the loaded game, or '' when unavailable. */
   loadedGameCover = '';
+  /** Collapsed/expanded state of the Loaded Game accordion card. */
+  loadedGameOpen = true;
   private subs: Subscription[] = [];
 
   @ViewChild(SettingsTabComponent) private settingsTab?: SettingsTabComponent;
@@ -317,12 +319,19 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
     this.bridge.postMessage({ command: 'snapshotPcsx2' });
   }
 
-  saveScreenshot(): void {
-    this.bridge.postMessage({ command: 'saveScreenshot' });
-  }
-
   openGsViewer(): void {
     this.bridge.postMessage({ command: 'openGsViewer' });
+  }
+
+  /** Open the markdown help guide that matches the active tab. */
+  openHelp(): void {
+    const docs: Record<'settings' | 'cheats' | 'cds' | 'recompile', string> = {
+      settings:  'docs/README.md',
+      cheats:    'docs/cheat-engine.md',
+      cds:       'CODE_DESIGNER_SOURCE.md',
+      recompile: 'docs/recompiler.md',
+    };
+    this.bridge.postMessage({ command: 'openMarkdownHelp', file: docs[this.activeTab] });
   }
 
   openDocs(): void {

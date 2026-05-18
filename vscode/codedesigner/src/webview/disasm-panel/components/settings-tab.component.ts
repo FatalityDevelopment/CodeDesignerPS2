@@ -115,11 +115,6 @@ const SNAP_PREVIEW = 5;
           <div class="acc-body">
             <div class="btn-grid">
 
-              <button id="runPcsx2Btn" (click)="runPcsx2Click.emit()"
-                      [disabled]="!isPcsx2Selected()">
-                <app-icon name="plugzap" [size]="14" /><span>Run PCSX2</span>
-              </button>
-
               <button id="restartBtn" (click)="restartClick.emit()" [disabled]="!isConnected()">
                 <app-icon name="refreshcw" [size]="14" /><span>Restart</span>
               </button>
@@ -135,9 +130,6 @@ const SNAP_PREVIEW = 5;
               } @else {
                 <button id="snapshotPcsx2Btn" (click)="snapshotPcsx2Click.emit()" [disabled]="!isConnected()">
                   <app-icon name="camera" [size]="14" /><span>Snapshot</span>
-                </button>
-                <button id="saveScreenshotBtn" (click)="saveScreenshotClick.emit()" [disabled]="!isConnected()">
-                  <app-icon name="image" [size]="14" /><span>Screenshot</span>
                 </button>
                 <button id="previewBtn" (click)="previewClick.emit()"
                         title="Open the live PCSX2 display inside VS Code (requires the GSStreamServer-enabled PCSX2 build)">
@@ -263,7 +255,7 @@ const SNAP_PREVIEW = 5;
               </button>
               <button (click)="openCompatBrowserClick.emit()"
                       title="Browse the PCSX2 game compatibility list">
-                <app-icon name="gamepad2" [size]="14" /><span>Game Compat</span>
+                <app-icon name="gamepad2" [size]="14" /><span>Games</span>
               </button>
               <button (click)="openCheatsEditorClick.emit()"
                       title="Open the PS2 cheats editor">
@@ -300,7 +292,7 @@ const SNAP_PREVIEW = 5;
         <button class="acc-header" (click)="memViewOpen.set(!memViewOpen())">
           <app-icon class="acc-chevron" [name]="memViewOpen() ? 'chevrondown' : 'chevronright'" [size]="13" />
           <app-icon class="acc-ico" name="memorystick" [size]="14" />
-          <span class="acc-title">Memory</span>
+          <span class="acc-title">Memory Region</span>
         </button>
         @if (memViewOpen()) {
           <div class="acc-body">
@@ -321,11 +313,13 @@ const SNAP_PREVIEW = 5;
                       title="Open BIOS ROM memory view (0x1FC00000)">
                 <app-icon class="mvb-icon" name="disc3" [size]="14" />
                 <span class="mvb-label">BIOS ROM</span>
+                <span class="mvb-badge">4 MB</span>
               </button>
               <button class="mem-view-btn" (click)="openMemoryViewClick.emit('Scratchpad')"
                       title="Open Scratchpad memory view (0x70000000)">
                 <app-icon class="mvb-icon" name="harddrive" [size]="14" />
                 <span class="mvb-label">Scratchpad</span>
+                <span class="mvb-badge">16 KB</span>
               </button>
             </div>
           </div>
@@ -357,7 +351,6 @@ export class SettingsTabComponent {
   readonly restartClick       = output<void>();
   readonly snapshotClick      = output<void>();
   readonly snapshotPcsx2Click = output<void>();
-  readonly saveScreenshotClick = output<void>();
   readonly previewClick        = output<void>();
   readonly docsClick           = output<void>();
   readonly archiveDocsClick    = output<void>();

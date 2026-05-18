@@ -33,7 +33,13 @@ import { IconComponent } from '../../shared/icon.component';
 
       <!-- Row 1: status indicator + mode toggle -->
       <div id="emu-status-row">
-        <span id="emu-status-dot">{{controlMode() === 'ai-control' && isConnected() && !isPaused() ? '🤖' : '●'}}</span>
+        <span id="emu-status-dot">
+          @if (controlMode() === 'ai-control' && isConnected() && !isPaused()) {
+            <app-icon name="bot" [size]="15" />
+          } @else {
+            ●
+          }
+        </span>
         <span id="emu-status-text">{{statusText()}}</span>
         @if (isConnected()) {
           <span id="emu-mode-toggle">

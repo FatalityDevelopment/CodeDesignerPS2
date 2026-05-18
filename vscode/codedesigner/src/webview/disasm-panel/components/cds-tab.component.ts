@@ -37,9 +37,6 @@ interface CdsCompileResultMsg {
       <div class="t-head">
         <app-icon name="filecode" [size]="14" />
         <span class="t-head-label">Compiled GameShark Codes</span>
-        <button class="t-icon-btn" title="Open CDS guide" (click)="onOpenHelp()">
-          <app-icon name="bookopen" [size]="14" />
-        </button>
       </div>
       <textarea id="cds-output" readonly
         [value]="cdsOutput()"
@@ -85,10 +82,6 @@ export class CdsTabComponent implements OnDestroy {
 
   ngOnDestroy(): void {
     this.subs.forEach(s => s.unsubscribe());
-  }
-
-  onOpenHelp(): void {
-    this.bridge.postMessage({ command: 'openMarkdownHelp', file: 'CODE_DESIGNER_SOURCE.md' });
   }
 
   onCompileCds(): void {

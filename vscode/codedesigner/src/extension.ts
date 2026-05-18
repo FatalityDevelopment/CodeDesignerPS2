@@ -303,6 +303,14 @@ export function activate(context: vscode.ExtensionContext) {
 	);
 	context.subscriptions.push(openGsFrameViewerCommand);
 
+	// Save a PCSX2 screenshot — surfaced as a command so the GS frame viewer's
+	// in-webview Screenshot button can trigger it without a panel round-trip.
+	const saveScreenshotCommand = vscode.commands.registerCommand(
+		'codedesigner.saveScreenshot',
+		() => disasmPanelProvider.handleSaveScreenshot(),
+	);
+	context.subscriptions.push(saveScreenshotCommand);
+
 	// Joker Maker (virtual PS2 controller)
 	// Standalone webview that builds GameShark joker codes from a canvas-rendered
 	// controller, mirrors live pad state via PINE, and can drive PCSX2 pad input.
