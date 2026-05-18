@@ -231,6 +231,69 @@ app-icon,
 .lg-status-menus    { background: #c62828; }
 .lg-status-unknown  { background: #555; }
 
+/* ── MCP server status badge (above the view tabs) ───────────────────────── */
+
+.mcp-status {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    flex-shrink: 0;
+    margin-top: 8px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--vscode-panel-border, #313131);
+    background: #252526;
+    color: var(--vscode-descriptionForeground, #8f8f8f);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+/* Online state — uses the AI-control amber accent. */
+.mcp-status.mcp-online {
+    background: linear-gradient(90deg, #3a2800, #402f08);
+    border-color: #7a5500;
+    color: #e8a030;
+}
+
+.mcp-ico {
+    flex-shrink: 0;
+    opacity: 0.55;
+}
+
+.mcp-online .mcp-ico {
+    opacity: 1;
+}
+
+.mcp-label {
+    flex: 1;
+}
+
+.mcp-state {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 700;
+}
+
+.mcp-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: currentColor;
+}
+
+.mcp-online .mcp-dot {
+    box-shadow: 0 0 6px 1px rgba(232, 160, 48, 0.9);
+    animation: mcp-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes mcp-pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.4; }
+}
+
 /* ── Cheats tab ──────────────────────────────────────────────────────────── */
 
 #tab-cheats {
@@ -1100,6 +1163,111 @@ button:disabled {
     font-family: var(--vscode-editor-font-family, monospace);
     font-size: 10px;
     color: var(--vscode-descriptionForeground, #8f8f8f);
+}
+
+/* Agents list — lead star + clickable agent card */
+.agent-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 3px;
+}
+
+.agent-star {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border-radius: 4px;
+    background: transparent;
+    border: 1px solid transparent;
+    cursor: pointer;
+    color: var(--vscode-descriptionForeground, #8f8f8f);
+}
+
+.agent-star:hover {
+    background: rgba(255, 255, 255, 0.07);
+    color: #e8a030;
+}
+
+/* Team lead — amber, filled star (uses the AI-control accent). */
+.agent-star-on {
+    color: #e8a030;
+}
+
+.agent-star-on .lic svg path {
+    fill: currentColor;
+}
+
+.agent-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 7px;
+    border-radius: 4px;
+    background: var(--vscode-button-secondaryBackground, #252526);
+    border: 1px solid var(--vscode-panel-border, #313131);
+    cursor: pointer;
+    text-align: left;
+    overflow: hidden;
+}
+
+.agent-info:hover {
+    background: var(--vscode-button-secondaryHoverBackground, #2f2f30);
+    border-color: #4d4d4d;
+}
+
+/* Agent profile picture (Mortal Kombat avatar) */
+.agent-avatar {
+    width: 30px;
+    height: 30px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 1px solid var(--vscode-panel-border, #454545);
+    background: #000;
+}
+
+.agent-avatar-ph {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(160deg, #2a2a2a, #141414);
+    color: var(--vscode-descriptionForeground, #8f8f8f);
+    font-size: 13px;
+    font-weight: 800;
+}
+
+.agent-text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    overflow: hidden;
+}
+
+.agent-name {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--vscode-foreground, #d4d4d4);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.agent-desc {
+    font-size: 10px;
+    color: var(--vscode-descriptionForeground, #8f8f8f);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 /* Network server status list */

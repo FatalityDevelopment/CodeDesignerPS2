@@ -829,6 +829,8 @@ export class AiConfigPageComponent implements AfterViewInit {
   });
 
   private _pendingAgentDelete = false;
+  /** Agent id to select once the agent list arrives (from an external focus request). */
+  private _pendingFocusAgentId: number | null = null;
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
@@ -1331,6 +1333,21 @@ export class AiConfigPageComponent implements AfterViewInit {
 
   private _handleMessage(data: Record<string, unknown>): void {
     switch (data['type']) {
+      // ── External focus request (e.g. from the disasm panel Agents list) ──
+      case 'aiConfigFocus': {
+        const tab     = data['tab'] as string | undefined;
+        const agentId = data['agentId'] as number | undefined;
+        if (tab === 'orchestration' || tab === 'agents' || tab === 'memories'
+            || tab === 'tools' || tab === 'history' || tab === 'planner') {
+          this.activeTab.set(tab);
+        }
+        if (typeof agentId === 'number') {
+          const found = this.agents().find(a => a.id === agentId);
+          if (found) { this.selectAgent(found); }
+          else       { this._pendingFocusAgentId = agentId; }
+        }
+        break;
+      }
       // ── Orchestration responses ──────────────────────────────────────────
       case 'orchestrationListResult': {
         const profiles = (data['profiles'] as OrchestrationProfile[] | undefined) ?? [];
@@ -1394,6 +1411,12 @@ export class AiConfigPageComponent implements AfterViewInit {
         } else {
           this.agents.set(agents);
           this.setStatus(agents.length === 0 ? '' : `${agents.length} profile${agents.length === 1 ? '' : 's'}`, false);
+          // Honour a deferred focus request now that the agent list is loaded.
+          if (this._pendingFocusAgentId !== null) {
+            const focusAgent = agents.find(a => a.id === this._pendingFocusAgentId);
+            this._pendingFocusAgentId = null;
+            if (focusAgent) { this.selectAgent(focusAgent); break; }
+          }
           const sel = this.selectedId();
           if (sel !== null && !agents.find(a => a.id === sel)) {
             this.selectedId.set(null);
