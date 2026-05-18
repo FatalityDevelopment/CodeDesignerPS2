@@ -255,6 +255,17 @@ namespace CodeDesigner.Ps2.Bridge
         /// <summary>New value (tool description) for MCPCONFIG_UPDATE.</summary>
         public string? McpConfigValue { get; set; }
 
+
+        // Discord presence fields (SETDISCORDPRESENCE)
+        /// <summary>GameDisc row ID for Discord presence context.</summary>
+        public int? DiscordGameDiscId { get; set; }
+        /// <summary>Current EE PC address string (e.g. "0x00123ABC") to show in Discord state.</summary>
+        public string? DiscordPcAddress { get; set; }
+        /// <summary>Optional debug status text shown in Discord state.</summary>
+        public string? DiscordDebugStatus { get; set; }
+        /// <summary>Optional Discord image asset key for the active game.</summary>
+        public string? DiscordPictureKey { get; set; }
+
         // Pad / controller input fields (PADGETSTATE / PADSETBUTTON / PADSETANALOG / PADSETSTATE / PADGETTYPE)
         /// <summary>Unified pad slot index (0–7).</summary>
         public byte? PadSlot { get; set; }
