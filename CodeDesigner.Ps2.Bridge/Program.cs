@@ -563,37 +563,40 @@ namespace CodeDesigner.Ps2.Bridge
         }
 
         /// <summary>
-        /// Starts the Discord rich-presence worker when an application ID has been
-        /// configured (settings key <see cref="DiscordPresenceService.ApplicationIdKey"/>).
-        /// The worker polls the database for the active game-research context and
-        /// publishes it to Discord. No-op when no application ID is set.
+        /// Default Discord application (client) ID used for rich presence when the
+        /// <c>DiscordPresence.ApplicationId</c> setting has not been overridden.
+        /// </summary>
+        private const string DefaultDiscordApplicationId = "1490548720293642381";
+
+        /// <summary>
+        /// Starts the Discord rich-presence worker. Uses the application ID from the
+        /// <see cref="DiscordPresenceService.ApplicationIdKey"/> setting when present,
+        /// otherwise falls back to <see cref="DefaultDiscordApplicationId"/>. The worker
+        /// polls the database for the active game-research context and publishes it to
+        /// Discord.
         /// </summary>
         private static void StartDiscordPresence(CancellationToken cancellationToken)
         {
-            DbContextOptions<CodeDesignerDbContext> dbOptions;
-            string? applicationId;
+            DbContextOptions<CodeDesignerDbContext> dbOptions =
+                DatabaseInitialiser.BuildDbOptions(DatabasePaths.GetDefaultConnectionString());
+
+            string? configuredId = null;
             try
             {
-                string connectionString = DatabasePaths.GetDefaultConnectionString();
-                dbOptions = DatabaseInitialiser.BuildDbOptions(connectionString);
                 using var db = new CodeDesignerDbContext(dbOptions);
-                applicationId = db.Settings
+                configuredId = db.Settings
                     .Where(s => s.Key == DiscordPresenceService.ApplicationIdKey)
                     .Select(s => s.Value)
                     .FirstOrDefault();
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[Discord] Rich presence unavailable - could not read settings: {ex.Message}");
-                return;
+                Console.WriteLine($"[Discord] Could not read the application ID setting ({ex.Message}); using the built-in default.");
             }
 
-            if (string.IsNullOrWhiteSpace(applicationId))
-            {
-                Console.WriteLine("[Discord] Rich presence disabled - no application ID configured " +
-                                  $"(send the SETDISCORDAPPID command to set '{DiscordPresenceService.ApplicationIdKey}').");
-                return;
-            }
+            string applicationId = string.IsNullOrWhiteSpace(configuredId)
+                ? DefaultDiscordApplicationId
+                : configuredId.Trim();
 
             Console.WriteLine($"[Discord] Rich presence enabled (application ID {applicationId}).");
 

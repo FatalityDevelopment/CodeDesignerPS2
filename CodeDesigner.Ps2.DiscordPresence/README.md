@@ -34,12 +34,13 @@ Flow:
 ## Integration
 
 The Bridge hosts this worker automatically. On start-up (default control-server
-mode) it reads the `DiscordPresence.ApplicationId` setting; when that key holds a
-Discord application (client) ID it constructs the provider, client, and worker and
-begins polling every 15 seconds. When the key is missing, rich presence stays off.
+mode) it constructs the provider, client, and worker and begins polling every
+15 seconds. It uses a built-in default Discord application (client) ID, so rich
+presence works out of the box with no configuration.
 
-To configure it, send the Bridge a `SETDISCORDAPPID` command with the
-`DiscordApplicationId` field set to your Discord application ID, then restart the
-Bridge. The application ID is the only credential needed — Discord's *public key*
+To point it at a different Discord application, send the Bridge a `SETDISCORDAPPID`
+command with the `DiscordApplicationId` field set to your application ID, then
+restart the Bridge — the `DiscordPresence.ApplicationId` setting overrides the
+default. The application ID is the only credential needed — Discord's *public key*
 is only used for verifying inbound interaction webhooks, which this feature does
 not use.
