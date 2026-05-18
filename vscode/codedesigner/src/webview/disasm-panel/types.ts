@@ -27,3 +27,32 @@ export interface DiscElfEntry {
   Size: number;
   IsBootElf: boolean;
 }
+
+/** One entry in the PC navigation history (server-recorded). */
+export interface NavHistoryEntry {
+  address: string;
+  label?: string;
+  /** 'user' for manual navigations, 'mcp' for AI-driven ones. */
+  source: string;
+  timestamp: string;
+}
+
+/** A label from the active label set, slimmed for the Recent Labels list. */
+export interface RecentLabelEntry {
+  name: string;
+  type: string;
+  address: string;
+}
+
+/** Reachability of a single Multiplayer server port. */
+export interface ServerStatus {
+  name: string;
+  port: number;
+  online: boolean;
+}
+
+/** Multiplayer server reachability + packet-capture state. */
+export interface NetworkStatus {
+  servers: ServerStatus[];
+  capturing: boolean;
+}

@@ -9,7 +9,7 @@ import { getNonce, getWebviewErrorHandlerScript } from '../../utils/nonce';
 // ── Multiplayer server config ─────────────────────────────────────────────────
 
 /** Server-name map entry sent to the webview for port-based dissection. */
-interface MediusPortEntry {
+export interface MediusPortEntry {
     port: number;
     /** Display name (e.g. "MAS", "MLS"). */
     name: string;
@@ -57,7 +57,7 @@ const DEFAULT_MEDIUS_PORTS: MediusPortEntry[] = [
  * built-in defaults — packet dissection still works, just against the stock
  * port assignments.
  */
-function loadMediusPorts(): MediusPortEntry[] {
+export function loadMediusPorts(): MediusPortEntry[] {
     const candidates: string[] = [];
     const localAppData = process.env['LOCALAPPDATA'];
     if (localAppData) {
@@ -344,11 +344,18 @@ function buildPcap(packets: PcapPacketEntry[]): Buffer {
  */
 export class PacketViewerProvider {
     private _panel: vscode.WebviewPanel | undefined;
+    /** True while a live packet capture is running. Queried by the disasm panel. */
+    private _capturing = false;
 
     constructor(
         private readonly extensionUri: vscode.Uri,
         private readonly socketClient: SocketClient,
     ) {}
+
+    /** Whether a live packet capture is currently active. */
+    public isCapturing(): boolean {
+        return this._capturing;
+    }
 
     /** Open (or reveal) the Packet Viewer panel. */
     public open(): void {
@@ -369,7 +376,7 @@ export class PacketViewerProvider {
         );
         this._panel = panel;
 
-        panel.onDidDispose(() => { this._panel = undefined; });
+        panel.onDidDispose(() => { this._panel = undefined; this._capturing = false; });
 
         panel.webview.onDidReceiveMessage(async (msg: Record<string, unknown>) => {
             await this._handleMessage(msg, panel.webview);
@@ -413,6 +420,7 @@ export class PacketViewerProvider {
                     const dir = (action['direction'] as number) ?? 0;
                     const maxQ = (action['maxQueue'] as number) ?? 1000;
                     await this.socketClient.netCapture(true, dir, maxQ);
+                    this._capturing = true;
                     // Capture was enabled successfully — tell the webview to start polling.
                     webview.postMessage({ type: 'packetViewerCaptureStarted' });
                     break;
@@ -420,6 +428,7 @@ export class PacketViewerProvider {
 
                 case 'stopCapture':
                     await this.socketClient.netCapture(false);
+                    this._capturing = false;
                     break;
 
                 case 'recvCapture': {
@@ -513,6 +522,7 @@ export class PacketViewerProvider {
             const msg = err instanceof Error ? err.message : String(err);
             getOutputChannel().error(`[PacketViewer] ${actionType} failed: ${msg}`);
             if (actionType === 'startCapture') {
+                this._capturing = false;
                 webview.postMessage({ type: 'packetViewerCaptureFailed', message: msg });
             } else {
                 webview.postMessage({ type: 'packetViewerError', message: msg });

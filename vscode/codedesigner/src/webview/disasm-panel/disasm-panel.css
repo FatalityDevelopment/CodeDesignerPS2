@@ -966,6 +966,185 @@ button:disabled {
     flex-shrink: 0;
 }
 
+/* ── History / Recent Labels / Network status ────────────────────────────── */
+
+.list-actions {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+
+.list-action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 9px;
+    font-size: 11px;
+    border-radius: 4px;
+    background: var(--vscode-button-secondaryBackground, #252526);
+    color: var(--vscode-button-secondaryForeground, var(--vscode-foreground, #d4d4d4));
+    border: 1px solid var(--vscode-panel-border, #313131);
+    cursor: pointer;
+}
+
+.list-action-btn:hover:not(:disabled) {
+    background: var(--vscode-button-secondaryHoverBackground, #2f2f30);
+    border-color: #4d4d4d;
+}
+
+.list-error {
+    font-size: 11px;
+    color: var(--vscode-errorForeground, #e07070);
+    padding: 4px 0;
+}
+
+/* History rows — whole row is a clickable goto button */
+.hist-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    margin-bottom: 3px;
+    padding: 4px 6px;
+    border-radius: 4px;
+    background: var(--vscode-button-secondaryBackground, #252526);
+    border: 1px solid var(--vscode-panel-border, #313131);
+    cursor: pointer;
+    text-align: left;
+    font-size: 12px;
+}
+
+.hist-item:hover {
+    background: var(--vscode-button-secondaryHoverBackground, #2f2f30);
+    border-color: #4d4d4d;
+}
+
+.hist-addr {
+    flex-shrink: 0;
+    font-family: var(--vscode-editor-font-family, monospace);
+    color: var(--vscode-foreground, #d4d4d4);
+}
+
+.hist-label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--vscode-descriptionForeground, #8f8f8f);
+}
+
+.hist-src {
+    flex-shrink: 0;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: rgba(255,255,255,0.08);
+    color: var(--vscode-descriptionForeground, #8f8f8f);
+}
+
+.hist-src-ai {
+    background: #3a2800;
+    color: #e8a030;
+}
+
+/* Recent Labels rows */
+.label-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 3px;
+    padding: 4px 6px;
+    border-radius: 4px;
+    background: var(--vscode-button-secondaryBackground, #252526);
+    border: 1px solid var(--vscode-panel-border, #313131);
+    font-size: 12px;
+}
+
+.label-type {
+    flex-shrink: 0;
+    width: 52px;
+    text-align: center;
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 2px 4px;
+    border-radius: 3px;
+    background: rgba(255,255,255,0.08);
+    color: var(--vscode-descriptionForeground, #8f8f8f);
+}
+
+.label-type[data-label-type="Function"] { background: #1d3a5f; color: #7cb3ff; }
+.label-type[data-label-type="Pointer"]  { background: #3a2858; color: #c79bff; }
+.label-type[data-label-type="String"]   { background: #14422a; color: #6fdc9a; }
+.label-type[data-label-type="Float"]    { background: #4a3210; color: #f0b66a; }
+
+.label-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.label-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 500;
+    color: var(--vscode-foreground, #d4d4d4);
+}
+
+.label-addr {
+    font-family: var(--vscode-editor-font-family, monospace);
+    font-size: 10px;
+    color: var(--vscode-descriptionForeground, #8f8f8f);
+}
+
+/* Network server status list */
+.net-status {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 8px;
+}
+
+.net-row {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 12px;
+}
+
+.net-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: #c44;
+}
+
+.net-dot.net-dot-on {
+    background: #4ec94e;
+}
+
+.net-row-name {
+    color: var(--vscode-foreground, #d4d4d4);
+}
+
+.net-row-port {
+    font-family: var(--vscode-editor-font-family, monospace);
+    font-size: 11px;
+    color: var(--vscode-descriptionForeground, #8f8f8f);
+}
+
+.net-row-state {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--vscode-descriptionForeground, #8f8f8f);
+}
+
 .section-label {
     font-size: 11px;
     font-weight: 600;

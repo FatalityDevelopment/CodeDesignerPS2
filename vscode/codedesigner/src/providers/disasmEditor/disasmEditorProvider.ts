@@ -465,6 +465,29 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   }
 
   /**
+   * Fetch every entry in the currently active label set, for the disasm
+   * panel's "Recent Labels" list. Picks the set the user is actually viewing
+   * (the cached active set, else the first user set, else "Built-in").
+   * Returns an empty array when disconnected or no workspace is open.
+   */
+  public async getActiveLabelEntries(): Promise<LabelManagerEntry[]> {
+    if (!this.socketClient?.isConnected()) { return []; }
+    const ctx = this._labelManagerCtx();
+    if (!ctx) { return []; }
+    const { workspaceDir, gameDiscId } = ctx;
+    try {
+      const sets = await this.socketClient.getLabelSets(workspaceDir, gameDiscId);
+      const activeName = (this._activeSetName && sets.includes(this._activeSetName))
+        ? this._activeSetName
+        : (sets.find(s => s !== 'Built-in') ?? 'Built-in');
+      const set = await this.socketClient.getLabelSet(workspaceDir, gameDiscId, activeName);
+      return set.entries ?? [];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
    * Returns the path to the per-game labels.json file, or null if the game
    * name or workspace root is not set.
    */
