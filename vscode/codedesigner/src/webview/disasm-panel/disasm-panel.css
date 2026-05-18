@@ -16,6 +16,21 @@ body {
     margin: 0;
 }
 
+/* Faint CodeDesigner dragon watermark behind the panel content.
+   --cd-bg-logo is injected by the provider with the resolved webview URI. */
+body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background-image: var(--cd-bg-logo, none);
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: 88%;
+    opacity: 0.04;
+    pointer-events: none;
+    z-index: -1;
+}
+
 app-disasm-panel {
     display: flex;
     flex-direction: column;
@@ -545,6 +560,13 @@ app-cheats-tab {
     align-items: center;
     gap: 8px;
     height: 22px;
+}
+
+#emu-brand-icon {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+    object-fit: contain;
 }
 
 #emu-status-text {
