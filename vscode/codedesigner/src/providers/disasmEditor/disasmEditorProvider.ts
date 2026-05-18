@@ -1032,8 +1032,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     overflow: hidden;
   }
   img {
-    max-width: 100%;
-    max-height: 100%;
+    max-width: 50%;
+    max-height: 50%;
     object-fit: contain;
   }
 </style>
