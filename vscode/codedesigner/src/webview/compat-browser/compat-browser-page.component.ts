@@ -122,6 +122,11 @@ const PAGE_SIZE = 50;
                 <a class="cb-link-btn" [href]="g.forumLink" target="_blank" rel="noopener"
                    title="Open the PCSX2 forum thread">Forum</a>
               }
+              @if (g.crc) {
+                <button class="cb-link-btn cb-download-btn"
+                        title="Download this game's ROM from Vimm's Lair (matched by CRC)"
+                        (click)="downloadGame(g)">⬇ Download</button>
+              }
               <button class="cb-link-btn cb-cheats-btn" title="Open cheats for this game"
                       (click)="openCheats(g)">🎮 Cheats</button>
             </div>
@@ -266,6 +271,10 @@ export class CompatBrowserPageComponent implements AfterViewInit {
 
   openCheats(g: CompatGame): void {
     this.vscode.postMessage({ type: 'openCheats', serial: g.serial, title: g.title });
+  }
+
+  downloadGame(g: CompatGame): void {
+    this.vscode.postMessage({ type: 'downloadGame', crc: g.crc, title: g.title });
   }
 
   // ── View helpers ───────────────────────────────────────────────────────
