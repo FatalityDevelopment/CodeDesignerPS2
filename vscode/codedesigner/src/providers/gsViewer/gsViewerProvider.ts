@@ -93,6 +93,10 @@ export class GsViewerProvider {
                 setImmediate(() => {
                     if (this._panel) this._connect();
                 });
+            } else if (msg?.type === 'screenshot') {
+                vscode.commands.executeCommand('codedesigner.saveScreenshot');
+            } else if (msg?.type === 'controller') {
+                vscode.commands.executeCommand('codedesigner.openJokerMaker');
             } else if (msg?.type === 'decodeError') {
                 log.warn(`[GsViewer] webview decode error: ${msg.error}`);
             }
@@ -251,6 +255,7 @@ export class GsViewerProvider {
             padding: 2px 8px; cursor: pointer; font: inherit;
         }
         #status button:hover { background: var(--vscode-button-hoverBackground, #404040); }
+        #status .actions { display: flex; gap: 6px; }
         #stage {
             position: relative;
             flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center;
@@ -281,7 +286,11 @@ export class GsViewerProvider {
         <span id="text">connecting…</span>
         <span style="flex: 1"></span>
         <span id="meta"></span>
-        <button id="reconnect">Reconnect</button>
+        <span class="actions">
+            <button id="screenshot" title="Save a screenshot in PCSX2">Screenshot</button>
+            <button id="controller" title="Open the virtual controller">Controller</button>
+            <button id="reconnect">Reconnect</button>
+        </span>
     </div>
     <div id="stage">
         <canvas id="canvas" width="640" height="480"></canvas>
@@ -439,6 +448,14 @@ export class GsViewerProvider {
 
         document.getElementById('reconnect').addEventListener('click', () => {
             vscode.postMessage({ type: 'reconnect' });
+        });
+
+        document.getElementById('screenshot').addEventListener('click', () => {
+            vscode.postMessage({ type: 'screenshot' });
+        });
+
+        document.getElementById('controller').addEventListener('click', () => {
+            vscode.postMessage({ type: 'controller' });
         });
 
         // Tick the UI every second so the "no frames for Ns" indicator

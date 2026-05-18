@@ -70,13 +70,6 @@ interface ArchiveCheatsUpdatedMsg {
                   title="Open the Memory Scanner to search for values in memory">
             <app-icon name="search" [size]="13" /><span>Scanner</span>
           </button>
-          <button class="cheats-tool-btn" id="jokerMakerBtn" (click)="openJokerMaker()"
-                  title="Build a Joker/button-combo code">
-            <app-icon name="gamepad2" [size]="13" /><span>Joker</span>
-          </button>
-          <button class="cheats-tool-btn" (click)="onOpenHelp()" title="Open the Cheat Engine guide">
-            <app-icon name="bookopen" [size]="13" /><span>Help</span>
-          </button>
         </div>
       </div>
 
@@ -231,13 +224,5 @@ export class CheatsTabComponent implements OnDestroy {
 
   onApplyCheats(): void {
     this.bridge.postMessage({ command: 'applyCheats', cheatText: this.cheatText() });
-  }
-
-  openJokerMaker(): void {
-    this.bridge.postMessage({ command: 'openJokerMaker' });
-  }
-
-  onOpenHelp(): void {
-    this.bridge.postMessage({ command: 'openMarkdownHelp', file: 'CHEAT_ENGINE.md' });
   }
 }

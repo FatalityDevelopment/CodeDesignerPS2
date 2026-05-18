@@ -72,6 +72,14 @@ app-disasm-panel {
     color: var(--vscode-descriptionForeground, #8f8f8f);
 }
 
+.view-help-btn {
+    color: var(--vscode-descriptionForeground, #8f8f8f);
+}
+
+.view-help-btn:hover {
+    color: var(--vscode-foreground, #d4d4d4);
+}
+
 .tab-content {
     padding: 0;
     flex: 1;
@@ -97,6 +105,7 @@ app-icon,
 .loaded-game {
     display: flex;
     flex-direction: column;
+    gap: 9px;
     flex-shrink: 0;
     margin-top: 8px;
     padding: 10px;
@@ -109,12 +118,23 @@ app-icon,
     display: flex;
     align-items: center;
     gap: 6px;
-    margin-bottom: 9px;
+    width: 100%;
+    padding: 0;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    text-align: left;
+    font-family: var(--vscode-font-family, sans-serif);
     font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.05em;
     text-transform: uppercase;
     color: var(--vscode-descriptionForeground, #8f8f8f);
+}
+
+.lg-head:hover {
+    background: transparent;
+    color: var(--vscode-foreground, #d4d4d4);
 }
 
 .lg-body {
@@ -717,23 +737,6 @@ app-cheats-tab {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-}
-
-.t-icon-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 4px 7px;
-    background: transparent;
-    border: 1px solid var(--vscode-panel-border, #313131);
-    border-radius: 4px;
-    color: var(--vscode-descriptionForeground, #8f8f8f);
-    cursor: pointer;
-}
-
-.t-icon-btn:hover {
-    background: rgba(255,255,255,0.07);
-    color: var(--vscode-foreground, #d4d4d4);
 }
 
 /* Buttons that pair an icon with a label. */
@@ -1605,19 +1608,3 @@ app-cds-tab {
     color: var(--vscode-descriptionForeground);
 }
 
-/* ── Joker Maker button ──────────────────────────────────────────────────── */
-
-#jokerMakerBtn {
-    background: var(--vscode-button-secondaryBackground, #3c3c3c);
-    color: var(--vscode-button-secondaryForeground, #cccccc);
-    border: 1px solid var(--vscode-button-border, transparent);
-    border-radius: 2px;
-    padding: 3px 10px;
-    font-size: 12px;
-    cursor: pointer;
-    margin-left: 6px;
-}
-
-#jokerMakerBtn:hover {
-    background: var(--vscode-button-secondaryHoverBackground, #4c4c4c);
-}

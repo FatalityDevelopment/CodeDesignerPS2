@@ -11,10 +11,12 @@
 
 @if (loadedGame) {
   <div class="loaded-game">
-    <div class="lg-head">
+    <button class="lg-head" (click)="loadedGameOpen = !loadedGameOpen">
+      <app-icon class="acc-chevron" [name]="loadedGameOpen ? 'chevrondown' : 'chevronright'" [size]="13" />
       <app-icon name="disc3" [size]="13" />
       <span>Loaded Game</span>
-    </div>
+    </button>
+    @if (loadedGameOpen) {
     <div class="lg-body">
     <div class="lg-cover">
       @if (loadedGameCover) {
@@ -47,6 +49,7 @@
       </div>
     </div>
     </div>
+    }
   </div>
 }
 
@@ -68,6 +71,10 @@
     <app-icon name="code" [size]="16" />
   </button>
   <span class="view-label">{{viewLabel}}</span>
+  <button class="view-btn view-help-btn" (click)="openHelp()"
+          title="Open the {{viewLabel}} help guide">
+    <app-icon name="bookopen" [size]="16" />
+  </button>
 </div>
 
 <div id="tab-settings" class="tab-content" [style.display]="activeTab === 'settings' ? 'block' : 'none'">
@@ -87,7 +94,6 @@
     (restartClick)="restart()"
     (snapshotClick)="snapshot()"
     (snapshotPcsx2Click)="snapshotPcsx2()"
-    (saveScreenshotClick)="saveScreenshot()"
     (previewClick)="openGsViewer()"
     (docsClick)="openDocs()"
     (archiveDocsClick)="openArchiveDocs()"

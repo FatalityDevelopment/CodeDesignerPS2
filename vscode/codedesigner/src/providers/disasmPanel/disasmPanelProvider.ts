@@ -359,9 +359,6 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 case 'snapshotPcsx2':
                     await this.handleSnapshotPcsx2();
                     break;
-                case 'saveScreenshot':
-                    await this.handleSaveScreenshot();
-                    break;
                 case 'openGsViewer':
                     await vscode.commands.executeCommand('codedesigner.openGsFrameViewer');
                     break;
@@ -2198,7 +2195,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
      * (PINESAVESCREENSHOT command → PineClient.SaveScreenshot opcode 0x32).
      * Only available in PINE mode.
      */
-    private async handleSaveScreenshot(): Promise<void> {
+    public async handleSaveScreenshot(): Promise<void> {
         const out = getOutputChannel();
 
         if (!this.socketClient.isConnected()) {
