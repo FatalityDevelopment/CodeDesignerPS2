@@ -471,9 +471,8 @@ const NET_POLL_MS = 4000;
             </div>
             @if (orchestrationsError()) {
               <div class="list-error">{{orchestrationsError()}}</div>
-            } @else if (!orchestrations().length) {
-              <div class="snapshot-empty">No orchestration plans</div>
-            } @else {
+            }
+            @if (orchestrations().length) {
               <div class="snapshot-scroll">
                 @for (o of orchestrations(); track o.id) {
                   <div class="agent-item">
@@ -492,6 +491,8 @@ const NET_POLL_MS = 4000;
                   </div>
                 }
               </div>
+            } @else if (!orchestrationsError()) {
+              <div class="snapshot-empty">No orchestration plans</div>
             }
           </div>
         }
