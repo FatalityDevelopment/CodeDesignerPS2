@@ -48,6 +48,8 @@ const ICONS: Record<string, string> = {
   disc3: `<circle cx="12" cy="12" r="10" /> <path d="M6 12c0-1.7.7-3.2 1.8-4.2" /> <circle cx="12" cy="12" r="2" /> <path d="M18 12c0 1.7-.7 3.2-1.8 4.2" />`,
   chevrondown: `<path d="m6 9 6 6 6-6" />`,
   chevronright: `<path d="m9 18 6-6-6-6" />`,
+  repeat: `<path d="m17 2 4 4-4 4" /> <path d="M3 11v-1a4 4 0 0 1 4-4h14" /> <path d="m7 22-4-4 4-4" /> <path d="M21 13v1a4 4 0 0 1-4 4H3" />`,
+  search: `<path d="m21 21-4.34-4.34" /> <circle cx="11" cy="11" r="8" />`,
 };
 
 /**

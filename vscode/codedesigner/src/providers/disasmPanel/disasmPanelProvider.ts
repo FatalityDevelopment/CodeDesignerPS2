@@ -1060,6 +1060,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
                style-src 'unsafe-inline';
+               img-src data:;
                script-src ${webview.cspSource} 'nonce-${nonce}';">
 <script nonce="${nonce}">${getWebviewErrorHandlerScript()}</script>
 </head>

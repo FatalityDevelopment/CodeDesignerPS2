@@ -250,11 +250,17 @@ app-cheats-tab {
     resize: none;
     background: var(--vscode-input-background);
     color: var(--vscode-input-foreground);
-    border: 1px solid var(--vscode-input-border);
-    padding: 6px;
-    font-family: monospace;
+    border: 1px solid var(--vscode-input-border, #313131);
+    border-radius: 4px;
+    padding: 7px 8px;
+    font-family: var(--vscode-editor-font-family, monospace);
     font-size: 12px;
     box-sizing: border-box;
+    outline: none;
+}
+
+#cheats-input:focus {
+    border-color: var(--vscode-focusBorder, #0078d4);
 }
 
 #cheats-input::placeholder {
@@ -686,6 +692,56 @@ app-cheats-tab {
 .dbg-glyph {
     font-size: 13px;
     line-height: 1;
+}
+
+/* ── Tab content headings & buttons (Cheats / CDS / Recompile) ───────────── */
+
+.t-head {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin: 2px 0 8px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--vscode-foreground, #d4d4d4);
+}
+
+.t-head > app-icon:first-child {
+    color: var(--vscode-descriptionForeground, #b0b0b0);
+}
+
+.t-head-label {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.t-icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px 7px;
+    background: transparent;
+    border: 1px solid var(--vscode-panel-border, #313131);
+    border-radius: 4px;
+    color: var(--vscode-descriptionForeground, #8f8f8f);
+    cursor: pointer;
+}
+
+.t-icon-btn:hover {
+    background: rgba(255,255,255,0.07);
+    color: var(--vscode-foreground, #d4d4d4);
+}
+
+/* Buttons that pair an icon with a label. */
+.ibtn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
 }
 
 /* ── Memory views (compact 2-column tool rows) ───────────────────────────── */
@@ -1189,12 +1245,14 @@ app-cds-tab {
     resize: none;
     background: var(--vscode-input-background);
     color: var(--vscode-input-foreground);
-    border: 1px solid var(--vscode-input-border);
-    padding: 6px;
-    font-family: monospace;
+    border: 1px solid var(--vscode-input-border, #313131);
+    border-radius: 4px;
+    padding: 7px 8px;
+    font-family: var(--vscode-editor-font-family, monospace);
     font-size: 12px;
     box-sizing: border-box;
     overflow-y: auto;
+    outline: none;
 }
 
 #cds-output::placeholder {
@@ -1214,8 +1272,9 @@ app-cds-tab {
     width: 100%;
     background: var(--vscode-input-background);
     color: var(--vscode-input-foreground);
-    border: 1px solid var(--vscode-input-border);
-    padding: 4px 6px;
+    border: 1px solid var(--vscode-input-border, #313131);
+    border-radius: 4px;
+    padding: 5px 6px;
     box-sizing: border-box;
 }
 
@@ -1224,20 +1283,31 @@ app-cds-tab {
     min-width: 0;
     background: var(--vscode-input-background);
     color: var(--vscode-input-foreground);
-    border: 1px solid var(--vscode-input-border);
-    padding: 4px 6px;
+    border: 1px solid var(--vscode-input-border, #313131);
+    border-radius: 4px;
+    padding: 5px 7px;
     box-sizing: border-box;
     font-size: 12px;
+    outline: none;
+}
+
+#recompileOutputDir:focus {
+    border-color: var(--vscode-focusBorder, #0078d4);
 }
 
 #recompileBrowseBtn {
     flex: 0 0 auto;
-    padding: 3px 8px;
+    padding: 4px 9px;
     font-size: 12px;
     cursor: pointer;
-    background: var(--vscode-button-secondaryBackground);
-    color: var(--vscode-button-secondaryForeground);
-    border: 1px solid var(--vscode-button-border, transparent);
+    background: var(--vscode-button-secondaryBackground, #252526);
+    color: var(--vscode-button-secondaryForeground, #d4d4d4);
+    border: 1px solid var(--vscode-panel-border, #313131);
+    border-radius: 4px;
+}
+
+#recompileBrowseBtn:hover {
+    background: var(--vscode-button-secondaryHoverBackground, #2f2f30);
 }
 
 .recompile-status {

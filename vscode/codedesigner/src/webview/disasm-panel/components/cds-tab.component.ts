@@ -10,6 +10,7 @@ import {
 } from '@angular/core';
 import { Subscription } from 'rxjs';
 import { VsCodeBridgeService } from '../../shared/vscode-bridge.service';
+import { IconComponent } from '../../shared/icon.component';
 
 interface CdsCompileResultMsg {
   command: 'cdsCompileResult';
@@ -28,29 +29,33 @@ interface CdsCompileResultMsg {
 @Component({
   selector: 'app-cds-tab',
   standalone: true,
+  imports: [IconComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
   template: `
     <div class="cds-container">
-      <div class="section-header">
-        <div class="section-label">Compiled GameShark Codes</div>
-        <button class="help-btn" title="Open CDS guide" (click)="onOpenHelp()">? Help</button>
+      <div class="t-head">
+        <app-icon name="filecode" [size]="14" />
+        <span class="t-head-label">Compiled GameShark Codes</span>
+        <button class="t-icon-btn" title="Open CDS guide" (click)="onOpenHelp()">
+          <app-icon name="bookopen" [size]="14" />
+        </button>
       </div>
       <textarea id="cds-output" readonly
         [value]="cdsOutput()"
         placeholder="Compiled GameShark codes will appear here after pressing Compile.&#10;&#10;Add an address directive in your .cds file:&#10;  address 0x20123456&#10;  nop&#10;  add $t0, $s0, $s1"></textarea>
       <div class="row">
-        <button id="cdsCompileBtn" (click)="onCompileCds()" [disabled]="!isConnected()">
-          Compile
+        <button class="ibtn" id="cdsCompileBtn" (click)="onCompileCds()" [disabled]="!isConnected()">
+          <app-icon name="zap" [size]="13" /><span>Compile</span>
         </button>
-        <button id="cdsAddPatchBtn" (click)="onAddPatch()"
+        <button class="ibtn" id="cdsAddPatchBtn" (click)="onAddPatch()"
                 [disabled]="!isConnected() || !cdsOutput()">
-          Add Patch
+          <app-icon name="plugzap" [size]="13" /><span>Add Patch</span>
         </button>
       </div>
       <div class="row">
-        <button id="cdsAddCheatBtn" (click)="onAddCheat()" [disabled]="!cdsOutput()">
-          Add Cheat
+        <button class="ibtn" id="cdsAddCheatBtn" (click)="onAddCheat()" [disabled]="!cdsOutput()">
+          <app-icon name="sparkles" [size]="13" /><span>Add Cheat</span>
         </button>
       </div>
     </div>
