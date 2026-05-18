@@ -16,21 +16,6 @@ body {
     margin: 0;
 }
 
-/* Faint CodeDesigner dragon watermark behind the panel content.
-   --cd-bg-logo is injected by the provider with the resolved webview URI. */
-body::before {
-    content: "";
-    position: fixed;
-    inset: 0;
-    background-image: var(--cd-bg-logo, none);
-    background-repeat: no-repeat;
-    background-position: center;
-    background-size: 88%;
-    opacity: 0.04;
-    pointer-events: none;
-    z-index: -1;
-}
-
 app-disasm-panel {
     display: flex;
     flex-direction: column;

@@ -1,13 +1,28 @@
  
-body { 
-    margin: 0; 
-    font-family: monospace; 
+body {
+    margin: 0;
+    font-family: monospace;
     background: #1e1e1e;
     color: #d4d4d4;
     height: 100vh;
     overflow: hidden;
     display: flex;
     flex-direction: column;
+}
+
+/* Faint CodeDesigner dragon watermark behind the disassembler content.
+   --cd-bg-logo is injected by the provider with the resolved webview URI. */
+body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background-image: var(--cd-bg-logo, none);
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: min(70%, 440px);
+    opacity: 0.04;
+    pointer-events: none;
+    z-index: -1;
 }
 
 /* Angular renders the component inside <app-disasm-editor>.
