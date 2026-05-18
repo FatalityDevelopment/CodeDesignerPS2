@@ -518,6 +518,10 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 case 'requestNetworkStatus':
                     await this.handleRequestNetworkStatus();
                     break;
+                // ── MCP server process status ─────────────────────────────
+                case 'requestMcpStatus':
+                    await this.handleRequestMcpStatus();
+                    break;
                 // ── PC navigation history ─────────────────────────────────
                 case 'requestNavHistory':
                     await this.handleRequestNavHistory();
@@ -3753,6 +3757,37 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             servers,
             capturing: this._packetViewerProvider.isCapturing(),
         });
+    }
+
+    /**
+     * Detect whether the CodeDesigner MCP server process is currently running.
+     * The MCP server is a stdio process spawned by an AI client (Claude /
+     * Copilot); "running" means a client currently has it loaded. It has no
+     * network port, so the OS process list is the only way to probe it.
+     */
+    private static detectMcpServerRunning(): Promise<boolean> {
+        const isWin = process.platform === 'win32';
+        const cmd = isWin
+            ? 'tasklist /FI "IMAGENAME eq CodeDesigner.Ps2.McpServer.exe" /NH /FO CSV'
+            : 'pgrep -f CodeDesigner.Ps2.McpServer';
+        return new Promise<boolean>(resolve => {
+            child_process.exec(cmd, { timeout: 4000, windowsHide: true }, (err, stdout) => {
+                // tasklist exits 0 with an "INFO: No tasks…" line when nothing
+                // matches, so test the output text. pgrep exits non-zero when
+                // nothing matches.
+                if (isWin) {
+                    resolve(/CodeDesigner\.Ps2\.McpServer/i.test(stdout ?? ''));
+                } else {
+                    resolve(!err && (stdout ?? '').trim().length > 0);
+                }
+            });
+        });
+    }
+
+    /** Probe the MCP server process and push its status to the panel. */
+    private async handleRequestMcpStatus(): Promise<void> {
+        const online = await DisasmPanelProvider.detectMcpServerRunning();
+        this.webview?.postMessage({ command: 'mcpStatus', online });
     }
 
     /** Jump the disassembler editor to a hex or numeric address from the panel. */

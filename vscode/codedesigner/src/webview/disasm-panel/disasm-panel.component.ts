@@ -13,6 +13,9 @@ import { EmuOption, SnapshotEntry, NavHistoryEntry, RecentLabelEntry, NetworkSta
 import { IconComponent } from '../shared/icon.component';
 import './disasm-panel.css';
 
+/** Poll interval for the MCP server process status badge. */
+const MCP_POLL_MS = 8000;
+
 /** Message sent by the provider when connection state changes. */
 interface ConnectionStatusMsg {
   type: 'connectionStatus';
@@ -114,6 +117,12 @@ interface NetworkStatusResultMsg {
   capturing?: boolean;
 }
 
+/** Message sent by the provider with the MCP server process status. */
+interface McpStatusMsg {
+  command: 'mcpStatus';
+  online: boolean;
+}
+
 @Component({
   selector: 'app-disasm-panel',
   standalone: true,
@@ -166,7 +175,10 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
   recentLabelsError = '';
   /** Multiplayer server reachability + capture state for the Network section. */
   networkStatus: NetworkStatus | null = null;
+  /** True when the CodeDesigner MCP server process is running. */
+  mcpOnline = false;
   private subs: Subscription[] = [];
+  private mcpPollTimer?: ReturnType<typeof setInterval>;
 
   @ViewChild(SettingsTabComponent) private settingsTab?: SettingsTabComponent;
 
@@ -257,8 +269,15 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
       this.bridge.on<NetworkStatusResultMsg>('networkStatusResult').subscribe(msg => {
         this.networkStatus = { servers: msg.servers ?? [], capturing: !!msg.capturing };
       }),
+      // MCP server process status for the badge above the tabs
+      this.bridge.on<McpStatusMsg>('mcpStatus').subscribe(msg => {
+        this.mcpOnline = !!msg.online;
+      }),
     );
     this.bridge.postMessage({ command: 'ready' });
+    // Poll the MCP server process status for the always-visible status badge.
+    this.requestMcpStatus();
+    this.mcpPollTimer = setInterval(() => this.requestMcpStatus(), MCP_POLL_MS);
   }
 
   ngAfterViewInit(): void {
@@ -268,6 +287,12 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.subs.forEach(s => s.unsubscribe());
+    if (this.mcpPollTimer !== undefined) { clearInterval(this.mcpPollTimer); }
+  }
+
+  /** Ask the provider whether the MCP server process is running. */
+  requestMcpStatus(): void {
+    this.bridge.postMessage({ command: 'requestMcpStatus' });
   }
 
   // ── Status bar handlers ──────────────────────────────────────────────────

@@ -231,6 +231,69 @@ app-icon,
 .lg-status-menus    { background: #c62828; }
 .lg-status-unknown  { background: #555; }
 
+/* ── MCP server status badge (above the view tabs) ───────────────────────── */
+
+.mcp-status {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    flex-shrink: 0;
+    margin-top: 8px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--vscode-panel-border, #313131);
+    background: #252526;
+    color: var(--vscode-descriptionForeground, #8f8f8f);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+/* Online state — uses the AI-control amber accent. */
+.mcp-status.mcp-online {
+    background: linear-gradient(90deg, #3a2800, #402f08);
+    border-color: #7a5500;
+    color: #e8a030;
+}
+
+.mcp-ico {
+    flex-shrink: 0;
+    opacity: 0.55;
+}
+
+.mcp-online .mcp-ico {
+    opacity: 1;
+}
+
+.mcp-label {
+    flex: 1;
+}
+
+.mcp-state {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 700;
+}
+
+.mcp-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: currentColor;
+}
+
+.mcp-online .mcp-dot {
+    box-shadow: 0 0 6px 1px rgba(232, 160, 48, 0.9);
+    animation: mcp-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes mcp-pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.4; }
+}
+
 /* ── Cheats tab ──────────────────────────────────────────────────────────── */
 
 #tab-cheats {

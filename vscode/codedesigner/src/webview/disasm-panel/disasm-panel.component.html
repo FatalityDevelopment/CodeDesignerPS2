@@ -53,6 +53,16 @@
   </div>
 }
 
+<div class="mcp-status" [class.mcp-online]="mcpOnline"
+     [title]="mcpOnline ? 'CodeDesigner MCP server is running' : 'CodeDesigner MCP server is not running'">
+  <app-icon class="mcp-ico" name="bot" [size]="14" />
+  <span class="mcp-label">MCP</span>
+  <span class="mcp-state">
+    <span class="mcp-dot"></span>
+    {{ mcpOnline ? 'Online' : 'Offline' }}
+  </span>
+</div>
+
 <div id="panel-views" role="tablist">
   <button class="view-btn" [class.active]="activeTab === 'settings'"
           (click)="setTab('settings')" title="Emulator settings">
