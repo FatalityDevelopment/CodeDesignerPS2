@@ -29,7 +29,7 @@ public sealed class DiscordPresenceWorker
 
             if (context is null)
             {
-                _presenceClient.Clear();
+                _presenceClient.UpdateIdle();
             }
             else
             {

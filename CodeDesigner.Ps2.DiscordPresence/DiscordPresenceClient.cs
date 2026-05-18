@@ -46,6 +46,24 @@ public sealed class DiscordPresenceClient : IDisposable
         _client.SetPresence(richPresence);
     }
 
+    /// <summary>
+    /// Publishes a generic "idle" presence, shown whenever no game-research
+    /// session is active so the user's status still reflects CodeDesigner is open.
+    /// </summary>
+    public void UpdateIdle()
+    {
+        _client.SetPresence(new RichPresence
+        {
+            Details = "Idle",
+            State = "No game loaded",
+            Assets = new Assets
+            {
+                LargeImageKey = "code_designer",
+                LargeImageText = "CodeDesigner",
+            }
+        });
+    }
+
     public void Clear() => _client.ClearPresence();
 
     public void Dispose()

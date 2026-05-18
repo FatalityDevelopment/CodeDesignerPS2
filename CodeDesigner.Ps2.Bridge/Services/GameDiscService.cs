@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using CodeDesigner.Ps2.Database;
 using CodeDesigner.Ps2.Database.Entities;
 using CodeDesigner.Ps2.Bridge.Repositories;
 
@@ -32,9 +33,41 @@ namespace CodeDesigner.Ps2.Bridge.Services
             if (string.IsNullOrWhiteSpace(serial))
                 return Responses.Error("GameSerial is required for UPDATEGAMEDISC");
 
+            var disc = UpsertGameDisc(_ctx.Db, serial, gameTitle, crc, isoPath);
+
+            return JsonSerializer.Serialize(new CommandResponse
+            {
+                Success    = true,
+                Command    = "UPDATEGAMEDISC",
+                Data       = JsonSerializer.Serialize(new
+                {
+                    GameDiscId = disc.Id,
+                    Serial     = disc.Serial,
+                    IsoPath    = disc.IsoPath,
+                    CRC        = disc.CRC,
+                }),
+            });
+        }
+
+        /// <summary>
+        /// Upserts a <see cref="GameDisc"/> identified by its serial number, creating
+        /// the parent <see cref="Game"/> and <see cref="GameRegion"/> rows as needed.
+        /// The serial is normalised before lookup (SCUS_97130 → SCUS-97130).
+        /// <para>
+        /// Shared by the UPDATEGAMEDISC command and the Discord presence publisher,
+        /// so it operates on a caller-supplied context rather than a fixed one.
+        /// </para>
+        /// </summary>
+        internal static GameDisc UpsertGameDisc(
+            CodeDesignerDbContext db,
+            string serial,
+            string? gameTitle = null,
+            string? crc = null,
+            string? isoPath = null)
+        {
             var normalized = DbLabelRepository.NormalizeSerial(serial);
 
-            var disc = _ctx.Db.GameDiscs
+            var disc = db.GameDiscs
                          .FirstOrDefault(d =>
                              d.Serial != null &&
                              d.Serial.Replace("_", "-").ToUpper() == normalized);
@@ -43,12 +76,12 @@ namespace CodeDesigner.Ps2.Bridge.Services
             {
                 // ── Determine region from serial prefix ───────────────────────
                 var regionName = InferRegionFromSerial(normalized);
-                var region = _ctx.Db.GameRegions.FirstOrDefault(r => r.Name == regionName);
+                var region = db.GameRegions.FirstOrDefault(r => r.Name == regionName);
                 if (region is null)
                 {
                     region = new GameRegion { Name = regionName };
-                    _ctx.Db.GameRegions.Add(region);
-                    _ctx.Db.SaveChanges();
+                    db.GameRegions.Add(region);
+                    db.SaveChanges();
                 }
 
                 // ── Find or create the Game row ───────────────────────────────
@@ -56,12 +89,12 @@ namespace CodeDesigner.Ps2.Bridge.Services
                     ? gameTitle
                     : $"Unknown Game ({normalized})";   // fall back to a descriptive placeholder
 
-                var game = _ctx.Db.Games.FirstOrDefault(g => g.Title == title);
+                var game = db.Games.FirstOrDefault(g => g.Title == title);
                 if (game is null)
                 {
                     game = new Game { Title = title };
-                    _ctx.Db.Games.Add(game);
-                    _ctx.Db.SaveChanges();
+                    db.Games.Add(game);
+                    db.SaveChanges();
                 }
 
                 // ── Create the GameDisc row ───────────────────────────────────
@@ -73,8 +106,8 @@ namespace CodeDesigner.Ps2.Bridge.Services
                     IsoPath      = isoPath,
                     CRC          = crc,
                 };
-                _ctx.Db.GameDiscs.Add(disc);
-                _ctx.Db.SaveChanges();
+                db.GameDiscs.Add(disc);
+                db.SaveChanges();
             }
             else
             {
@@ -93,21 +126,10 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 }
 
                 if (changed)
-                    _ctx.Db.SaveChanges();
+                    db.SaveChanges();
             }
 
-            return JsonSerializer.Serialize(new CommandResponse
-            {
-                Success    = true,
-                Command    = "UPDATEGAMEDISC",
-                Data       = JsonSerializer.Serialize(new
-                {
-                    GameDiscId = disc.Id,
-                    Serial     = disc.Serial,
-                    IsoPath    = disc.IsoPath,
-                    CRC        = disc.CRC,
-                }),
-            });
+            return disc;
         }
 
         /// <summary>
