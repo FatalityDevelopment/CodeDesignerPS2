@@ -155,6 +155,14 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     public getWorkspaceRoot(): string { return this.workspaceRoot; }
     /** Returns the ISO name derived from the currently selected game path. */
     public getSelectedGameName(): string { return this.selectedGameName; }
+    /**
+     * Toggle the emulator connection — invoked by the panel header
+     * (view/title) Connect/Disconnect action. Uses the panel's currently
+     * selected emulator / BIOS / game paths.
+     */
+    public toggleConnectionFromCommand(): void {
+        this.handleConnect(this.selectedEmulatorPath, this.selectedBiosPath, this.selectedGamePath);
+    }
     /** Provides the standalone Joker Maker panel used by the cheats tab. */
     public setJokerMakerProvider(provider: JokerMakerProvider): void {
         this._jokerMakerProvider = provider;
@@ -965,6 +973,22 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     }
 
     /**
+     * Derives a PS2 disc serial (e.g. "SLUS-21606") from a SYSTEM.CNF BOOT2
+     * value such as "cdrom0:\SLUS_216.06;1". Returns undefined when the value
+     * does not look like a serial.
+     */
+    private static serialFromBootElf(bootElf: string): string | undefined {
+        if (!bootElf) { return undefined; }
+        let s = bootElf.trim();
+        const slash = Math.max(s.lastIndexOf('\\'), s.lastIndexOf('/'));
+        if (slash >= 0) { s = s.slice(slash + 1); }
+        const semi = s.indexOf(';');
+        if (semi >= 0) { s = s.slice(0, semi); }
+        s = s.trim().toUpperCase().replace(/_/g, '-').replace(/\./g, '');
+        return /^[A-Z]{3,4}-?\d{3,6}$/.test(s) ? s : undefined;
+    }
+
+    /**
      * Resolve the currently loaded game's rich metadata (region, CRC, PCSX2
      * compatibility status, cover art) and push it to the panel's Loaded Game
      * card. Falls back to a bare title when the game is not in the local
@@ -983,7 +1007,16 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 const t = (info.Title ?? '').replace(/\0/g, '').trim();
                 if (s) { serial = s; }
                 if (t) { title = t; }
-            } catch { /* PCSX2 not attached — fall back to the selected game name */ }
+            } catch { /* PCSX2 not attached — fall back to the ISO serial */ }
+        }
+
+        // Not attached: read the disc serial straight from the selected ISO so
+        // the card (and cover art) update as soon as a game is picked.
+        if (!serial && this.selectedGamePath && this.socketClient.isConnected()) {
+            try {
+                const bootElf = await this.socketClient.isoBootElf(this.selectedGamePath);
+                serial = DisasmPanelProvider.serialFromBootElf(bootElf);
+            } catch { /* ISO unreadable or socket down — fall back to the name */ }
         }
 
         if (!serial && !title) {

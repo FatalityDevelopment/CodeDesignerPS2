@@ -72,6 +72,11 @@
         "title": "CodeDesigner: Open PS2 Cheats Editor"
       },
       {
+        "command": "codedesigner.toggleEmulatorConnection",
+        "title": "CodeDesigner: Connect / Disconnect Emulator",
+        "icon": "$(plug)"
+      },
+      {
         "command": "codedesigner.pointerManager.addPointer",
         "title": "Add Struct",
         "icon": "$(add)"
@@ -109,6 +114,11 @@
     ],
     "menus": {
       "view/title": [
+        {
+          "command": "codedesigner.toggleEmulatorConnection",
+          "when": "view == disasm.disasmPanel",
+          "group": "navigation"
+        },
         {
           "command": "codedesigner.pointerManager.addPointer",
           "when": "view == disasm.pointerManager",
