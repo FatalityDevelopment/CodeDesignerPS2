@@ -729,6 +729,9 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     const scriptUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this._extensionUri, 'dist', 'webview', 'disasm-editor.js')
     );
+    const bgLogoUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this._extensionUri, 'dist', 'resources', 'codedesigner-logo.png')
+    );
     const nonce = getNonce();
     return `<!DOCTYPE html>
 <html>
@@ -737,7 +740,9 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
                style-src 'unsafe-inline';
+               img-src ${webview.cspSource};
                script-src ${webview.cspSource} 'nonce-${nonce}';">
+<style>:root { --cd-bg-logo: url("${bgLogoUri}"); }</style>
 <script nonce="${nonce}">${getWebviewErrorHandlerScript()}</script>
 </head>
 <body>
