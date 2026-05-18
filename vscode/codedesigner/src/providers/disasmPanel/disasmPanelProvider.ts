@@ -3897,24 +3897,57 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         await this.handleRequestAgents();
     }
 
-    /** Fetch the orchestration plans and push a slimmed list to the panel. */
-    private async handleRequestOrchestrations(): Promise<void> {
+    /**
+     * Run an optional orchestration mutation, then ALWAYS re-fetch the plan
+     * list and push it to the panel — together with any error. Posting the
+     * fresh list on every path means a failed action never blanks the
+     * section and the per-plan toggles always reflect the true backend state.
+     */
+    private async runOrchestrationAction(action?: () => Promise<void>): Promise<void> {
         if (!this.socketClient.isConnected()) {
-            this.webview?.postMessage({ command: 'orchestrationsResult', error: 'Not connected to the emulator.' });
+            this.webview?.postMessage({ command: 'orchestrationsResult', entries: [], error: 'Not connected to the emulator.' });
             return;
         }
+        let actionError = '';
+        if (action) {
+            try {
+                await action();
+            } catch (err: any) {
+                actionError = err?.message ?? String(err);
+            }
+        }
+        let entries: Array<{ id: number; name: string; description: string; isActive: boolean }> = [];
         try {
             const plans = await this.socketClient.mcpOrchestrationList();
-            const entries = plans.map(p => ({
+            entries = plans.map(p => ({
                 id:          p.id,
                 name:        p.name,
                 description: p.description ?? '',
                 isActive:    !!p.isActive,
             }));
-            this.webview?.postMessage({ command: 'orchestrationsResult', entries });
         } catch (err: any) {
-            this.webview?.postMessage({ command: 'orchestrationsResult', error: err?.message ?? String(err) });
+            if (!actionError) { actionError = err?.message ?? String(err); }
         }
+        this.webview?.postMessage({
+            command: 'orchestrationsResult',
+            entries,
+            error:   actionError || undefined,
+        });
+    }
+
+    /** Deactivate every orchestration plan; surfaces a clear hint when the Bridge is too old. */
+    private async deactivateOrchestrations(): Promise<void> {
+        try {
+            await this.socketClient.mcpOrchestrationDeactivate();
+        } catch (err: any) {
+            const msg = err?.message ?? String(err);
+            throw new Error(`Could not turn off the active plan (${msg}). Rebuild and restart the CodeDesigner Bridge to enable single-agent mode.`);
+        }
+    }
+
+    /** Fetch the orchestration plans and push the list to the panel. */
+    private async handleRequestOrchestrations(): Promise<void> {
+        await this.runOrchestrationAction();
     }
 
     /**
@@ -3923,23 +3956,15 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
      * deactivates it (single-agent mode).
      */
     private async handleSetOrchestrationActive(id: number): Promise<void> {
-        if (!this.socketClient.isConnected()) {
-            this.webview?.postMessage({ command: 'orchestrationsResult', error: 'Not connected to the emulator.' });
-            return;
-        }
-        try {
+        await this.runOrchestrationAction(async () => {
             const plans = await this.socketClient.mcpOrchestrationList();
             const target = plans.find(p => p.id === id);
             if (target?.isActive) {
-                await this.socketClient.mcpOrchestrationDeactivate();
+                await this.deactivateOrchestrations();
             } else {
                 await this.socketClient.mcpOrchestrationSetActive(id);
             }
-        } catch (err: any) {
-            this.webview?.postMessage({ command: 'orchestrationsResult', error: err?.message ?? String(err) });
-            return;
-        }
-        await this.handleRequestOrchestrations();
+        });
     }
 
     /**
@@ -3947,24 +3972,16 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
      * plan; turning it on activates the first plan when none is active yet.
      */
     private async handleSetMultiAgentMode(enabled: boolean): Promise<void> {
-        if (!this.socketClient.isConnected()) {
-            this.webview?.postMessage({ command: 'orchestrationsResult', error: 'Not connected to the emulator.' });
-            return;
-        }
-        try {
+        await this.runOrchestrationAction(async () => {
             const plans = await this.socketClient.mcpOrchestrationList();
             if (enabled) {
                 if (plans.length > 0 && !plans.some(p => p.isActive)) {
                     await this.socketClient.mcpOrchestrationSetActive(plans[0].id);
                 }
             } else {
-                await this.socketClient.mcpOrchestrationDeactivate();
+                await this.deactivateOrchestrations();
             }
-        } catch (err: any) {
-            this.webview?.postMessage({ command: 'orchestrationsResult', error: err?.message ?? String(err) });
-            return;
-        }
-        await this.handleRequestOrchestrations();
+        });
     }
 
     /** Jump the disassembler editor to a hex or numeric address from the panel. */
