@@ -10,7 +10,7 @@ import { getNonce, getWebviewErrorHandlerScript } from '../../utils/nonce';
 import { DisasmEditorProvider } from '../disasmEditor/disasmEditorProvider';
 import { AiConfigProvider } from '../aiConfig/aiConfigProvider';
 import { McpProgressReportEditorProvider } from '../mcpProgressReportEditor/mcpProgressReportEditorProvider';
-import { PacketViewerProvider } from '../packetViewer/packetViewerProvider';
+import { PacketViewerProvider, loadMediusPorts } from '../packetViewer/packetViewerProvider';
 import { SnapshotManagerProvider, SnapshotDataDelegate } from '../snapshotManager/snapshotManagerProvider';
 import { DiffViewerProvider } from '../diffViewer/diffViewerProvider';
 import { JokerMakerProvider } from '../jokerMaker/jokerMakerProvider';
@@ -513,6 +513,25 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 // ── Multiplayer config editor ─────────────────────────────
                 case 'openNetConfig':
                     await this.handleOpenNetConfig();
+                    break;
+                // ── Multiplayer server reachability + capture state ───────
+                case 'requestNetworkStatus':
+                    await this.handleRequestNetworkStatus();
+                    break;
+                // ── PC navigation history ─────────────────────────────────
+                case 'requestNavHistory':
+                    await this.handleRequestNavHistory();
+                    break;
+                case 'clearNavHistory':
+                    await this.handleClearNavHistory();
+                    break;
+                // ── Recent labels (active label set) ──────────────────────
+                case 'requestRecentLabels':
+                    await this.handleRequestRecentLabels();
+                    break;
+                // ── Jump the disassembler editor to an address ────────────
+                case 'panelGotoAddress':
+                    this.handlePanelGotoAddress(msg.address);
                     break;
                 // ── Cheat Code Converter ──────────────────────────────────
                 case 'openConverter':
@@ -3668,6 +3687,81 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             vscode.window.showInformationMessage(`MCP Memory '${name}' exported to ${uri.fsPath}`);
         } catch (err: any) {
             vscode.window.showErrorMessage(`MCP Memory export failed: ${err?.message ?? err}`);
+        }
+    }
+
+    // ── PC navigation history / labels / network status ──────────────────────
+
+    /** Fetch the server-side PC navigation history and push it to the panel. */
+    private async handleRequestNavHistory(): Promise<void> {
+        if (!this.socketClient.isConnected()) {
+            this.webview?.postMessage({ command: 'navHistoryResult', error: 'Not connected to the emulator.' });
+            return;
+        }
+        try {
+            const history = await this.socketClient.getNavHistory();
+            // The server records oldest-first; reverse so the panel shows newest-first.
+            const entries = history.slice().reverse().map(h => ({
+                address:   h.Address,
+                label:     h.Label,
+                source:    h.Source,
+                timestamp: h.Timestamp,
+            }));
+            this.webview?.postMessage({ command: 'navHistoryResult', entries });
+        } catch (err: any) {
+            this.webview?.postMessage({ command: 'navHistoryResult', error: err?.message ?? String(err) });
+        }
+    }
+
+    /** Clear the server-side navigation history, then refresh the panel list. */
+    private async handleClearNavHistory(): Promise<void> {
+        try {
+            await this.socketClient.clearNavHistory();
+        } catch { /* non-fatal — the refresh below surfaces any error */ }
+        await this.handleRequestNavHistory();
+    }
+
+    /** Fetch the active label set's entries and push them to the panel. */
+    private async handleRequestRecentLabels(): Promise<void> {
+        if (!this.socketClient.isConnected()) {
+            this.webview?.postMessage({ command: 'recentLabelsResult', error: 'Not connected to the emulator.' });
+            return;
+        }
+        try {
+            const entries = await this.editorProvider.getActiveLabelEntries();
+            // Root, visible labels only — child/struct-member entries use synthetic
+            // addresses that can't be navigated to directly.
+            const slim = entries
+                .filter(e => !e.parentAddress && !e.hidden)
+                .map(e => ({ name: e.name, type: e.type ?? 'Address', address: e.address }));
+            this.webview?.postMessage({ command: 'recentLabelsResult', entries: slim });
+        } catch (err: any) {
+            this.webview?.postMessage({ command: 'recentLabelsResult', error: err?.message ?? String(err) });
+        }
+    }
+
+    /** Ping every Multiplayer server port and report reachability + capture state. */
+    private async handleRequestNetworkStatus(): Promise<void> {
+        const ports = loadMediusPorts();
+        const servers = await Promise.all(ports.map(async p => ({
+            name:   p.name,
+            port:   p.port,
+            online: await DisasmPanelProvider.probePortListening(p.port),
+        })));
+        this.webview?.postMessage({
+            command:   'networkStatusResult',
+            servers,
+            capturing: this._packetViewerProvider.isCapturing(),
+        });
+    }
+
+    /** Jump the disassembler editor to a hex or numeric address from the panel. */
+    private handlePanelGotoAddress(raw: unknown): void {
+        const addr = typeof raw === 'string'
+            ? parseInt(raw.replace(/^0x/i, ''), 16)
+            : (typeof raw === 'number' ? raw : NaN);
+        if (Number.isFinite(addr)) {
+            this.editorProvider.navigateToAddress(addr >>> 0);
         }
     }
 

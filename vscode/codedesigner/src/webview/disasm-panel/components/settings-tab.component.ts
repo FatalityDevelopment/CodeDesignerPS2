@@ -2,18 +2,23 @@ import {
   Component,
   ChangeDetectionStrategy,
   ViewEncapsulation,
+  OnDestroy,
   input,
   output,
   computed,
   signal,
   viewChild,
 } from '@angular/core';
-import { EmuOption, SnapshotEntry } from '../types';
+import { EmuOption, SnapshotEntry, NavHistoryEntry, RecentLabelEntry, NetworkStatus } from '../types';
 import { IconComponent } from '../../shared/icon.component';
 import { McpMemoryOverlayComponent } from './mcp-memory-overlay.component';
 import type { McpMemoryEntry, McpMemoryListResult, McpMemoryActionResult } from './mcp-memory-overlay.component';
 
 const SNAP_PREVIEW = 5;
+/** Preview count for the History and Recent Labels lists before "show more". */
+const LIST_PREVIEW = 8;
+/** Interval for re-pinging Multiplayer servers while the Network section is open. */
+const NET_POLL_MS = 4000;
 
 /**
  * SettingsTabComponent - Emulator settings tab content.
@@ -151,13 +156,34 @@ const SNAP_PREVIEW = 5;
 
       <!-- ── Network ──────────────────────────────────────────────────────── -->
       <div class="acc-section">
-        <button class="acc-header" (click)="netOpen.set(!netOpen())">
+        <button class="acc-header" (click)="toggleNet()">
           <app-icon class="acc-chevron" [name]="netOpen() ? 'chevrondown' : 'chevronright'" [size]="13" />
           <app-icon class="acc-ico" name="network" [size]="14" />
           <span class="acc-title">Network</span>
         </button>
         @if (netOpen()) {
           <div class="acc-body">
+
+            @if (networkStatus(); as ns) {
+              <div class="net-status">
+                <div class="net-row">
+                  <span class="net-dot" [class.net-dot-on]="ns.capturing"></span>
+                  <span class="net-row-name">Packet capture</span>
+                  <span class="net-row-state">{{ ns.capturing ? 'Capturing' : 'Idle' }}</span>
+                </div>
+                @for (s of ns.servers; track s.port) {
+                  <div class="net-row">
+                    <span class="net-dot" [class.net-dot-on]="s.online"></span>
+                    <span class="net-row-name">{{ s.name }}</span>
+                    <span class="net-row-port">:{{ s.port }}</span>
+                    <span class="net-row-state">{{ s.online ? 'Online' : 'Offline' }}</span>
+                  </div>
+                }
+              </div>
+            } @else {
+              <div class="snapshot-empty">Checking servers…</div>
+            }
+
             <div class="btn-grid">
 
               <button id="startNetworkBtn" (click)="startNetworkClick.emit()"
@@ -214,6 +240,99 @@ const SNAP_PREVIEW = 5;
               <button class="show-more-btn" (click)="snapShowAll.set(!snapShowAll())">
                 {{snapShowAll() ? '▴ Show fewer' : '▾ Show ' + (snapshots().length - snapPreview) + ' more'}}
               </button>
+            }
+          </div>
+        }
+      </div>
+
+      <!-- ── History ──────────────────────────────────────────────────────── -->
+      <div class="acc-section">
+        <button class="acc-header" (click)="toggleHist()">
+          <app-icon class="acc-chevron" [name]="histOpen() ? 'chevrondown' : 'chevronright'" [size]="13" />
+          <app-icon class="acc-ico" name="history" [size]="14" />
+          <span class="acc-title">
+            History
+            @if (navHistory().length) { <span class="acc-count">({{navHistory().length}})</span> }
+          </span>
+        </button>
+        @if (histOpen()) {
+          <div class="acc-body">
+            <div class="list-actions">
+              <button class="list-action-btn" (click)="requestHistory.emit()" title="Refresh navigation history">
+                <app-icon name="refreshcw" [size]="12" /><span>Refresh</span>
+              </button>
+              <button class="list-action-btn" (click)="clearHistory.emit()"
+                      [disabled]="!navHistory().length" title="Clear navigation history">
+                <app-icon name="trash2" [size]="12" /><span>Clear</span>
+              </button>
+            </div>
+            @if (navHistoryError()) {
+              <div class="list-error">{{navHistoryError()}}</div>
+            } @else if (!navHistory().length) {
+              <div class="snapshot-empty">No navigation history yet</div>
+            } @else {
+              <div class="snapshot-scroll">
+                @for (h of displayedHistory(); track $index) {
+                  <button class="hist-item" (click)="gotoAddress.emit(h.address)"
+                          [title]="'Go to ' + h.address">
+                    <span class="hist-addr">{{h.address}}</span>
+                    <span class="hist-label">{{h.label}}</span>
+                    <span class="hist-src" [class.hist-src-ai]="h.source === 'mcp'">
+                      {{h.source === 'mcp' ? 'AI' : 'You'}}
+                    </span>
+                  </button>
+                }
+              </div>
+              @if (navHistory().length > listPreview) {
+                <button class="show-more-btn" (click)="histShowAll.set(!histShowAll())">
+                  {{histShowAll() ? '▴ Show fewer' : '▾ Show ' + (navHistory().length - listPreview) + ' more'}}
+                </button>
+              }
+            }
+          </div>
+        }
+      </div>
+
+      <!-- ── Recent Labels ────────────────────────────────────────────────── -->
+      <div class="acc-section">
+        <button class="acc-header" (click)="toggleLabels()">
+          <app-icon class="acc-chevron" [name]="labelsOpen() ? 'chevrondown' : 'chevronright'" [size]="13" />
+          <app-icon class="acc-ico" name="tag" [size]="14" />
+          <span class="acc-title">
+            Recent Labels
+            @if (recentLabels().length) { <span class="acc-count">({{recentLabels().length}})</span> }
+          </span>
+        </button>
+        @if (labelsOpen()) {
+          <div class="acc-body">
+            <div class="list-actions">
+              <button class="list-action-btn" (click)="requestLabels.emit()" title="Refresh labels">
+                <app-icon name="refreshcw" [size]="12" /><span>Refresh</span>
+              </button>
+            </div>
+            @if (recentLabelsError()) {
+              <div class="list-error">{{recentLabelsError()}}</div>
+            } @else if (!recentLabels().length) {
+              <div class="snapshot-empty">No labels in the active set</div>
+            } @else {
+              <div class="snapshot-scroll">
+                @for (l of displayedLabels(); track $index) {
+                  <div class="label-item">
+                    <span class="label-type" [attr.data-label-type]="l.type">{{l.type}}</span>
+                    <div class="label-info">
+                      <span class="label-name" [title]="l.name">{{l.name}}</span>
+                      <span class="label-addr">{{l.address}}</span>
+                    </div>
+                    <button class="open-snapshot-btn" (click)="gotoAddress.emit(l.address)"
+                            [title]="'Go to ' + l.address">Goto</button>
+                  </div>
+                }
+              </div>
+              @if (recentLabels().length > listPreview) {
+                <button class="show-more-btn" (click)="labelShowAll.set(!labelShowAll())">
+                  {{labelShowAll() ? '▴ Show fewer' : '▾ Show ' + (recentLabels().length - listPreview) + ' more'}}
+                </button>
+              }
             }
           </div>
         }
@@ -329,7 +448,7 @@ const SNAP_PREVIEW = 5;
     </div>
   `,
 })
-export class SettingsTabComponent {
+export class SettingsTabComponent implements OnDestroy {
 
   // ── Inputs ──────────────────────────────────────────────────────────────────
 
@@ -342,6 +461,11 @@ export class SettingsTabComponent {
   readonly isConnected    = input(false);
   readonly snapshots      = input<SnapshotEntry[]>([]);
   readonly currentGameName = input('');
+  readonly navHistory        = input<NavHistoryEntry[]>([]);
+  readonly navHistoryError   = input('');
+  readonly recentLabels      = input<RecentLabelEntry[]>([]);
+  readonly recentLabelsError = input('');
+  readonly networkStatus     = input<NetworkStatus | null>(null);
 
   // ── Outputs (emulator settings) ─────────────────────────────────────────────
 
@@ -375,6 +499,11 @@ export class SettingsTabComponent {
   readonly openMemoryViewClick = output<string>();
   readonly openDnsMappingClick   = output<void>();
   readonly openNetConfigClick    = output<void>();
+  readonly requestHistory        = output<void>();
+  readonly clearHistory          = output<void>();
+  readonly requestLabels         = output<void>();
+  readonly requestNetworkStatus  = output<void>();
+  readonly gotoAddress           = output<string>();
 
   // ── Outputs (memory relay) ──────────────────────────────────────────────────
 
@@ -395,6 +524,8 @@ export class SettingsTabComponent {
   readonly actOpen     = signal(false);
   readonly netOpen     = signal(false);
   readonly snapOpen    = signal(true);
+  readonly histOpen    = signal(false);
+  readonly labelsOpen  = signal(false);
   readonly toolsOpen   = signal(false);
   readonly memOpen     = signal(false);
   readonly memViewOpen = signal(true);
@@ -409,12 +540,71 @@ export class SettingsTabComponent {
     return this.snapShowAll() ? snaps : snaps.slice(0, SNAP_PREVIEW);
   });
 
+  // ── History / Recent Labels show-all ─────────────────────────────────────────
+
+  /** Preview threshold for the History and Recent Labels lists. */
+  readonly listPreview  = LIST_PREVIEW;
+  readonly histShowAll  = signal(false);
+  readonly labelShowAll = signal(false);
+  readonly displayedHistory = computed(() => {
+    const h = this.navHistory();
+    return this.histShowAll() ? h : h.slice(0, LIST_PREVIEW);
+  });
+  readonly displayedLabels = computed(() => {
+    const l = this.recentLabels();
+    return this.labelShowAll() ? l : l.slice(0, LIST_PREVIEW);
+  });
+
   // ── PCSX2 detection ──────────────────────────────────────────────────────────
 
   /** True when a PCSX2 emulator is explicitly selected in the dropdown. */
   readonly isPcsx2Selected = computed(() =>
     (this.selectedEmulator() ?? '').toLowerCase().includes('pcsx2')
   );
+
+  // ── History / Recent Labels / Network section toggles ───────────────────────
+
+  /** Toggle the History section; requests the history when it opens. */
+  toggleHist(): void {
+    const open = !this.histOpen();
+    this.histOpen.set(open);
+    if (open) { this.requestHistory.emit(); }
+  }
+
+  /** Toggle the Recent Labels section; requests the labels when it opens. */
+  toggleLabels(): void {
+    const open = !this.labelsOpen();
+    this.labelsOpen.set(open);
+    if (open) { this.requestLabels.emit(); }
+  }
+
+  /** Toggle the Network section; starts/stops Multiplayer server polling. */
+  toggleNet(): void {
+    const open = !this.netOpen();
+    this.netOpen.set(open);
+    if (open) { this.startNetPoll(); } else { this.stopNetPoll(); }
+  }
+
+  private netPollTimer?: ReturnType<typeof setInterval>;
+
+  /** Begin polling Multiplayer server reachability every NET_POLL_MS. */
+  private startNetPoll(): void {
+    this.requestNetworkStatus.emit();
+    this.stopNetPoll();
+    this.netPollTimer = setInterval(() => this.requestNetworkStatus.emit(), NET_POLL_MS);
+  }
+
+  /** Stop the Multiplayer server poll timer. */
+  private stopNetPoll(): void {
+    if (this.netPollTimer !== undefined) {
+      clearInterval(this.netPollTimer);
+      this.netPollTimer = undefined;
+    }
+  }
+
+  ngOnDestroy(): void {
+    this.stopNetPoll();
+  }
 
   // ── Public relay methods (called by parent DisasmPanelComponent) ─────────────
 

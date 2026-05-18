@@ -9,7 +9,7 @@ import {
   RecompileTabComponent,
 } from './components';
 import type { McpMemoryEntry, McpMemoryListResult, McpMemoryActionResult } from './components';
-import { EmuOption, SnapshotEntry } from './types';
+import { EmuOption, SnapshotEntry, NavHistoryEntry, RecentLabelEntry, NetworkStatus } from './types';
 import { IconComponent } from '../shared/icon.component';
 import './disasm-panel.css';
 
@@ -93,6 +93,27 @@ interface LoadedGameMsg {
   coverUri?: string;
 }
 
+/** Message sent by the provider with the PC navigation history. */
+interface NavHistoryResultMsg {
+  command: 'navHistoryResult';
+  entries?: NavHistoryEntry[];
+  error?: string;
+}
+
+/** Message sent by the provider with the active label set's entries. */
+interface RecentLabelsResultMsg {
+  command: 'recentLabelsResult';
+  entries?: RecentLabelEntry[];
+  error?: string;
+}
+
+/** Message sent by the provider with Multiplayer server reachability. */
+interface NetworkStatusResultMsg {
+  command: 'networkStatusResult';
+  servers?: NetworkStatus['servers'];
+  capturing?: boolean;
+}
+
 @Component({
   selector: 'app-disasm-panel',
   standalone: true,
@@ -137,6 +158,14 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
   loadedGameCover = '';
   /** Collapsed/expanded state of the Loaded Game accordion card. */
   loadedGameOpen = true;
+  /** PC navigation history shown in the History section. */
+  navHistory: NavHistoryEntry[] = [];
+  navHistoryError = '';
+  /** Active label set entries shown in the Recent Labels section. */
+  recentLabels: RecentLabelEntry[] = [];
+  recentLabelsError = '';
+  /** Multiplayer server reachability + capture state for the Network section. */
+  networkStatus: NetworkStatus | null = null;
   private subs: Subscription[] = [];
 
   @ViewChild(SettingsTabComponent) private settingsTab?: SettingsTabComponent;
@@ -213,6 +242,20 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
       this.bridge.on<LoadedGameMsg>('loadedGame').subscribe(msg => {
         this.loadedGame = msg.game ?? null;
         this.loadedGameCover = msg.coverUri ?? '';
+      }),
+      // PC navigation history for the History section
+      this.bridge.on<NavHistoryResultMsg>('navHistoryResult').subscribe(msg => {
+        this.navHistory = msg.entries ?? [];
+        this.navHistoryError = msg.error ?? '';
+      }),
+      // Active label set entries for the Recent Labels section
+      this.bridge.on<RecentLabelsResultMsg>('recentLabelsResult').subscribe(msg => {
+        this.recentLabels = msg.entries ?? [];
+        this.recentLabelsError = msg.error ?? '';
+      }),
+      // Multiplayer server reachability for the Network section
+      this.bridge.on<NetworkStatusResultMsg>('networkStatusResult').subscribe(msg => {
+        this.networkStatus = { servers: msg.servers ?? [], capturing: !!msg.capturing };
       }),
     );
     this.bridge.postMessage({ command: 'ready' });
@@ -463,6 +506,29 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
 
   onOpenNetConfig(): void {
     this.bridge.postMessage({ command: 'openNetConfig' });
+  }
+
+  // ── History / Recent Labels / Network status handlers ────────────────────
+
+  onRequestHistory(): void {
+    this.bridge.postMessage({ command: 'requestNavHistory' });
+  }
+
+  onClearHistory(): void {
+    this.bridge.postMessage({ command: 'clearNavHistory' });
+  }
+
+  onRequestLabels(): void {
+    this.bridge.postMessage({ command: 'requestRecentLabels' });
+  }
+
+  onRequestNetworkStatus(): void {
+    this.bridge.postMessage({ command: 'requestNetworkStatus' });
+  }
+
+  /** Jump the disassembler editor to a history entry or label address. */
+  onGotoAddress(address: string): void {
+    this.bridge.postMessage({ command: 'panelGotoAddress', address });
   }
 
   onOpenConverter(): void {
