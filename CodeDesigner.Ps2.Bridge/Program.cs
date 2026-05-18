@@ -543,7 +543,7 @@ namespace CodeDesigner.Ps2.Bridge
                 server.Stop();
             };
 
-            StartDiscordPresence(cts.Token);
+            StartDiscordPresence(server, cts.Token);
 
             Console.WriteLine("Server is running. Press Ctrl+C to stop.");
             Console.WriteLine("Runtime commands:");
@@ -569,21 +569,27 @@ namespace CodeDesigner.Ps2.Bridge
         private const string DefaultDiscordApplicationId = "1490548720293642381";
 
         /// <summary>
-        /// Starts the Discord rich-presence worker. Uses the application ID from the
-        /// <see cref="DiscordPresenceService.ApplicationIdKey"/> setting when present,
-        /// otherwise falls back to <see cref="DefaultDiscordApplicationId"/>. The worker
-        /// polls the database for the active game-research context and publishes it to
-        /// Discord.
+        /// Starts the two Discord rich-presence background loops:
+        /// <list type="bullet">
+        /// <item><see cref="Services.DiscordPresencePublisher"/> — detects the game
+        /// running under an attached PCSX2 instance and writes the session keys
+        /// into the database.</item>
+        /// <item><see cref="DiscordPresenceWorker"/> — reads those keys and pushes
+        /// the rich presence to Discord, showing an idle status when none is set.</item>
+        /// </list>
+        /// The application ID comes from the <see cref="DiscordPresenceService.ApplicationIdKey"/>
+        /// setting when present, otherwise <see cref="DefaultDiscordApplicationId"/>.
         /// </summary>
-        private static void StartDiscordPresence(CancellationToken cancellationToken)
+        private static void StartDiscordPresence(SocketServer server, CancellationToken cancellationToken)
         {
             DbContextOptions<CodeDesignerDbContext> dbOptions =
                 DatabaseInitialiser.BuildDbOptions(DatabasePaths.GetDefaultConnectionString());
+            var dbContextFactory = new BridgeDbContextFactory(dbOptions);
 
             string? configuredId = null;
             try
             {
-                using var db = new CodeDesignerDbContext(dbOptions);
+                using var db = dbContextFactory.CreateDbContext();
                 configuredId = db.Settings
                     .Where(s => s.Key == DiscordPresenceService.ApplicationIdKey)
                     .Select(s => s.Value)
@@ -600,9 +606,27 @@ namespace CodeDesigner.Ps2.Bridge
 
             Console.WriteLine($"[Discord] Rich presence enabled (application ID {applicationId}).");
 
+            // Publisher — writes the active PCSX2 game + PC into the DB session keys.
             _ = Task.Run(async () =>
             {
-                var dbContextFactory = new BridgeDbContextFactory(dbOptions);
+                try
+                {
+                    await new Services.DiscordPresencePublisher(server, dbContextFactory)
+                        .RunAsync(TimeSpan.FromSeconds(10), cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    // Bridge is shutting down.
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[Discord] Session publisher stopped: {ex.Message}");
+                }
+            }, cancellationToken);
+
+            // Worker — reads the DB session keys and pushes rich presence to Discord.
+            _ = Task.Run(async () =>
+            {
                 var provider = new DatabaseDiscordPresenceDataProvider(dbContextFactory);
                 using var presenceClient = new DiscordPresenceClient(applicationId);
                 var worker = new DiscordPresenceWorker(provider, presenceClient);
