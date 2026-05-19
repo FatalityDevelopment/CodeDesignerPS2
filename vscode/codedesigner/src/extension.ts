@@ -338,7 +338,7 @@ export function activate(context: vscode.ExtensionContext) {
 	// ── Structure Visualizer ────────────────────────────────────────────────
 	// Standalone webview that renders Mermaid diagrams of a game's structure:
 	// classes/objects, vtables, and call-graph chains back to a hook.
-	const structureVisualizerProvider = new StructureVisualizerProvider(context.extensionUri, socketClient);
+	const structureVisualizerProvider = new StructureVisualizerProvider(context.extensionUri, socketClient, editorProvider);
 	const openStructureVisualizerCommand = vscode.commands.registerCommand(
 		'codedesigner.openStructureVisualizer',
 		() => structureVisualizerProvider.open(),

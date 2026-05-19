@@ -1,15 +1,17 @@
 import * as vscode from 'vscode';
 import { getOutputChannel } from '../../extension';
 import { SocketClient } from '../../socketClient';
+import { DisasmEditorProvider } from '../disasmEditor/disasmEditorProvider';
 import { getNonce, getWebviewErrorHandlerScript } from '../../utils/nonce';
 
 /**
  * Provider for the Structure Visualizer standalone webview.
  *
- * Renders Mermaid diagrams of a game's structure: classes/objects from Struct
- * labels, vtables from ArrayOfPointers labels, and call-graph chains from the
- * persisted CallEdge table. The provider is a thin proxy — it forwards webview
- * requests to the C# backend over the socket and posts the results back.
+ * Renders Mermaid diagrams of a game's structure — classes/objects, vtables and
+ * call-graph chains — and lets the user build that structure (typed labels and
+ * label groups) in place. The provider is a thin proxy: it resolves the loaded
+ * game automatically from {@link DisasmEditorProvider}, forwards webview
+ * requests to the C# backend over the socket, and posts the results back.
  */
 export class StructureVisualizerProvider {
     private _panel: vscode.WebviewPanel | undefined;
@@ -17,6 +19,7 @@ export class StructureVisualizerProvider {
     constructor(
         private readonly extensionUri: vscode.Uri,
         private readonly socketClient: SocketClient,
+        private readonly editorProvider: DisasmEditorProvider,
     ) {}
 
     /** Open (or reveal) the Structure Visualizer panel. */
@@ -46,6 +49,20 @@ export class StructureVisualizerProvider {
         panel.webview.html = this._buildHtml(panel.webview);
     }
 
+    // ── Game context ──────────────────────────────────────────────────────────
+
+    /** Resolve the loaded game automatically — never ask the user to type it. */
+    private _ctx(): { workspaceDir: string; gameId: string; gameName: string; activeSetName: string | null } | null {
+        const c = this.editorProvider.getLabelManagerContext();
+        if (!c) { return null; }
+        return {
+            workspaceDir:  c.workspaceDir,
+            gameId:        c.gameDiscId,
+            gameName:      c.gameName,
+            activeSetName: c.activeSetName,
+        };
+    }
+
     // ── Message dispatch ──────────────────────────────────────────────────────
 
     private async _handleMessage(msg: Record<string, unknown>, webview: vscode.Webview): Promise<void> {
@@ -53,26 +70,17 @@ export class StructureVisualizerProvider {
         try {
             switch (type) {
                 case 'ready':
-                    webview.postMessage({
-                        type: 'init',
-                        workspaceDir: this._workspaceDir(),
-                    });
+                case 'refresh':
+                    await this._sendContext(webview);
                     break;
-
-                case 'loadSets': {
-                    const gameId = String(msg['gameId'] ?? '');
-                    const sets = await this.socketClient.getLabelSets(this._workspaceDir(), gameId);
-                    webview.postMessage({ type: 'sets', sets });
-                    break;
-                }
 
                 case 'loadData': {
-                    const gameId  = String(msg['gameId'] ?? '');
+                    const ctx = this._requireCtx();
                     const setName = String(msg['setName'] ?? '');
-                    const labelSet = await this.socketClient.getLabelSet(this._workspaceDir(), gameId, setName);
+                    const labelSet = await this.socketClient.getLabelSet(ctx.workspaceDir, ctx.gameId, setName);
                     let groups: unknown[] = [];
                     try {
-                        groups = await this.socketClient.getLabelGroups(gameId, setName);
+                        groups = await this.socketClient.getLabelGroups(ctx.gameId, setName);
                     } catch (err: unknown) {
                         // Groups are optional — a set may simply have none yet.
                         getOutputChannel().warn('[StructureVisualizer] getLabelGroups: ' + errText(err));
@@ -82,8 +90,9 @@ export class StructureVisualizerProvider {
                 }
 
                 case 'getCallGraph': {
+                    const ctx = this._requireCtx();
                     const graph = await this.socketClient.getCallGraph(
-                        String(msg['gameId'] ?? ''),
+                        ctx.gameId,
                         String(msg['address'] ?? ''),
                         Number(msg['depth'] ?? 3),
                         String(msg['direction'] ?? 'both'),
@@ -93,8 +102,9 @@ export class StructureVisualizerProvider {
                 }
 
                 case 'scanCallGraph': {
+                    const ctx = this._requireCtx();
                     const result = await this.socketClient.scanCallGraph(
-                        String(msg['gameId'] ?? ''),
+                        ctx.gameId,
                         String(msg['address'] ?? ''),
                         Number(msg['length'] ?? 0),
                         msg['region'] ? String(msg['region']) : undefined,
@@ -103,39 +113,82 @@ export class StructureVisualizerProvider {
                     break;
                 }
 
-                case 'saveGroup':
+                case 'saveLabel': {
+                    const ctx = this._requireCtx();
+                    const setName = String(msg['setName'] ?? '');
+                    await this.socketClient.addLabelEntry(
+                        ctx.workspaceDir, ctx.gameId, setName,
+                        msg['entry'] as Parameters<SocketClient['addLabelEntry']>[3]);
+                    await this._reloadData(webview, setName);
+                    break;
+                }
+
+                case 'deleteLabel': {
+                    const ctx = this._requireCtx();
+                    const setName = String(msg['setName'] ?? '');
+                    await this.socketClient.deleteLabelEntry(
+                        ctx.workspaceDir, ctx.gameId, setName, String(msg['address'] ?? ''));
+                    await this._reloadData(webview, setName);
+                    break;
+                }
+
+                case 'createSet': {
+                    const ctx = this._requireCtx();
+                    const name = (await vscode.window.showInputBox({
+                        title: 'New label set',
+                        prompt: 'Name for the new label set',
+                        placeHolder: 'e.g. structures',
+                        validateInput: v => v.trim() ? undefined : 'A name is required.',
+                    }))?.trim();
+                    if (!name) { break; }
+                    await this.socketClient.createLabelSet(ctx.workspaceDir, ctx.gameId, name);
+                    await this._sendContext(webview, name);
+                    break;
+                }
+
+                case 'saveGroup': {
+                    const ctx = this._requireCtx();
+                    const setName = String(msg['setName'] ?? '');
                     await this.socketClient.addLabelGroup(
-                        String(msg['gameId'] ?? ''), String(msg['setName'] ?? ''),
+                        ctx.gameId, setName,
                         String(msg['name'] ?? ''), String(msg['kind'] ?? 'Class'),
                         msg['comment'] ? String(msg['comment']) : undefined,
                         msg['color'] ? String(msg['color']) : undefined,
                     );
-                    await this._reloadGroups(webview, msg);
+                    await this._reloadGroups(webview, setName);
                     break;
+                }
 
-                case 'deleteGroup':
-                    await this.socketClient.deleteLabelGroup(
-                        String(msg['gameId'] ?? ''), String(msg['setName'] ?? ''),
-                        String(msg['groupName'] ?? ''));
-                    await this._reloadGroups(webview, msg);
+                case 'deleteGroup': {
+                    const ctx = this._requireCtx();
+                    const setName = String(msg['setName'] ?? '');
+                    await this.socketClient.deleteLabelGroup(ctx.gameId, setName, String(msg['groupName'] ?? ''));
+                    await this._reloadGroups(webview, setName);
                     break;
+                }
 
-                case 'addMember':
+                case 'addMember': {
+                    const ctx = this._requireCtx();
+                    const setName = String(msg['setName'] ?? '');
                     await this.socketClient.addLabelGroupMember(
-                        String(msg['gameId'] ?? ''), String(msg['setName'] ?? ''),
+                        ctx.gameId, setName,
                         String(msg['groupName'] ?? ''), String(msg['labelAddress'] ?? ''),
                         msg['role'] ? String(msg['role']) : undefined,
                         msg['sortOrder'] !== undefined ? Number(msg['sortOrder']) : undefined,
                     );
-                    await this._reloadGroups(webview, msg);
+                    await this._reloadGroups(webview, setName);
                     break;
+                }
 
-                case 'removeMember':
+                case 'removeMember': {
+                    const ctx = this._requireCtx();
+                    const setName = String(msg['setName'] ?? '');
                     await this.socketClient.deleteLabelGroupMember(
-                        String(msg['gameId'] ?? ''), String(msg['setName'] ?? ''),
+                        ctx.gameId, setName,
                         String(msg['groupName'] ?? ''), String(msg['labelAddress'] ?? ''));
-                    await this._reloadGroups(webview, msg);
+                    await this._reloadGroups(webview, setName);
                     break;
+                }
 
                 case 'navigate': {
                     const addr = parseAddress(String(msg['address'] ?? ''));
@@ -154,14 +207,51 @@ export class StructureVisualizerProvider {
         }
     }
 
-    private async _reloadGroups(webview: vscode.Webview, msg: Record<string, unknown>): Promise<void> {
-        const groups = await this.socketClient.getLabelGroups(
-            String(msg['gameId'] ?? ''), String(msg['setName'] ?? ''));
-        webview.postMessage({ type: 'groups', groups });
+    /** Resolve the loaded game and its label sets, and push them to the webview. */
+    private async _sendContext(webview: vscode.Webview, preferSet?: string): Promise<void> {
+        const ctx = this._ctx();
+        if (!ctx) {
+            webview.postMessage({ type: 'error', message: 'No workspace folder is open.' });
+            return;
+        }
+        let sets: string[] = [];
+        try {
+            sets = await this.socketClient.getLabelSets(ctx.workspaceDir, ctx.gameId);
+        } catch (err: unknown) {
+            getOutputChannel().warn('[StructureVisualizer] getLabelSets: ' + errText(err));
+        }
+        const activeSet =
+            (preferSet && sets.includes(preferSet) && preferSet) ||
+            (ctx.activeSetName && sets.includes(ctx.activeSetName) && ctx.activeSetName) ||
+            sets.find(s => s !== 'Built-in') ||
+            sets[0] || '';
+        webview.postMessage({
+            type: 'init',
+            gameName: ctx.gameName,
+            gameId:   ctx.gameId,
+            sets,
+            activeSet,
+        });
     }
 
-    private _workspaceDir(): string {
-        return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
+    private _requireCtx(): { workspaceDir: string; gameId: string; gameName: string; activeSetName: string | null } {
+        const ctx = this._ctx();
+        if (!ctx) { throw new Error('No workspace folder is open.'); }
+        return ctx;
+    }
+
+    private async _reloadData(webview: vscode.Webview, setName: string): Promise<void> {
+        const ctx = this._requireCtx();
+        const labelSet = await this.socketClient.getLabelSet(ctx.workspaceDir, ctx.gameId, setName);
+        let groups: unknown[] = [];
+        try { groups = await this.socketClient.getLabelGroups(ctx.gameId, setName); } catch { /* optional */ }
+        webview.postMessage({ type: 'data', labelSet, groups });
+    }
+
+    private async _reloadGroups(webview: vscode.Webview, setName: string): Promise<void> {
+        const ctx = this._requireCtx();
+        const groups = await this.socketClient.getLabelGroups(ctx.gameId, setName);
+        webview.postMessage({ type: 'groups', groups });
     }
 
     // ── HTML builder ──────────────────────────────────────────────────────────

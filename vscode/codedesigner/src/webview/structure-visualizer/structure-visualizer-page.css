@@ -1,132 +1,213 @@
-:root {
-  color-scheme: light dark;
-}
+/* Structure Visualizer — styled to match the disassembler panel
+   (webview/disasm-panel/disasm-panel.css) and shared.css primitives. */
+
+html { height: 100%; }
 
 body {
+  height: 100%;
   margin: 0;
-  font-family: var(--vscode-font-family, sans-serif);
-  font-size: 12px;
-  color: var(--vscode-foreground, #ccc);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  font-family: var(--vscode-font-family, 'Segoe UI', sans-serif);
+  font-size: 13px;
+  color: var(--vscode-editor-foreground, #d4d4d4);
   background: var(--vscode-editor-background, #1e1e1e);
+  box-sizing: border-box;
 }
 
 .sv-shell {
   display: flex;
   flex-direction: column;
-  height: 100vh;
-  box-sizing: border-box;
+  flex: 1;
+  min-height: 0;
 }
 
-/* ── Toolbar ─────────────────────────────────────────────────────────── */
+/* ── Toolbar / controls ──────────────────────────────────────────────── */
 .sv-toolbar,
 .sv-controls {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 8px;
-  border-bottom: 1px solid var(--vscode-panel-border, #333);
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--vscode-panel-border, #313131);
   flex-wrap: wrap;
+  flex-shrink: 0;
 }
 
 .sv-title {
+  font-size: 11px;
   font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--vscode-descriptionForeground, #8f8f8f);
   margin-right: 4px;
 }
-
+.sv-game {
+  font-weight: 600;
+  color: var(--vscode-textLink-foreground, #569cd6);
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .sv-spacer { flex: 1; }
 .sv-sep {
   width: 1px;
   align-self: stretch;
-  background: var(--vscode-panel-border, #333);
+  background: var(--vscode-panel-border, #313131);
   margin: 0 4px;
 }
 
+/* ── Inputs (mirrors disasm-panel select styling) ────────────────────── */
 .sv-input,
 .sv-select {
   background: var(--vscode-input-background, #2a2a2a);
-  color: var(--vscode-input-foreground, #ddd);
-  border: 1px solid var(--vscode-input-border, #444);
-  padding: 3px 6px;
+  color: var(--vscode-input-foreground, #d4d4d4);
+  border: 1px solid var(--vscode-input-border, #313131);
+  border-radius: 4px;
+  padding: 5px 6px;
+  font-family: var(--vscode-font-family, sans-serif);
   font-size: 12px;
-  border-radius: 2px;
+  box-sizing: border-box;
 }
+.sv-input:focus,
+.sv-select:focus {
+  outline: none;
+  border-color: var(--vscode-focusBorder, #0e639c);
+}
+.sv-input::placeholder { color: var(--vscode-input-placeholderForeground, #888); }
 .sv-input { width: 150px; }
-.sv-input.sv-sm { width: 100px; }
+.sv-input.sv-sm, .sv-select.sv-sm { width: 110px; }
+.sv-input.sv-xs { width: 64px; }
+.sv-full { width: 100%; }
 .sv-grow { flex: 1; min-width: 220px; }
 
-.sv-btn {
-  background: var(--vscode-button-secondaryBackground, #3a3a3a);
-  color: var(--vscode-button-secondaryForeground, #fff);
-  border: none;
-  padding: 4px 10px;
-  font-size: 12px;
-  border-radius: 2px;
-  cursor: pointer;
-}
-.sv-btn:hover:not(:disabled) {
-  background: var(--vscode-button-secondaryHoverBackground, #4a4a4a);
-}
-.sv-btn:disabled { opacity: 0.5; cursor: default; }
-
+/* ── Button modifiers (base is .lm-tool-btn from shared.css) ─────────── */
 .sv-primary {
   background: var(--vscode-button-background, #0e639c);
   color: var(--vscode-button-foreground, #fff);
+  border-color: transparent;
 }
 .sv-primary:hover:not(:disabled) {
   background: var(--vscode-button-hoverBackground, #1177bb);
+}
+.sv-on {
+  background: var(--vscode-button-background, #0e639c);
+  color: var(--vscode-button-foreground, #fff);
+  border-color: transparent;
 }
 
 /* ── Tabs ────────────────────────────────────────────────────────────── */
 .sv-tabs {
   display: flex;
   gap: 2px;
-  padding: 4px 8px 0;
-  border-bottom: 1px solid var(--vscode-panel-border, #333);
+  padding: 4px 10px 0;
+  border-bottom: 1px solid var(--vscode-panel-border, #313131);
+  flex-shrink: 0;
 }
 .sv-tab {
   background: transparent;
-  color: var(--vscode-foreground, #ccc);
+  color: var(--vscode-foreground, #d4d4d4);
   border: none;
   border-bottom: 2px solid transparent;
-  padding: 5px 12px;
+  padding: 6px 12px;
+  font-family: inherit;
   font-size: 12px;
   cursor: pointer;
 }
+.sv-tab:hover { background: rgba(255, 255, 255, 0.05); }
 .sv-tab-on {
   border-bottom-color: var(--vscode-focusBorder, #0e639c);
   font-weight: 600;
 }
-
 .sv-depth {
   display: flex;
   align-items: center;
   gap: 4px;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground, #8f8f8f);
 }
 
 /* ── Status ──────────────────────────────────────────────────────────── */
 .sv-status {
   padding: 4px 10px;
   font-size: 11px;
-  color: var(--vscode-descriptionForeground, #999);
+  color: var(--vscode-descriptionForeground, #8f8f8f);
+  flex-shrink: 0;
 }
-.sv-error {
-  color: var(--vscode-errorForeground, #f48771);
-}
+.sv-error { color: var(--vscode-errorForeground, #f48771); }
 
-/* ── Diagram ─────────────────────────────────────────────────────────── */
+/* ── Body: diagram + editor ──────────────────────────────────────────── */
+.sv-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
 .sv-diagram {
   flex: 1;
   overflow: auto;
   padding: 12px;
 }
-.sv-diagram svg {
-  max-width: 100%;
-  height: auto;
-}
+.sv-diagram svg { max-width: 100%; height: auto; }
 
 .sv-empty {
+  flex: 1;
   padding: 24px;
-  color: var(--vscode-descriptionForeground, #888);
+  color: var(--vscode-descriptionForeground, #8f8f8f);
   font-size: 12px;
   line-height: 1.6;
+}
+
+/* ── Editor panel ────────────────────────────────────────────────────── */
+.sv-editor {
+  width: 320px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  border-left: 1px solid var(--vscode-panel-border, #313131);
+  padding: 10px;
+  box-sizing: border-box;
+}
+
+/* Each editor block is a card, matching the disasm-panel section cards. */
+.sv-ed-section {
+  margin-bottom: 10px;
+  padding: 10px;
+  border: 1px solid var(--vscode-panel-border, #313131);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.022);
+}
+.sv-ed-section > * { margin-bottom: 5px; }
+.sv-ed-section > *:last-child { margin-bottom: 0; }
+
+.sv-ed-head {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--vscode-descriptionForeground, #8f8f8f);
+}
+.sv-ed-note {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground, #8f8f8f);
+  font-style: italic;
+}
+.sv-ed-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+}
+.sv-ed-off {
+  font-family: var(--vscode-editor-font-family, monospace);
+  color: var(--vscode-textLink-foreground, #9cdcfe);
+}
+.sv-ed-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sv-ed-vt { color: var(--vscode-descriptionForeground, #8f8f8f); }
+.sv-ed-addrow {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: 4px;
 }

@@ -465,6 +465,22 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   }
 
   /**
+   * Current label-manager context for satellite webviews (e.g. the Structure
+   * Visualizer) so they can resolve the loaded game automatically instead of
+   * asking the user to type a serial. Returns null when no workspace is open.
+   */
+  public getLabelManagerContext(): { workspaceDir: string; gameDiscId: string; gameName: string; activeSetName: string | null } | null {
+    const ctx = this._labelManagerCtx();
+    if (!ctx) { return null; }
+    return {
+      workspaceDir:  ctx.workspaceDir,
+      gameDiscId:    ctx.gameDiscId,
+      gameName:      this._currentGameName || ctx.gameDiscId,
+      activeSetName: this._activeSetName,
+    };
+  }
+
+  /**
    * Fetch every entry in the currently active label set, for the disasm
    * panel's "Recent Labels" list. Picks the set the user is actually viewing
    * (the cached active set, else the first user set, else "Built-in").
