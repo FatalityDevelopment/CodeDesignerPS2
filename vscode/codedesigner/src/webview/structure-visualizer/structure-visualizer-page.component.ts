@@ -12,7 +12,7 @@ import mermaid from 'mermaid';
 import { getVsCodeApi } from '../shared/vscode-api';
 import '../shared/styles/shared.css';
 import {
-  SvLabel, SvGroup, SvCallGraph,
+  SvLabel, SvGroup, SvCallGraph, SvNodeResolved,
   classDiagramFromStruct, classDiagramFromGroup,
   vtableDiagramFromLabel, vtableDiagramFromGroup,
   callGraphFlowchart, hexKey,
@@ -44,6 +44,12 @@ type Mode = 'class' | 'vtable' | 'callgraph';
         <button class="lm-tool-btn" [disabled]="busy()" (click)="reload()" title="Reload from backend">⟳</button>
         <button class="lm-tool-btn" (click)="newSet()" title="Create a new label set">+ Set</button>
         <span class="sv-spacer"></span>
+        <div class="sv-zoom">
+          <button class="lm-tool-btn" [disabled]="!source()" (click)="zoomOut()" title="Zoom out">−</button>
+          <button class="lm-tool-btn" [disabled]="!source()" (click)="zoomReset()" title="Reset to 100%">{{ zoomPct() }}%</button>
+          <button class="lm-tool-btn" [disabled]="!source()" (click)="zoomIn()" title="Zoom in">+</button>
+          <button class="lm-tool-btn" [disabled]="!source()" (click)="fitToViewport(false)" title="Fit the whole diagram in view">Fit</button>
+        </div>
         <button class="lm-tool-btn" [class.sv-on]="editMode()" (click)="toggleEdit()">{{ editMode() ? '✓ Editing' : '✎ Edit' }}</button>
         <button class="lm-tool-btn" [disabled]="!source()" (click)="copySource()">Copy Mermaid</button>
         <button class="lm-tool-btn" [disabled]="!source()" (click)="exportSvg()">Export SVG</button>
@@ -62,7 +68,7 @@ type Mode = 'class' | 'vtable' | 'callgraph';
           <select class="sv-select sv-grow" [value]="selectedKey()" (change)="onSelect($event)">
             <option value="">— pick a struct or class group —</option>
             @if (structOptions().length) {
-              <optgroup label="Struct labels">
+              <optgroup label="Struct &amp; Pointer labels">
                 @for (s of structOptions(); track s.address) {
                   <option [value]="'struct:' + s.address">{{ s.name }} ({{ s.address }})</option>
                 }
@@ -81,7 +87,7 @@ type Mode = 'class' | 'vtable' | 'callgraph';
           <select class="sv-select sv-grow" [value]="selectedKey()" (change)="onSelect($event)">
             <option value="">— pick a vtable —</option>
             @if (vtableOptions().length) {
-              <optgroup label="ArrayOfPointers labels">
+              <optgroup label="Array / VTable labels">
                 @for (v of vtableOptions(); track v.address) {
                   <option [value]="'vt:' + v.address">{{ v.name }} ({{ v.address }})</option>
                 }
@@ -235,6 +241,17 @@ export class StructureVisualizerPageComponent implements AfterViewInit {
 
   private readonly vscode = getVsCodeApi();
   private renderSeq = 0;
+  private panHost?: HTMLElement;
+  private panPointerId: number | null = null;
+  private panStartX = 0;
+  private panStartY = 0;
+  private panStartLeft = 0;
+  private panStartTop = 0;
+  private panMoved = false;
+  private suppressNextNodeClick = false;
+  /** Natural (unscaled) diagram size, captured after each render for zooming. */
+  private baseW = 0;
+  private baseH = 0;
 
   // ── Context & data ────────────────────────────────────────────────────
   readonly gameName  = signal('');
@@ -258,6 +275,7 @@ export class StructureVisualizerPageComponent implements AfterViewInit {
   readonly status      = signal('');
   readonly error       = signal('');
   readonly source      = signal('');
+  readonly zoom        = signal(1);
 
   // ── Editor form fields ────────────────────────────────────────────────
   readonly lblName   = signal('');
@@ -273,17 +291,22 @@ export class StructureVisualizerPageComponent implements AfterViewInit {
   readonly memberRole = signal('');
 
   // ── Derived collections ───────────────────────────────────────────────
-  readonly structOptions = computed(() => this.entries().filter(e => e.type === 'Struct' && !e.parentAddress));
-  readonly vtableOptions  = computed(() => this.entries().filter(e => e.type === 'ArrayOfPointers'));
+  // "Pointer" and "Struct" describe the same thing — an address holding a
+  // pointer whose dereferenced value has child fields — so both render as a
+  // class. Matched case-insensitively to tolerate wire-format variations.
+  readonly structOptions = computed(() => this.entries().filter(e => {
+    const t = (e.type ?? '').toLowerCase();
+    return (t === 'struct' || t === 'pointer') && !e.parentAddress;
+  }));
+  // A vtable is an array of function pointers — accept both ArrayOfPointers
+  // and plain Array labels (case-insensitive) as candidates.
+  readonly vtableOptions  = computed(() => this.entries().filter(e => {
+    const t = (e.type ?? '').toLowerCase();
+    return t === 'arrayofpointers' || t === 'array';
+  }));
   readonly classGroups    = computed(() => this.groups().filter(g => g.kind === 'Class'));
   readonly vtableGroups   = computed(() => this.groups().filter(g => g.kind === 'VTable'));
   readonly modeGroups     = computed(() => this.mode() === 'vtable' ? this.vtableGroups() : this.classGroups());
-
-  private readonly nameMap = computed(() => {
-    const m = new Map<string, string>();
-    for (const e of this.entries()) { m.set(hexKey(e.address), e.name); }
-    return m;
-  });
 
   /** The label currently selected in class/vtable mode, if any. */
   readonly selectedLabel = computed<SvLabel | null>(() => {
@@ -359,9 +382,18 @@ export class StructureVisualizerPageComponent implements AfterViewInit {
         this.status.set('Groups updated.');
         break;
       case 'callGraph':
-        this.callGraph.set(msg['graph'] as SvCallGraph);
+        {
+          const graph = msg['graph'] as SvCallGraph;
+          this.callGraph.set(graph);
+          const edgeCount = graph?.edges?.length ?? 0;
+          const nodeCount = graph?.nodes?.length ?? 0;
+          const labelled = graph?.nodeInfo?.filter(n => !!n.label).length ?? 0;
+          const signatures = graph?.nodeInfo?.filter(n => (n.argRegs?.length ?? 0) > 0 || (n.returnRegs?.length ?? 0) > 0).length ?? 0;
+          this.status.set(edgeCount > 0
+            ? `Call graph built: ${nodeCount} node(s), ${edgeCount} edge(s), ${labelled} label(s), ${signatures} signature(s).`
+            : 'No call edges found. Scan the code segment, then build again.');
+        }
         this.busy.set(false);
-        this.status.set('Call graph built.');
         break;
       case 'scanResult': {
         const r = msg['result'] as { totalEdges?: number; directEdges?: number; indirectEdges?: number };
@@ -557,7 +589,16 @@ export class StructureVisualizerPageComponent implements AfterViewInit {
     const mode = this.mode();
     if (mode === 'callgraph') {
       const g = this.callGraph();
-      return g ? callGraphFlowchart(g, addr => this.nameMap().get(hexKey(addr)) ?? '') : '';
+      if (!g) { return ''; }
+      // Resolve each node against the loaded labels so call-graph functions
+      // show the same name + argument/return registers as class diagrams.
+      const byKey = new Map<string, SvLabel>();
+      for (const e of this.entries()) { byKey.set(hexKey(e.address), e); }
+      const resolve = (addr: string): SvNodeResolved | undefined => {
+        const e = byKey.get(hexKey(addr));
+        return e ? { label: e.name, argRegs: e.argRegs, returnRegs: e.returnRegs } : undefined;
+      };
+      return callGraphFlowchart(g, resolve);
     }
 
     const key = this.selectedKey();
@@ -567,7 +608,13 @@ export class StructureVisualizerPageComponent implements AfterViewInit {
     if (kind === 'group') {
       const grp = this.groups().find(g => String(g.id) === value);
       if (!grp) { return ''; }
-      return mode === 'vtable' ? vtableDiagramFromGroup(grp) : classDiagramFromGroup(grp);
+      // Resolve member addresses to full labels so Function members can show
+      // their argument / return register signatures.
+      const resolve = (addr: string): SvLabel | undefined =>
+        this.entries().find(e => hexKey(e.address) === hexKey(addr));
+      return mode === 'vtable'
+        ? vtableDiagramFromGroup(grp, resolve)
+        : classDiagramFromGroup(grp, resolve);
     }
 
     const label = this.entries().find(e => e.address === value);
@@ -586,6 +633,9 @@ export class StructureVisualizerPageComponent implements AfterViewInit {
     try {
       const { svg } = await mermaid.render('sv-mmd-' + (this.renderSeq++), src);
       host.innerHTML = svg;
+      this.prepareScrollableSvg(host);
+      this.fitToViewport(true);
+      this.wireDiagramPan(host);
       this.wireNodeClicks(host);
       this.error.set('');
     } catch (e) {
@@ -600,9 +650,118 @@ export class StructureVisualizerPageComponent implements AfterViewInit {
       const m = /[ncv]([0-9a-fA-F]{8})/.exec(node.getAttribute('id') ?? '');
       if (!m) { return; }
       node.style.cursor = 'pointer';
-      node.addEventListener('click', () => {
+      node.addEventListener('click', (event) => {
+        if (this.suppressNextNodeClick) {
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
         this.vscode.postMessage({ type: 'navigate', address: '0x' + m[1] });
       });
     });
+  }
+
+  /** Capture the diagram's natural size so the zoom controls can scale it. */
+  private prepareScrollableSvg(host: HTMLElement): void {
+    const svg = host.querySelector<SVGSVGElement>('svg');
+    if (!svg) { this.baseW = 0; this.baseH = 0; return; }
+    svg.style.maxWidth = 'none';
+    const vb = svg.viewBox.baseVal;
+    this.baseW = vb?.width  ? Math.ceil(vb.width)  : svg.clientWidth  || 0;
+    this.baseH = vb?.height ? Math.ceil(vb.height) : svg.clientHeight || 0;
+  }
+
+  /** Scale the rendered SVG to the current zoom level. */
+  private applyZoom(): void {
+    const svg = this.diagramRef?.nativeElement.querySelector<SVGSVGElement>('svg');
+    if (!svg || !this.baseW || !this.baseH) { return; }
+    const z = this.zoom();
+    const w = Math.ceil(this.baseW * z);
+    const h = Math.ceil(this.baseH * z);
+    // Set inline styles, not just attributes — a stylesheet `width: auto` rule
+    // beats the attribute, leaving the SVG un-resized so it never overflows
+    // the pane and can't be scrolled or panned.
+    svg.setAttribute('width',  String(w));
+    svg.setAttribute('height', String(h));
+    svg.style.width    = `${w}px`;
+    svg.style.height   = `${h}px`;
+    svg.style.maxWidth = 'none';
+  }
+
+  private setZoom(z: number): void {
+    this.zoom.set(Math.min(6, Math.max(0.05, z)));
+    this.applyZoom();
+  }
+
+  zoomIn(): void { this.setZoom(this.zoom() * 1.2); }
+  zoomOut(): void { this.setZoom(this.zoom() / 1.2); }
+  zoomReset(): void { this.setZoom(1); }
+  zoomPct(): number { return Math.round(this.zoom() * 100); }
+
+  /**
+   * Scale the diagram to fit the viewport. When <auto> is true (called after a
+   * fresh render) it only shrinks oversized diagrams — small ones stay 1:1.
+   */
+  fitToViewport(auto: boolean): void {
+    const host = this.diagramRef?.nativeElement;
+    if (!host || !this.baseW || !this.baseH) { return; }
+    const pad = 28;
+    const fit = Math.min(
+      (host.clientWidth  - pad) / this.baseW,
+      (host.clientHeight - pad) / this.baseH,
+    );
+    if (!Number.isFinite(fit) || fit <= 0) { this.applyZoom(); return; }
+    this.setZoom(auto ? Math.min(1, fit) : fit);
+    host.scrollTo({ left: 0, top: 0 });
+  }
+
+  private wireDiagramPan(host: HTMLElement): void {
+    if (this.panHost === host) { return; }
+    this.panHost = host;
+
+    // Ctrl/Cmd + wheel zooms; a plain wheel still scrolls the diagram.
+    host.addEventListener('wheel', (event: WheelEvent) => {
+      if (!event.ctrlKey && !event.metaKey) { return; }
+      event.preventDefault();
+      this.setZoom(this.zoom() * (event.deltaY < 0 ? 1.15 : 1 / 1.15));
+    }, { passive: false });
+
+    host.addEventListener('pointerdown', (event: PointerEvent) => {
+      if (event.button !== 0) { return; }
+      this.panPointerId = event.pointerId;
+      this.panStartX = event.clientX;
+      this.panStartY = event.clientY;
+      this.panStartLeft = host.scrollLeft;
+      this.panStartTop = host.scrollTop;
+      this.panMoved = false;
+      host.classList.add('sv-panning');
+      host.setPointerCapture(event.pointerId);
+    });
+
+    host.addEventListener('pointermove', (event: PointerEvent) => {
+      if (this.panPointerId !== event.pointerId) { return; }
+      const dx = event.clientX - this.panStartX;
+      const dy = event.clientY - this.panStartY;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+        this.panMoved = true;
+        this.suppressNextNodeClick = true;
+      }
+      host.scrollLeft = this.panStartLeft - dx;
+      host.scrollTop = this.panStartTop - dy;
+      event.preventDefault();
+    });
+
+    const finishPan = (event: PointerEvent) => {
+      if (this.panPointerId !== event.pointerId) { return; }
+      this.panPointerId = null;
+      host.classList.remove('sv-panning');
+      try { host.releasePointerCapture(event.pointerId); } catch { /* already released */ }
+      if (this.panMoved) {
+        window.setTimeout(() => { this.suppressNextNodeClick = false; }, 0);
+      }
+    };
+
+    host.addEventListener('pointerup', finishPan);
+    host.addEventListener('pointercancel', finishPan);
   }
 }

@@ -38,7 +38,28 @@ export interface SvGroup {
 }
 
 /** One caller→callee edge. */
-export interface SvCallEdge { from: string; to: string; kind: string; }
+export interface SvCallEdge {
+    from:       string;
+    to:         string;
+    kind:       string;
+    argRegs?:    string[];
+    returnRegs?: string[];
+}
+
+/** Resolved metadata for one call-graph node. */
+export interface SvCallNodeInfo {
+    address:    string;
+    label?:     string;
+    argRegs?:    string[];
+    returnRegs?: string[];
+}
+
+/** Name + register signature for a call-graph address, resolved by the webview. */
+export interface SvNodeResolved {
+    label?:      string;
+    argRegs?:    string[];
+    returnRegs?: string[];
+}
 
 /** A call-graph subgraph around a focus address. */
 export interface SvCallGraph {
@@ -46,6 +67,7 @@ export interface SvCallGraph {
     depth:     number;
     direction: string;
     nodes:     string[];
+    nodeInfo?: SvCallNodeInfo[];
     edges:     SvCallEdge[];
 }
 
@@ -59,7 +81,11 @@ export function hexKey(addr: string): string {
     const colon = t.indexOf(':');
     if (colon >= 0) { t = t.slice(0, colon); }
     const n = parseInt(t, 16);
-    return Number.isFinite(n) ? (n >>> 0).toString(16).padStart(8, '0') : t.replace(/[^0-9a-f]/g, '');
+    if (!Number.isFinite(n)) { return t.replace(/[^0-9a-f]/g, ''); }
+    const v = n >>> 0;
+    const masked = v & 0x1FFFFFFF;
+    const canonical = v >= 0x02000000 && masked < 0x02000000 ? masked : v;
+    return canonical.toString(16).padStart(8, '0');
 }
 
 /** Keep only characters that are safe inside a Mermaid member / label. */
@@ -88,11 +114,11 @@ function argName(raw: string): string {
 export function classDiagramFromStruct(struct: SvLabel, children: SvLabel[]): string {
     const id   = 'c' + hexKey(struct.address);
     const name = safeText(struct.name) || ('Struct_' + hexKey(struct.address));
-    const lines = ['classDiagram', `  class ${id}["${name}"]`];
+    const lines = ['classDiagram', classDeclaration(id, name)];
 
     const sorted = [...children].sort((a, b) => (a.offset ?? 0) - (b.offset ?? 0));
     if (sorted.length === 0) {
-        lines.push(`  ${id} : (no fields)`);
+        lines.push(`  ${id} : no_fields`);
     }
     for (const c of sorted) {
         const off = `off_0x${(c.offset ?? 0).toString(16).toUpperCase()}`;
@@ -111,14 +137,17 @@ export function classDiagramFromStruct(struct: SvLabel, children: SvLabel[]): st
  * Build a classDiagram from a label group: Function members become methods,
  * everything else becomes a field. Members are ordered by their sortOrder.
  */
-export function classDiagramFromGroup(group: SvGroup): string {
+export function classDiagramFromGroup(
+    group: SvGroup,
+    resolve?: (address: string) => SvLabel | undefined,
+): string {
     const id   = 'g' + group.id;
     const name = safeText(group.name) || ('Group_' + group.id);
-    const lines = ['classDiagram', `  class ${id}["${name}"]`];
+    const lines = ['classDiagram', classDeclaration(id, name)];
 
     const members = [...group.members].sort((a, b) => a.sortOrder - b.sortOrder);
     if (members.length === 0) {
-        lines.push(`  ${id} : (empty group)`);
+        lines.push(`  ${id} : empty_group`);
     }
     for (const m of members) {
         const tag = m.role ? `${safeText(m.role)} ` : '';
@@ -141,11 +170,11 @@ export function vtableDiagramFromLabel(vt: SvLabel, children: SvLabel[]): string
     const id     = 'v' + hexKey(vt.address);
     const name   = safeText(vt.name) || ('VTable_' + hexKey(vt.address));
     const stride = vt.elementStride && vt.elementStride > 0 ? vt.elementStride : 4;
-    const lines  = ['classDiagram', `  class ${id}["${name}"]`];
+    const lines  = ['classDiagram', classDeclaration(id, name)];
 
     const sorted = [...children].sort((a, b) => (a.offset ?? 0) - (b.offset ?? 0));
     if (sorted.length === 0) {
-        lines.push(`  ${id} : (no resolved slots)`);
+        lines.push(`  ${id} : no_resolved_slots`);
     }
     for (const c of sorted) {
         const slot = Math.floor((c.offset ?? 0) / stride);
@@ -155,14 +184,17 @@ export function vtableDiagramFromLabel(vt: SvLabel, children: SvLabel[]): string
 }
 
 /** Build a classDiagram for a vtable-kind label group (members are the slots). */
-export function vtableDiagramFromGroup(group: SvGroup): string {
+export function vtableDiagramFromGroup(
+    group: SvGroup,
+    resolve?: (address: string) => SvLabel | undefined,
+): string {
     const id   = 'g' + group.id;
     const name = safeText(group.name) || ('VTable_' + group.id);
-    const lines = ['classDiagram', `  class ${id}["${name}"]`];
+    const lines = ['classDiagram', classDeclaration(id, name)];
 
     const members = [...group.members].sort((a, b) => a.sortOrder - b.sortOrder);
     if (members.length === 0) {
-        lines.push(`  ${id} : (empty vtable)`);
+        lines.push(`  ${id} : empty_vtable`);
     }
     members.forEach((m, i) => {
         lines.push(`  ${id} : ${safeMemberText(`slot_${m.sortOrder || i} ${safeText(m.labelName)}()` )}`);
@@ -176,13 +208,25 @@ export function vtableDiagramFromGroup(group: SvGroup): string {
  * Build a flowchart for a call-graph subgraph. The focus node is highlighted;
  * node ids are `n<hex>` so the webview can wire click-to-navigate.
  */
-export function callGraphFlowchart(graph: SvCallGraph, nameOf: (addr: string) => string): string {
+export function callGraphFlowchart(
+    graph: SvCallGraph,
+    resolve: (addr: string) => SvNodeResolved | undefined,
+): string {
     const focusKey = hexKey(graph.focus);
     const lines = ['flowchart LR'];
+    const nodeInfo = new Map<string, SvCallNodeInfo>();
+    for (const info of graph.nodeInfo ?? []) {
+        const key = hexKey(info.address);
+        if (key) { nodeInfo.set(key, info); }
+    }
 
     for (const node of (graph.nodes ?? []).filter((n): n is string => typeof n === 'string' && !!hexKey(n))) {
         const key   = hexKey(node);
-        const label = `${safeText(nameOf(node))} 0x${key.toUpperCase()}`;
+        const info  = merge(node);
+        const name  = safeFlowText(info.label || `sub_${key.toUpperCase()}`);
+        const args  = signaturePart('args', info.argRegs);
+        const ret   = signaturePart('ret', info.returnRegs);
+        const label = [name, `0x${key.toUpperCase()}`, args, ret].filter(Boolean).join('<br/>');
         lines.push(`  n${key}["${label}"]`);
     }
     if (lines.length === 1 && focusKey) {
@@ -197,4 +241,15 @@ export function callGraphFlowchart(graph: SvCallGraph, nameOf: (addr: string) =>
         lines.push('  classDef focusNode fill:#3a6ea5,stroke:#9cf,color:#fff,stroke-width:2px');
     }
     return lines.join('\n');
+}
+
+function signaturePart(prefix: string, regs: string[] | undefined): string {
+    const values = (regs ?? []).map(safeFlowText).filter(Boolean);
+    return values.length ? `${prefix}: ${values.join(', ')}` : '';
+}
+
+function edgeAnnotation(edge: SvCallEdge): string {
+    const args = signaturePart('args', edge.argRegs);
+    const ret  = signaturePart('ret', edge.returnRegs);
+    return safeFlowText([args, ret].filter(Boolean).join('; '));
 }

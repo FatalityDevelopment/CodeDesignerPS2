@@ -53,6 +53,11 @@ body {
   white-space: nowrap;
 }
 .sv-spacer { flex: 1; }
+.sv-zoom {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
 .sv-sep {
   width: 1px;
   align-self: stretch;
@@ -159,7 +164,6 @@ body {
   padding: 12px;
   background: var(--vscode-editor-background, #1e1e1e);
 }
-.sv-diagram svg { max-width: 100%; height: auto; }
 
 .sv-empty {
   flex: 1;

@@ -192,8 +192,8 @@ All Structure-Visualizer commands take their parameters as a JSON object in the
 | `DELETELABELGROUP` | Delete a label group. `Data`: `{ groupId }` or `{ gameId, setName, groupName }` |
 | `ADDLABELGROUPMEMBER` | Add a label to a group. `Data`: `{ gameId, setName, groupName, labelAddress, role, sortOrder }` |
 | `DELETELABELGROUPMEMBER` | Remove a label from a group. `Data`: `{ gameId, setName, groupName, labelAddress }` |
-| `SCANCALLGRAPH` | Scan a code range for `JAL`/`JALR` calls and persist the caller→callee edges. `Data`: `{ gameId, address, length, region }` |
-| `GETCALLGRAPH` | Return the call-graph subgraph around a focus address. `Data`: `{ gameId, address, depth, direction }` — `direction` is `callers`/`callees`/`both` |
+| `SCANCALLGRAPH` | Scan a code range for `JAL`/`JALR` calls and persist the caller→callee edges. `Data`: `{ gameId, address, length, region }`. Rescans replace only edges whose caller lies inside the scanned range, so chunked scans are additive. |
+| `GETCALLGRAPH` | Return the call-graph subgraph around a focus address. `Data`: `{ gameId, address, depth, direction, setName }` — `direction` is `callers`/`callees`/`both`; optional `setName` lets the backend group call-site addresses under containing `Function` labels. Response includes `nodes` plus `nodeInfo` (`address`, `label`, `argRegs`, `returnRegs`), and each edge includes the callee `argRegs`/`returnRegs` for diagram annotations. |
 
 ### Save states & snapshots
 
