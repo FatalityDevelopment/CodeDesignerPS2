@@ -122,9 +122,9 @@ const PAGE_SIZE = 50;
                 <a class="cb-link-btn" [href]="g.forumLink" target="_blank" rel="noopener"
                    title="Open the PCSX2 forum thread">Forum</a>
               }
-              @if (g.crc) {
+              @if (canDownload(g)) {
                 <button class="cb-link-btn cb-download-btn"
-                        title="Download this game's ROM from Vimm's Lair (matched by CRC)"
+                        title="Download this USA game's ROM from Vimm's Lair"
                         (click)="downloadGame(g)">⬇ Download</button>
               }
               <button class="cb-link-btn cb-cheats-btn" title="Open cheats for this game"
@@ -273,8 +273,13 @@ export class CompatBrowserPageComponent implements AfterViewInit {
     this.vscode.postMessage({ type: 'openCheats', serial: g.serial, title: g.title });
   }
 
+  /** Vimm's Lair only carries USA releases, so downloads are offered for those. */
+  canDownload(g: CompatGame): boolean {
+    return g.region === 'NTSC-U';
+  }
+
   downloadGame(g: CompatGame): void {
-    this.vscode.postMessage({ type: 'downloadGame', crc: g.crc, title: g.title });
+    this.vscode.postMessage({ type: 'downloadGame', title: g.title });
   }
 
   // ── View helpers ───────────────────────────────────────────────────────
