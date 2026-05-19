@@ -53,6 +53,7 @@ export interface SvCallGraph {
 
 /** Normalise an address string to lowercase 8-hex without the 0x prefix. */
 export function hexKey(addr: string): string {
+    if (typeof addr !== 'string') { return ''; }
     let t = addr.trim().toLowerCase();
     if (t.startsWith('0x')) { t = t.slice(2); }
     const colon = t.indexOf(':');
@@ -173,19 +174,21 @@ export function callGraphFlowchart(graph: SvCallGraph, nameOf: (addr: string) =>
     const focusKey = hexKey(graph.focus);
     const lines = ['flowchart LR'];
 
-    for (const node of graph.nodes) {
+    for (const node of (graph.nodes ?? []).filter((n): n is string => typeof n === 'string' && !!hexKey(n))) {
         const key   = hexKey(node);
         const label = `${safeText(nameOf(node))} 0x${key.toUpperCase()}`;
         lines.push(`  n${key}["${label}"]`);
     }
-    if (graph.nodes.length === 0) {
+    if (lines.length === 1 && focusKey) {
         lines.push(`  n${focusKey}["${safeText(nameOf(graph.focus))} 0x${focusKey.toUpperCase()}"]`);
     }
-    for (const e of graph.edges) {
+    for (const e of (graph.edges ?? []).filter(e => !!hexKey(e?.from ?? '') && !!hexKey(e?.to ?? ''))) {
         const arrow = e.kind === 'Direct' ? '-->' : '-.->';
         lines.push(`  n${hexKey(e.from)} ${arrow} n${hexKey(e.to)}`);
     }
-    lines.push(`  class n${focusKey} focusNode`);
-    lines.push('  classDef focusNode fill:#3a6ea5,stroke:#9cf,color:#fff,stroke-width:2px');
+    if (focusKey) {
+        lines.push(`  class n${focusKey} focusNode`);
+        lines.push('  classDef focusNode fill:#3a6ea5,stroke:#9cf,color:#fff,stroke-width:2px');
+    }
     return lines.join('\n');
 }
