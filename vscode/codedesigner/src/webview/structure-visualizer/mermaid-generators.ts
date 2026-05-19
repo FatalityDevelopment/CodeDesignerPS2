@@ -67,6 +67,12 @@ function safeText(s: string): string {
     return (s || '').replace(/[^A-Za-z0-9_ .+\-*]/g, '_').trim() || '_';
 }
 
+/** Mermaid class members are parser-sensitive; keep a conservative subset. */
+function safeMemberText(s: string): string {
+    const t = safeText(s).replace(/[+\-#~]/g, '_');
+    return t || '_';
+}
+
 /** Strip the register= prefix from an argRegs entry, e.g. "a0=playerPtr" → "playerPtr". */
 function argName(raw: string): string {
     const eq = raw.indexOf('=');
@@ -82,20 +88,20 @@ function argName(raw: string): string {
 export function classDiagramFromStruct(struct: SvLabel, children: SvLabel[]): string {
     const id   = 'c' + hexKey(struct.address);
     const name = safeText(struct.name) || ('Struct_' + hexKey(struct.address));
-    const lines = ['classDiagram', `  class ${id}["${name}"]`];
+    const lines = ['classDiagram', `  class ${id}`, `  class ${id} as ${JSON.stringify(name)}`];
 
     const sorted = [...children].sort((a, b) => (a.offset ?? 0) - (b.offset ?? 0));
     if (sorted.length === 0) {
         lines.push(`  ${id} : (no fields)`);
     }
     for (const c of sorted) {
-        const off = `+0x${(c.offset ?? 0).toString(16).toUpperCase()}`;
+        const off = `off_0x${(c.offset ?? 0).toString(16).toUpperCase()}`;
         if (c.type === 'Function') {
             const args = (c.argRegs ?? []).map(argName).join(', ');
-            lines.push(`  ${id} : ${off} ${safeText(c.name)}(${args})`);
+            lines.push(`  ${id} : ${safeMemberText(`${off} ${safeText(c.name)}(${args})`)}`);
         } else {
             const vt = c.valueType ? ' ' + safeText(c.valueType) : '';
-            lines.push(`  ${id} : ${off} ${safeText(c.name)}${vt}`);
+            lines.push(`  ${id} : ${safeMemberText(`${off} ${safeText(c.name)}${vt}`)}`);
         }
     }
     return lines.join('\n');
@@ -108,18 +114,18 @@ export function classDiagramFromStruct(struct: SvLabel, children: SvLabel[]): st
 export function classDiagramFromGroup(group: SvGroup): string {
     const id   = 'g' + group.id;
     const name = safeText(group.name) || ('Group_' + group.id);
-    const lines = ['classDiagram', `  class ${id}["${name}"]`];
+    const lines = ['classDiagram', `  class ${id}`, `  class ${id} as ${JSON.stringify(name)}`];
 
     const members = [...group.members].sort((a, b) => a.sortOrder - b.sortOrder);
     if (members.length === 0) {
         lines.push(`  ${id} : (empty group)`);
     }
     for (const m of members) {
-        const tag = m.role ? `+${safeText(m.role)} ` : '+';
+        const tag = m.role ? `${safeText(m.role)} ` : '';
         if (m.labelType === 'Function') {
-            lines.push(`  ${id} : ${tag}${safeText(m.labelName)}()`);
+            lines.push(`  ${id} : ${safeMemberText(`${tag}${safeText(m.labelName)}()` )}`);
         } else {
-            lines.push(`  ${id} : ${tag}${safeText(m.labelName)}`);
+            lines.push(`  ${id} : ${safeMemberText(`${tag}${safeText(m.labelName)}`)}`);
         }
     }
     return lines.join('\n');
@@ -135,7 +141,7 @@ export function vtableDiagramFromLabel(vt: SvLabel, children: SvLabel[]): string
     const id     = 'v' + hexKey(vt.address);
     const name   = safeText(vt.name) || ('VTable_' + hexKey(vt.address));
     const stride = vt.elementStride && vt.elementStride > 0 ? vt.elementStride : 4;
-    const lines  = ['classDiagram', `  class ${id}["${name}"]`];
+    const lines  = ['classDiagram', `  class ${id}`, `  class ${id} as ${JSON.stringify(name)}`];
 
     const sorted = [...children].sort((a, b) => (a.offset ?? 0) - (b.offset ?? 0));
     if (sorted.length === 0) {
@@ -143,7 +149,7 @@ export function vtableDiagramFromLabel(vt: SvLabel, children: SvLabel[]): string
     }
     for (const c of sorted) {
         const slot = Math.floor((c.offset ?? 0) / stride);
-        lines.push(`  ${id} : +[${slot}] ${safeText(c.name)}()`);
+        lines.push(`  ${id} : ${safeMemberText(`slot_${slot} ${safeText(c.name)}()` )}`);
     }
     return lines.join('\n');
 }
@@ -152,14 +158,14 @@ export function vtableDiagramFromLabel(vt: SvLabel, children: SvLabel[]): string
 export function vtableDiagramFromGroup(group: SvGroup): string {
     const id   = 'g' + group.id;
     const name = safeText(group.name) || ('VTable_' + group.id);
-    const lines = ['classDiagram', `  class ${id}["${name}"]`];
+    const lines = ['classDiagram', `  class ${id}`, `  class ${id} as ${JSON.stringify(name)}`];
 
     const members = [...group.members].sort((a, b) => a.sortOrder - b.sortOrder);
     if (members.length === 0) {
         lines.push(`  ${id} : (empty vtable)`);
     }
     members.forEach((m, i) => {
-        lines.push(`  ${id} : +[${m.sortOrder || i}] ${safeText(m.labelName)}()`);
+        lines.push(`  ${id} : ${safeMemberText(`slot_${m.sortOrder || i} ${safeText(m.labelName)}()` )}`);
     });
     return lines.join('\n');
 }
