@@ -103,7 +103,7 @@ export class StructureVisualizerProvider {
                     if ((graph.edges?.length ?? 0) === 0) {
                         const focus = parseAddress(address);
                         if (focus !== undefined) {
-                            const autoScanLen = 0x20000;
+                            const autoScanLen = 0x200000;
                             try {
                                 await this.socketClient.scanCallGraph(ctx.gameId, `0x${focus.toString(16)}`, autoScanLen);
                                 const rescanned = await this.socketClient.getCallGraph(ctx.gameId, address, depth, direction);
