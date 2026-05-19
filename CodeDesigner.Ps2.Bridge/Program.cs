@@ -222,6 +222,10 @@ namespace CodeDesigner.Ps2.Bridge
                 "STARTFILEMODE" or "START_FILE_MODE"
                     => HandleStartFileMode(server, command),
 
+                "STARTANALYSISEMU" or "START_ANALYSIS_EMU"
+                or "STARTANALYSISEMULATOR" or "START_ANALYSIS_EMULATOR"
+                    => HandleStartAnalysisEmulatorMode(server, command),
+
                 _ => JsonSerializer.Serialize(new CommandResponse
                 {
                     Success = false,
@@ -245,6 +249,11 @@ namespace CodeDesigner.Ps2.Bridge
                     var pine = new PineClient(host, slot);
                     var status = pine.GetStatus();
 
+                    // If AnalysisClient was the same instance as InternalClient
+                    // (built-in mode), drop the reference before disposing or it
+                    // would point at a disposed client.
+                    if (ReferenceEquals(server.AnalysisClient, server.InternalClient))
+                        server.AnalysisClient = null;
                     server.InternalClient?.Dispose();
                     server.InternalClient = null;
 
@@ -332,6 +341,10 @@ namespace CodeDesigner.Ps2.Bridge
                 }
 
                 server.InternalClient = client;
+                // Built-in mode: the live emulator process is also the analysis
+                // substrate, so AnalysisStateService can read state directly
+                // without any cross-process mirror.
+                server.AnalysisClient = client;
             }
 
             return JsonSerializer.Serialize(new CommandResponse
@@ -339,6 +352,79 @@ namespace CodeDesigner.Ps2.Bridge
                 Success = true,
                 Command = "STARTEMULATOR",
                 Message = "Built-in emulator mode started"
+            });
+        }
+
+        // Default port for the secondary InternalPineSocket used as the analysis
+        // substrate in PCSX2 mode. The user (or the front end) launches a bare
+        // Emulator.exe with `--bare --port 28013` and then issues STARTANALYSISEMU.
+        private const int AnalysisEmulatorPortDefault = 28013;
+
+        /// <summary>
+        /// STARTANALYSISEMU — connect to a bare CodeDesigner.Ps2.Emulator.exe instance
+        /// that the front end has launched as the analysis substrate (typically with
+        /// <c>--bare --port 28013</c>). Bridge keeps this second connection alive in
+        /// parallel with the live debug client and uses it to seed the analyzer with
+        /// real runtime state at every breakpoint.
+        /// </summary>
+        private static string HandleStartAnalysisEmulatorMode(SocketServer server, CommandMessage command)
+        {
+            lock (RuntimeModeLock)
+            {
+                string host = string.IsNullOrWhiteSpace(command.InternalEmulatorHost)
+                    ? InternalEmulatorHostDefault
+                    : command.InternalEmulatorHost!;
+                int port = command.InternalEmulatorPort ?? AnalysisEmulatorPortDefault;
+
+                // If the analysis client is currently the same instance as the
+                // live built-in client, leave InternalClient alone — only swap
+                // the analysis socket itself.
+                bool analysisWasInternal = ReferenceEquals(server.AnalysisClient, server.InternalClient);
+                if (!analysisWasInternal)
+                {
+                    server.AnalysisClient?.Dispose();
+                }
+                server.AnalysisClient = null;
+
+                InternalEmulatorClient? client = null;
+                Exception? lastEx = null;
+                for (int attempt = 0; attempt < 10; attempt++)
+                {
+                    try
+                    {
+                        client = new InternalEmulatorClient(host, port);
+                        _ = client.GetStatus();
+                        lastEx = null;
+                        break;
+                    }
+                    catch (Exception ex)
+                    {
+                        client?.Dispose();
+                        client = null;
+                        lastEx = ex;
+                        Thread.Sleep(200);
+                    }
+                }
+
+                if (client == null)
+                {
+                    return JsonSerializer.Serialize(new CommandResponse
+                    {
+                        Success = false,
+                        Command = "STARTANALYSISEMU",
+                        Error   = $"Could not connect to analysis InternalPineSocket at {host}:{port} — " +
+                                  $"launch a bare emulator with `--bare --port {port}` first. ({lastEx?.Message})"
+                    });
+                }
+
+                server.AnalysisClient = client;
+            }
+
+            return JsonSerializer.Serialize(new CommandResponse
+            {
+                Success = true,
+                Command = "STARTANALYSISEMU",
+                Message = "Analysis emulator attached"
             });
         }
 
