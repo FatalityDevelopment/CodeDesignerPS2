@@ -445,12 +445,15 @@ app-bottom-panel {
     min-width: 180px;
     display: none;
     flex-direction: column;
-    background: var(--vscode-editor-background, #1e1e1e);
-    border-left: 1px solid #3e3e42;
+    margin: 8px 8px 8px 0;
+    background: color-mix(in srgb, var(--vscode-editor-background, #1e1e1e) 90%, white 10%);
+    border: 1px solid var(--vscode-panel-border, #3e3e42);
+    border-radius: 10px;
     overflow: hidden;
     font-family: var(--vscode-editor-font-family, monospace);
     font-size: 12px;
     position: relative;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.22);
 }
 
 .debug-panel.visible {
@@ -481,35 +484,41 @@ app-bottom-panel {
     display: flex;
     background: color-mix(in srgb, var(--vscode-editor-background, #1e1e1e) 88%, white 12%);
     border-bottom: 1px solid var(--vscode-panel-border, #3e3e42);
+    gap: 2px;
+    padding: 3px 4px;
     flex-shrink: 0;
 }
 
 .debug-tab {
-    background: none;
-    border: none;
-    border-bottom: 2px solid transparent;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
     color: var(--vscode-descriptionForeground, #858585);
-    padding: 6px 14px;
+    padding: 5px 10px;
     cursor: pointer;
     font-family: var(--vscode-editor-font-family, monospace);
     font-size: 11px;
+    font-weight: 600;
     outline: none;
+    transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
 
 .debug-tab:hover {
+    background: color-mix(in srgb, var(--vscode-editor-background, #1e1e1e) 76%, white 24%);
     color: var(--vscode-editor-foreground, #d4d4d4);
 }
 
 .debug-tab.active {
     color: var(--vscode-editor-foreground, #d4d4d4);
-    border-bottom-color: #007acc;
+    border-color: var(--vscode-button-background, #007acc);
+    background: color-mix(in srgb, var(--vscode-button-background, #007acc) 28%, transparent);
 }
 
 .debug-tab-content {
     display: none;
     flex: 1;
     overflow-y: auto;
-    padding: 4px 0;
+    padding: 6px;
 }
 
 .debug-tab-content.active {
@@ -527,31 +536,38 @@ app-bottom-panel {
     color: var(--vscode-descriptionForeground, #858585);
     font-size: 10px;
     text-transform: uppercase;
-    padding: 6px 8px 2px;
-    letter-spacing: 0.05em;
+    padding: 8px 10px 4px;
+    letter-spacing: 0.07em;
+    font-weight: 700;
 }
 
 .dbg-divider {
     border-bottom: 1px solid var(--vscode-panel-border, #3e3e42);
-    margin: 4px 8px;
+    margin: 6px 8px;
 }
 
 .dbg-row {
     display: flex;
     align-items: center;
-    padding: 1px 8px;
-    line-height: 1.6;
+    gap: 8px;
+    margin: 2px 0;
+    padding: 4px 8px;
+    line-height: 1.4;
+    border-radius: 6px;
+    border: 1px solid transparent;
 }
 
 .dbg-row:hover {
-    background: #2a2d2e;
+    background: color-mix(in srgb, var(--vscode-editor-background, #1e1e1e) 72%, white 28%);
+    border-color: var(--vscode-panel-border, #3e3e42);
 }
 
 .dbg-name {
     color: var(--vscode-debugTokenExpression-name, #9cdcfe);
-    width: 7ch;
+    width: 6.5ch;
     flex-shrink: 0;
     white-space: pre;
+    font-weight: 600;
 }
 
 /* ── GPR register category colours ── */
@@ -578,11 +594,13 @@ app-bottom-panel {
     color: #c586c0;
     width: 9ch;
     flex-shrink: 0;
+    opacity: 0.88;
 }
 
 .dbg-val {
     color: var(--vscode-editor-foreground, #d4d4d4);
     font-family: var(--vscode-editor-font-family, monospace);
+    letter-spacing: 0.01em;
 }
 
 .dbg-nonzero .dbg-val {
@@ -606,7 +624,7 @@ app-bottom-panel {
     align-items: center;
     justify-content: space-between;
     gap: 6px;
-    padding: 4px 8px;
+    padding: 7px 10px;
     border-bottom: 1px solid var(--vscode-panel-border, #3e3e42);
     flex-shrink: 0;
     background: color-mix(in srgb, var(--vscode-editor-background, #1e1e1e) 88%, white 12%);
@@ -616,12 +634,14 @@ app-bottom-panel {
     color: var(--vscode-descriptionForeground, #858585);
     font-size: 10px;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.07em;
+    font-weight: 700;
 }
 
 .inspect-section-stack {
-    margin-top: 8px;
-    border-top: 1px solid #3e3e42;
+    margin-top: 10px;
+    border-top: 1px solid var(--vscode-panel-border, #3e3e42);
+    padding-top: 4px;
 }
 
 /* ── Quad-word (128-bit) GPR column header and value layout ── */
@@ -1099,8 +1119,10 @@ app-bottom-panel {
     min-height: 80px;
     display: none;
     flex-direction: column;
-    background: var(--vscode-editor-background, #1e1e1e);
-    border-top: 1px solid #3e3e42;
+    margin: 0 8px 8px;
+    background: color-mix(in srgb, var(--vscode-editor-background, #1e1e1e) 90%, white 10%);
+    border: 1px solid var(--vscode-panel-border, #3e3e42);
+    border-radius: 10px;
     overflow: hidden;
     font-family: var(--vscode-editor-font-family, monospace);
     font-size: 12px;
@@ -1135,6 +1157,8 @@ app-bottom-panel {
     align-items: center;
     background: color-mix(in srgb, var(--vscode-editor-background, #1e1e1e) 88%, white 12%);
     border-bottom: 1px solid var(--vscode-panel-border, #3e3e42);
+    padding: 3px 4px;
+    gap: 2px;
     flex-shrink: 0;
 }
 
@@ -1143,28 +1167,33 @@ app-bottom-panel {
     flex: 0 0 auto;
     align-items: center;
     background: color-mix(in srgb, var(--vscode-editor-background, #1e1e1e) 88%, white 12%);
-    border-bottom: 1px solid var(--vscode-panel-border, #3e3e42);
+    border-bottom: 0;
+    gap: 2px;
 }
 
 .bottom-tab {
-    background: none;
-    border: none;
-    border-bottom: 2px solid transparent;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
     color: var(--vscode-descriptionForeground, #858585);
-    padding: 5px 14px;
+    padding: 5px 10px;
     cursor: pointer;
     font-family: var(--vscode-editor-font-family, monospace);
     font-size: 11px;
+    font-weight: 600;
     outline: none;
+    transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
 
 .bottom-tab:hover {
+    background: color-mix(in srgb, var(--vscode-editor-background, #1e1e1e) 76%, white 24%);
     color: var(--vscode-editor-foreground, #d4d4d4);
 }
 
 .bottom-tab.active {
     color: var(--vscode-editor-foreground, #d4d4d4);
-    border-bottom-color: #007acc;
+    border-color: var(--vscode-button-background, #007acc);
+    background: color-mix(in srgb, var(--vscode-button-background, #007acc) 28%, transparent);
 }
 
 .bottom-refresh-btn {
@@ -1178,7 +1207,7 @@ app-bottom-panel {
     font-family: var(--vscode-editor-font-family, monospace);
     font-size: 11px;
     outline: none;
-    border-radius: 2px;
+    border-radius: 6px;
 }
 
 .bottom-refresh-btn:hover {
@@ -1189,7 +1218,8 @@ app-bottom-panel {
 #bottom-panel-actions {
     display: flex;
     align-items: center;
-    padding: 0 6px;
+    gap: 6px;
+    padding: 0 6px 0 2px;
     flex-shrink: 0;
 }
 
@@ -1202,7 +1232,7 @@ app-bottom-panel {
     font-family: var(--vscode-editor-font-family, monospace);
     font-size: 11px;
     outline: none;
-    border-radius: 2px;
+    border-radius: 6px;
 }
 
 .bottom-action-btn:hover {
