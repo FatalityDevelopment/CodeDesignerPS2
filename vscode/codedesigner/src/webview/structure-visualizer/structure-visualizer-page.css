@@ -33,6 +33,7 @@ body {
   border-bottom: 1px solid var(--vscode-panel-border, #313131);
   flex-wrap: wrap;
   flex-shrink: 0;
+  background: #252526;
 }
 
 .sv-title {
@@ -107,23 +108,28 @@ body {
 .sv-tabs {
   display: flex;
   gap: 2px;
-  padding: 4px 10px 0;
+  padding: 6px 10px 4px;
   border-bottom: 1px solid var(--vscode-panel-border, #313131);
   flex-shrink: 0;
+  background: #252526;
 }
 .sv-tab {
-  background: transparent;
+  background: rgba(255,255,255,0.02);
   color: var(--vscode-foreground, #d4d4d4);
-  border: none;
+  border: 1px solid transparent;
   border-bottom: 2px solid transparent;
+  border-radius: 4px 4px 0 0;
   padding: 6px 12px;
   font-family: inherit;
   font-size: 12px;
   cursor: pointer;
 }
-.sv-tab:hover { background: rgba(255, 255, 255, 0.05); }
+.sv-tab:hover { background: rgba(255, 255, 255, 0.08); }
 .sv-tab-on {
-  border-bottom-color: var(--vscode-focusBorder, #0e639c);
+  background: var(--vscode-button-background, #2d7f9f);
+  color: var(--vscode-button-foreground, #fff);
+  border-color: transparent;
+  border-bottom-color: var(--vscode-button-background, #2d7f9f);
   font-weight: 600;
 }
 .sv-depth {
@@ -136,9 +142,11 @@ body {
 
 /* ── Status ──────────────────────────────────────────────────────────── */
 .sv-status {
-  padding: 4px 10px;
+  padding: 6px 10px;
   font-size: 11px;
-  color: var(--vscode-descriptionForeground, #8f8f8f);
+  color: var(--vscode-foreground, #d4d4d4);
+  background: #252526;
+  border-bottom: 1px solid var(--vscode-panel-border, #313131);
   flex-shrink: 0;
 }
 .sv-error { color: var(--vscode-errorForeground, #f48771); }
@@ -154,15 +162,7 @@ body {
   flex: 1;
   overflow: auto;
   padding: 12px;
-  cursor: grab;
-  user-select: none;
-}
-.sv-diagram.sv-panning { cursor: grabbing; }
-.sv-diagram svg {
-  display: block;
-  /* Explicit width/height are set inline by the zoom logic; the stylesheet
-     must not override them or the diagram can't overflow and pan. */
-  max-width: none !important;
+  background: var(--vscode-editor-background, #1e1e1e);
 }
 
 .sv-empty {
@@ -180,6 +180,7 @@ body {
   overflow-y: auto;
   border-left: 1px solid var(--vscode-panel-border, #313131);
   padding: 10px;
+  background: #252526;
   box-sizing: border-box;
 }
 
@@ -210,7 +211,11 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 2px 0;
+  padding: 4px 6px;
+  border-radius: 4px;
+}
+.sv-ed-row:hover {
+  background: rgba(255, 255, 255, 0.06);
 }
 .sv-ed-off {
   font-family: var(--vscode-editor-font-family, monospace);
@@ -223,4 +228,35 @@ body {
   gap: 4px;
   flex-wrap: wrap;
   margin-top: 4px;
+}
+
+/* ── Mermaid contrast overrides (dark disassembler-like palette) ─────── */
+.sv-diagram .mermaid svg { background: transparent; }
+.sv-diagram .node rect,
+.sv-diagram .node polygon,
+.sv-diagram .node path,
+.sv-diagram .node circle,
+.sv-diagram .classBox {
+  fill: #2a2d2e !important;
+  stroke: #6b6f72 !important;
+}
+.sv-diagram .nodeLabel,
+.sv-diagram .label text,
+.sv-diagram .classTitle,
+.sv-diagram .classLabel text {
+  fill: #d4d4d4 !important;
+  color: #d4d4d4 !important;
+}
+.sv-diagram .edgePath .path,
+.sv-diagram .flowchart-link,
+.sv-diagram path.relation {
+  stroke: #7aa2c7 !important;
+}
+.sv-diagram marker path {
+  fill: #7aa2c7 !important;
+  stroke: #7aa2c7 !important;
+}
+.sv-diagram .edgeLabel {
+  background-color: #1e1e1e !important;
+  color: #c8c8c8 !important;
 }

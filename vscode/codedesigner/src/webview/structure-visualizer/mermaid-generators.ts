@@ -93,43 +93,16 @@ function safeText(s: string): string {
     return (s || '').replace(/[^A-Za-z0-9_ .+\-*]/g, '_').trim() || '_';
 }
 
-/** Flowchart labels can carry richer signatures, but keep Mermaid delimiters out. */
-function safeFlowText(s: string): string {
-    return (s || '').replace(/[|"[\]{}<>]/g, '_').replace(/\s+/g, ' ').trim();
-}
-
 /** Mermaid class members are parser-sensitive; keep a conservative subset. */
 function safeMemberText(s: string): string {
     const t = safeText(s).replace(/[+\-#~]/g, '_');
     return t || '_';
 }
 
-/** Format a register annotation token for display, e.g. "a0=playerPtr" → "a0.playerPtr". */
-function regText(raw: string): string {
-    return (raw || '').replace(/[^A-Za-z0-9_]+/g, '.').replace(/^\.+|\.+$/g, '') || '_';
-}
-
-/** Join an argument or return register list into "reg.name, reg.name". */
-function regList(regs: string[] | undefined): string {
-    return (regs ?? []).map(regText).filter(t => t !== '_').join(', ');
-}
-
-/**
- * Build a classDiagram method member that shows a function's argument and
- * return registers, e.g. "+update(a0.playerPtr, a1.flags) v0.result".
- * The name is sanitised so it can never be empty (an empty name before "("
- * makes the Mermaid classDiagram parser throw).
- */
-function functionMember(name: string, argRegs?: string[], returnRegs?: string[]): string {
-    const fn   = safeText(name) || 'fn';
-    const args = regList(argRegs);
-    const rets = regList(returnRegs);
-    return rets ? `+${fn}(${args}) ${rets}` : `+${fn}(${args})`;
-}
-
-/** Mermaid classDiagram uses bracket labels, not flowchart-style `as` aliases. */
-function classDeclaration(id: string, label: string): string {
-    return `  class ${id}[${JSON.stringify(label)}]`;
+/** Strip the register= prefix from an argRegs entry, e.g. "a0=playerPtr" → "playerPtr". */
+function argName(raw: string): string {
+    const eq = raw.indexOf('=');
+    return safeText(eq >= 0 ? raw.slice(eq + 1) : raw);
 }
 
 // ── Class / object diagram ─────────────────────────────────────────────────
@@ -150,7 +123,8 @@ export function classDiagramFromStruct(struct: SvLabel, children: SvLabel[]): st
     for (const c of sorted) {
         const off = `off_0x${(c.offset ?? 0).toString(16).toUpperCase()}`;
         if (c.type === 'Function') {
-            lines.push(`  ${id} : ${functionMember(`${off}_${safeText(c.name)}`, c.argRegs, c.returnRegs)}`);
+            const args = (c.argRegs ?? []).map(argName).join(', ');
+            lines.push(`  ${id} : ${safeMemberText(`${off} ${safeText(c.name)}(${args})`)}`);
         } else {
             const vt = c.valueType ? ' ' + safeText(c.valueType) : '';
             lines.push(`  ${id} : ${safeMemberText(`${off} ${safeText(c.name)}${vt}`)}`);
@@ -176,12 +150,10 @@ export function classDiagramFromGroup(
         lines.push(`  ${id} : empty_group`);
     }
     for (const m of members) {
+        const tag = m.role ? `${safeText(m.role)} ` : '';
         if (m.labelType === 'Function') {
-            const info = resolve?.(m.labelAddress);
-            const nm   = (m.role ? safeText(m.role) + '_' : '') + safeText(m.labelName);
-            lines.push(`  ${id} : ${functionMember(nm, info?.argRegs, info?.returnRegs)}`);
+            lines.push(`  ${id} : ${safeMemberText(`${tag}${safeText(m.labelName)}()` )}`);
         } else {
-            const tag = m.role ? `${safeText(m.role)} ` : '';
             lines.push(`  ${id} : ${safeMemberText(`${tag}${safeText(m.labelName)}`)}`);
         }
     }
@@ -206,7 +178,7 @@ export function vtableDiagramFromLabel(vt: SvLabel, children: SvLabel[]): string
     }
     for (const c of sorted) {
         const slot = Math.floor((c.offset ?? 0) / stride);
-        lines.push(`  ${id} : ${functionMember(`slot_${slot}_${safeText(c.name)}`, c.argRegs, c.returnRegs)}`);
+        lines.push(`  ${id} : ${safeMemberText(`slot_${slot} ${safeText(c.name)}()` )}`);
     }
     return lines.join('\n');
 }
@@ -225,8 +197,7 @@ export function vtableDiagramFromGroup(
         lines.push(`  ${id} : empty_vtable`);
     }
     members.forEach((m, i) => {
-        const info = resolve?.(m.labelAddress);
-        lines.push(`  ${id} : ${functionMember(`slot_${m.sortOrder || i}_${safeText(m.labelName)}`, info?.argRegs, info?.returnRegs)}`);
+        lines.push(`  ${id} : ${safeMemberText(`slot_${m.sortOrder || i} ${safeText(m.labelName)}()` )}`);
     });
     return lines.join('\n');
 }
@@ -249,19 +220,6 @@ export function callGraphFlowchart(
         if (key) { nodeInfo.set(key, info); }
     }
 
-    // Prefer the webview's own label data — it always carries the same
-    // annotations shown in class diagrams — and fall back to the backend's
-    // resolved node info.
-    const merge = (addr: string): Required<SvNodeResolved> => {
-        const local = resolve(addr) ?? {};
-        const back  = nodeInfo.get(hexKey(addr));
-        return {
-            label:      local.label || back?.label || '',
-            argRegs:    (local.argRegs?.length    ? local.argRegs    : back?.argRegs)    ?? [],
-            returnRegs: (local.returnRegs?.length ? local.returnRegs : back?.returnRegs) ?? [],
-        };
-    };
-
     for (const node of (graph.nodes ?? []).filter((n): n is string => typeof n === 'string' && !!hexKey(n))) {
         const key   = hexKey(node);
         const info  = merge(node);
@@ -272,19 +230,11 @@ export function callGraphFlowchart(
         lines.push(`  n${key}["${label}"]`);
     }
     if (lines.length === 1 && focusKey) {
-        const info = merge(graph.focus);
-        lines.push(`  n${focusKey}["${safeFlowText(info.label || `sub_${focusKey.toUpperCase()}`)}<br/>0x${focusKey.toUpperCase()}"]`);
+        lines.push(`  n${focusKey}["${safeText(nameOf(graph.focus))} 0x${focusKey.toUpperCase()}"]`);
     }
     for (const e of (graph.edges ?? []).filter(e => !!hexKey(e?.from ?? '') && !!hexKey(e?.to ?? ''))) {
-        const arrow  = e.kind === 'Direct' ? '-->' : '-.->';
-        const callee = merge(e.to);
-        const annotation = edgeAnnotation({
-            ...e,
-            argRegs:    e.argRegs?.length    ? e.argRegs    : callee.argRegs,
-            returnRegs: e.returnRegs?.length ? e.returnRegs : callee.returnRegs,
-        });
-        const label = annotation ? `|${annotation}|` : '';
-        lines.push(`  n${hexKey(e.from)} ${arrow}${label} n${hexKey(e.to)}`);
+        const arrow = e.kind === 'Direct' ? '-->' : '-.->';
+        lines.push(`  n${hexKey(e.from)} ${arrow} n${hexKey(e.to)}`);
     }
     if (focusKey) {
         lines.push(`  class n${focusKey} focusNode`);

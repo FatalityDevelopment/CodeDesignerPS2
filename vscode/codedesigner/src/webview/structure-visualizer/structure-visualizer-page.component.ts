@@ -463,7 +463,6 @@ export class StructureVisualizerPageComponent implements AfterViewInit {
     const focus = this.focusAddr().trim() || selected?.address || this.entries().find(e => e.type === 'Function')?.address || '';
     this.vscode.postMessage({
       type: 'getCallGraph',
-      setName: this.setName(),
       address: focus,
       depth: this.depth(),
       direction: this.direction(),

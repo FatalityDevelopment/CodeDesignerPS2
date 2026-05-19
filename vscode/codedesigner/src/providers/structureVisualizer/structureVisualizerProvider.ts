@@ -94,14 +94,27 @@ export class StructureVisualizerProvider {
                     const address = String(msg['address'] ?? '');
                     const depth = Number(msg['depth'] ?? 3);
                     const direction = String(msg['direction'] ?? 'both');
-                    const setName = String(msg['setName'] ?? ctx.activeSetName ?? '');
                     const graph = await this.socketClient.getCallGraph(
                         ctx.gameId,
                         address,
                         depth,
                         direction,
-                        setName,
                     );
+                    if ((graph.edges?.length ?? 0) === 0) {
+                        const focus = parseAddress(address);
+                        if (focus !== undefined) {
+                            const autoScanLen = 0x200000;
+                            try {
+                                await this.socketClient.scanCallGraph(ctx.gameId, `0x${focus.toString(16)}`, autoScanLen);
+                                const rescanned = await this.socketClient.getCallGraph(ctx.gameId, address, depth, direction);
+                                webview.postMessage({ type: 'scanResult', result: { totalEdges: rescanned.edges?.length ?? 0, directEdges: 0, indirectEdges: 0 } });
+                                webview.postMessage({ type: 'callGraph', graph: rescanned });
+                                break;
+                            } catch (err: unknown) {
+                                getOutputChannel().warn('[StructureVisualizer] auto scan/getCallGraph: ' + errText(err));
+                            }
+                        }
+                    }
                     webview.postMessage({ type: 'callGraph', graph });
                     break;
                 }

@@ -4059,3 +4059,62 @@ app-bottom-panel {
     font-size: 12px;
     user-select: all;
 }
+
+/* ── 2026 contrast refresh: darker disassembler style with clearer separation ── */
+#header-toolbar,
+#search-panel,
+#goto-panel,
+#setpc-panel,
+#symbols-panel-header,
+#sym-tabs,
+#debug-tabs,
+.debug-tabs {
+    background: #202124;
+    border-color: #34363a;
+}
+
+.header-tool-btn,
+#search-panel button,
+#goto-panel button,
+#setpc-panel button,
+.sym-tab,
+.debug-tab {
+    background: #2a2c30;
+    border-color: #45484e;
+    color: #d4d4d4;
+}
+
+.header-tool-btn:hover,
+#search-panel button:hover,
+#goto-panel button:hover,
+#setpc-panel button:hover,
+.sym-tab:hover,
+.debug-tab:hover {
+    background: #343840;
+    color: #ffffff;
+}
+
+.header-tool-btn.active,
+.sym-tab.active,
+.debug-tab.active {
+    background: #0e639c;
+    border-color: #1177bb;
+    color: #ffffff;
+}
+
+#symbols-panel,
+.debug-panel,
+#scanner-results,
+#struct-members-list,
+#lm-table-wrap {
+    background: #1b1c1f;
+}
+
+#lm-table tr:hover td {
+    background: #2b3038;
+}
+
+.comment,
+.lm-muted {
+    color: #8f949b !important;
+}
