@@ -54,6 +54,13 @@ export interface SvCallNodeInfo {
     returnRegs?: string[];
 }
 
+/** Name + register signature for a call-graph address, resolved by the webview. */
+export interface SvNodeResolved {
+    label?:      string;
+    argRegs?:    string[];
+    returnRegs?: string[];
+}
+
 /** A call-graph subgraph around a focus address. */
 export interface SvCallGraph {
     focus:     string;
@@ -230,7 +237,10 @@ export function vtableDiagramFromGroup(
  * Build a flowchart for a call-graph subgraph. The focus node is highlighted;
  * node ids are `n<hex>` so the webview can wire click-to-navigate.
  */
-export function callGraphFlowchart(graph: SvCallGraph, nameOf: (addr: string) => string): string {
+export function callGraphFlowchart(
+    graph: SvCallGraph,
+    resolve: (addr: string) => SvNodeResolved | undefined,
+): string {
     const focusKey = hexKey(graph.focus);
     const lines = ['flowchart LR'];
     const nodeInfo = new Map<string, SvCallNodeInfo>();
@@ -239,21 +249,40 @@ export function callGraphFlowchart(graph: SvCallGraph, nameOf: (addr: string) =>
         if (key) { nodeInfo.set(key, info); }
     }
 
+    // Prefer the webview's own label data — it always carries the same
+    // annotations shown in class diagrams — and fall back to the backend's
+    // resolved node info.
+    const merge = (addr: string): Required<SvNodeResolved> => {
+        const local = resolve(addr) ?? {};
+        const back  = nodeInfo.get(hexKey(addr));
+        return {
+            label:      local.label || back?.label || '',
+            argRegs:    (local.argRegs?.length    ? local.argRegs    : back?.argRegs)    ?? [],
+            returnRegs: (local.returnRegs?.length ? local.returnRegs : back?.returnRegs) ?? [],
+        };
+    };
+
     for (const node of (graph.nodes ?? []).filter((n): n is string => typeof n === 'string' && !!hexKey(n))) {
         const key   = hexKey(node);
-        const info  = nodeInfo.get(key);
-        const name  = safeFlowText(info?.label || nameOf(node) || `sub_${key.toUpperCase()}`);
-        const args  = signaturePart('args', info?.argRegs);
-        const ret   = signaturePart('ret', info?.returnRegs);
+        const info  = merge(node);
+        const name  = safeFlowText(info.label || `sub_${key.toUpperCase()}`);
+        const args  = signaturePart('args', info.argRegs);
+        const ret   = signaturePart('ret', info.returnRegs);
         const label = [name, `0x${key.toUpperCase()}`, args, ret].filter(Boolean).join('<br/>');
         lines.push(`  n${key}["${label}"]`);
     }
     if (lines.length === 1 && focusKey) {
-        lines.push(`  n${focusKey}["${safeFlowText(nameOf(graph.focus) || `sub_${focusKey.toUpperCase()}`)}<br/>0x${focusKey.toUpperCase()}"]`);
+        const info = merge(graph.focus);
+        lines.push(`  n${focusKey}["${safeFlowText(info.label || `sub_${focusKey.toUpperCase()}`)}<br/>0x${focusKey.toUpperCase()}"]`);
     }
     for (const e of (graph.edges ?? []).filter(e => !!hexKey(e?.from ?? '') && !!hexKey(e?.to ?? ''))) {
-        const arrow = e.kind === 'Direct' ? '-->' : '-.->';
-        const annotation = edgeAnnotation(e);
+        const arrow  = e.kind === 'Direct' ? '-->' : '-.->';
+        const callee = merge(e.to);
+        const annotation = edgeAnnotation({
+            ...e,
+            argRegs:    e.argRegs?.length    ? e.argRegs    : callee.argRegs,
+            returnRegs: e.returnRegs?.length ? e.returnRegs : callee.returnRegs,
+        });
         const label = annotation ? `|${annotation}|` : '';
         lines.push(`  n${hexKey(e.from)} ${arrow}${label} n${hexKey(e.to)}`);
     }

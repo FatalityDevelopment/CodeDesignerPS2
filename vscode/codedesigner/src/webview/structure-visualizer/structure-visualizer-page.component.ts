@@ -12,7 +12,7 @@ import mermaid from 'mermaid';
 import { getVsCodeApi } from '../shared/vscode-api';
 import '../shared/styles/shared.css';
 import {
-  SvLabel, SvGroup, SvCallGraph,
+  SvLabel, SvGroup, SvCallGraph, SvNodeResolved,
   classDiagramFromStruct, classDiagramFromGroup,
   vtableDiagramFromLabel, vtableDiagramFromGroup,
   callGraphFlowchart, hexKey,
@@ -87,7 +87,7 @@ type Mode = 'class' | 'vtable' | 'callgraph';
           <select class="sv-select sv-grow" [value]="selectedKey()" (change)="onSelect($event)">
             <option value="">— pick a vtable —</option>
             @if (vtableOptions().length) {
-              <optgroup label="ArrayOfPointers labels">
+              <optgroup label="Array / VTable labels">
                 @for (v of vtableOptions(); track v.address) {
                   <option [value]="'vt:' + v.address">{{ v.name }} ({{ v.address }})</option>
                 }
@@ -298,16 +298,15 @@ export class StructureVisualizerPageComponent implements AfterViewInit {
     const t = (e.type ?? '').toLowerCase();
     return (t === 'struct' || t === 'pointer') && !e.parentAddress;
   }));
-  readonly vtableOptions  = computed(() => this.entries().filter(e => e.type === 'ArrayOfPointers'));
+  // A vtable is an array of function pointers — accept both ArrayOfPointers
+  // and plain Array labels (case-insensitive) as candidates.
+  readonly vtableOptions  = computed(() => this.entries().filter(e => {
+    const t = (e.type ?? '').toLowerCase();
+    return t === 'arrayofpointers' || t === 'array';
+  }));
   readonly classGroups    = computed(() => this.groups().filter(g => g.kind === 'Class'));
   readonly vtableGroups   = computed(() => this.groups().filter(g => g.kind === 'VTable'));
   readonly modeGroups     = computed(() => this.mode() === 'vtable' ? this.vtableGroups() : this.classGroups());
-
-  private readonly nameMap = computed(() => {
-    const m = new Map<string, string>();
-    for (const e of this.entries()) { m.set(hexKey(e.address), e.name); }
-    return m;
-  });
 
   /** The label currently selected in class/vtable mode, if any. */
   readonly selectedLabel = computed<SvLabel | null>(() => {
@@ -591,7 +590,16 @@ export class StructureVisualizerPageComponent implements AfterViewInit {
     const mode = this.mode();
     if (mode === 'callgraph') {
       const g = this.callGraph();
-      return g ? callGraphFlowchart(g, addr => this.nameMap().get(hexKey(addr)) ?? '') : '';
+      if (!g) { return ''; }
+      // Resolve each node against the loaded labels so call-graph functions
+      // show the same name + argument/return registers as class diagrams.
+      const byKey = new Map<string, SvLabel>();
+      for (const e of this.entries()) { byKey.set(hexKey(e.address), e); }
+      const resolve = (addr: string): SvNodeResolved | undefined => {
+        const e = byKey.get(hexKey(addr));
+        return e ? { label: e.name, argRegs: e.argRegs, returnRegs: e.returnRegs } : undefined;
+      };
+      return callGraphFlowchart(g, resolve);
     }
 
     const key = this.selectedKey();
@@ -669,8 +677,16 @@ export class StructureVisualizerPageComponent implements AfterViewInit {
     const svg = this.diagramRef?.nativeElement.querySelector<SVGSVGElement>('svg');
     if (!svg || !this.baseW || !this.baseH) { return; }
     const z = this.zoom();
-    svg.setAttribute('width',  String(Math.ceil(this.baseW * z)));
-    svg.setAttribute('height', String(Math.ceil(this.baseH * z)));
+    const w = Math.ceil(this.baseW * z);
+    const h = Math.ceil(this.baseH * z);
+    // Set inline styles, not just attributes — a stylesheet `width: auto` rule
+    // beats the attribute, leaving the SVG un-resized so it never overflows
+    // the pane and can't be scrolled or panned.
+    svg.setAttribute('width',  String(w));
+    svg.setAttribute('height', String(h));
+    svg.style.width    = `${w}px`;
+    svg.style.height   = `${h}px`;
+    svg.style.maxWidth = 'none';
   }
 
   private setZoom(z: number): void {
