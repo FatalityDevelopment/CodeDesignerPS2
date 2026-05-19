@@ -53,6 +53,7 @@ export interface SvCallGraph {
 
 /** Normalise an address string to lowercase 8-hex without the 0x prefix. */
 export function hexKey(addr: string): string {
+    if (typeof addr !== 'string') { return ''; }
     let t = addr.trim().toLowerCase();
     if (t.startsWith('0x')) { t = t.slice(2); }
     const colon = t.indexOf(':');
@@ -64,6 +65,12 @@ export function hexKey(addr: string): string {
 /** Keep only characters that are safe inside a Mermaid member / label. */
 function safeText(s: string): string {
     return (s || '').replace(/[^A-Za-z0-9_ .+\-*]/g, '_').trim() || '_';
+}
+
+/** Mermaid class members are parser-sensitive; keep a conservative subset. */
+function safeMemberText(s: string): string {
+    const t = safeText(s).replace(/[+\-#~]/g, '_');
+    return t || '_';
 }
 
 /** Strip the register= prefix from an argRegs entry, e.g. "a0=playerPtr" → "playerPtr". */
@@ -88,13 +95,13 @@ export function classDiagramFromStruct(struct: SvLabel, children: SvLabel[]): st
         lines.push(`  ${id} : (no fields)`);
     }
     for (const c of sorted) {
-        const off = `+0x${(c.offset ?? 0).toString(16).toUpperCase()}`;
+        const off = `off_0x${(c.offset ?? 0).toString(16).toUpperCase()}`;
         if (c.type === 'Function') {
             const args = (c.argRegs ?? []).map(argName).join(', ');
-            lines.push(`  ${id} : ${off} ${safeText(c.name)}(${args})`);
+            lines.push(`  ${id} : ${safeMemberText(`${off} ${safeText(c.name)}(${args})`)}`);
         } else {
             const vt = c.valueType ? ' ' + safeText(c.valueType) : '';
-            lines.push(`  ${id} : ${off} ${safeText(c.name)}${vt}`);
+            lines.push(`  ${id} : ${safeMemberText(`${off} ${safeText(c.name)}${vt}`)}`);
         }
     }
     return lines.join('\n');
@@ -114,11 +121,11 @@ export function classDiagramFromGroup(group: SvGroup): string {
         lines.push(`  ${id} : (empty group)`);
     }
     for (const m of members) {
-        const tag = m.role ? `+${safeText(m.role)} ` : '+';
+        const tag = m.role ? `${safeText(m.role)} ` : '';
         if (m.labelType === 'Function') {
-            lines.push(`  ${id} : ${tag}${safeText(m.labelName)}()`);
+            lines.push(`  ${id} : ${safeMemberText(`${tag}${safeText(m.labelName)}()` )}`);
         } else {
-            lines.push(`  ${id} : ${tag}${safeText(m.labelName)}`);
+            lines.push(`  ${id} : ${safeMemberText(`${tag}${safeText(m.labelName)}`)}`);
         }
     }
     return lines.join('\n');
@@ -142,7 +149,7 @@ export function vtableDiagramFromLabel(vt: SvLabel, children: SvLabel[]): string
     }
     for (const c of sorted) {
         const slot = Math.floor((c.offset ?? 0) / stride);
-        lines.push(`  ${id} : +[${slot}] ${safeText(c.name)}()`);
+        lines.push(`  ${id} : ${safeMemberText(`slot_${slot} ${safeText(c.name)}()` )}`);
     }
     return lines.join('\n');
 }
@@ -158,7 +165,7 @@ export function vtableDiagramFromGroup(group: SvGroup): string {
         lines.push(`  ${id} : (empty vtable)`);
     }
     members.forEach((m, i) => {
-        lines.push(`  ${id} : +[${m.sortOrder || i}] ${safeText(m.labelName)}()`);
+        lines.push(`  ${id} : ${safeMemberText(`slot_${m.sortOrder || i} ${safeText(m.labelName)}()` )}`);
     });
     return lines.join('\n');
 }
@@ -173,19 +180,21 @@ export function callGraphFlowchart(graph: SvCallGraph, nameOf: (addr: string) =>
     const focusKey = hexKey(graph.focus);
     const lines = ['flowchart LR'];
 
-    for (const node of graph.nodes) {
+    for (const node of (graph.nodes ?? []).filter((n): n is string => typeof n === 'string' && !!hexKey(n))) {
         const key   = hexKey(node);
         const label = `${safeText(nameOf(node))} 0x${key.toUpperCase()}`;
         lines.push(`  n${key}["${label}"]`);
     }
-    if (graph.nodes.length === 0) {
+    if (lines.length === 1 && focusKey) {
         lines.push(`  n${focusKey}["${safeText(nameOf(graph.focus))} 0x${focusKey.toUpperCase()}"]`);
     }
-    for (const e of graph.edges) {
+    for (const e of (graph.edges ?? []).filter(e => !!hexKey(e?.from ?? '') && !!hexKey(e?.to ?? ''))) {
         const arrow = e.kind === 'Direct' ? '-->' : '-.->';
         lines.push(`  n${hexKey(e.from)} ${arrow} n${hexKey(e.to)}`);
     }
-    lines.push(`  class n${focusKey} focusNode`);
-    lines.push('  classDef focusNode fill:#3a6ea5,stroke:#9cf,color:#fff,stroke-width:2px');
+    if (focusKey) {
+        lines.push(`  class n${focusKey} focusNode`);
+        lines.push('  classDef focusNode fill:#3a6ea5,stroke:#9cf,color:#fff,stroke-width:2px');
+    }
     return lines.join('\n');
 }
