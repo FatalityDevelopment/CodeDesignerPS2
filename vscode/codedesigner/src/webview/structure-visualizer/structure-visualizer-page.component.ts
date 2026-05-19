@@ -36,7 +36,6 @@ type Mode = 'class' | 'vtable' | 'callgraph';
       <!-- ── Toolbar ───────────────────────────────────────────────────── -->
       <div class="sv-toolbar">
         <span class="sv-title">Structure Visualizer</span>
-        <span class="sv-game" [title]="gameId()">{{ gameName() || '(no game loaded)' }}</span>
         <select class="sv-select" [value]="setName()" (change)="onSetPick($event)"
                 [disabled]="sets().length === 0">
           @for (s of sets(); track s) { <option [value]="s">{{ s }}</option> }
@@ -98,7 +97,7 @@ type Mode = 'class' | 'vtable' | 'callgraph';
           </select>
         }
         @if (mode() === 'callgraph') {
-          <input class="sv-input" type="text" placeholder="Focus address (0x…)"
+          <input class="sv-input" type="text" placeholder="Focus address (optional, 0x…)"
                  [value]="focusAddr()" (input)="onFocusAddr($event)" />
           <select class="sv-select" [value]="direction()" (change)="onDirection($event)">
             <option value="both">Callers + callees</option>
@@ -108,7 +107,7 @@ type Mode = 'class' | 'vtable' | 'callgraph';
           <label class="sv-depth">Depth {{ depth() }}
             <input type="range" min="1" max="8" [value]="depth()" (input)="onDepth($event)" />
           </label>
-          <button class="lm-tool-btn sv-primary" [disabled]="busy() || !focusAddr()" (click)="buildCallGraph()">Build</button>
+          <button class="lm-tool-btn sv-primary" [disabled]="busy() || entries().length === 0" (click)="buildCallGraph()">Build</button>
           <span class="sv-sep"></span>
           <input class="sv-input sv-sm" type="text" placeholder="Scan from 0x…"
                  [value]="scanAddr()" (input)="onScanAddr($event)" />
@@ -339,7 +338,7 @@ export class StructureVisualizerPageComponent implements AfterViewInit {
         this.setName.set(active);
         this.busy.set(false);
         if (active) {
-          this.status.set(`Game ${this.gameName()} — loading set "${active}"…`);
+          this.status.set(`Loading set "${active}"…`);
           this.loadData();
         } else {
           this.status.set(this.sets().length ? 'Pick a label set.' : 'No label sets for this game yet.');
@@ -428,9 +427,11 @@ export class StructureVisualizerPageComponent implements AfterViewInit {
     this.error.set('');
     this.busy.set(true);
     this.status.set('Building call graph…');
+    const selected = this.selectedLabel();
+    const focus = this.focusAddr().trim() || selected?.address || this.entries().find(e => e.type === 'Function')?.address || '';
     this.vscode.postMessage({
       type: 'getCallGraph',
-      address: this.focusAddr().trim(),
+      address: focus,
       depth: this.depth(),
       direction: this.direction(),
     });
@@ -440,8 +441,9 @@ export class StructureVisualizerPageComponent implements AfterViewInit {
     this.error.set('');
     this.busy.set(true);
     this.status.set('Scanning code for calls…');
-    const raw = this.scanLen().trim();
-    const len = raw.toLowerCase().startsWith('0x') ? parseInt(raw.slice(2), 16) : parseInt(raw, 10);
+    const raw = String(this.scanLen() ?? '').trim();
+    const lower = raw.toLowerCase();
+    const len = lower.startsWith('0x') ? parseInt(raw.slice(2), 16) : parseInt(raw, 10);
     this.vscode.postMessage({ type: 'scanCallGraph', address: this.scanAddr().trim(), length: len });
   }
 
@@ -519,10 +521,11 @@ export class StructureVisualizerPageComponent implements AfterViewInit {
     this.vscode.postMessage({ type, setName: this.setName(), ...payload });
   }
 
-  private parseInt(raw: string): number | undefined {
-    const t = raw.trim();
+  private parseInt(raw: string | undefined | null): number | undefined {
+    const t = String(raw ?? '').trim();
     if (!t) { return undefined; }
-    const n = t.toLowerCase().startsWith('0x') ? parseInt(t.slice(2), 16) : parseInt(t, 10);
+    const lower = t.toLowerCase();
+    const n = lower.startsWith('0x') ? parseInt(t.slice(2), 16) : parseInt(t, 10);
     return Number.isFinite(n) ? n : undefined;
   }
 
