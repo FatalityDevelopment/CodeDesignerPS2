@@ -44,6 +44,12 @@ type Mode = 'class' | 'vtable' | 'callgraph';
         <button class="lm-tool-btn" [disabled]="busy()" (click)="reload()" title="Reload from backend">⟳</button>
         <button class="lm-tool-btn" (click)="newSet()" title="Create a new label set">+ Set</button>
         <span class="sv-spacer"></span>
+        <div class="sv-zoom">
+          <button class="lm-tool-btn" [disabled]="!source()" (click)="zoomOut()" title="Zoom out">−</button>
+          <button class="lm-tool-btn" [disabled]="!source()" (click)="zoomReset()" title="Reset to 100%">{{ zoomPct() }}%</button>
+          <button class="lm-tool-btn" [disabled]="!source()" (click)="zoomIn()" title="Zoom in">+</button>
+          <button class="lm-tool-btn" [disabled]="!source()" (click)="fitToViewport(false)" title="Fit the whole diagram in view">Fit</button>
+        </div>
         <button class="lm-tool-btn" [class.sv-on]="editMode()" (click)="toggleEdit()">{{ editMode() ? '✓ Editing' : '✎ Edit' }}</button>
         <button class="lm-tool-btn" [disabled]="!source()" (click)="copySource()">Copy Mermaid</button>
         <button class="lm-tool-btn" [disabled]="!source()" (click)="exportSvg()">Export SVG</button>
@@ -62,7 +68,7 @@ type Mode = 'class' | 'vtable' | 'callgraph';
           <select class="sv-select sv-grow" [value]="selectedKey()" (change)="onSelect($event)">
             <option value="">— pick a struct or class group —</option>
             @if (structOptions().length) {
-              <optgroup label="Struct labels">
+              <optgroup label="Struct &amp; Pointer labels">
                 @for (s of structOptions(); track s.address) {
                   <option [value]="'struct:' + s.address">{{ s.name }} ({{ s.address }})</option>
                 }
@@ -243,6 +249,9 @@ export class StructureVisualizerPageComponent implements AfterViewInit {
   private panStartTop = 0;
   private panMoved = false;
   private suppressNextNodeClick = false;
+  /** Natural (unscaled) diagram size, captured after each render for zooming. */
+  private baseW = 0;
+  private baseH = 0;
 
   // ── Context & data ────────────────────────────────────────────────────
   readonly gameName  = signal('');
@@ -266,6 +275,7 @@ export class StructureVisualizerPageComponent implements AfterViewInit {
   readonly status      = signal('');
   readonly error       = signal('');
   readonly source      = signal('');
+  readonly zoom        = signal(1);
 
   // ── Editor form fields ────────────────────────────────────────────────
   readonly lblName   = signal('');
@@ -281,7 +291,13 @@ export class StructureVisualizerPageComponent implements AfterViewInit {
   readonly memberRole = signal('');
 
   // ── Derived collections ───────────────────────────────────────────────
-  readonly structOptions = computed(() => this.entries().filter(e => e.type === 'Struct' && !e.parentAddress));
+  // "Pointer" and "Struct" describe the same thing — an address holding a
+  // pointer whose dereferenced value has child fields — so both render as a
+  // class. Matched case-insensitively to tolerate wire-format variations.
+  readonly structOptions = computed(() => this.entries().filter(e => {
+    const t = (e.type ?? '').toLowerCase();
+    return (t === 'struct' || t === 'pointer') && !e.parentAddress;
+  }));
   readonly vtableOptions  = computed(() => this.entries().filter(e => e.type === 'ArrayOfPointers'));
   readonly classGroups    = computed(() => this.groups().filter(g => g.kind === 'Class'));
   readonly vtableGroups   = computed(() => this.groups().filter(g => g.kind === 'VTable'));
@@ -611,6 +627,7 @@ export class StructureVisualizerPageComponent implements AfterViewInit {
       const { svg } = await mermaid.render('sv-mmd-' + (this.renderSeq++), src);
       host.innerHTML = svg;
       this.prepareScrollableSvg(host);
+      this.fitToViewport(true);
       this.wireDiagramPan(host);
       this.wireNodeClicks(host);
       this.error.set('');
@@ -637,21 +654,62 @@ export class StructureVisualizerPageComponent implements AfterViewInit {
     });
   }
 
+  /** Capture the diagram's natural size so the zoom controls can scale it. */
   private prepareScrollableSvg(host: HTMLElement): void {
     const svg = host.querySelector<SVGSVGElement>('svg');
-    if (!svg) { return; }
-
+    if (!svg) { this.baseW = 0; this.baseH = 0; return; }
     svg.style.maxWidth = 'none';
     const vb = svg.viewBox.baseVal;
-    if (vb?.width && vb?.height) {
-      svg.setAttribute('width', String(Math.ceil(vb.width)));
-      svg.setAttribute('height', String(Math.ceil(vb.height)));
-    }
+    this.baseW = vb?.width  ? Math.ceil(vb.width)  : svg.clientWidth  || 0;
+    this.baseH = vb?.height ? Math.ceil(vb.height) : svg.clientHeight || 0;
+  }
+
+  /** Scale the rendered SVG to the current zoom level. */
+  private applyZoom(): void {
+    const svg = this.diagramRef?.nativeElement.querySelector<SVGSVGElement>('svg');
+    if (!svg || !this.baseW || !this.baseH) { return; }
+    const z = this.zoom();
+    svg.setAttribute('width',  String(Math.ceil(this.baseW * z)));
+    svg.setAttribute('height', String(Math.ceil(this.baseH * z)));
+  }
+
+  private setZoom(z: number): void {
+    this.zoom.set(Math.min(6, Math.max(0.05, z)));
+    this.applyZoom();
+  }
+
+  zoomIn(): void { this.setZoom(this.zoom() * 1.2); }
+  zoomOut(): void { this.setZoom(this.zoom() / 1.2); }
+  zoomReset(): void { this.setZoom(1); }
+  zoomPct(): number { return Math.round(this.zoom() * 100); }
+
+  /**
+   * Scale the diagram to fit the viewport. When <auto> is true (called after a
+   * fresh render) it only shrinks oversized diagrams — small ones stay 1:1.
+   */
+  fitToViewport(auto: boolean): void {
+    const host = this.diagramRef?.nativeElement;
+    if (!host || !this.baseW || !this.baseH) { return; }
+    const pad = 28;
+    const fit = Math.min(
+      (host.clientWidth  - pad) / this.baseW,
+      (host.clientHeight - pad) / this.baseH,
+    );
+    if (!Number.isFinite(fit) || fit <= 0) { this.applyZoom(); return; }
+    this.setZoom(auto ? Math.min(1, fit) : fit);
+    host.scrollTo({ left: 0, top: 0 });
   }
 
   private wireDiagramPan(host: HTMLElement): void {
     if (this.panHost === host) { return; }
     this.panHost = host;
+
+    // Ctrl/Cmd + wheel zooms; a plain wheel still scrolls the diagram.
+    host.addEventListener('wheel', (event: WheelEvent) => {
+      if (!event.ctrlKey && !event.metaKey) { return; }
+      event.preventDefault();
+      this.setZoom(this.zoom() * (event.deltaY < 0 ? 1.15 : 1 / 1.15));
+    }, { passive: false });
 
     host.addEventListener('pointerdown', (event: PointerEvent) => {
       if (event.button !== 0) { return; }
