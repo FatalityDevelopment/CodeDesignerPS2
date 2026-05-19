@@ -67,10 +67,7 @@ export class CompatBrowserProvider {
                     'codedesigner.openCheatsEditor', msg['title'] as string | undefined);
                 break;
             case 'downloadGame':
-                await this._downloadGame(
-                    webview,
-                    msg['crc'] as string | undefined,
-                    msg['title'] as string | undefined);
+                await this._downloadGame(webview, msg['title'] as string | undefined);
                 break;
             case 'bootstrapError':
                 getOutputChannel().error('[CompatBrowser] Bootstrap error: ' + msg['error']);
@@ -136,22 +133,21 @@ export class CompatBrowserProvider {
     // ── ROM download (Vimm's Lair) ────────────────────────────────────────────
 
     /**
-     * Resolve a game's CRC to a Vimm's Lair ROM and stream it to a user-chosen
-     * file. Vimm has no API, so the vault is searched by CRC and scraped; the
+     * Resolve a game's title to a Vimm's Lair ROM and stream it to a user-chosen
+     * file. Vimm has no API, so the vault is searched by title and scraped; the
      * download endpoint only answers requests carrying a vimm.net Referer, so
      * the extension host (not the browser) must perform the transfer.
      */
     private async _downloadGame(
         webview: vscode.Webview,
-        crc: string | undefined,
         title: string | undefined,
     ): Promise<void> {
-        const label = title?.trim() || 'this game';
+        const cleanTitle = title?.trim();
 
-        if (!crc || !crc.trim()) {
+        if (!cleanTitle) {
             webview.postMessage({
                 type: 'compatError',
-                message: `No CRC recorded for ${label} — cannot look it up on Vimm's Lair.`,
+                message: `This game has no title — cannot look it up on Vimm's Lair.`,
             });
             return;
         }
@@ -159,10 +155,10 @@ export class CompatBrowserProvider {
         try {
             webview.postMessage({
                 type: 'compatStatus',
-                message: `Looking up ${label} on Vimm's Lair…`,
+                message: `Looking up ${cleanTitle} on Vimm's Lair…`,
                 busy: false,
             });
-            const dl = await resolveVimmDownload(crc);
+            const dl = await resolveVimmDownload(cleanTitle);
 
             const target = await vscode.window.showSaveDialog({
                 saveLabel: 'Download ROM',
