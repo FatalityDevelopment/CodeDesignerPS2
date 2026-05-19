@@ -162,6 +162,12 @@ namespace CodeDesigner.Ps2.Bridge
         public InternalEmulatorClient? InternalClient { get; set; }
 
         /// <summary>
+        /// Second built-in-emulator client used as the analysis substrate.
+        /// See <see cref="IBridgeContext.AnalysisClient"/> for the contract.
+        /// </summary>
+        public InternalEmulatorClient? AnalysisClient { get; set; }
+
+        /// <summary>
         /// Active <see cref="IDebugClient"/> for the current runtime mode —
         /// either <see cref="PineClient"/> (PCSX2 PINE) or
         /// <see cref="InternalClient"/> (built-in emulator). Returns <c>null</c>
@@ -285,12 +291,14 @@ namespace CodeDesigner.Ps2.Bridge
             // MemoryService and RegisterService are constructed first so peer
             // services that depend on them (e.g. WatchpointTraceService) can
             // be wired up via constructor injection.
-            _memoryService   = new Services.MemoryService(ctx);
-            _registerService = new Services.RegisterService(ctx);
+            _memoryService        = new Services.MemoryService(ctx);
+            _registerService      = new Services.RegisterService(ctx);
+            _analysisStateService = new Services.AnalysisStateService(ctx);
             _dispatcher = new Services.CommandDispatcher(new Services.ICommandService[]
             {
                 _memoryService,
                 _registerService,
+                _analysisStateService,
                 new Services.ExecutionService(ctx),
                 new Services.CheatsService(ctx),
                 new Services.NetworkService(ctx),
@@ -331,9 +339,11 @@ namespace CodeDesigner.Ps2.Bridge
             });
         }
 
-        private readonly Services.MemoryService   _memoryService;
-        private readonly Services.RegisterService _registerService;
-        Services.MemoryService Services.IBridgeContext.Memory => _memoryService;
+        private readonly Services.MemoryService         _memoryService;
+        private readonly Services.RegisterService       _registerService;
+        private readonly Services.AnalysisStateService  _analysisStateService;
+        Services.MemoryService        Services.IBridgeContext.Memory        => _memoryService;
+        Services.AnalysisStateService Services.IBridgeContext.AnalysisState => _analysisStateService;
 
         /// <inheritdoc/>
         public void Dispose()
@@ -752,6 +762,10 @@ namespace CodeDesigner.Ps2.Bridge
                     case "START_EMULATOR_MODE":
                     case "STARTFILEMODE":
                     case "START_FILE_MODE":
+                    case "STARTANALYSISEMU":
+                    case "START_ANALYSIS_EMU":
+                    case "STARTANALYSISEMULATOR":
+                    case "START_ANALYSIS_EMULATOR":
                         if (RuntimeCommandHandler == null)
                             return CreateErrorResponse("Runtime mode switching is not enabled in this server instance");
                         return RuntimeCommandHandler(command);

@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
+using CodeDesigner.Ps2.Common.CPU;
 
 namespace CodeDesigner.Ps2.Bridge
 {
@@ -45,6 +46,8 @@ namespace CodeDesigner.Ps2.Bridge
         private const byte MsgSetProgramCounter   = 0x17;
         private const byte MsgWriteBuffer         = 0x18;
         private const byte MsgReadBuffer          = 0x19;
+        private const byte MsgGetRegisters        = 0x1A;
+        private const byte MsgSetRegisters        = 0x1B;
         private const byte MsgReset               = 0x24;
         private const byte MsgInternalRequestRestart = 0x80;
 
@@ -137,6 +140,63 @@ namespace CodeDesigner.Ps2.Bridge
         {
             byte[] rep = SendReceive(BuildReadRequest(MsgSetProgramCounter, pc), expectedReplySize: 5);
             if (rep[4] != IPC_OK) throw Fail($"MsgSetProgramCounter 0x{pc:X8}");
+        }
+
+        // ── EE register snapshot R/W (analysis mirror) ────────────────────────
+        // Wire format (552 bytes, little-endian throughout):
+        //   32 × u64  RegsLo  (256 B)
+        //   32 × u64  RegsHi  (256 B)
+        //   u32       PC      (4 B)
+        //   u64       HI, LO, HI1, LO1  (32 B)
+        //   i32       SA      (4 B)
+        // COP0 / FPR / VU are omitted — the analyzer's GPR-driven hints don't need them.
+        private const int RegisterSnapshotPayloadBytes =
+            32 * 8 + 32 * 8 + 4 + 8 + 8 + 8 + 8 + 4;
+
+        /// <summary>
+        /// Snapshot the EE register file from the running emulator. The returned
+        /// <see cref="CpuState"/> has <c>Bus</c>/<c>IopBus</c> left null — callers
+        /// (notably <c>AnalysisStateService</c>) attach the analysis bus afterwards.
+        /// </summary>
+        public CpuState GetEeRegisters()
+        {
+            byte[] rep = SendReceive(BuildSingleRequest(MsgGetRegisters),
+                                     expectedReplySize: 5 + RegisterSnapshotPayloadBytes);
+            if (rep[4] != IPC_OK) throw Fail("MsgGetRegisters");
+
+            var cpu = new CpuState();
+            int p = 5;
+            for (int i = 0; i < 32; i++) { cpu.RegsLo[i] = ReadU64LE(rep, p); p += 8; }
+            for (int i = 0; i < 32; i++) { cpu.RegsHi[i] = ReadU64LE(rep, p); p += 8; }
+            cpu.PC  = ReadU32LE(rep, p);   p += 4;
+            cpu.HI  = ReadU64LE(rep, p);   p += 8;
+            cpu.LO  = ReadU64LE(rep, p);   p += 8;
+            cpu.HI1 = ReadU64LE(rep, p);   p += 8;
+            cpu.LO1 = ReadU64LE(rep, p);   p += 8;
+            cpu.SA  = (int)ReadU32LE(rep, p);
+            return cpu;
+        }
+
+        /// <summary>Load an EE register file into the running emulator.</summary>
+        public void SetEeRegisters(CpuState src)
+        {
+            if (src is null) throw new ArgumentNullException(nameof(src));
+
+            byte[] req = new byte[5 + 1 + RegisterSnapshotPayloadBytes];
+            WriteU32LE(req, 0, (uint)req.Length);
+            req[4] = MsgSetRegisters;
+            int p = 5;
+            for (int i = 0; i < 32; i++) { WriteU64LE(req, p, src.RegsLo[i]); p += 8; }
+            for (int i = 0; i < 32; i++) { WriteU64LE(req, p, src.RegsHi[i]); p += 8; }
+            WriteU32LE(req, p, (uint)(src.PC & 0xFFFFFFFFUL)); p += 4;
+            WriteU64LE(req, p, src.HI);  p += 8;
+            WriteU64LE(req, p, src.LO);  p += 8;
+            WriteU64LE(req, p, src.HI1); p += 8;
+            WriteU64LE(req, p, src.LO1); p += 8;
+            WriteU32LE(req, p, (uint)src.SA);
+
+            byte[] rep = SendReceive(req, expectedReplySize: 5);
+            if (rep[4] != IPC_OK) throw Fail("MsgSetRegisters");
         }
 
         public byte ReadByte(uint address)
@@ -332,6 +392,15 @@ namespace CodeDesigner.Ps2.Bridge
             buf[offset + 1] = (byte)(value >> 8 );
             buf[offset + 2] = (byte)(value >> 16);
             buf[offset + 3] = (byte)(value >> 24);
+        }
+
+        private static ulong ReadU64LE(byte[] buf, int offset)
+            => ReadU32LE(buf, offset) | ((ulong)ReadU32LE(buf, offset + 4) << 32);
+
+        private static void WriteU64LE(byte[] buf, int offset, ulong value)
+        {
+            WriteU32LE(buf, offset,     (uint)(value      ));
+            WriteU32LE(buf, offset + 4, (uint)(value >> 32));
         }
     }
 }

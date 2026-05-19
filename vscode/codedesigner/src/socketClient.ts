@@ -1887,6 +1887,21 @@ export class SocketClient {
     }
 
     /**
+     * REFRESHANALYSIS — ask the Bridge to re-mirror live memory + registers
+     * into its analysis cache. Fire-and-forget on pause-state change so the
+     * next DISASSEMBLE sees a warm mirror and the comment column lights up
+     * with state-aware hints (`[TAKEN]` / `[NOT TAKEN]`, resolved pointer
+     * targets, etc.) on first render.
+     */
+    public async refreshAnalysis(): Promise<void> {
+        const command: CommandMessage = { Command: 'REFRESHANALYSIS' };
+        const response = await this.sendCommand(command);
+        if (!response.Success) {
+            throw new Error(response.Error || 'REFRESHANALYSIS failed');
+        }
+    }
+
+    /**
      * Resume emulator execution
      */
     public async resume(): Promise<void> {

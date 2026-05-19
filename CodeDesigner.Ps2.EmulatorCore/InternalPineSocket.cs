@@ -76,6 +76,12 @@ namespace CodeDesigner.Ps2.EmulatorCore
         // multi-MB regions — without this they make millions of round-trips
         // and time out.
         private const byte MsgReadBuffer          = 0x19;
+        // Internal-only register snapshot R/W. Used by the Bridge's analysis
+        // mirror to seed the analyzer with real runtime state at a breakpoint.
+        // Wire format mirrors a minimal subset of PineClient.RegisterSnapshot —
+        // see HandleGetRegisters / HandleSetRegisters for the exact layout.
+        private const byte MsgGetRegisters        = 0x1A;
+        private const byte MsgSetRegisters        = 0x1B;
         private const byte MsgReset               = 0x24;
 
         // Internal-only opcodes (high range, won't collide with PCSX2 PINE).
@@ -283,6 +289,10 @@ namespace CodeDesigner.Ps2.EmulatorCore
                             pos = HandleWriteBuffer(packet, pos); break;
                         case MsgReadBuffer:
                             pos = HandleReadBuffer(packet, pos, ms); break;
+                        case MsgGetRegisters:
+                            HandleGetRegisters(ms); break;
+                        case MsgSetRegisters:
+                            pos = HandleSetRegisters(packet, pos); break;
                         case MsgReset:
                         case MsgInternalRequestRestart:
                             _pendingRestart = true; break;
@@ -438,6 +448,48 @@ namespace CodeDesigner.Ps2.EmulatorCore
                     bus.WriteByte(addr + i, p[pos + (int)i]);
             }
             pos += (int)len;
+            return pos;
+        }
+
+        /// <summary>
+        /// Snapshot the EE CPU register file. Reply body is a fixed-size 552-byte
+        /// block: 32 × u64 <see cref="CodeDesigner.Ps2.Common.Core.CpuState.RegsLo"/>,
+        /// 32 × u64 <see cref="CodeDesigner.Ps2.Common.Core.CpuState.RegsHi"/>,
+        /// u32 PC, u64 HI, u64 LO, u64 HI1, u64 LO1, i32 SA — little-endian throughout.
+        /// COP0 / FPR / VU registers are intentionally omitted; the analyzer's
+        /// GPR-driven hints don't need them.
+        /// </summary>
+        private void HandleGetRegisters(MemoryStream reply)
+        {
+            lock (_swapLock)
+            {
+                var cpu = _scheduler.EE.Cpu;
+                for (int i = 0; i < 32; i++) WriteU64LE(reply, cpu.RegsLo[i]);
+                for (int i = 0; i < 32; i++) WriteU64LE(reply, cpu.RegsHi[i]);
+                WriteU32LE(reply, (uint)(cpu.PC & 0xFFFFFFFFUL));
+                WriteU64LE(reply, cpu.HI);
+                WriteU64LE(reply, cpu.LO);
+                WriteU64LE(reply, cpu.HI1);
+                WriteU64LE(reply, cpu.LO1);
+                WriteU32LE(reply, (uint)cpu.SA);
+            }
+        }
+
+        /// <summary>Inverse of <see cref="HandleGetRegisters"/> — load a snapshot into EE CPU.</summary>
+        private int HandleSetRegisters(byte[] p, int pos)
+        {
+            lock (_swapLock)
+            {
+                var cpu = _scheduler.EE.Cpu;
+                for (int i = 0; i < 32; i++) { cpu.RegsLo[i] = ReadU64LE(p, pos); pos += 8; }
+                for (int i = 0; i < 32; i++) { cpu.RegsHi[i] = ReadU64LE(p, pos); pos += 8; }
+                cpu.PC  = ReadU32LE(p, pos); pos += 4;
+                cpu.HI  = ReadU64LE(p, pos); pos += 8;
+                cpu.LO  = ReadU64LE(p, pos); pos += 8;
+                cpu.HI1 = ReadU64LE(p, pos); pos += 8;
+                cpu.LO1 = ReadU64LE(p, pos); pos += 8;
+                cpu.SA  = (int)ReadU32LE(p, pos); pos += 4;
+            }
             return pos;
         }
 

@@ -143,19 +143,41 @@ namespace CodeDesigner.Ps2.Common
         /// which is typical in the batch disassembly path.
         /// Pass <c>true</c> only when a real, live CPU snapshot is available.
         /// </param>
+        /// <param name="seedCpu">
+        /// Optional pre-populated CPU snapshot (registers + memory bus) to start simulation
+        /// from. Used at breakpoint time so the analyzer sees real runtime state — concrete
+        /// register values, real pointer targets — rather than the all-zero default. The
+        /// snapshot is cloned before use; the analyzer's mutating execution doesn't pollute
+        /// the caller's copy.
+        /// </param>
         /// <returns>Dictionary mapping instruction address to comment string</returns>
         public static Dictionary<uint, string> AnalyzeInstructions(
-            IEnumerable<(uint instruction, uint address)> instructions, 
+            IEnumerable<(uint instruction, uint address)> instructions,
             uint startPc = 0,
             bool executeInstructions = true,
             IPs2MemoryBus? bus = null,
             Func<uint, string?>? lookupLabel = null,
-            bool includeStateHints = false)
+            bool includeStateHints = false,
+            CpuState? seedCpu = null)
         {
             var comments = new Dictionary<uint, string>();
-            
-            // Create CPU state for tracking register values during execution
-            CpuState? cpu = executeInstructions ? new CpuState() : null;
+
+            // CPU state for tracking register values during simulated execution. When
+            // a seed snapshot is provided (e.g. mirrored from PCSX2 at a breakpoint),
+            // clone it so the analyzer's mutating ExecuteGeneric calls don't pollute
+            // the cache, and reuse its Bus so simulated loads see real memory. Without
+            // a seed the analyzer starts from a fresh zeroed state with no bus, which
+            // is the safe default for cold batch disassembly.
+            CpuState? cpu;
+            if (executeInstructions)
+            {
+                cpu = seedCpu?.CreateAnalysisSnapshot() ?? new CpuState();
+                if (seedCpu is not null) cpu.Bus = seedCpu.Bus;
+            }
+            else
+            {
+                cpu = null;
+            }
             
             uint currentPc = startPc;
             

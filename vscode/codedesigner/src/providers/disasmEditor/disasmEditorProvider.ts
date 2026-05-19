@@ -388,6 +388,21 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   }
 
   /**
+   * Unified fan-out for pause-state transitions. Fires the existing
+   * onPauseStateChange callback and — when transitioning to paused — kicks the
+   * Bridge to refresh its analysis mirror so the next DISASSEMBLE sees state-
+   * aware comment-column hints on first render.
+   */
+  private _firePauseStateChange(paused: boolean): void {
+    if (paused && this.socketClient?.isConnected()) {
+      // Fire-and-forget; never block the pause flow on analysis warm-up.
+      this.socketClient.refreshAnalysis().catch(() => { /* ignore */ });
+    }
+    const cb = this.onPauseStateChange;
+    cb?.(paused);
+  }
+
+  /**
    * Enable or disable "Follow AI" mode.
    * When enabled, the disassembly cursor automatically navigates to whichever
    * address the MCP AI server is currently working with.
@@ -608,7 +623,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       }
       this._broadcastFullStatus(statusMsg);
       // Always notify the sidebar so it stays in sync (step keeps emulator paused).
-      this.onPauseStateChange?.(status.paused);
+      this._firePauseStateChange(status.paused);
     } catch (err: any) {
       getOutputChannel().appendLine(`[STEP] Status error: ${err?.message ?? err}`);
     }
@@ -1279,7 +1294,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                         this._revealPanelForAddress(hitAddr);
                     }
                     this._broadcastFullStatus(statusMsg);
-                    this.onPauseStateChange?.(status.paused);
+                    this._firePauseStateChange(status.paused);
                 } catch (err: any) {
                     const msg = err?.message ?? String(err);
                     console.error(`[LIVE] Failed to pause emulator: ${msg}`);
@@ -1396,7 +1411,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                         this._revealPanelForAddress(hitAddr);
                         this._broadcastFullStatus(statusMsg);
                         // Notify the sidebar so it flips to PAUSED immediately.
-                        this.onPauseStateChange?.(true);
+                        this._firePauseStateChange(true);
                     } else {
                         panel.webview.postMessage(statusMsg);
                     }
@@ -1575,7 +1590,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                         target.panel.webview.postMessage({ type: 'gotoAddress', address: addr });
                     }
                     // Notify the sidebar so it stays in PAUSED state.
-                    this.onPauseStateChange?.(true);
+                    this._firePauseStateChange(true);
                 } catch (err: any) {
                     getOutputChannel().appendLine(`[SETPC] Error: ${err?.message ?? err}`);
                 }
@@ -1791,7 +1806,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         for (const p of this._livePanels) {
             p.webview.postMessage(msg);
         }
-        this.onPauseStateChange?.(paused);
+        this._firePauseStateChange(paused);
     }
 
     /**
