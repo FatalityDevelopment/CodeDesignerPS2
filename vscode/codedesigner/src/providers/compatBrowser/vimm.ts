@@ -6,7 +6,8 @@ import type { IncomingMessage } from 'http';
  * Vimm's Lair ROM lookup / download helper.
  *
  * Vimm's Lair has no public API. A PS2 game is located by searching the vault
- * by CRC, the matching vault page is parsed for its media id, and the file is
+ * by title (Vimm's CRC hashes the whole ISO, so it never matches PCSX2's ELF
+ * CRC), the matching vault page is parsed for its media id, and the file is
  * streamed from the download endpoint — which only answers when the request
  * carries a browser User-Agent and a vimm.net Referer.
  */
@@ -94,6 +95,20 @@ async function fetchText(url: string, referer?: string): Promise<string> {
   });
 }
 
+/**
+ * Normalises a game title for comparison: lower-cased, with HTML entities,
+ * parenthetical edition suffixes (e.g. "(Greatest Hits)"), punctuation and
+ * whitespace removed. Lets a PCSX2 title match a Vimm title despite cosmetic
+ * differences while still rejecting cheat discs and unrelated entries.
+ */
+function normalizeTitle(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/&[a-z]+;|&#\d+;/gi, ' ')   // HTML entities (&amp;, &#39;, …)
+    .replace(/\([^)]*\)/g, ' ')          // (Greatest Hits), (Rockstar Classics)
+    .replace(/[^a-z0-9]+/g, '');         // punctuation + whitespace
+}
+
 /** Extracts the file name from a Content-Disposition header. */
 function parseFileName(disposition: string | undefined, fallback: string): string {
   if (!disposition) { return fallback; }
@@ -107,26 +122,34 @@ function parseFileName(disposition: string | undefined, fallback: string): strin
 }
 
 /**
- * Resolves a PS2 game CRC to a downloadable Vimm's Lair ROM.
+ * Resolves a PS2 game title to a downloadable Vimm's Lair ROM.
  *
- * Searches the vault by CRC, opens the matching game page, extracts the media
- * id, then probes the download endpoint for the real file name and size.
+ * Searches the vault by title, picks the result whose title matches exactly
+ * (so cheat discs and unrelated entries are skipped), opens its game page,
+ * extracts the media id, then probes the download endpoint for the file name
+ * and size.
  */
-export async function resolveVimmDownload(crc: string): Promise<VimmDownload> {
-  const cleanCrc = crc.trim();
-  if (!cleanCrc) { throw new Error('No CRC available for this game.'); }
+export async function resolveVimmDownload(title: string): Promise<VimmDownload> {
+  const cleanTitle = title.trim();
+  if (!cleanTitle) { throw new Error('No title available for this game.'); }
 
   const listUrl =
-    `https://vimm.net/vault/?p=list&system=PS2&q=${encodeURIComponent(cleanCrc)}`;
+    `https://vimm.net/vault/?p=list&system=PS2&q=${encodeURIComponent(cleanTitle)}`;
   const listHtml = await fetchText(listUrl);
 
-  // Game results link to /vault/<digits>"; requiring the closing quote
-  // excludes system-nav links such as /vault/3DS and /vault/32X.
-  const vaultMatch = listHtml.match(/\/vault\/(\d+)"/);
-  if (!vaultMatch) {
-    throw new Error(`No PS2 game on Vimm's Lair matches CRC ${cleanCrc}.`);
+  // Vimm's title search is fuzzy and also returns cheat discs and foreign
+  // editions — and its first result is often not the game — so match the
+  // result row whose title equals ours. Each game result is an anchor
+  // `/vault/<id>"…>Title</a>`; cover-image links carry no text and are skipped.
+  const want = normalizeTitle(cleanTitle);
+  let vaultId: string | undefined;
+  for (const m of listHtml.matchAll(/\/vault\/(\d+)"[^>]*>([^<]+)<\/a>/g)) {
+    if (normalizeTitle(m[2]) === want) { vaultId = m[1]; break; }
   }
-  const vaultId = vaultMatch[1];
+  if (!vaultId) {
+    throw new Error(
+      `No PS2 game titled "${cleanTitle}" was found in the Vimm's Lair vault.`);
+  }
   const vaultUrl = `https://vimm.net/vault/${vaultId}`;
 
   const vaultHtml = await fetchText(vaultUrl, listUrl);
