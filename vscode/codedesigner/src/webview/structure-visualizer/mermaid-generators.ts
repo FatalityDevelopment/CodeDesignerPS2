@@ -93,6 +93,11 @@ function safeText(s: string): string {
     return (s || '').replace(/[^A-Za-z0-9_ .+\-*]/g, '_').trim() || '_';
 }
 
+/** Keep flowchart node and edge labels parser-friendly while preserving register text. */
+function safeFlowText(s: string): string {
+    return (s || '').replace(/[|"[\]{}<>]/g, '_').replace(/\s+/g, ' ').trim();
+}
+
 /** Mermaid class members are parser-sensitive; keep a conservative subset. */
 function safeMemberText(s: string): string {
     const t = safeText(s).replace(/[+\-#~]/g, '_');
@@ -220,9 +225,20 @@ export function callGraphFlowchart(
         if (key) { nodeInfo.set(key, info); }
     }
 
+    const merged = (addr: string): SvNodeResolved => {
+        const key = hexKey(addr);
+        const backend = key ? nodeInfo.get(key) : undefined;
+        const local = resolve(addr);
+        return {
+            label: backend?.label || local?.label,
+            argRegs: (backend?.argRegs?.length ? backend.argRegs : local?.argRegs) ?? [],
+            returnRegs: (backend?.returnRegs?.length ? backend.returnRegs : local?.returnRegs) ?? [],
+        };
+    };
+
     for (const node of (graph.nodes ?? []).filter((n): n is string => typeof n === 'string' && !!hexKey(n))) {
         const key   = hexKey(node);
-        const info  = merge(node);
+        const info  = merged(node);
         const name  = safeFlowText(info.label || `sub_${key.toUpperCase()}`);
         const args  = signaturePart('args', info.argRegs);
         const ret   = signaturePart('ret', info.returnRegs);
@@ -230,11 +246,15 @@ export function callGraphFlowchart(
         lines.push(`  n${key}["${label}"]`);
     }
     if (lines.length === 1 && focusKey) {
-        lines.push(`  n${focusKey}["${safeText(nameOf(graph.focus))} 0x${focusKey.toUpperCase()}"]`);
+        const info = merged(graph.focus);
+        const name = safeFlowText(info.label || `sub_${focusKey.toUpperCase()}`);
+        lines.push(`  n${focusKey}["${name}<br/>0x${focusKey.toUpperCase()}"]`);
     }
     for (const e of (graph.edges ?? []).filter(e => !!hexKey(e?.from ?? '') && !!hexKey(e?.to ?? ''))) {
         const arrow = e.kind === 'Direct' ? '-->' : '-.->';
-        lines.push(`  n${hexKey(e.from)} ${arrow} n${hexKey(e.to)}`);
+        const annotation = edgeAnnotation(e);
+        const label = annotation ? `|${annotation}|` : '';
+        lines.push(`  n${hexKey(e.from)} ${arrow}${label} n${hexKey(e.to)}`);
     }
     if (focusKey) {
         lines.push(`  class n${focusKey} focusNode`);
@@ -251,5 +271,10 @@ function signaturePart(prefix: string, regs: string[] | undefined): string {
 function edgeAnnotation(edge: SvCallEdge): string {
     const args = signaturePart('args', edge.argRegs);
     const ret  = signaturePart('ret', edge.returnRegs);
-    return safeFlowText([args, ret].filter(Boolean).join('; '));
+    return safeFlowText([args, ret].filter(Boolean).join(' / '));
 }
+
+function classDeclaration(id: string, name: string): string {
+    return `  class ${id}[${JSON.stringify(name)}]`;
+}
+

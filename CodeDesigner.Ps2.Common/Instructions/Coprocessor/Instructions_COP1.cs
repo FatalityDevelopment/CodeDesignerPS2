@@ -373,10 +373,10 @@ namespace CodeDesigner.Ps2.Common.Instructions.CoprocessorInstructions
             int offset = CpuHelpers.SignExtend16(args.Imm);
             if (cpu != null)
             {
-                uint addr = (uint)((long)cpu.RegsLo[args.Rs] + offset);
-                return $"$f{args.Rt} ← [0x{addr:X8}]";
+                string address = CpuHelpers.FormatMemoryReference(cpu, args.Rs, offset);
+                return $"$f{args.Rt} ← [{address}]";
             }
-            return $"$f{args.Rt} ← [{CpuHelpers.RegName(args.Rs)} + {offset}]";
+            return $"$f{args.Rt} ← [{CpuHelpers.FormatMemoryOffset(offset)}]";
         }
     }
 
@@ -432,12 +432,12 @@ namespace CodeDesigner.Ps2.Common.Instructions.CoprocessorInstructions
             int offset = CpuHelpers.SignExtend16(args.Imm);
             if (cpu != null)
             {
-                uint addr = (uint)((long)cpu.RegsLo[args.Rs] + offset);
+                string address = CpuHelpers.FormatMemoryReference(cpu, args.Rs, offset);
                 float value = cpu.FPR[args.Rt];
                 uint bits = BitConverter.SingleToUInt32Bits(value);
-                return $"[0x{addr:X8}] ← $f{args.Rt} = {value} (0x{bits:X8})";
+                return $"[{address}] ← $f{args.Rt} = {value} (0x{bits:X8})";
             }
-            return $"[{CpuHelpers.RegName(args.Rs)} + {offset}] ← $f{args.Rt}";
+            return $"[{CpuHelpers.FormatMemoryOffset(offset)}] ← $f{args.Rt}";
         }
     }
 

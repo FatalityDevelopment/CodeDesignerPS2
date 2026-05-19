@@ -9,6 +9,7 @@ import {
   OnDestroy,
 } from '@angular/core';
 import { CallStackEntry, ModuleEntry, ThreadEntry, PineWatchInfo } from '../state/types';
+import { IconComponent } from '../../shared/icon.component';
 
 export type BottomTab = 'callstack' | 'threads' | 'breakpoints' | 'modules' | 'watches';
 
@@ -22,6 +23,7 @@ export type BottomTab = 'callstack' | 'threads' | 'breakpoints' | 'modules' | 'w
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
+  imports: [IconComponent],
   template: `
     <div id="bottom-panel" class="bottom-panel" [class.visible]="visible()" [style.height.px]="panelHeight()">
       <div class="bottom-resize-handle" (mousedown)="onResizeMouseDown($event)"></div>
@@ -31,7 +33,7 @@ export type BottomTab = 'callstack' | 'threads' | 'breakpoints' | 'modules' | 'w
         <button class="bottom-tab" [class.active]="activeTab() === 'breakpoints'" (click)="selectTab('breakpoints')">Breakpoints</button>
         <button class="bottom-tab" [class.active]="activeTab() === 'watches'" (click)="selectTab('watches')">Watches</button>
         <button class="bottom-tab" [class.active]="activeTab() === 'modules'" (click)="selectTab('modules')">Modules</button>
-        <button class="bottom-refresh-btn" (click)="onRefreshClick()">⟳</button>
+        <button class="bottom-refresh-btn" title="Refresh" (click)="onRefreshClick()"><app-icon name="refreshcw" [size]="12" /></button>
       </div>
 
       @if (activeTab() === 'callstack') {
@@ -91,7 +93,7 @@ export type BottomTab = 'callstack' | 'threads' | 'breakpoints' | 'modules' | 'w
       @if (activeTab() === 'breakpoints') {
         <div class="bottom-tab-content active">
           <div class="breakpoints-header">
-            <button class="bp-clear-all-btn" (click)="clearAllBreakpoints.emit()">Clear All</button>
+            <button class="bp-clear-all-btn" (click)="clearAllBreakpoints.emit()"><app-icon name="trash2" [size]="12" /><span>Clear All</span></button>
           </div>
           <table class="dbg-table">
             <thead><tr>
@@ -116,7 +118,8 @@ export type BottomTab = 'callstack' | 'threads' | 'breakpoints' | 'modules' | 'w
                   </td>
                   <td class="dbg-td-del">
                     <button class="dbg-bp-del-btn"
-                      (click)="$event.stopPropagation(); removeBreakpoint.emit(addr)">✕</button>
+                      title="Remove Breakpoint"
+                      (click)="$event.stopPropagation(); removeBreakpoint.emit(addr)"><app-icon name="trash2" [size]="12" /></button>
                   </td>
                 </tr>
               }
@@ -128,7 +131,7 @@ export type BottomTab = 'callstack' | 'threads' | 'breakpoints' | 'modules' | 'w
       @if (activeTab() === 'watches') {
         <div class="bottom-tab-content active">
           <div class="breakpoints-header">
-            <button class="bp-clear-all-btn" (click)="clearAllWatches.emit()">Clear All</button>
+            <button class="bp-clear-all-btn" (click)="clearAllWatches.emit()"><app-icon name="trash2" [size]="12" /><span>Clear All</span></button>
           </div>
           <table class="dbg-table">
             <thead><tr>
@@ -148,7 +151,8 @@ export type BottomTab = 'callstack' | 'threads' | 'breakpoints' | 'modules' | 'w
                   <td class="dbg-td-type mono">{{ w.Cond }}</td>
                   <td class="dbg-td-del">
                     <button class="dbg-bp-del-btn"
-                      (click)="$event.stopPropagation(); removeWatch.emit(w)">✕</button>
+                      title="Remove Watchpoint"
+                      (click)="$event.stopPropagation(); removeWatch.emit(w)"><app-icon name="trash2" [size]="12" /></button>
                   </td>
                 </tr>
               }

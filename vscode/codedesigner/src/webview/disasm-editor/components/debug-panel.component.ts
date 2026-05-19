@@ -10,6 +10,7 @@ import {
 } from '@angular/core';
 import { RegisterData } from '../disasm-editor.service';
 import { PineWatchInfo } from '../state/types';
+import { IconComponent } from '../../shared/icon.component';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Constants for register names
@@ -57,6 +58,7 @@ export type DebugTab = 'registers' | 'cop0' | 'fpr' | 'fcr' | 'vu0f' | 'vu0i' | 
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
+  imports: [IconComponent],
   template: `
     <div class="debug-panel" [class.visible]="visible()" [style.width.px]="panelWidth()" [style.minWidth.px]="MIN_WIDTH">
       <div class="debug-resize-handle" (mousedown)="onResizeMouseDown($event)"></div>
@@ -112,7 +114,7 @@ export type DebugTab = 'registers' | 'cop0' | 'fpr' | 'fcr' | 'vu0f' | 'vu0i' | 
           <!-- Watches Section -->
           <div class="inspect-section-header">
             <span class="inspect-section-title">PINE Watchpoints</span>
-            <button class="bp-clear-all-btn" (click)="clearAllWatches.emit()">Clear All</button>
+            <button class="bp-clear-all-btn" (click)="clearAllWatches.emit()"><app-icon name="trash2" [size]="12" /><span>Clear All</span></button>
           </div>
           <table class="dbg-table">
             <thead><tr>
@@ -132,7 +134,8 @@ export type DebugTab = 'registers' | 'cop0' | 'fpr' | 'fcr' | 'vu0f' | 'vu0i' | 
                   <td class="dbg-td-type mono watch-cond-badge" [class]="watchCondClass(w.Cond)">{{ w.Cond }}</td>
                   <td class="dbg-td-del">
                     <button class="dbg-bp-del-btn"
-                      (click)="$event.stopPropagation(); removeWatch.emit(w)">✕</button>
+                      title="Remove Watchpoint"
+                      (click)="$event.stopPropagation(); removeWatch.emit(w)"><app-icon name="trash2" [size]="12" /></button>
                   </td>
                 </tr>
               }
@@ -595,6 +598,10 @@ export class DebugPanelComponent implements OnDestroy {
     if ((i >= 8 && i <= 15) || i === 24 || i === 25) return 'dbg-reg-t';
     if (i >= 16 && i <= 23) return 'dbg-reg-s';
     if (i === 26 || i === 27) return 'dbg-reg-k';
+    if (i === 28) return 'dbg-reg-gp';
+    if (i === 29) return 'dbg-reg-sp';
+    if (i === 30) return 'dbg-reg-fp';
+    if (i === 31) return 'dbg-reg-ra';
     return 'dbg-reg-special';
   }
 

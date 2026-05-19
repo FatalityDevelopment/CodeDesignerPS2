@@ -6,6 +6,7 @@ import {
   output,
   computed,
 } from '@angular/core';
+import { IconComponent } from '../../shared/icon.component';
 
 /**
  * Context data passed when opening the menu via `open()`.
@@ -44,6 +45,7 @@ export interface ContextMenuData {
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
+  imports: [IconComponent],
   host: {
     'class': 'context-menu',
     '[class.visible]': 'visible()',
@@ -58,43 +60,43 @@ export interface ContextMenuData {
       class="ctx-menu-item"
       [class.disabled]="data()?.hasBreakpoint"
       (click)="onSetBreakpoint()">
-      <span class="ctx-menu-icon">●</span>Set Breakpoint
+      <app-icon class="ctx-menu-icon" name="circle" [size]="13" />Set Breakpoint
     </div>
     <div
       class="ctx-menu-item"
       [class.disabled]="!data()?.hasBreakpoint"
       (click)="onRemoveBreakpoint()">
-      <span class="ctx-menu-icon">○</span>Remove Breakpoint
+      <app-icon class="ctx-menu-icon" name="trash2" [size]="13" />Remove Breakpoint
     </div>
     <div class="ctx-menu-separator"></div>
     <div
       class="ctx-menu-item"
       [class.disabled]="data()?.hasWatch"
       (click)="onAddWatch()">
-      <span class="ctx-menu-icon">👁</span>Add Watch
+      <app-icon class="ctx-menu-icon" name="eye" [size]="13" />Add Watch
     </div>
     <div
       class="ctx-menu-item"
       [class.disabled]="!data()?.hasWatch"
       (click)="onRemoveWatch()">
-      <span class="ctx-menu-icon">🚫</span>Remove Watch
+      <app-icon class="ctx-menu-icon" name="ban" [size]="13" />Remove Watch
     </div>
     <div class="ctx-menu-separator"></div>
     <div
       class="ctx-menu-item"
       [class.disabled]="!data()?.hasTarget"
       (click)="onGotoTarget()">
-      <span class="ctx-menu-icon">→</span>Go to Target Address
+      <app-icon class="ctx-menu-icon" name="arrowright" [size]="13" />Go to Target Address
     </div>
     <div class="ctx-menu-item" (click)="onFindReferences()">
-      <span class="ctx-menu-icon">🔍</span>Find References
+      <app-icon class="ctx-menu-icon" name="search" [size]="13" />Find References
     </div>
     <div class="ctx-menu-item" (click)="onFindCodeReferences()">
-      <span class="ctx-menu-icon">📌</span>Find Code References
+      <app-icon class="ctx-menu-icon" name="search" [size]="13" />Find Code References
     </div>
     <div class="ctx-menu-separator"></div>
     <div class="ctx-menu-item" (click)="onAddToLabelManager()">
-      <span class="ctx-menu-icon">&#128211;</span>{{ data()?.currentLabel ? 'Edit Label…' : 'Add Label…' }}
+      <app-icon class="ctx-menu-icon" name="tag" [size]="13" />{{ data()?.currentLabel ? 'Edit Label…' : 'Add Label…' }}
     </div>
     <div class="ctx-menu-separator"></div>
     <div class="ctx-menu-item" (click)="onFormatAs('byte')">

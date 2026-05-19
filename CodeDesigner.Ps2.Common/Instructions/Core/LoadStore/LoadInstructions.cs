@@ -64,8 +64,8 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
         {
             if (cpu == null) return string.Empty;
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
-            return $"{CpuHelpers.RegName(args.Rt)} ← [0x{addr:X8}]";
+            string address = CpuHelpers.FormatMemoryReference(cpu, args.Rs, offset);
+            return $"{CpuHelpers.RegName(args.Rt)} ← [{address}]";
         }
     }
 
@@ -112,8 +112,8 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
         {
             if (cpu == null) return string.Empty;
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
-            return $"{CpuHelpers.RegName(args.Rt)} ← [0x{addr:X8}]";
+            string address = CpuHelpers.FormatMemoryReference(cpu, args.Rs, offset);
+            return $"{CpuHelpers.RegName(args.Rt)} ← [{address}]";
         }
     }
 
@@ -162,8 +162,8 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
         {
             if (cpu == null) return string.Empty;
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
-            return $"{CpuHelpers.RegName(args.Rt)} ← [0x{addr:X8}]";
+            string address = CpuHelpers.FormatMemoryReference(cpu, args.Rs, offset);
+            return $"{CpuHelpers.RegName(args.Rt)} ← [{address}]";
         }
     }
 
@@ -211,8 +211,8 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
         {
             if (cpu == null) return string.Empty;
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
-            return $"{CpuHelpers.RegName(args.Rt)} ← [0x{addr:X8}]";
+            string address = CpuHelpers.FormatMemoryReference(cpu, args.Rs, offset);
+            return $"{CpuHelpers.RegName(args.Rt)} ← [{address}]";
         }
     }
 
@@ -265,8 +265,8 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
         {
             if (cpu == null) return string.Empty;
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
-            return $"{CpuHelpers.RegName(args.Rt)} ← [0x{addr:X8}]";
+            string address = CpuHelpers.FormatMemoryReference(cpu, args.Rs, offset);
+            return $"{CpuHelpers.RegName(args.Rt)} ← [{address}]";
         }
     }
 
@@ -318,8 +318,8 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
         {
             if (cpu == null) return string.Empty;
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
-            return $"{CpuHelpers.RegName(args.Rt)} ← [0x{addr:X8}]";
+            string address = CpuHelpers.FormatMemoryReference(cpu, args.Rs, offset);
+            return $"{CpuHelpers.RegName(args.Rt)} ← [{address}]";
         }
     }
 
@@ -375,8 +375,8 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
         {
             if (cpu == null) return string.Empty;
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
-            return $"{CpuHelpers.RegName(args.Rt)} ← [0x{addr:X8}]";
+            string address = CpuHelpers.FormatMemoryReference(cpu, args.Rs, offset);
+            return $"{CpuHelpers.RegName(args.Rt)} ← [{address}]";
         }
     }
 
@@ -437,8 +437,8 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
         {
             if (cpu == null) return string.Empty;
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
-            return $"{CpuHelpers.RegName(args.Rt)} ← [0x{addr:X8}]";
+            string address = CpuHelpers.FormatMemoryReference(cpu, args.Rs, offset);
+            return $"{CpuHelpers.RegName(args.Rt)} ← [{address}]";
         }
     }
 
@@ -498,8 +498,8 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
         {
             if (cpu == null) return string.Empty;
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
-            return $"{CpuHelpers.RegName(args.Rt)} ← [0x{addr:X8}]";
+            string address = CpuHelpers.FormatMemoryReference(cpu, args.Rs, offset);
+            return $"{CpuHelpers.RegName(args.Rt)} ← [{address}]";
         }
     }
 
@@ -560,8 +560,8 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
         {
             if (cpu == null) return string.Empty;
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
-            return $"{CpuHelpers.RegName(args.Rt)} ← [0x{addr:X8}]";
+            string address = CpuHelpers.FormatMemoryReference(cpu, args.Rs, offset);
+            return $"{CpuHelpers.RegName(args.Rt)} ← [{address}]";
         }
     }
 
@@ -622,8 +622,8 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
         {
             if (cpu == null) return string.Empty;
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
-            return $"{CpuHelpers.RegName(args.Rt)} ← [0x{addr:X8}]";
+            string address = CpuHelpers.FormatMemoryReference(cpu, args.Rs, offset);
+            return $"{CpuHelpers.RegName(args.Rt)} ← [{address}]";
         }
     }
 
@@ -691,8 +691,8 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
         {
             if (cpu == null) return string.Empty;
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
-            return $"{CpuHelpers.RegName(args.Rt)} ← [0x{addr:X8}]";
+            string address = CpuHelpers.FormatMemoryReference(cpu, args.Rs, offset);
+            return $"{CpuHelpers.RegName(args.Rt)} ← [{address}]";
         }
     }
 }

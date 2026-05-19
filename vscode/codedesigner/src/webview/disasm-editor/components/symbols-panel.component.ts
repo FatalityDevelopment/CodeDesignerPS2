@@ -15,6 +15,7 @@ import {
   SymFloat,
   SymInteger,
 } from '../state/types';
+import { IconComponent } from '../../shared/icon.component';
 
 export type SymbolTab = 'labels' | 'strings' | 'functions' | 'pointers' | 'floats' | 'integers';
 
@@ -33,13 +34,14 @@ const PAGE_SIZE = 100;
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
+  imports: [IconComponent],
   template: `
     <div id="symbols-panel" class="symbols-panel" [class.visible]="visible()">
       <div id="symbols-panel-header">
         <span class="symbols-title">Symbols</span>
         <span id="sym-region-label" class="sym-region-label">{{ regionLabel() }}</span>
-        <button class="sym-header-btn" (click)="onRefresh()" title="Refresh symbols">&#8635;</button>
-        <button class="sym-header-btn" (click)="onClose()" title="Close">&#xD7;</button>
+        <button class="sym-header-btn" (click)="onRefresh()" title="Refresh symbols"><app-icon name="refreshcw" [size]="12" /></button>
+        <button class="sym-header-btn" (click)="onClose()" title="Close"><app-icon name="x" [size]="13" /></button>
       </div>
 
       <div id="sym-tabs">
@@ -81,7 +83,7 @@ const PAGE_SIZE = 100;
               [value]="newLabelComment()"
               (input)="newLabelComment.set(newCommentInput.value)"
             />
-            <button class="sym-add-btn" (click)="onAddLabel()" title="Add label">+</button>
+            <button class="sym-add-btn" (click)="onAddLabel()" title="Add label"><app-icon name="plus" [size]="13" /></button>
           </div>
           <div class="sym-list" [innerHTML]="labelsHtml()"></div>
         </div>
@@ -105,8 +107,8 @@ const PAGE_SIZE = 100;
             />
             @if (getPageCount('strings') > 1) {
               <div class="sym-pager">
-                <button class="sym-pager-btn" (click)="onPagerPrev('strings')" [disabled]="isPrevDisabled('strings')">&#8249; Prev</button>
-                <button class="sym-pager-btn" (click)="onPagerNext('strings')" [disabled]="isNextDisabled('strings')">Next &#8250;</button>
+                <button class="sym-pager-btn" (click)="onPagerPrev('strings')" [disabled]="isPrevDisabled('strings')"><app-icon name="arrowleft" [size]="12" /><span>Prev</span></button>
+                <button class="sym-pager-btn" (click)="onPagerNext('strings')" [disabled]="isNextDisabled('strings')"><span>Next</span><app-icon name="arrowright" [size]="12" /></button>
                 <span class="sym-pager-info" [title]="getPagerTitle('strings')">{{ getPagerLabel('strings') }}</span>
               </div>
             }
@@ -133,8 +135,8 @@ const PAGE_SIZE = 100;
             />
             @if (getPageCount('functions') > 1) {
               <div class="sym-pager">
-                <button class="sym-pager-btn" (click)="onPagerPrev('functions')" [disabled]="isPrevDisabled('functions')">&#8249; Prev</button>
-                <button class="sym-pager-btn" (click)="onPagerNext('functions')" [disabled]="isNextDisabled('functions')">Next &#8250;</button>
+                <button class="sym-pager-btn" (click)="onPagerPrev('functions')" [disabled]="isPrevDisabled('functions')"><app-icon name="arrowleft" [size]="12" /><span>Prev</span></button>
+                <button class="sym-pager-btn" (click)="onPagerNext('functions')" [disabled]="isNextDisabled('functions')"><span>Next</span><app-icon name="arrowright" [size]="12" /></button>
                 <span class="sym-pager-info" [title]="getPagerTitle('functions')">{{ getPagerLabel('functions') }}</span>
               </div>
             }
@@ -161,8 +163,8 @@ const PAGE_SIZE = 100;
             />
             @if (getPageCount('pointers') > 1) {
               <div class="sym-pager">
-                <button class="sym-pager-btn" (click)="onPagerPrev('pointers')" [disabled]="isPrevDisabled('pointers')">&#8249; Prev</button>
-                <button class="sym-pager-btn" (click)="onPagerNext('pointers')" [disabled]="isNextDisabled('pointers')">Next &#8250;</button>
+                <button class="sym-pager-btn" (click)="onPagerPrev('pointers')" [disabled]="isPrevDisabled('pointers')"><app-icon name="arrowleft" [size]="12" /><span>Prev</span></button>
+                <button class="sym-pager-btn" (click)="onPagerNext('pointers')" [disabled]="isNextDisabled('pointers')"><span>Next</span><app-icon name="arrowright" [size]="12" /></button>
                 <span class="sym-pager-info" [title]="getPagerTitle('pointers')">{{ getPagerLabel('pointers') }}</span>
               </div>
             }
@@ -189,8 +191,8 @@ const PAGE_SIZE = 100;
             />
             @if (getPageCount('floats') > 1) {
               <div class="sym-pager">
-                <button class="sym-pager-btn" (click)="onPagerPrev('floats')" [disabled]="isPrevDisabled('floats')">&#8249; Prev</button>
-                <button class="sym-pager-btn" (click)="onPagerNext('floats')" [disabled]="isNextDisabled('floats')">Next &#8250;</button>
+                <button class="sym-pager-btn" (click)="onPagerPrev('floats')" [disabled]="isPrevDisabled('floats')"><app-icon name="arrowleft" [size]="12" /><span>Prev</span></button>
+                <button class="sym-pager-btn" (click)="onPagerNext('floats')" [disabled]="isNextDisabled('floats')"><span>Next</span><app-icon name="arrowright" [size]="12" /></button>
                 <span class="sym-pager-info" [title]="getPagerTitle('floats')">{{ getPagerLabel('floats') }}</span>
               </div>
             }
@@ -217,8 +219,8 @@ const PAGE_SIZE = 100;
             />
             @if (getPageCount('integers') > 1) {
               <div class="sym-pager">
-                <button class="sym-pager-btn" (click)="onPagerPrev('integers')" [disabled]="isPrevDisabled('integers')">&#8249; Prev</button>
-                <button class="sym-pager-btn" (click)="onPagerNext('integers')" [disabled]="isNextDisabled('integers')">Next &#8250;</button>
+                <button class="sym-pager-btn" (click)="onPagerPrev('integers')" [disabled]="isPrevDisabled('integers')"><app-icon name="arrowleft" [size]="12" /><span>Prev</span></button>
+                <button class="sym-pager-btn" (click)="onPagerNext('integers')" [disabled]="isNextDisabled('integers')"><span>Next</span><app-icon name="arrowright" [size]="12" /></button>
                 <span class="sym-pager-info" [title]="getPagerTitle('integers')">{{ getPagerLabel('integers') }}</span>
               </div>
             }
@@ -386,7 +388,7 @@ export class SymbolsPanelComponent {
           <span class="sym-item-addr">${this.escapeHtml(item.address)}</span>
           <span class="sym-item-name" title="${this.escapeHtml(item.label)}">${this.escapeHtml(item.label)}</span>
           ${comment}
-          <button class="sym-delete-btn" data-addr="${this.escapeHtml(item.address)}" title="Delete label">×</button>
+          <button class="sym-delete-btn" data-addr="${this.escapeHtml(item.address)}" title="Delete label">${this.inlineTrashIcon()}</button>
         </div>`;
       })
       .join('');
@@ -745,6 +747,10 @@ export class SymbolsPanelComponent {
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
+  }
+
+  private inlineTrashIcon(): string {
+    return '<svg class="lic-inline" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /><line x1="10" x2="10" y1="11" y2="17" /><line x1="14" x2="14" y1="11" y2="17" /></svg>';
   }
 
   private rawBitsToFloat(bits: number): string {

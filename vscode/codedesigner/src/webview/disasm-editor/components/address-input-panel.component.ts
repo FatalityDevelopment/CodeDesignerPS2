@@ -9,6 +9,7 @@ import {
   viewChild,
   computed,
 } from '@angular/core';
+import { IconComponent } from '../../shared/icon.component';
 
 /**
  * AddressInputPanel - Reusable address input panel.
@@ -20,6 +21,7 @@ import {
   selector: 'app-address-input-panel',
   standalone: true,
   encapsulation: ViewEncapsulation.None,
+  imports: [IconComponent],
   template: `
     @if (visible()) {
       <div [id]="panelId()" class="visible">
@@ -35,7 +37,7 @@ import {
               (input)="onInput($event)"
               (keydown)="onKeydown($event)"
             />
-            <button class="search-clear" (click)="clearInput()">&#xD7;</button>
+            <button class="search-clear" title="Clear" (click)="clearInput()"><app-icon name="x" [size]="13" /></button>
           </div>
           <div class="search-nav">
             <button class="nav-btn" [title]="buttonTitle()" (click)="submit()">
@@ -43,7 +45,7 @@ import {
             </button>
           </div>
           <span class="search-info">{{ statusMessage() }}</span>
-          <button class="close-search" title="Close (Escape)" (click)="close.emit()">&#xD7;</button>
+          <button class="close-search" title="Close (Escape)" (click)="close.emit()"><app-icon name="x" [size]="14" /></button>
         </div>
       </div>
     }

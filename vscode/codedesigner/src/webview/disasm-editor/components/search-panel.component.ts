@@ -11,6 +11,7 @@ import {
 } from '@angular/core';
 import { EditorState } from '../state/editor.state';
 import { SearchMode } from '../state/types';
+import { IconComponent } from '../../shared/icon.component';
 
 /**
  * SearchPanel - Self-contained search UI component.
@@ -22,6 +23,7 @@ import { SearchMode } from '../state/types';
   selector: 'app-search-panel',
   standalone: true,
   encapsulation: ViewEncapsulation.None,
+  imports: [IconComponent],
   template: `
     @if (visible()) {
       <div id="search-panel" class="visible">
@@ -37,7 +39,7 @@ import { SearchMode } from '../state/types';
               (input)="onInput($event)"
               (keydown)="onKeydown($event)"
             />
-            <button class="search-clear" (click)="clearSearch()">&#xD7;</button>
+            <button class="search-clear" title="Clear Search" (click)="clearSearch()"><app-icon name="x" [size]="13" /></button>
           </div>
           <div class="search-mode">
             @for (mode of modes; track mode.id) {
@@ -56,16 +58,16 @@ import { SearchMode } from '../state/types';
               [disabled]="!hasMatches()"
               title="Previous Match (Shift+Enter)"
               (click)="prevMatch.emit()"
-            >&#8593;</button>
+            ><app-icon name="chevronup" [size]="13" /></button>
             <button
               class="nav-btn"
               [disabled]="!hasMatches()"
               title="Next Match (Enter)"
               (click)="nextMatch.emit()"
-            >&#8595;</button>
+            ><app-icon name="chevrondown" [size]="13" /></button>
           </div>
           <span class="search-info">{{ statusText() }}</span>
-          <button class="close-search" title="Close (Escape)" (click)="close.emit()">&#xD7;</button>
+          <button class="close-search" title="Close (Escape)" (click)="close.emit()"><app-icon name="x" [size]="14" /></button>
         </div>
       </div>
     }

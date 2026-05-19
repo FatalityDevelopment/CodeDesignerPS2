@@ -54,14 +54,14 @@ export class HexViewComponent implements OnChanges {
 
   private _buildHeader(): HTMLElement {
     const header = document.createElement('div');
-    header.className = 'hex-row';
+    header.className = 'hex-row hex-header-row';
     let bytes = '';
     for (let i = 0; i < 16; i++) {
-      if (i && i % 4 === 0) { bytes += '<span style="width:8px"></span>'; }
+      if (i && i % 4 === 0) { bytes += '<span class="hex-sep"></span>'; }
       bytes += `<span class="hex-byte">+${i.toString(16).toUpperCase()}</span>`;
     }
     const rowAddr = (this.offset >>> 0).toString(16).padStart(8, '0').toUpperCase();
-    header.innerHTML = `<span class="hex-addr">${rowAddr}</span><span class="hex-bytes">${bytes}</span><span class="hex-ascii">0123456789ABCDEF</span>`;
+    header.innerHTML = `<span class="hex-addr">${rowAddr}</span><span class="hex-bytes">${bytes}</span><span class="hex-ascii">ASCII</span>`;
     return header;
   }
 
@@ -72,7 +72,7 @@ export class HexViewComponent implements OnChanges {
     let bytesHtml = '';
     let asciiHtml = '';
     for (let i = 0; i < 16; i++) {
-      if (i && i % 4 === 0) { bytesHtml += '<span style="width:8px"></span>'; }
+      if (i && i % 4 === 0) { bytesHtml += '<span class="hex-sep"></span>'; }
       let byteStr = '  ';
       let char = ' ';
       let highlight = false;

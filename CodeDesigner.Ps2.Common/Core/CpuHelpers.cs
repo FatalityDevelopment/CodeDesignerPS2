@@ -49,6 +49,33 @@ namespace CodeDesigner.Ps2.Common.CPU
         }
 
         /// <summary>
+        /// Format a load/store analysis memory reference.  When the base register is
+        /// unknown in a synthetic/static analysis pass, keep the 16-bit displacement
+        /// visible instead of implying it is a resolved 32-bit address.
+        /// </summary>
+        public static string FormatMemoryReference(CpuState? cpu, int baseReg, int offset)
+        {
+            if (cpu == null)
+                return FormatMemoryOffset(offset);
+
+            ulong baseLo = cpu.RegsLo[baseReg];
+            ulong baseHi = cpu.RegsHi[baseReg];
+            if (baseReg != 0 && baseLo == 0 && baseHi == 0)
+                return FormatMemoryOffset(offset);
+
+            uint addr = (uint)((int)baseLo + offset);
+            return $"0x{addr:X8}";
+        }
+
+        /// <summary>
+        /// Format a 16-bit load/store displacement for analysis comments.
+        /// </summary>
+        public static string FormatMemoryOffset(int offset)
+        {
+            return $"0x{offset & 0xFFFF:X4}";
+        }
+
+        /// <summary>
         /// Sign-extend a 16-bit value to 32-bit integer.
         /// </summary>
         public static int SignExtend16(int val)

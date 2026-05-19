@@ -2564,6 +2564,42 @@ namespace CodeDesigner.Ps2.TestProject
                 $"Analysis should mention the store address, got: {analysis}");
         }
 
+        [TestMethod]
+        public void AnalyzeInstructions_SD_WithUnknownBase_ShowsOffsetNotFakeAddress()
+        {
+            // SD $v0, $0018($a2).  In batch/static analysis $a2 starts unknown/zero,
+            // so the comment should keep the 16-bit displacement instead of implying
+            // it resolved to absolute address 0x00000018.
+            uint enc = (0x3Fu << 26) | (6u << 21) | (2u << 16) | 0x0018u;
+
+            var comments = MipsAnalyzer.AnalyzeInstructions(
+                new[] { (enc, 0x001A3A30u) },
+                startPc: 0x001A3A30u,
+                executeInstructions: true,
+                includeStateHints: false);
+
+            string analysis = comments[0x001A3A30u];
+            Assert.IsTrue(analysis.Contains("[0x0018]"),
+                $"Expected 16-bit offset in SD analysis, got: {analysis}");
+            Assert.IsFalse(analysis.Contains("[0x00000018]"),
+                $"Should not show unresolved offset as an 8-digit address, got: {analysis}");
+        }
+
+        [TestMethod]
+        public void AnalyzeSingleInstruction_SD_WithKnownBase_ShowsResolvedAddress()
+        {
+            uint enc = (0x3Fu << 26) | (6u << 21) | (2u << 16) | 0x0018u;
+
+            var cpu = new CpuState();
+            cpu.RegsLo[6] = 0x001A0000u;
+            cpu.RegsLo[2] = 0xCFu;
+
+            string analysis = MipsAnalyzer.AnalyzeSingleInstruction(enc, 0x001A3A30u, cpu);
+
+            Assert.IsTrue(analysis.Contains("[0x001A0018]"),
+                $"Expected resolved address when base register is known, got: {analysis}");
+        }
+
         // -----------------------------------------------------------------------
         // MMIO register name hints
         // -----------------------------------------------------------------------

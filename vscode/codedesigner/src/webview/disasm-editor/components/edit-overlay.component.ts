@@ -512,12 +512,13 @@ export class EditOverlayComponent {
   /** Wrap GPR register tokens with color class spans. */
   colorizeRegisters(text: string): string {
     if (!text) return text;
-    return text.replace(this._GPR_REGEX, (match, name) => {
+    const colored = text.replace(this._GPR_REGEX, (match, name) => {
       const cls = this._GPR_NAME_TO_CAT[name];
       if (!cls) return match;
-      const dollar = match.startsWith('$') ? '$' : '';
-      return `<span class="${cls}">${dollar}${name}</span>`;
+      const sigil = match.startsWith('$') ? '$' : '';
+      return `${sigil}<span class="${cls}">${name}</span>`;
     });
+    return this.colorizeOperandSyntax(colored);
   }
 
   /** Helper for template: cast Event.target to HTMLInputElement. */
@@ -537,8 +538,40 @@ export class EditOverlayComponent {
     s0: 'dbg-reg-s', s1: 'dbg-reg-s', s2: 'dbg-reg-s', s3: 'dbg-reg-s',
     s4: 'dbg-reg-s', s5: 'dbg-reg-s', s6: 'dbg-reg-s', s7: 'dbg-reg-s',
     k0: 'dbg-reg-k', k1: 'dbg-reg-k',
-    gp: 'dbg-reg-special', sp: 'dbg-reg-special', fp: 'dbg-reg-special', ra: 'dbg-reg-special',
+    gp: 'dbg-reg-gp', sp: 'dbg-reg-sp', fp: 'dbg-reg-fp', ra: 'dbg-reg-ra',
   };
 
   private readonly _GPR_REGEX = /\$?(zero|at|v[01]|a[0-3]|t[0-9]|s[0-7]|k[01]|gp|sp|fp|ra)(?![A-Za-z0-9_])/g;
+
+  private colorizeOperandSyntax(html: string): string {
+    return html.split(/(<[^>]+>)/g).map(part => {
+      if (part.startsWith('<')) { return part; }
+      return this.colorizeOperandText(part);
+    }).join('');
+  }
+
+  private colorizeOperandText(text: string): string {
+    let html = '';
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      const offset = text.slice(i + 1, i + 5);
+      if (ch === '$' && /^[0-9a-f]{4}$/i.test(offset) && text[i + 5] === '(') {
+        html += '<span class="dbg-reg-sigil">$</span>';
+        html += `<span class="dbg-arg-offset">${offset}</span>`;
+        i += 4;
+        continue;
+      }
+
+      if (ch === '$') {
+        html += '<span class="dbg-reg-sigil">$</span>';
+      } else if (ch === ',') {
+        html += '<span class="dbg-arg-comma">,</span>';
+      } else if (ch === '(' || ch === ')') {
+        html += `<span class="dbg-reg-paren">${ch}</span>`;
+      } else {
+        html += ch;
+      }
+    }
+    return html;
+  }
 }

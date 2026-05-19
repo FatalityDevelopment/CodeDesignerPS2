@@ -26,6 +26,8 @@ import { DisasmRow } from '../state/types';
       class="row"
       [class.active]="isActive()"
       [class.current-pc]="isPc()"
+      [class.branch-highlight]="isBranchHighlight()"
+      [class.branch-path]="isBranchPath()"
       [class.search-match]="isSearchMatch()"
       [class.search-current]="isCurrentMatch()"
       [class.breakpoint]="hasBreakpoint()"
@@ -111,6 +113,31 @@ export class DisasmRowComponent {
     return this.toPhysAddr(hitAddr) === this.toPhysAddr(rowAddr);
   });
 
+  /** Whether this row is the target of the currently selected branch/jump. */
+  protected readonly isBranchHighlight = computed(() => {
+    if (this.isActive()) { return false; }
+    const branch = this.selectedBranch();
+    if (!branch?.spansPath) { return false; }
+
+    const rowAddr = parseInt(this.data().addr, 16);
+    return this.toPhysAddr(rowAddr) === this.toPhysAddr(branch.target);
+  });
+
+  /** Whether this row sits between the selected branch/jump and its target. */
+  protected readonly isBranchPath = computed(() => {
+    if (this.isActive()) { return false; }
+    const branch = this.selectedBranch();
+    if (!branch) { return false; }
+
+    const rowAddr = this.toPhysAddr(parseInt(this.data().addr, 16));
+    const source = this.toPhysAddr(branch.source);
+    const target = this.toPhysAddr(branch.target);
+    const low = Math.min(source, target);
+    const high = Math.max(source, target);
+
+    return rowAddr > low && rowAddr < high;
+  });
+
   // ═══════════════════════════════════════════════════════════════════════════
   // Computed HTML Content
   // ═══════════════════════════════════════════════════════════════════════════
@@ -177,7 +204,7 @@ export class DisasmRowComponent {
   });
 
   protected readonly commentHtml = computed(() =>
-    this.highlightSearch(this.data().comment || '', 'comment')
+    this.highlightSearch(this.colorizeComment(this.data().comment || ''), 'comment')
   );
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -217,6 +244,79 @@ export class DisasmRowComponent {
     return v;
   }
 
+  private readonly CONTROL_FLOW_OPS = new Set([
+    'b', 'beq', 'beql', 'bne', 'bnel', 'blez', 'blezl', 'bgtz', 'bgtzl',
+    'bltz', 'bltzl', 'bgez', 'bgezl', 'bltzal', 'bltzall', 'bgezal', 'bgezall',
+    'bc1f', 'bc1fl', 'bc1t', 'bc1tl', 'bal', 'j', 'jal',
+  ]);
+
+  private readonly BRANCH_PATH_OPS = new Set([
+    'b', 'beq', 'beql', 'bne', 'bnel', 'blez', 'blezl', 'bgtz', 'bgtzl',
+    'bltz', 'bltzl', 'bgez', 'bgezl', 'bltzal', 'bltzall', 'bgezal', 'bgezall',
+    'bc1f', 'bc1fl', 'bc1t', 'bc1tl', 'bal',
+  ]);
+
+  private branchTarget(row: DisasmRow | undefined): number | undefined {
+    if (!row) { return undefined; }
+    const op = row.op.trim().toLowerCase();
+    if (!this.CONTROL_FLOW_OPS.has(op)) { return undefined; }
+
+    return this.addressFromArgs(row.args) ?? this.decodeBranchTarget(row);
+  }
+
+  private selectedBranch(): { source: number; target: number; spansPath: boolean } | undefined {
+    const row = this.state.currentRow();
+    const target = this.branchTarget(row);
+    if (!row || target === undefined) { return undefined; }
+    return {
+      source: parseInt(row.addr, 16) >>> 0,
+      target,
+      spansPath: this.BRANCH_PATH_OPS.has(row.op.trim().toLowerCase()),
+    };
+  }
+
+  private addressFromArgs(args: string): number | undefined {
+    const target = args.match(/(?:\$|0x)([0-9a-f]{8})\b/i)
+      ?? args.match(/(?:^|[^0-9a-f])([0-9a-f]{8})(?![0-9a-f])/i);
+    return target ? parseInt(target[1], 16) >>> 0 : undefined;
+  }
+
+  private decodeBranchTarget(row: DisasmRow): number | undefined {
+    const wordHex = row.bytes.replace(/[^0-9a-f]/gi, '');
+    if (wordHex.length < 8) { return undefined; }
+
+    const word = parseInt(wordHex.slice(0, 8), 16) >>> 0;
+    const opcode = (word >>> 26) & 0x3f;
+    const pc = parseInt(row.addr, 16) >>> 0;
+
+    if (opcode === 0x02 || opcode === 0x03) {
+      return (((pc + 4) & 0xf0000000) | ((word & 0x03ffffff) << 2)) >>> 0;
+    }
+
+    const imm = word & 0xffff;
+    const signedImm = imm & 0x8000 ? imm - 0x10000 : imm;
+    const relativeTarget = (pc + 4 + (signedImm << 2)) >>> 0;
+
+    if ([0x04, 0x05, 0x06, 0x07, 0x14, 0x15, 0x16, 0x17].includes(opcode)) {
+      return relativeTarget;
+    }
+
+    if (opcode === 0x01) {
+      const rt = (word >>> 16) & 0x1f;
+      return [0x00, 0x01, 0x02, 0x03, 0x10, 0x11, 0x12, 0x13].includes(rt)
+        ? relativeTarget
+        : undefined;
+    }
+
+    if (opcode === 0x11) {
+      const rs = (word >>> 21) & 0x1f;
+      const rt = (word >>> 16) & 0x03;
+      return rs === 0x08 && rt <= 0x03 ? relativeTarget : undefined;
+    }
+
+    return undefined;
+  }
+
   /** GPR name to category class mapping */
   private readonly GPR_NAME_TO_CAT: Readonly<Record<string, string>> = {
     zero: 'dbg-reg-zero', at: 'dbg-reg-at',
@@ -228,7 +328,7 @@ export class DisasmRowComponent {
     s0: 'dbg-reg-s', s1: 'dbg-reg-s', s2: 'dbg-reg-s', s3: 'dbg-reg-s',
     s4: 'dbg-reg-s', s5: 'dbg-reg-s', s6: 'dbg-reg-s', s7: 'dbg-reg-s',
     k0: 'dbg-reg-k', k1: 'dbg-reg-k',
-    gp: 'dbg-reg-special', sp: 'dbg-reg-special', fp: 'dbg-reg-special', ra: 'dbg-reg-special',
+    gp: 'dbg-reg-gp', sp: 'dbg-reg-sp', fp: 'dbg-reg-fp', ra: 'dbg-reg-ra',
   };
 
   /** Regex for matching GPR names */
@@ -237,12 +337,58 @@ export class DisasmRowComponent {
   /** Wrap GPR register tokens with color class spans */
   private colorizeRegisters(text: string): string {
     if (!text) return text;
-    return text.replace(this.GPR_REGEX, (match, name) => {
+    const colored = text.replace(this.GPR_REGEX, (match, name) => {
       const cls = this.GPR_NAME_TO_CAT[name];
       if (!cls) return match;
-      const dollar = match.startsWith('$') ? '$' : '';
-      return `<span class="${cls}">${dollar}${name}</span>`;
+      const sigil = match.startsWith('$') ? '$' : '';
+      return `${sigil}<span class="${cls}">${name}</span>`;
     });
+    return this.colorizeOperandSyntax(colored);
+  }
+
+  private colorizeOperandSyntax(html: string): string {
+    return html.split(/(<[^>]+>)/g).map(part => {
+      if (part.startsWith('<')) { return part; }
+      return this.colorizeOperandText(part);
+    }).join('');
+  }
+
+  private colorizeOperandText(text: string): string {
+    let html = '';
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      const offset = text.slice(i + 1, i + 5);
+      if (ch === '$' && /^[0-9a-f]{4}$/i.test(offset) && text[i + 5] === '(') {
+        html += '<span class="dbg-reg-sigil">$</span>';
+        html += `<span class="dbg-arg-offset">${offset}</span>`;
+        i += 4;
+        continue;
+      }
+
+      if (ch === '$') {
+        html += '<span class="dbg-reg-sigil">$</span>';
+      } else if (ch === ',') {
+        html += '<span class="dbg-arg-comma">,</span>';
+      } else if (ch === '(' || ch === ')') {
+        html += `<span class="dbg-reg-paren">${ch}</span>`;
+      } else {
+        html += ch;
+      }
+    }
+    return html;
+  }
+
+  private colorizeComment(text: string): string {
+    if (!text) { return text; }
+    let html = this.escapeHtml(text);
+    html = html.replace(/(&quot;.*?&quot;)/g, '<span class="comment-resolved">$1</span>');
+    html = html.split(/(<[^>]+>)/g).map(part => {
+      if (part.startsWith('<')) { return part; }
+      return part
+        .replace(/\b(0x[0-9a-f]{8}|[0-9a-f]{8})\b/gi, '<span class="comment-resolved">$1</span>')
+        .replace(/\b(0x[0-9a-f]{4})\b/gi, '<span class="comment-offset">$1</span>');
+    }).join('');
+    return html;
   }
 
   /** Highlight search matches within text */

@@ -46,7 +46,11 @@ export function gprCategoryClass(index: number): string {
                                                           return 'dbg-reg-t';       // $t0-$t9
   if (index >= 16 && index <= 23)                         return 'dbg-reg-s';       // $s0-$s7
   if (index === 26 || index === 27)                       return 'dbg-reg-k';       // $k0-$k1
-  return 'dbg-reg-special';                                                         // $gp $sp $fp $ra
+  if (index === 28)                                       return 'dbg-reg-gp';      // $gp
+  if (index === 29)                                       return 'dbg-reg-sp';      // $sp
+  if (index === 30)                                       return 'dbg-reg-fp';      // $fp
+  if (index === 31)                                       return 'dbg-reg-ra';      // $ra
+  return 'dbg-reg-special';
 }
 
 /** Pre-computed map: GPR name => CSS category class. */
@@ -87,12 +91,46 @@ const GPR_REGEX = /\$?(zero|at|v[01]|a[0-3]|t[0-9]|s[0-7]|k[01]|gp|sp|fp|ra)(?![
 export function colorizeRegisters(text: string): string {
   if (!text) return text;
 
-  return text.replace(GPR_REGEX, (match, name) => {
+  const colored = text.replace(GPR_REGEX, (match, name) => {
     const cls = GPR_NAME_TO_CATEGORY[name];
     if (!cls) return match;
-    const dollar = match.startsWith('$') ? '$' : '';
-    return `<span class="${cls}">${dollar}${name}</span>`;
+    const sigil = match.startsWith('$') ? '$' : '';
+    return `${sigil}<span class="${cls}">${name}</span>`;
   });
+
+  return colorizeOperandSyntax(colored);
+}
+
+function colorizeOperandSyntax(html: string): string {
+  return html.split(/(<[^>]+>)/g).map(part => {
+    if (part.startsWith('<')) { return part; }
+    return colorizeOperandText(part);
+  }).join('');
+}
+
+function colorizeOperandText(text: string): string {
+  let html = '';
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    const offset = text.slice(i + 1, i + 5);
+    if (ch === '$' && /^[0-9a-f]{4}$/i.test(offset) && text[i + 5] === '(') {
+      html += '<span class="dbg-reg-sigil">$</span>';
+      html += `<span class="dbg-arg-offset">${offset}</span>`;
+      i += 4;
+      continue;
+    }
+
+    if (ch === '$') {
+      html += '<span class="dbg-reg-sigil">$</span>';
+    } else if (ch === ',') {
+      html += '<span class="dbg-arg-comma">,</span>';
+    } else if (ch === '(' || ch === ')') {
+      html += `<span class="dbg-reg-paren">${ch}</span>`;
+    } else {
+      html += ch;
+    }
+  }
+  return html;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

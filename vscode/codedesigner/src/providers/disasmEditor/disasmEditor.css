@@ -239,12 +239,19 @@ body {
     background: #264f78;
 }
 
+.row.branch-path {
+    background: color-mix(in srgb, var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.08)) 46%, transparent);
+    box-shadow: inset 3px 0 0 color-mix(in srgb, var(--vscode-editor-foreground, #d4d4d4) 22%, transparent);
+}
+
 .row.branch-highlight {
-    background: #3a3d41;
+    background: color-mix(in srgb, var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.08)) 72%, #3a3d41);
+    box-shadow: inset 3px 0 0 color-mix(in srgb, var(--vscode-editor-foreground, #d4d4d4) 36%, transparent);
 }
 
 .row.active.branch-highlight {
     background: #264f78;
+    box-shadow: none;
 }
 
 .row.breakpoint .addr::before {
@@ -317,7 +324,12 @@ body {
 .label { color: #4ec9b0; } 
 .op { color: #dcdcaa; } 
 .args { color: #ce9178; } 
-.comment { color: #6a9955; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } 
+.comment {
+    color: #737980;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+} 
 
 .search-match-highlight {
     background: #f9826c;
@@ -492,22 +504,30 @@ body {
 /* ── GPR register category colours ── */
 /* Applied to .dbg-name spans in the debug panel and inline <span> elements   */
 /* injected by colorizeRegisters() in the disassembler args column.            */
-/* $zero — always-zero, muted */
-.dbg-reg-zero   { color: var(--vscode-disabledForeground, #858585); }
-/* $at — assembler temporary, amber caution */
-.dbg-reg-at     { color: var(--vscode-editorWarning-foreground, #cca700); }
-/* $v0/$v1 — function return values, number/value green */
-.dbg-reg-v      { color: var(--vscode-debugTokenExpression-number, #b5cea8); }
-/* $a0-$a3 — call arguments, string/parameter orange */
-.dbg-reg-a      { color: var(--vscode-debugTokenExpression-string, #ce9178); }
-/* $t0-$t9 — temporaries, function-name yellow */
-.dbg-reg-t      { color: var(--vscode-symbolIcon-functionForeground, #dcdcaa); }
-/* $s0-$s7 — saved (callee-saved), variable blue */
-.dbg-reg-s      { color: var(--vscode-debugTokenExpression-name, #9cdcfe); }
-/* $k0/$k1 — kernel-reserved, error red */
-.dbg-reg-k      { color: var(--vscode-debugTokenExpression-error, #f48771); }
-/* $gp/$sp/$fp/$ra — architectural specials, type-param teal */
-.dbg-reg-special { color: var(--vscode-symbolIcon-typeParameterForeground, #4ec9b0); }
+.dbg-reg-zero   { color: #8b949e; }
+.dbg-reg-at     { color: #c586c0; }
+.dbg-reg-v      { color: #ff6b7a; }
+.dbg-reg-a      { color: #9cdcfe; }
+.dbg-reg-t      { color: #b5cea8; }
+.dbg-reg-s      { color: #dcdcaa; }
+.dbg-reg-k      { color: #f48771; }
+.dbg-reg-gp     { color: #4ec9b0; }
+.dbg-reg-sp     { color: #dcdcaa; }
+.dbg-reg-fp     { color: #dcdcaa; }
+.dbg-reg-ra     { color: #ff6b7a; }
+.dbg-reg-special { color: #4ec9b0; }
+.dbg-reg-sigil  { color: #d7ba7d; }
+.dbg-reg-paren  { color: #8b949e; }
+.dbg-arg-comma  { color: #8b949e; }
+.dbg-arg-offset { color: #a8afb8; }
+
+.comment-resolved {
+    color: #6a9955;
+}
+
+.comment-offset {
+    color: #a8afb8;
+}
 
 .dbg-addr {
     color: #c586c0;
