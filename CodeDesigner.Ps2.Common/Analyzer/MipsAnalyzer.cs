@@ -461,8 +461,8 @@ namespace CodeDesigner.Ps2.Common
                     string? str = TryPeekStringAtAddress(bus, addr);
                     if (str != null)
                     {
-                        string region = GetMemoryRegionName(addr) is string rn ? $" ({rn})" : string.Empty;
-                        analysis += $" \"{str}\"{region}";
+                        //string region = GetMemoryRegionName(addr) is string rn ? $" ({rn})" : string.Empty;
+                        analysis += $" \"{str}\"";
                         return analysis;
                     }
 
@@ -481,8 +481,8 @@ namespace CodeDesigner.Ps2.Common
                     try
                     {
                         uint word = bus.ReadWord(addr);
-                        string region = GetMemoryRegionName(addr) is string rn ? $" ({rn})" : string.Empty;
-                        analysis += $" = 0x{word:X8}{region}";
+                        //string region = GetMemoryRegionName(addr) is string rn ? $" ({rn})" : string.Empty;
+                        analysis += $" = 0x{word:X8}";
                         return analysis;
                     }
                     catch { /* address unreadable */ }
@@ -569,9 +569,6 @@ namespace CodeDesigner.Ps2.Common
         private static string FormatPointerChain(List<string> types, List<uint> addresses, string finalValue)
         {
             var sb = new StringBuilder();
-            sb.Append('[');
-            sb.Append(string.Join("->", types));
-            sb.Append("] ");
 
             // Show all intermediate address hops (the first address in the chain is the
             // one whose content is shown, so we include all addresses up to the last).
@@ -710,8 +707,8 @@ namespace CodeDesigner.Ps2.Common
             string? str = TryPeekStringAtAddress(bus, target);
             if (str != null)
             {
-                string region = GetMemoryRegionName(target) is string rn ? $" ({rn})" : string.Empty;
-                return $"\"{str}\"{region}";
+                //string region = GetMemoryRegionName(target) is string rn ? $" ({rn})" : string.Empty;
+                return $"\"{str}\"";
             }
 
             // 3. Pointer chain starting at target address
