@@ -324,6 +324,7 @@ namespace CodeDesigner.Ps2.Bridge
                 new Services.LabelManagerService(ctx),
                 new Services.AssemblerService(ctx),
                 new Services.CodeAnalysisService(ctx),
+                new Services.VisualizerService(ctx),
                 new Services.EmulatorControlService(ctx),
                 new Services.DataFormatService(ctx),
                 new Services.GsStreamService(ctx, _gsStreamForwarder),

@@ -72,6 +72,11 @@
         "title": "CodeDesigner: Open PS2 Cheats Editor"
       },
       {
+        "command": "codedesigner.openStructureVisualizer",
+        "title": "CodeDesigner: Open Structure Visualizer",
+        "icon": "$(type-hierarchy)"
+      },
+      {
         "command": "codedesigner.toggleEmulatorConnection",
         "title": "CodeDesigner: Connect / Disconnect Emulator",
         "icon": "$(plug)"
@@ -116,6 +121,11 @@
       "view/title": [
         {
           "command": "codedesigner.toggleEmulatorConnection",
+          "when": "view == disasm.disasmPanel",
+          "group": "navigation"
+        },
+        {
+          "command": "codedesigner.openStructureVisualizer",
           "when": "view == disasm.disasmPanel",
           "group": "navigation"
         },
@@ -278,6 +288,7 @@
     "@angular/platform-browser": "^19.2.19",
     "@angular/platform-browser-dynamic": "^19.2.19",
     "@vscode/webview-ui-toolkit": "^1.4.0",
+    "mermaid": "^11.4.1",
     "rxjs": "^7.8.2",
     "zone.js": "^0.15.0"
   },
