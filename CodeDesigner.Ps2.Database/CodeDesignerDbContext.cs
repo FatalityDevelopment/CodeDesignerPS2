@@ -59,6 +59,15 @@ public class CodeDesignerDbContext : DbContext
     /// <summary>User-defined data-format overrides for the disassembler view.</summary>
     public DbSet<DataFormatOverride> DataFormatOverrides { get; set; } = null!;
 
+    /// <summary>Cross-cutting label groups ("objectmap") — classes, modules, subsystems, vtables.</summary>
+    public DbSet<LabelGroup> LabelGroups { get; set; } = null!;
+
+    /// <summary>Join rows linking labels into label groups.</summary>
+    public DbSet<LabelGroupMember> LabelGroupMembers { get; set; } = null!;
+
+    /// <summary>Persisted caller → callee relationships used by the call-graph visualizer.</summary>
+    public DbSet<CallEdge> CallEdges { get; set; } = null!;
+
     // ── Construction ──────────────────────────────────────────────────────────
 
     public CodeDesignerDbContext(DbContextOptions<CodeDesignerDbContext> options)
@@ -289,6 +298,60 @@ public class CodeDesignerDbContext : DbContext
 
             // Fast lookup by (disc, address range).
             entity.HasIndex(o => new { o.GameDiscId, o.Address });
+        });
+
+        // ── LabelGroup ─────────────────────────────────────────────────────────
+        modelBuilder.Entity<LabelGroup>(entity =>
+        {
+            entity.HasKey(g => g.Id);
+            entity.Property(g => g.Name).HasMaxLength(256).IsRequired();
+            entity.Property(g => g.Color).HasMaxLength(32);
+
+            entity.HasOne(g => g.LabelSet)
+                  .WithMany()
+                  .HasForeignKey(g => g.LabelSetId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(g => new { g.LabelSetId, g.Name });
+        });
+
+        // ── LabelGroupMember ───────────────────────────────────────────────────
+        modelBuilder.Entity<LabelGroupMember>(entity =>
+        {
+            entity.HasKey(m => m.Id);
+            entity.Property(m => m.Role).HasMaxLength(64);
+
+            entity.HasOne(m => m.LabelGroup)
+                  .WithMany(g => g.Members)
+                  .HasForeignKey(m => m.LabelGroupId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            // Both LabelGroup and Label cascade-delete from LabelSet; SQL Server
+            // rejects two cascade paths into the same table, so the Label side is
+            // handled client-side by EF Core instead.
+            entity.HasOne(m => m.Label)
+                  .WithMany()
+                  .HasForeignKey(m => m.LabelId)
+                  .OnDelete(DeleteBehavior.ClientCascade);
+
+            // A label may only appear once per group.
+            entity.HasIndex(m => new { m.LabelGroupId, m.LabelId }).IsUnique();
+        });
+
+        // ── CallEdge ───────────────────────────────────────────────────────────
+        modelBuilder.Entity<CallEdge>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            entity.HasOne(e => e.GameDisc)
+                  .WithMany()
+                  .HasForeignKey(e => e.GameDiscId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            // Forward (callees of X) and reverse (callers of X) traversals both
+            // need a covering index — the reverse one powers "back to a hook".
+            entity.HasIndex(e => new { e.GameDiscId, e.CallerAddress });
+            entity.HasIndex(e => new { e.GameDiscId, e.CalleeAddress });
         });
     }
 }

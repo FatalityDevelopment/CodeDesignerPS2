@@ -180,6 +180,21 @@ Port can be overridden with `--port <number>` (default `8765`) or the `CODEDESIG
 | `IMPORTLABELSET` | Import a label set from JSON |
 | `EXPORTLABELSET` | Export a label set to JSON |
 
+### Structure visualizer
+
+All Structure-Visualizer commands take their parameters as a JSON object in the
+`Data` field and return their results as a JSON object in the response `Data` field.
+
+| Command | Description |
+|---|---|
+| `GETLABELGROUPS` | List label groups ("objectmap") and their members. `Data`: `{ gameId, setName }` |
+| `ADDLABELGROUP` | Create or update a label group. `Data`: `{ gameId, setName, name, kind, comment, color }` — `kind` is `Class`/`Module`/`Subsystem`/`VTable` |
+| `DELETELABELGROUP` | Delete a label group. `Data`: `{ groupId }` or `{ gameId, setName, groupName }` |
+| `ADDLABELGROUPMEMBER` | Add a label to a group. `Data`: `{ gameId, setName, groupName, labelAddress, role, sortOrder }` |
+| `DELETELABELGROUPMEMBER` | Remove a label from a group. `Data`: `{ gameId, setName, groupName, labelAddress }` |
+| `SCANCALLGRAPH` | Scan a code range for `JAL`/`JALR` calls and persist the caller→callee edges. `Data`: `{ gameId, address, length, region }` |
+| `GETCALLGRAPH` | Return the call-graph subgraph around a focus address. `Data`: `{ gameId, address, depth, direction }` — `direction` is `callers`/`callees`/`both` |
+
 ### Save states & snapshots
 
 | Command | Description |
