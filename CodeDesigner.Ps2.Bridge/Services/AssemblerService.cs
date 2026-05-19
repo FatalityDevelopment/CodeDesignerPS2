@@ -880,19 +880,58 @@ namespace CodeDesigner.Ps2.Bridge.Services
                     byteIndex += 4;
                 }
 
+                // State-aware analysis: when the live client is paused at a
+                // breakpoint and the disassembled range overlaps the paused PC
+                // (±64 KB), seed the analyzer with the mirrored register
+                // snapshot from AnalysisStateService. This unlocks concrete
+                // [TAKEN]/[NOT TAKEN] hints, real branch targets and resolved
+                // pointer/string values in the comment column.
+                // Far-away cold disassembly keeps the old blank-state behaviour
+                // so it doesn't show misleading state-dependent hints for
+                // unreached code.
+                CodeDesigner.Ps2.Common.CPU.CpuState? seedCpu = null;
+                bool includeStateHints = false;
+                if (_ctx.AnalysisState is not null)
+                {
+                    try
+                    {
+                        _ctx.AnalysisState.RefreshFromLive(force: false);
+                        var snap = _ctx.AnalysisState.TryAcquire();
+                        if (snap is not null)
+                        {
+                            const uint NearWindow = 0x10000u; // 64 KB either side of PC
+                            uint disasmStart = startAddress ?? 0u;
+                            uint disasmEnd   = (uint)(disasmStart + (uint)byteBuf.Length);
+                            uint pcLo = snap.PcAtMirror >= NearWindow ? snap.PcAtMirror - NearWindow : 0u;
+                            uint pcHi = snap.PcAtMirror + NearWindow;
+                            if (disasmStart < pcHi && disasmEnd > pcLo)
+                            {
+                                seedCpu = snap.Cpu;
+                                includeStateHints = true;
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        // Best-effort: a failed mirror falls back to blank-state
+                        // analysis — the disassembly still renders.
+                    }
+                }
+
                 // Run analyzer using the instruction's built-in Analyze() method.
-                // State-specific hints (TAKEN / NOT TAKEN) are suppressed here because
-                // the batch analyzer starts from a blank CPU state.  Only the
-                // rows that were emitted as MIPS instructions participate —
-                // data-format rows (.byte/.half/.word/...) are skipped so the
+                // State-specific hints (TAKEN / NOT TAKEN) are kept only when
+                // seedCpu is populated; otherwise they'd be misleading against
+                // a blank register file. Only MIPS-instruction rows participate
+                // — data-format rows (.byte/.half/.word/...) are skipped so the
                 // analyzer does not try to "execute" embedded data.
                 var comments = MipsAnalyzer.AnalyzeInstructions(
                     instructionList,
                     startAddress ?? 0,
-                    executeInstructions: true,  // Execute instructions to track register state
+                    executeInstructions: true,
                     bus: analysisBus,
                     lookupLabel: addr => _ctx.Labels.TryGetValue(addr, out var e) ? e.Label : null,
-                    includeStateHints: false);
+                    includeStateHints: includeStateHints,
+                    seedCpu: seedCpu);
 
                 // Apply comments and labels to results.  Look each row up by
                 // address rather than by index because the row stride is now

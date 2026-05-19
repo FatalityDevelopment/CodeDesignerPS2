@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using CodeDesigner.Ps2.Common;
 
 namespace CodeDesigner.Ps2.Bridge.Services
 {
@@ -37,7 +39,15 @@ namespace CodeDesigner.Ps2.Bridge.Services
         {
             if (_ctx.Client == null)
                 return Responses.Error("Emulator not running — no debug client attached");
-            try   { _ctx.Client.Resume(); return Responses.Success("Resumed"); }
+            try
+            {
+                // Drop the cached analysis snapshot — registers and memory will
+                // both diverge as soon as execution resumes, so any cached
+                // CpuState becomes meaningless.
+                _ctx.AnalysisState?.Invalidate();
+                _ctx.Client.Resume();
+                return Responses.Success("Resumed");
+            }
             catch (Exception ex) { return Responses.Error($"Resume error: {ex.Message}"); }
         }
 
@@ -47,13 +57,51 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 return Responses.Error("Emulator not running — no debug client attached");
             try
             {
-                uint newPc = _ctx.Client.Step();
+                uint newPc        = _ctx.Client.Step();
+                uint normalizedPc = AddressTranslator.NormalizePcToKseg0(newPc);
+
+                // Best-effort: refresh the analysis mirror (registers definitely
+                // changed) and compute a per-row hint for the new PC. The
+                // webview's existing _applyAnalysisUpdates path picks the
+                // dictionary up and patches that single row's comment column —
+                // no surrounding rows touched.
+                Dictionary<string, string>? analysis = null;
+                if (_ctx.AnalysisState is not null)
+                {
+                    try
+                    {
+                        _ctx.AnalysisState.RefreshFromLive(force: true);
+                        var snap = _ctx.AnalysisState.TryAcquire();
+                        if (snap is not null)
+                        {
+                            byte[] iBytes = _ctx.Client.ReadBytes(normalizedPc, 4);
+                            if (iBytes is { Length: >= 4 })
+                            {
+                                uint instr = BitConverter.ToUInt32(iBytes, 0);
+                                var liveBus = new ByteEditorMemoryBusAdapter(new DebugClientByteEditor(_ctx.Client));
+                                string hint = MipsAnalyzer.AnalyzeSingleInstruction(
+                                    instr, normalizedPc, snap.Cpu,
+                                    bus: liveBus,
+                                    lookupLabel: a => _ctx.Labels.TryGetValue(a, out var e) ? e.Label : null,
+                                    includeStateHints: true);
+                                if (!string.IsNullOrEmpty(hint))
+                                    analysis = new() { [normalizedPc.ToString("X8")] = hint };
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        // Analysis is best-effort — never block STEP on it.
+                    }
+                }
+
                 return Responses.Json(new CommandResponse
                 {
-                    Success = true,
-                    Command = "STEP",
-                    Paused  = true,
-                    PC      = AddressTranslator.NormalizePcToKseg0(newPc),
+                    Success             = true,
+                    Command             = "STEP",
+                    Paused              = true,
+                    PC                  = normalizedPc,
+                    InstructionAnalysis = analysis,
                 });
             }
             catch (Exception ex) { return Responses.Error($"Step error: {ex.Message}"); }
