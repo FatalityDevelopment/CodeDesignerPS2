@@ -143,13 +143,14 @@ public sealed partial class CodeDesignerPs2Tools
         [Description("Focus function address (hex or decimal).")] string address,
         [Description("Maximum hops from the focus (1–12, default 3).")] int? depth = null,
         [Description("Traversal direction: 'callers', 'callees', or 'both' (default).")] string? direction = null,
+        [Description("Optional label set name. When provided, call-site addresses are grouped under their containing Function labels.")] string? setName = null,
         CancellationToken cancellationToken = default)
     {
         var json = await bridge.SendAsync(
             new
             {
                 Command = "GETCALLGRAPH",
-                Data    = JsonSerializer.Serialize(new { gameId, address, depth, direction }),
+                Data    = JsonSerializer.Serialize(new { gameId, address, depth, direction, setName }),
             },
             cancellationToken);
         return ExtractGroupData(json);

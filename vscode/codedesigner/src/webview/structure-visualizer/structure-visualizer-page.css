@@ -149,8 +149,16 @@ body {
   flex: 1;
   overflow: auto;
   padding: 12px;
+  cursor: grab;
+  user-select: none;
 }
-.sv-diagram svg { max-width: 100%; height: auto; }
+.sv-diagram.sv-panning { cursor: grabbing; }
+.sv-diagram svg {
+  display: block;
+  max-width: none !important;
+  width: auto;
+  height: auto;
+}
 
 .sv-empty {
   flex: 1;

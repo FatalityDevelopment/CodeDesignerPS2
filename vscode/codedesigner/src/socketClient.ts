@@ -330,9 +330,19 @@ export interface LabelGroupInfo {
 
 /** One caller→callee edge in a call-graph subgraph. */
 export interface CallGraphEdge {
-    from: string;
-    to:   string;
-    kind: string;
+    from:       string;
+    to:         string;
+    kind:       string;
+    argRegs?:    string[];
+    returnRegs?: string[];
+}
+
+/** Resolved metadata for one call-graph node. */
+export interface CallGraphNodeInfo {
+    address:    string;
+    label?:     string;
+    argRegs?:    string[];
+    returnRegs?: string[];
 }
 
 /** A call-graph subgraph around a focus address. */
@@ -341,6 +351,7 @@ export interface CallGraphData {
     depth:     number;
     direction: string;
     nodes:     string[];
+    nodeInfo?: CallGraphNodeInfo[];
     edges:     CallGraphEdge[];
 }
 
@@ -3246,8 +3257,8 @@ export class SocketClient {
     }
 
     /** Return the call-graph subgraph around a focus address. */
-    public async getCallGraph(gameId: string, address: string, depth: number, direction: string): Promise<CallGraphData> {
-        const response = await this.sendCommand({ Command: 'GETCALLGRAPH', Data: JSON.stringify({ gameId, address, depth, direction }) });
+    public async getCallGraph(gameId: string, address: string, depth: number, direction: string, setName?: string): Promise<CallGraphData> {
+        const response = await this.sendCommand({ Command: 'GETCALLGRAPH', Data: JSON.stringify({ gameId, address, depth, direction, setName }) });
         if (!response.Success) { throw new Error(response.Error || 'GETCALLGRAPH failed'); }
         return JSON.parse((response as any).Data ?? '{}');
     }

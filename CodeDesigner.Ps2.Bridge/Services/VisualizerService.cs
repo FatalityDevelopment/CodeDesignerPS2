@@ -26,9 +26,21 @@ namespace CodeDesigner.Ps2.Bridge.Services
         // EE main RAM is 32 MB; used to sanity-check JAL targets.
         private const long EeRamSize = 32L * 1024 * 1024;
         private const int  MaxScanLength = 32 * 1024 * 1024;
+        private const long MaxInferredFunctionSize = 0x10000;
 
         /// <summary>In-memory call edge used while walking the graph.</summary>
         private readonly record struct Cg(long Caller, long Callee, CallEdgeKind Kind);
+        private readonly record struct FunctionRange(
+            long Start,
+            long? End,
+            string? Name,
+            IReadOnlyList<string> ArgRegs,
+            IReadOnlyList<string> ReturnRegs);
+        private readonly record struct LabelMeta(
+            string Name,
+            IReadOnlyList<string> ArgRegs,
+            IReadOnlyList<string> ReturnRegs,
+            bool IsFunction);
 
         private readonly IBridgeContext _ctx;
         public VisualizerService(IBridgeContext ctx) => _ctx = ctx;
@@ -221,17 +233,18 @@ namespace CodeDesigner.Ps2.Bridge.Services
                     uint instr  = BitConverter.ToUInt32(bytes, i);
                     uint opcode = (instr >> 26) & 0x3Fu;
                     uint pc     = baseAddr.Value + (uint)i;
+                    long caller = CanonicalAddr(pc);
 
                     // JAL — direct call, target encoded in the instruction.
                     if (opcode == 0x03u)
                     {
-                        uint target = ((instr & 0x03FFFFFFu) << 2) | (pc & 0xF0000000u);
+                        uint target = ((pc + 4) & 0xF0000000u) | ((instr & 0x03FFFFFFu) << 2);
                         if (IsRamAddr(target))
                             edges.Add(new CallEdge
                             {
                                 GameDiscId    = discId,
-                                CallerAddress = pc,
-                                CalleeAddress = target,
+                                CallerAddress = caller,
+                                CalleeAddress = CanonicalAddr(target),
                                 Kind          = CallEdgeKind.Direct,
                                 UpdatedAt     = now,
                             });
@@ -242,7 +255,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
                         edges.Add(new CallEdge
                         {
                             GameDiscId    = discId,
-                            CallerAddress = pc,
+                            CallerAddress = caller,
                             CalleeAddress = 0,
                             Kind          = CallEdgeKind.Indirect,
                             UpdatedAt     = now,
@@ -250,8 +263,20 @@ namespace CodeDesigner.Ps2.Bridge.Services
                     }
                 }
 
-                // Replace the disc's edge set so a rescan is idempotent.
-                var stale = _ctx.Db.CallEdges.Where(e => e.GameDiscId == discId).ToList();
+                // Replace just the scanned caller-address range. This keeps chunked
+                // scans additive and prevents a narrow scan from deleting the rest of
+                // the disc's call graph.
+                long scanStart = CanonicalAddr(baseAddr.Value);
+                long scanEnd   = scanStart + length;
+                var stale = _ctx.Db.CallEdges
+                    .Where(e => e.GameDiscId == discId)
+                    .ToList()
+                    .Where(e =>
+                    {
+                        long caller = CanonicalAddr(e.CallerAddress);
+                        return caller >= scanStart && caller < scanEnd;
+                    })
+                    .ToList();
                 if (stale.Count > 0) _ctx.Db.CallEdges.RemoveRange(stale);
                 _ctx.Db.CallEdges.AddRange(edges);
                 _ctx.Db.SaveChanges();
@@ -279,12 +304,26 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 int    depth     = Math.Clamp(Int(root, "depth") ?? 3, 1, 12);
                 string direction = (Str(root, "direction") ?? "both").ToLowerInvariant();
                 int?   discId    = ResolveDisc(Str(root, "gameId"));
+                var    set       = ResolveSet(Str(root, "gameId"), Str(root, "setName"));
 
-                var all = _ctx.Db.CallEdges
+                var rawEdges = _ctx.Db.CallEdges
                     .Where(e => e.GameDiscId == discId && e.CalleeAddress != 0)
                     .Select(e => new { e.CallerAddress, e.CalleeAddress, e.Kind })
                     .ToList()
                     .Select(e => new Cg(e.CallerAddress, e.CalleeAddress, e.Kind))
+                    .ToList();
+
+                var  labels     = LoadLabelMetadata(set?.Id);
+                var  functions  = LoadFunctionRanges(labels, rawEdges.Select(e => e.Callee));
+                long graphFocus = ResolveFunctionAddress(CanonicalAddr(focus.Value), functions);
+
+                var all = rawEdges
+                    .Select(e => new Cg(
+                        ResolveFunctionAddress(CanonicalAddr(e.Caller), functions),
+                        CanonicalAddr(e.Callee),
+                        e.Kind))
+                    .GroupBy(e => new { e.Caller, e.Callee, e.Kind })
+                    .Select(g => g.First())
                     .ToList();
 
                 var forward = all.GroupBy(e => e.Caller)
@@ -292,26 +331,39 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 var reverse = all.GroupBy(e => e.Callee)
                                  .ToDictionary(g => g.Key, g => g.ToList());
 
-                var nodes      = new HashSet<long> { focus.Value };
+                var nodes      = new HashSet<long> { graphFocus };
                 var edgeSet    = new HashSet<(long, long)>();
                 var resultEdge = new List<(long From, long To, CallEdgeKind Kind)>();
 
                 if (direction is "callees" or "both")
-                    Walk(focus.Value, depth, forward, isForward: true,  nodes, edgeSet, resultEdge);
+                    Walk(graphFocus, depth, forward, isForward: true,  nodes, edgeSet, resultEdge);
                 if (direction is "callers" or "both")
-                    Walk(focus.Value, depth, reverse, isForward: false, nodes, edgeSet, resultEdge);
+                    Walk(graphFocus, depth, reverse, isForward: false, nodes, edgeSet, resultEdge);
 
                 var payload = new
                 {
-                    focus     = Hex(focus.Value),
+                    focus     = Hex(graphFocus),
                     depth,
                     direction,
                     nodes     = nodes.OrderBy(n => n).Select(Hex).ToList(),
+                    nodeInfo  = nodes.OrderBy(n => n).Select(n =>
+                    {
+                        var meta = ResolveNodeMeta(n, labels, functions);
+                        return new
+                        {
+                            address    = Hex(n),
+                            label      = meta?.Name,
+                            argRegs    = meta?.ArgRegs ?? [],
+                            returnRegs = meta?.ReturnRegs ?? [],
+                        };
+                    }).ToList(),
                     edges     = resultEdge.Select(e => new
                     {
-                        from = Hex(e.From),
-                        to   = Hex(e.To),
-                        kind = e.Kind.ToString(),
+                        from       = Hex(e.From),
+                        to         = Hex(e.To),
+                        kind       = e.Kind.ToString(),
+                        argRegs    = ResolveNodeMeta(e.To, labels, functions)?.ArgRegs ?? [],
+                        returnRegs = ResolveNodeMeta(e.To, labels, functions)?.ReturnRegs ?? [],
                     }).ToList(),
                 };
                 return JsonResponse("GETCALLGRAPH", payload);
@@ -380,13 +432,129 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 ? null
                 : _ctx.LabelRepo.ResolveGameDiscIdAsync(gameId).GetAwaiter().GetResult();
 
+        private Dictionary<long, LabelMeta> LoadLabelMetadata(int? labelSetId)
+        {
+            var labels = new Dictionary<long, LabelMeta>();
+
+            if (labelSetId is null) return labels;
+
+            var rows = _ctx.Db.Labels
+                .Where(l => l.LabelSetId == labelSetId && l.ParentId == null)
+                .Select(l => new { l.Address, l.Name, l.Type, l.ArgRegsJson, l.ReturnRegsJson })
+                .ToList();
+
+            foreach (var label in rows)
+            {
+                var addr = ParseAddr(label.Address);
+                if (addr is null || string.IsNullOrWhiteSpace(label.Name)) continue;
+
+                long key = CanonicalAddr(addr.Value);
+                var meta = new LabelMeta(
+                    label.Name,
+                    JsonStringList(label.ArgRegsJson),
+                    JsonStringList(label.ReturnRegsJson),
+                    label.Type == LabelType.Function);
+
+                if (!labels.TryGetValue(key, out var existing) || meta.IsFunction || !existing.IsFunction)
+                    labels[key] = meta;
+            }
+
+            return labels;
+        }
+
+        private List<FunctionRange> LoadFunctionRanges(
+            IReadOnlyDictionary<long, LabelMeta> labels,
+            IEnumerable<long>? extraStarts = null)
+        {
+            var functions = labels
+                .Where(kv => kv.Value.IsFunction)
+                .ToDictionary(
+                    kv => kv.Key,
+                    kv => (Name: (string?)kv.Value.Name, Args: kv.Value.ArgRegs, Returns: kv.Value.ReturnRegs));
+
+            if (extraStarts is not null)
+            {
+                foreach (long addr in extraStarts.Where(a => a != 0).Select(CanonicalAddr))
+                {
+                    if (!functions.ContainsKey(addr))
+                    {
+                        functions[addr] = labels.TryGetValue(addr, out var label)
+                            ? (label.Name, label.ArgRegs, label.ReturnRegs)
+                            : (null, [], []);
+                    }
+                }
+            }
+
+            var starts = functions.Keys
+                .OrderBy(a => a)
+                .ToList();
+
+            var ranges = new List<FunctionRange>(starts.Count);
+            for (int i = 0; i < starts.Count; i++)
+            {
+                long? end = i + 1 < starts.Count ? starts[i + 1] : null;
+                var info = functions[starts[i]];
+                ranges.Add(new FunctionRange(starts[i], end, info.Name, info.Args, info.Returns));
+            }
+            return ranges;
+        }
+
+        private static long ResolveFunctionAddress(long address, IReadOnlyList<FunctionRange> functions)
+            => FindFunction(address, functions)?.Start ?? address;
+
+        private static LabelMeta? ResolveNodeMeta(
+            long address,
+            IReadOnlyDictionary<long, LabelMeta> labels,
+            IReadOnlyList<FunctionRange> functions)
+        {
+            address = CanonicalAddr(address);
+            if (labels.TryGetValue(address, out var exact)) return exact;
+
+            var fn = FindFunction(address, functions);
+            return fn is null || string.IsNullOrWhiteSpace(fn.Value.Name)
+                ? null
+                : new LabelMeta(fn.Value.Name!, fn.Value.ArgRegs, fn.Value.ReturnRegs, true);
+        }
+
+        private static FunctionRange? FindFunction(long address, IReadOnlyList<FunctionRange> functions)
+        {
+            address = CanonicalAddr(address);
+            foreach (var fn in functions)
+            {
+                if (address == fn.Start) return fn;
+                long end = fn.End ?? fn.Start + MaxInferredFunctionSize;
+                if (address > fn.Start && address < end) return fn;
+            }
+            return null;
+        }
+
+        private static IReadOnlyList<string> JsonStringList(string? json)
+        {
+            if (string.IsNullOrWhiteSpace(json)) return [];
+            try
+            {
+                return JsonSerializer.Deserialize<List<string>>(json) ?? [];
+            }
+            catch
+            {
+                return [];
+            }
+        }
+
         private static bool IsRamAddr(uint vaddr)
         {
             uint phys = vaddr >= 0x80000000u && vaddr < 0xC0000000u ? vaddr & 0x1FFFFFFFu : vaddr;
             return phys < EeRamSize;
         }
 
-        private static string Hex(long addr) => $"0x{(uint)addr:X8}";
+        private static long CanonicalAddr(long addr)
+        {
+            uint v = (uint)addr;
+            uint masked = v & 0x1FFFFFFFu;
+            return v >= EeRamSize && masked < EeRamSize ? masked : v;
+        }
+
+        private static string Hex(long addr) => $"0x{(uint)CanonicalAddr(addr):X8}";
 
         private static LabelGroupKind ParseGroupKind(string? s)
             => Enum.TryParse<LabelGroupKind>(s, ignoreCase: true, out var k) ? k : LabelGroupKind.Class;

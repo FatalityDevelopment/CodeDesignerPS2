@@ -235,6 +235,14 @@ export class StructureVisualizerPageComponent implements AfterViewInit {
 
   private readonly vscode = getVsCodeApi();
   private renderSeq = 0;
+  private panHost?: HTMLElement;
+  private panPointerId: number | null = null;
+  private panStartX = 0;
+  private panStartY = 0;
+  private panStartLeft = 0;
+  private panStartTop = 0;
+  private panMoved = false;
+  private suppressNextNodeClick = false;
 
   // ── Context & data ────────────────────────────────────────────────────
   readonly gameName  = signal('');
@@ -359,9 +367,18 @@ export class StructureVisualizerPageComponent implements AfterViewInit {
         this.status.set('Groups updated.');
         break;
       case 'callGraph':
-        this.callGraph.set(msg['graph'] as SvCallGraph);
+        {
+          const graph = msg['graph'] as SvCallGraph;
+          this.callGraph.set(graph);
+          const edgeCount = graph?.edges?.length ?? 0;
+          const nodeCount = graph?.nodes?.length ?? 0;
+          const labelled = graph?.nodeInfo?.filter(n => !!n.label).length ?? 0;
+          const signatures = graph?.nodeInfo?.filter(n => (n.argRegs?.length ?? 0) > 0 || (n.returnRegs?.length ?? 0) > 0).length ?? 0;
+          this.status.set(edgeCount > 0
+            ? `Call graph built: ${nodeCount} node(s), ${edgeCount} edge(s), ${labelled} label(s), ${signatures} signature(s).`
+            : 'No call edges found. Scan the code segment, then build again.');
+        }
         this.busy.set(false);
-        this.status.set('Call graph built.');
         break;
       case 'scanResult': {
         const r = msg['result'] as { totalEdges?: number; directEdges?: number; indirectEdges?: number };
@@ -431,6 +448,7 @@ export class StructureVisualizerPageComponent implements AfterViewInit {
     const focus = this.focusAddr().trim() || selected?.address || this.entries().find(e => e.type === 'Function')?.address || '';
     this.vscode.postMessage({
       type: 'getCallGraph',
+      setName: this.setName(),
       address: focus,
       depth: this.depth(),
       direction: this.direction(),
@@ -586,6 +604,8 @@ export class StructureVisualizerPageComponent implements AfterViewInit {
     try {
       const { svg } = await mermaid.render('sv-mmd-' + (this.renderSeq++), src);
       host.innerHTML = svg;
+      this.prepareScrollableSvg(host);
+      this.wireDiagramPan(host);
       this.wireNodeClicks(host);
       this.error.set('');
     } catch (e) {
@@ -600,9 +620,69 @@ export class StructureVisualizerPageComponent implements AfterViewInit {
       const m = /[ncv]([0-9a-fA-F]{8})/.exec(node.getAttribute('id') ?? '');
       if (!m) { return; }
       node.style.cursor = 'pointer';
-      node.addEventListener('click', () => {
+      node.addEventListener('click', (event) => {
+        if (this.suppressNextNodeClick) {
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
         this.vscode.postMessage({ type: 'navigate', address: '0x' + m[1] });
       });
     });
+  }
+
+  private prepareScrollableSvg(host: HTMLElement): void {
+    const svg = host.querySelector<SVGSVGElement>('svg');
+    if (!svg) { return; }
+
+    svg.style.maxWidth = 'none';
+    const vb = svg.viewBox.baseVal;
+    if (vb?.width && vb?.height) {
+      svg.setAttribute('width', String(Math.ceil(vb.width)));
+      svg.setAttribute('height', String(Math.ceil(vb.height)));
+    }
+  }
+
+  private wireDiagramPan(host: HTMLElement): void {
+    if (this.panHost === host) { return; }
+    this.panHost = host;
+
+    host.addEventListener('pointerdown', (event: PointerEvent) => {
+      if (event.button !== 0) { return; }
+      this.panPointerId = event.pointerId;
+      this.panStartX = event.clientX;
+      this.panStartY = event.clientY;
+      this.panStartLeft = host.scrollLeft;
+      this.panStartTop = host.scrollTop;
+      this.panMoved = false;
+      host.classList.add('sv-panning');
+      host.setPointerCapture(event.pointerId);
+    });
+
+    host.addEventListener('pointermove', (event: PointerEvent) => {
+      if (this.panPointerId !== event.pointerId) { return; }
+      const dx = event.clientX - this.panStartX;
+      const dy = event.clientY - this.panStartY;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+        this.panMoved = true;
+        this.suppressNextNodeClick = true;
+      }
+      host.scrollLeft = this.panStartLeft - dx;
+      host.scrollTop = this.panStartTop - dy;
+      event.preventDefault();
+    });
+
+    const finishPan = (event: PointerEvent) => {
+      if (this.panPointerId !== event.pointerId) { return; }
+      this.panPointerId = null;
+      host.classList.remove('sv-panning');
+      try { host.releasePointerCapture(event.pointerId); } catch { /* already released */ }
+      if (this.panMoved) {
+        window.setTimeout(() => { this.suppressNextNodeClick = false; }, 0);
+      }
+    };
+
+    host.addEventListener('pointerup', finishPan);
+    host.addEventListener('pointercancel', finishPan);
   }
 }
