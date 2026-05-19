@@ -91,12 +91,30 @@ export class StructureVisualizerProvider {
 
                 case 'getCallGraph': {
                     const ctx = this._requireCtx();
+                    const address = String(msg['address'] ?? '');
+                    const depth = Number(msg['depth'] ?? 3);
+                    const direction = String(msg['direction'] ?? 'both');
                     const graph = await this.socketClient.getCallGraph(
                         ctx.gameId,
-                        String(msg['address'] ?? ''),
-                        Number(msg['depth'] ?? 3),
-                        String(msg['direction'] ?? 'both'),
+                        address,
+                        depth,
+                        direction,
                     );
+                    if ((graph.edges?.length ?? 0) === 0) {
+                        const focus = parseAddress(address);
+                        if (focus !== undefined) {
+                            const autoScanLen = 0x20000;
+                            try {
+                                await this.socketClient.scanCallGraph(ctx.gameId, `0x${focus.toString(16)}`, autoScanLen);
+                                const rescanned = await this.socketClient.getCallGraph(ctx.gameId, address, depth, direction);
+                                webview.postMessage({ type: 'scanResult', result: { totalEdges: rescanned.edges?.length ?? 0, directEdges: 0, indirectEdges: 0 } });
+                                webview.postMessage({ type: 'callGraph', graph: rescanned });
+                                break;
+                            } catch (err: unknown) {
+                                getOutputChannel().warn('[StructureVisualizer] auto scan/getCallGraph: ' + errText(err));
+                            }
+                        }
+                    }
                     webview.postMessage({ type: 'callGraph', graph });
                     break;
                 }
@@ -282,10 +300,11 @@ export class StructureVisualizerProvider {
 }
 
 /** Parse a hex ("0x..") or decimal address string to a number. */
-function parseAddress(raw: string): number | undefined {
-    const t = raw.trim();
+function parseAddress(raw: string | undefined | null): number | undefined {
+    const t = String(raw ?? '').trim();
     if (!t) { return undefined; }
-    const n = t.toLowerCase().startsWith('0x') ? parseInt(t.slice(2), 16) : parseInt(t, 10);
+    const lower = t.toLowerCase();
+    const n = lower.startsWith('0x') ? parseInt(t.slice(2), 16) : parseInt(t, 10);
     return Number.isFinite(n) ? n : undefined;
 }
 
