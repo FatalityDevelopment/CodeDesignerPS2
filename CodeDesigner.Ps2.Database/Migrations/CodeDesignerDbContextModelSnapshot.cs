@@ -22,6 +22,41 @@ namespace CodeDesigner.Ps2.Database.Migrations
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
 
+            modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.CallEdge", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<long>("CalleeAddress")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("CallerAddress")
+                        .HasColumnType("bigint");
+
+                    b.Property<int?>("GameDiscId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("SourceLabelSetId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GameDiscId", "CalleeAddress");
+
+                    b.HasIndex("GameDiscId", "CallerAddress");
+
+                    b.ToTable("CallEdges");
+                });
+
             modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.Cheat", b =>
                 {
                     b.Property<int>("Id")
@@ -328,6 +363,70 @@ namespace CodeDesigner.Ps2.Database.Migrations
                     b.ToTable("Labels");
                 });
 
+            modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.LabelGroup", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Color")
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<string>("Comment")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("int");
+
+                    b.Property<int>("LabelSetId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LabelSetId", "Name");
+
+                    b.ToTable("LabelGroups");
+                });
+
+            modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.LabelGroupMember", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("LabelGroupId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("LabelId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Role")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LabelId");
+
+                    b.HasIndex("LabelGroupId", "LabelId")
+                        .IsUnique();
+
+                    b.ToTable("LabelGroupMembers");
+                });
+
             modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.LabelSet", b =>
                 {
                     b.Property<int>("Id")
@@ -612,6 +711,16 @@ namespace CodeDesigner.Ps2.Database.Migrations
                     b.ToTable("Snapshots");
                 });
 
+            modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.CallEdge", b =>
+                {
+                    b.HasOne("CodeDesigner.Ps2.Database.Entities.GameDisc", "GameDisc")
+                        .WithMany()
+                        .HasForeignKey("GameDiscId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.Navigation("GameDisc");
+                });
+
             modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.Cheat", b =>
                 {
                     b.HasOne("CodeDesigner.Ps2.Database.Entities.CheatList", "CheatList")
@@ -697,6 +806,36 @@ namespace CodeDesigner.Ps2.Database.Migrations
                     b.Navigation("Parent");
                 });
 
+            modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.LabelGroup", b =>
+                {
+                    b.HasOne("CodeDesigner.Ps2.Database.Entities.LabelSet", "LabelSet")
+                        .WithMany()
+                        .HasForeignKey("LabelSetId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("LabelSet");
+                });
+
+            modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.LabelGroupMember", b =>
+                {
+                    b.HasOne("CodeDesigner.Ps2.Database.Entities.LabelGroup", "LabelGroup")
+                        .WithMany("Members")
+                        .HasForeignKey("LabelGroupId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("CodeDesigner.Ps2.Database.Entities.Label", "Label")
+                        .WithMany()
+                        .HasForeignKey("LabelId")
+                        .OnDelete(DeleteBehavior.ClientCascade)
+                        .IsRequired();
+
+                    b.Navigation("Label");
+
+                    b.Navigation("LabelGroup");
+                });
+
             modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.LabelSet", b =>
                 {
                     b.HasOne("CodeDesigner.Ps2.Database.Entities.GameDisc", "GameDisc")
@@ -772,6 +911,11 @@ namespace CodeDesigner.Ps2.Database.Migrations
             modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.Label", b =>
                 {
                     b.Navigation("Children");
+                });
+
+            modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.LabelGroup", b =>
+                {
+                    b.Navigation("Members");
                 });
 
             modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.LabelSet", b =>

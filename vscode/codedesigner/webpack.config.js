@@ -98,6 +98,7 @@ const webviewConfig = {
     'snapshot-manager':   './src/webview/snapshot-manager/main.ts',
     'diff-viewer':        './src/webview/diff-viewer/main.ts',
     'joker-maker':        './src/webview/joker-maker/main.ts',
+    'structure-visualizer': './src/webview/structure-visualizer/main.ts',
   },
   output: {
     path: path.resolve(__dirname, 'dist/webview'),

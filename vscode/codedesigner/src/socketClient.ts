@@ -307,6 +307,43 @@ export interface LabelSetPayload {
     entries:      LabelManagerEntry[];
 }
 
+/** A member label within a {@link LabelGroupInfo}. */
+export interface LabelGroupMemberInfo {
+    id:           number;
+    labelId:      number;
+    labelAddress: string;
+    labelName:    string;
+    labelType:    string;
+    role?:        string;
+    sortOrder:    number;
+}
+
+/** A cross-cutting label group ("objectmap") — a class, module, subsystem or vtable. */
+export interface LabelGroupInfo {
+    id:       number;
+    name:     string;
+    kind:     string;
+    comment?: string;
+    color?:   string;
+    members:  LabelGroupMemberInfo[];
+}
+
+/** One caller→callee edge in a call-graph subgraph. */
+export interface CallGraphEdge {
+    from: string;
+    to:   string;
+    kind: string;
+}
+
+/** A call-graph subgraph around a focus address. */
+export interface CallGraphData {
+    focus:     string;
+    depth:     number;
+    direction: string;
+    nodes:     string[];
+    edges:     CallGraphEdge[];
+}
+
 /**
  * One entry in the server-side navigation history.
  */
@@ -3166,6 +3203,53 @@ export class SocketClient {
         const response = await this.sendCommand({ Command: 'RENAMELABELSET', WorkspaceDir: workspaceDir, GameId: gameId, SetName: oldName, NewSetName: newName });
         if (!response.Success) { throw new Error(response.Error || 'RENAMELABELSET failed'); }
         return (response as any).LabelSet as LabelSetPayload;
+    }
+
+    // ── Structure Visualizer ─────────────────────────────────────────────────
+
+    /** List all label groups ("objectmap") and their members for a label set. */
+    public async getLabelGroups(gameId: string, setName: string): Promise<LabelGroupInfo[]> {
+        const response = await this.sendCommand({ Command: 'GETLABELGROUPS', Data: JSON.stringify({ gameId, setName }) });
+        if (!response.Success) { throw new Error(response.Error || 'GETLABELGROUPS failed'); }
+        return JSON.parse((response as any).Data ?? '{}').groups ?? [];
+    }
+
+    /** Create or update a label group. */
+    public async addLabelGroup(gameId: string, setName: string, name: string, kind: string, comment?: string, color?: string): Promise<void> {
+        const response = await this.sendCommand({ Command: 'ADDLABELGROUP', Data: JSON.stringify({ gameId, setName, name, kind, comment, color }) });
+        if (!response.Success) { throw new Error(response.Error || 'ADDLABELGROUP failed'); }
+    }
+
+    /** Delete a label group (the member labels themselves are kept). */
+    public async deleteLabelGroup(gameId: string, setName: string, groupName: string): Promise<void> {
+        const response = await this.sendCommand({ Command: 'DELETELABELGROUP', Data: JSON.stringify({ gameId, setName, groupName }) });
+        if (!response.Success) { throw new Error(response.Error || 'DELETELABELGROUP failed'); }
+    }
+
+    /** Add a label (by address) to a label group. */
+    public async addLabelGroupMember(gameId: string, setName: string, groupName: string, labelAddress: string, role?: string, sortOrder?: number): Promise<void> {
+        const response = await this.sendCommand({ Command: 'ADDLABELGROUPMEMBER', Data: JSON.stringify({ gameId, setName, groupName, labelAddress, role, sortOrder }) });
+        if (!response.Success) { throw new Error(response.Error || 'ADDLABELGROUPMEMBER failed'); }
+    }
+
+    /** Remove a label (by address) from a label group. */
+    public async deleteLabelGroupMember(gameId: string, setName: string, groupName: string, labelAddress: string): Promise<void> {
+        const response = await this.sendCommand({ Command: 'DELETELABELGROUPMEMBER', Data: JSON.stringify({ gameId, setName, groupName, labelAddress }) });
+        if (!response.Success) { throw new Error(response.Error || 'DELETELABELGROUPMEMBER failed'); }
+    }
+
+    /** Scan a code range for JAL/JALR calls and persist the discovered call edges. */
+    public async scanCallGraph(gameId: string, address: string, length: number, region?: string): Promise<{ totalEdges: number; directEdges: number; indirectEdges: number }> {
+        const response = await this.sendCommand({ Command: 'SCANCALLGRAPH', Data: JSON.stringify({ gameId, address, length, region }) });
+        if (!response.Success) { throw new Error(response.Error || 'SCANCALLGRAPH failed'); }
+        return JSON.parse((response as any).Data ?? '{}');
+    }
+
+    /** Return the call-graph subgraph around a focus address. */
+    public async getCallGraph(gameId: string, address: string, depth: number, direction: string): Promise<CallGraphData> {
+        const response = await this.sendCommand({ Command: 'GETCALLGRAPH', Data: JSON.stringify({ gameId, address, depth, direction }) });
+        if (!response.Success) { throw new Error(response.Error || 'GETCALLGRAPH failed'); }
+        return JSON.parse((response as any).Data ?? '{}');
     }
 
     // ── MCP Config (tool descriptions) ───────────────────────────────────────

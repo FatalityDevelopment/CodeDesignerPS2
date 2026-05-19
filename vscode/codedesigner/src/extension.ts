@@ -8,6 +8,7 @@ import { JokerMakerProvider } from './providers/jokerMaker/jokerMakerProvider';
 import { Ps2FileEditorProvider } from './providers/ps2FileEditor/ps2FileEditorProvider';
 import { CompatBrowserProvider } from './providers/compatBrowser/compatBrowserProvider';
 import { CheatsEditorProvider } from './providers/cheatsEditor/cheatsEditorProvider';
+import { StructureVisualizerProvider } from './providers/structureVisualizer/structureVisualizerProvider';
 import { SocketClient } from './socketClient';
 
 let socketClient: SocketClient | null = null;
@@ -333,6 +334,16 @@ export function activate(context: vscode.ExtensionContext) {
 		() => compatBrowserProvider.open(),
 	);
 	context.subscriptions.push(openCompatBrowserCommand);
+
+	// ── Structure Visualizer ────────────────────────────────────────────────
+	// Standalone webview that renders Mermaid diagrams of a game's structure:
+	// classes/objects, vtables, and call-graph chains back to a hook.
+	const structureVisualizerProvider = new StructureVisualizerProvider(context.extensionUri, socketClient);
+	const openStructureVisualizerCommand = vscode.commands.registerCommand(
+		'codedesigner.openStructureVisualizer',
+		() => structureVisualizerProvider.open(),
+	);
+	context.subscriptions.push(openStructureVisualizerCommand);
 
 	// ── PS2 Cheats editor ───────────────────────────────────────────────────
 	// Three-panel cheat-code editor; also opened from the compatibility
