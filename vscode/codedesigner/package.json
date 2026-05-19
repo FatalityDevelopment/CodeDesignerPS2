@@ -21,7 +21,7 @@
         {
           "id": "disasmSidebar",
           "title": "CodeDesigner",
-          "icon": "dist/resources/disasm-icon.svg"
+          "icon": "dist/resources/codedesigner-icon.png"
         }
       ]
     },
