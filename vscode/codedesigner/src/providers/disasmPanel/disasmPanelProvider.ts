@@ -1003,7 +1003,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         const biosOptions = (this.settings.bios ?? []).map(b => ({ label: b.name, value: b.path }));
         const gameOptions = (this.settings.games ?? []).map(g => ({ label: g.name, value: g.path }));
         const iconUri = this.webview.asWebviewUri(
-            vscode.Uri.joinPath(this._extensionUri, 'dist', 'resources', 'disasm-icon.svg'),
+            vscode.Uri.joinPath(this._extensionUri, 'dist', 'resources', 'codedesigner-icon.png'),
         ).toString();
         this.webview.postMessage({
             command: 'init',
