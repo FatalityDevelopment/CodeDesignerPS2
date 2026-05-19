@@ -13,7 +13,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/TylerDev888/MipsR9500.git"
+    "url": "git+https://github.com/TylerDev888/CodeDesigner.git"
   },
   "contributes": {
     "viewsContainers": {
