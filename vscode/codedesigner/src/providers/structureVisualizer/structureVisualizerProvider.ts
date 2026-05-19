@@ -282,10 +282,11 @@ export class StructureVisualizerProvider {
 }
 
 /** Parse a hex ("0x..") or decimal address string to a number. */
-function parseAddress(raw: string): number | undefined {
-    const t = raw.trim();
+function parseAddress(raw: string | undefined | null): number | undefined {
+    const t = String(raw ?? '').trim();
     if (!t) { return undefined; }
-    const n = t.toLowerCase().startsWith('0x') ? parseInt(t.slice(2), 16) : parseInt(t, 10);
+    const lower = t.toLowerCase();
+    const n = lower.startsWith('0x') ? parseInt(t.slice(2), 16) : parseInt(t, 10);
     return Number.isFinite(n) ? n : undefined;
 }
 

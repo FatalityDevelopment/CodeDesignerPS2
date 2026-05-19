@@ -441,8 +441,9 @@ export class StructureVisualizerPageComponent implements AfterViewInit {
     this.error.set('');
     this.busy.set(true);
     this.status.set('Scanning code for calls…');
-    const raw = this.scanLen().trim();
-    const len = raw.toLowerCase().startsWith('0x') ? parseInt(raw.slice(2), 16) : parseInt(raw, 10);
+    const raw = String(this.scanLen() ?? '').trim();
+    const lower = raw.toLowerCase();
+    const len = lower.startsWith('0x') ? parseInt(raw.slice(2), 16) : parseInt(raw, 10);
     this.vscode.postMessage({ type: 'scanCallGraph', address: this.scanAddr().trim(), length: len });
   }
 
@@ -520,10 +521,11 @@ export class StructureVisualizerPageComponent implements AfterViewInit {
     this.vscode.postMessage({ type, setName: this.setName(), ...payload });
   }
 
-  private parseInt(raw: string): number | undefined {
-    const t = raw.trim();
+  private parseInt(raw: string | undefined | null): number | undefined {
+    const t = String(raw ?? '').trim();
     if (!t) { return undefined; }
-    const n = t.toLowerCase().startsWith('0x') ? parseInt(t.slice(2), 16) : parseInt(t, 10);
+    const lower = t.toLowerCase();
+    const n = lower.startsWith('0x') ? parseInt(t.slice(2), 16) : parseInt(t, 10);
     return Number.isFinite(n) ? n : undefined;
   }
 
