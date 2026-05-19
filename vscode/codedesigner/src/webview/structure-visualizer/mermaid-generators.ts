@@ -88,7 +88,7 @@ function argName(raw: string): string {
 export function classDiagramFromStruct(struct: SvLabel, children: SvLabel[]): string {
     const id   = 'c' + hexKey(struct.address);
     const name = safeText(struct.name) || ('Struct_' + hexKey(struct.address));
-    const lines = ['classDiagram', `  class ${id}["${name}"]`];
+    const lines = ['classDiagram', `  class ${id}`, `  class ${id} as ${JSON.stringify(name)}`];
 
     const sorted = [...children].sort((a, b) => (a.offset ?? 0) - (b.offset ?? 0));
     if (sorted.length === 0) {
@@ -114,7 +114,7 @@ export function classDiagramFromStruct(struct: SvLabel, children: SvLabel[]): st
 export function classDiagramFromGroup(group: SvGroup): string {
     const id   = 'g' + group.id;
     const name = safeText(group.name) || ('Group_' + group.id);
-    const lines = ['classDiagram', `  class ${id}["${name}"]`];
+    const lines = ['classDiagram', `  class ${id}`, `  class ${id} as ${JSON.stringify(name)}`];
 
     const members = [...group.members].sort((a, b) => a.sortOrder - b.sortOrder);
     if (members.length === 0) {
@@ -141,7 +141,7 @@ export function vtableDiagramFromLabel(vt: SvLabel, children: SvLabel[]): string
     const id     = 'v' + hexKey(vt.address);
     const name   = safeText(vt.name) || ('VTable_' + hexKey(vt.address));
     const stride = vt.elementStride && vt.elementStride > 0 ? vt.elementStride : 4;
-    const lines  = ['classDiagram', `  class ${id}["${name}"]`];
+    const lines  = ['classDiagram', `  class ${id}`, `  class ${id} as ${JSON.stringify(name)}`];
 
     const sorted = [...children].sort((a, b) => (a.offset ?? 0) - (b.offset ?? 0));
     if (sorted.length === 0) {
@@ -158,7 +158,7 @@ export function vtableDiagramFromLabel(vt: SvLabel, children: SvLabel[]): string
 export function vtableDiagramFromGroup(group: SvGroup): string {
     const id   = 'g' + group.id;
     const name = safeText(group.name) || ('VTable_' + group.id);
-    const lines = ['classDiagram', `  class ${id}["${name}"]`];
+    const lines = ['classDiagram', `  class ${id}`, `  class ${id} as ${JSON.stringify(name)}`];
 
     const members = [...group.members].sort((a, b) => a.sortOrder - b.sortOrder);
     if (members.length === 0) {
