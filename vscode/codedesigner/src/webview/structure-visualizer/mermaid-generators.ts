@@ -97,10 +97,27 @@ function safeMemberText(s: string): string {
     return t || '_';
 }
 
-/** Strip the register= prefix from an argRegs entry, e.g. "a0=playerPtr" → "playerPtr". */
-function argName(raw: string): string {
-    const eq = raw.indexOf('=');
-    return safeText(eq >= 0 ? raw.slice(eq + 1) : raw);
+/** Format a register annotation token for display, e.g. "a0=playerPtr" → "a0.playerPtr". */
+function regText(raw: string): string {
+    return (raw || '').replace(/[^A-Za-z0-9_]+/g, '.').replace(/^\.+|\.+$/g, '') || '_';
+}
+
+/** Join an argument or return register list into "reg.name, reg.name". */
+function regList(regs: string[] | undefined): string {
+    return (regs ?? []).map(regText).filter(t => t !== '_').join(', ');
+}
+
+/**
+ * Build a classDiagram method member that shows a function's argument and
+ * return registers, e.g. "+update(a0.playerPtr, a1.flags) v0.result".
+ * The name is sanitised so it can never be empty (an empty name before "("
+ * makes the Mermaid classDiagram parser throw).
+ */
+function functionMember(name: string, argRegs?: string[], returnRegs?: string[]): string {
+    const fn   = safeText(name) || 'fn';
+    const args = regList(argRegs);
+    const rets = regList(returnRegs);
+    return rets ? `+${fn}(${args}) ${rets}` : `+${fn}(${args})`;
 }
 
 /** Mermaid classDiagram uses bracket labels, not flowchart-style `as` aliases. */
@@ -121,13 +138,12 @@ export function classDiagramFromStruct(struct: SvLabel, children: SvLabel[]): st
 
     const sorted = [...children].sort((a, b) => (a.offset ?? 0) - (b.offset ?? 0));
     if (sorted.length === 0) {
-        lines.push(`  ${id} : (no fields)`);
+        lines.push(`  ${id} : no_fields`);
     }
     for (const c of sorted) {
         const off = `off_0x${(c.offset ?? 0).toString(16).toUpperCase()}`;
         if (c.type === 'Function') {
-            const args = (c.argRegs ?? []).map(argName).join(', ');
-            lines.push(`  ${id} : ${safeMemberText(`${off} ${safeText(c.name)}(${args})`)}`);
+            lines.push(`  ${id} : ${functionMember(`${off}_${safeText(c.name)}`, c.argRegs, c.returnRegs)}`);
         } else {
             const vt = c.valueType ? ' ' + safeText(c.valueType) : '';
             lines.push(`  ${id} : ${safeMemberText(`${off} ${safeText(c.name)}${vt}`)}`);
@@ -140,20 +156,25 @@ export function classDiagramFromStruct(struct: SvLabel, children: SvLabel[]): st
  * Build a classDiagram from a label group: Function members become methods,
  * everything else becomes a field. Members are ordered by their sortOrder.
  */
-export function classDiagramFromGroup(group: SvGroup): string {
+export function classDiagramFromGroup(
+    group: SvGroup,
+    resolve?: (address: string) => SvLabel | undefined,
+): string {
     const id   = 'g' + group.id;
     const name = safeText(group.name) || ('Group_' + group.id);
     const lines = ['classDiagram', classDeclaration(id, name)];
 
     const members = [...group.members].sort((a, b) => a.sortOrder - b.sortOrder);
     if (members.length === 0) {
-        lines.push(`  ${id} : (empty group)`);
+        lines.push(`  ${id} : empty_group`);
     }
     for (const m of members) {
-        const tag = m.role ? `${safeText(m.role)} ` : '';
         if (m.labelType === 'Function') {
-            lines.push(`  ${id} : ${safeMemberText(`${tag}${safeText(m.labelName)}()` )}`);
+            const info = resolve?.(m.labelAddress);
+            const nm   = (m.role ? safeText(m.role) + '_' : '') + safeText(m.labelName);
+            lines.push(`  ${id} : ${functionMember(nm, info?.argRegs, info?.returnRegs)}`);
         } else {
+            const tag = m.role ? `${safeText(m.role)} ` : '';
             lines.push(`  ${id} : ${safeMemberText(`${tag}${safeText(m.labelName)}`)}`);
         }
     }
@@ -174,27 +195,31 @@ export function vtableDiagramFromLabel(vt: SvLabel, children: SvLabel[]): string
 
     const sorted = [...children].sort((a, b) => (a.offset ?? 0) - (b.offset ?? 0));
     if (sorted.length === 0) {
-        lines.push(`  ${id} : (no resolved slots)`);
+        lines.push(`  ${id} : no_resolved_slots`);
     }
     for (const c of sorted) {
         const slot = Math.floor((c.offset ?? 0) / stride);
-        lines.push(`  ${id} : ${safeMemberText(`slot_${slot} ${safeText(c.name)}()` )}`);
+        lines.push(`  ${id} : ${functionMember(`slot_${slot}_${safeText(c.name)}`, c.argRegs, c.returnRegs)}`);
     }
     return lines.join('\n');
 }
 
 /** Build a classDiagram for a vtable-kind label group (members are the slots). */
-export function vtableDiagramFromGroup(group: SvGroup): string {
+export function vtableDiagramFromGroup(
+    group: SvGroup,
+    resolve?: (address: string) => SvLabel | undefined,
+): string {
     const id   = 'g' + group.id;
     const name = safeText(group.name) || ('VTable_' + group.id);
     const lines = ['classDiagram', classDeclaration(id, name)];
 
     const members = [...group.members].sort((a, b) => a.sortOrder - b.sortOrder);
     if (members.length === 0) {
-        lines.push(`  ${id} : (empty vtable)`);
+        lines.push(`  ${id} : empty_vtable`);
     }
     members.forEach((m, i) => {
-        lines.push(`  ${id} : ${safeMemberText(`slot_${m.sortOrder || i} ${safeText(m.labelName)}()` )}`);
+        const info = resolve?.(m.labelAddress);
+        lines.push(`  ${id} : ${functionMember(`slot_${m.sortOrder || i}_${safeText(m.labelName)}`, info?.argRegs, info?.returnRegs)}`);
     });
     return lines.join('\n');
 }

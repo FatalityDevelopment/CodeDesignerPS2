@@ -585,7 +585,13 @@ export class StructureVisualizerPageComponent implements AfterViewInit {
     if (kind === 'group') {
       const grp = this.groups().find(g => String(g.id) === value);
       if (!grp) { return ''; }
-      return mode === 'vtable' ? vtableDiagramFromGroup(grp) : classDiagramFromGroup(grp);
+      // Resolve member addresses to full labels so Function members can show
+      // their argument / return register signatures.
+      const resolve = (addr: string): SvLabel | undefined =>
+        this.entries().find(e => hexKey(e.address) === hexKey(addr));
+      return mode === 'vtable'
+        ? vtableDiagramFromGroup(grp, resolve)
+        : classDiagramFromGroup(grp, resolve);
     }
 
     const label = this.entries().find(e => e.address === value);
