@@ -10,6 +10,7 @@ import {
 } from '@angular/core';
 import mermaid from 'mermaid';
 import { getVsCodeApi } from '../shared/vscode-api';
+import '../shared/styles/shared.css';
 import {
   SvLabel, SvGroup, SvCallGraph,
   classDiagramFromStruct, classDiagramFromGroup,
@@ -21,9 +22,10 @@ import './structure-visualizer-page.css';
 type Mode = 'class' | 'vtable' | 'callgraph';
 
 /**
- * Structure Visualizer — renders Mermaid diagrams of a PS2 game's structure:
- * classes/objects (Struct labels & Class groups), vtables (ArrayOfPointers
- * labels & VTable groups), and call-graph chains around a focus function.
+ * Structure Visualizer — renders Mermaid diagrams of a PS2 game's structure and
+ * lets the user build that structure in place: typed labels (Struct + fields,
+ * ArrayOfPointers vtables, Function labels) and label groups ("objectmap").
+ * The loaded game is resolved automatically by the extension host.
  */
 @Component({
   selector: 'app-structure-visualizer-page',
@@ -34,18 +36,18 @@ type Mode = 'class' | 'vtable' | 'callgraph';
       <!-- ── Toolbar ───────────────────────────────────────────────────── -->
       <div class="sv-toolbar">
         <span class="sv-title">Structure Visualizer</span>
-        <input class="sv-input" type="text" placeholder="Game ID / serial…"
-               [value]="gameId()" (input)="onGameId($event)" />
-        <button class="sv-btn" [disabled]="busy()" (click)="loadSets()">Load sets</button>
+        <span class="sv-game" [title]="gameId()">{{ gameName() || '(no game loaded)' }}</span>
         <select class="sv-select" [value]="setName()" (change)="onSetPick($event)"
                 [disabled]="sets().length === 0">
-          <option value="">— label set —</option>
           @for (s of sets(); track s) { <option [value]="s">{{ s }}</option> }
+          @if (sets().length === 0) { <option value="">— no label sets —</option> }
         </select>
-        <button class="sv-btn sv-primary" [disabled]="busy() || !setName()" (click)="loadData()">Load</button>
+        <button class="lm-tool-btn" [disabled]="busy()" (click)="reload()" title="Reload from backend">⟳</button>
+        <button class="lm-tool-btn" (click)="newSet()" title="Create a new label set">+ Set</button>
         <span class="sv-spacer"></span>
-        <button class="sv-btn" [disabled]="!source()" (click)="copySource()">Copy Mermaid</button>
-        <button class="sv-btn" [disabled]="!source()" (click)="exportSvg()">Export SVG</button>
+        <button class="lm-tool-btn" [class.sv-on]="editMode()" (click)="toggleEdit()">{{ editMode() ? '✓ Editing' : '✎ Edit' }}</button>
+        <button class="lm-tool-btn" [disabled]="!source()" (click)="copySource()">Copy Mermaid</button>
+        <button class="lm-tool-btn" [disabled]="!source()" (click)="exportSvg()">Export SVG</button>
       </div>
 
       <!-- ── Mode tabs ─────────────────────────────────────────────────── -->
@@ -106,28 +108,126 @@ type Mode = 'class' | 'vtable' | 'callgraph';
           <label class="sv-depth">Depth {{ depth() }}
             <input type="range" min="1" max="8" [value]="depth()" (input)="onDepth($event)" />
           </label>
-          <button class="sv-btn sv-primary" [disabled]="busy() || !focusAddr()" (click)="buildCallGraph()">Build</button>
+          <button class="lm-tool-btn sv-primary" [disabled]="busy() || !focusAddr()" (click)="buildCallGraph()">Build</button>
           <span class="sv-sep"></span>
           <input class="sv-input sv-sm" type="text" placeholder="Scan from 0x…"
                  [value]="scanAddr()" (input)="onScanAddr($event)" />
           <input class="sv-input sv-sm" type="text" placeholder="Scan length"
                  [value]="scanLen()" (input)="onScanLen($event)" />
-          <button class="sv-btn" [disabled]="busy() || !scanAddr() || !scanLen()" (click)="scanCallGraph()">Scan calls</button>
+          <button class="lm-tool-btn" [disabled]="busy() || !scanAddr() || !scanLen()" (click)="scanCallGraph()">Scan calls</button>
         }
       </div>
 
-      <!-- ── Status ────────────────────────────────────────────────────── -->
       @if (status()) { <div class="sv-status">{{ status() }}</div> }
       @if (error())  { <div class="sv-status sv-error">{{ error() }}</div> }
 
-      <!-- ── Diagram ───────────────────────────────────────────────────── -->
-      <div class="sv-diagram" #diagram></div>
-      @if (!source() && !error()) {
-        <div class="sv-empty">
-          Enter a game ID, load a label set, then pick something to visualise.
-          Click a node in a call graph to jump to that address in the disassembler.
-        </div>
-      }
+      <!-- ── Body: diagram + editor ────────────────────────────────────── -->
+      <div class="sv-body">
+        <div class="sv-diagram" #diagram></div>
+        @if (!source() && !error()) {
+          <div class="sv-empty">
+            Pick a struct, class group or vtable to visualise — or turn on
+            <strong>Edit</strong> to build one. In Call Graph mode, click a node
+            to jump to that address in the disassembler.
+          </div>
+        }
+
+        @if (editMode()) {
+          <div class="sv-editor">
+            @if (mode() === 'callgraph') {
+              <div class="sv-ed-note">Call graphs are derived from the scanned call edges — nothing to edit here. Use the other tabs to build structures.</div>
+            } @else {
+              <!-- ── Label builder ─────────────────────────────────────── -->
+              <div class="sv-ed-section">
+                <div class="sv-ed-head">{{ mode() === 'vtable' ? 'New vtable' : 'New struct / function' }}</div>
+                <input class="sv-input sv-full" type="text" placeholder="Name"
+                       [value]="lblName()" (input)="set(lblName, $event)" />
+                <input class="sv-input sv-full" type="text" placeholder="Address (0x…)"
+                       [value]="lblAddr()" (input)="set(lblAddr, $event)" />
+                <select class="sv-select sv-full" [value]="lblKind()" (change)="set(lblKind, $event)">
+                  @if (mode() === 'vtable') {
+                    <option value="ArrayOfPointers">ArrayOfPointers (vtable)</option>
+                  } @else {
+                    <option value="Struct">Struct</option>
+                    <option value="Function">Function</option>
+                  }
+                </select>
+                @if (lblKind() === 'Function') {
+                  <input class="sv-input sv-full" type="text" placeholder="Arg regs, e.g. a0=playerPtr, a1=flags"
+                         [value]="lblArgs()" (input)="set(lblArgs, $event)" />
+                }
+                <button class="lm-tool-btn sv-primary sv-full" [disabled]="busy() || !lblName() || !lblAddr()"
+                        (click)="createLabel()">Create label</button>
+              </div>
+
+              <!-- ── Field editor for the selected struct/vtable ───────── -->
+              @if (selectedLabel(); as sel) {
+                <div class="sv-ed-section">
+                  <div class="sv-ed-head">Fields of {{ sel.name }}</div>
+                  @for (c of selectedChildren(); track c.address) {
+                    <div class="sv-ed-row">
+                      <span class="sv-ed-off">+0x{{ hex(c.offset) }}</span>
+                      <span class="sv-ed-name">{{ c.name }}</span>
+                      <span class="sv-ed-vt">{{ c.valueType || c.type }}</span>
+                      <button class="lm-row-btn lm-danger-btn" (click)="deleteLabel(c.address)" title="Delete">✕</button>
+                    </div>
+                  }
+                  @if (selectedChildren().length === 0) {
+                    <div class="sv-ed-note">No fields yet.</div>
+                  }
+                  <div class="sv-ed-addrow">
+                    <input class="sv-input sv-xs" type="text" placeholder="Offset" [value]="fldOffset()" (input)="set(fldOffset, $event)" />
+                    <input class="sv-input sv-sm" type="text" placeholder="Field name" [value]="fldName()" (input)="set(fldName, $event)" />
+                    <input class="sv-input sv-xs" type="text" placeholder="Type" [value]="fldType()" (input)="set(fldType, $event)" />
+                    <button class="lm-tool-btn" [disabled]="busy() || !fldName() || !fldOffset()" (click)="addField(sel)">+ Field</button>
+                  </div>
+                </div>
+              }
+
+              <!-- ── Group editor ──────────────────────────────────────── -->
+              <div class="sv-ed-section">
+                <div class="sv-ed-head">{{ mode() === 'vtable' ? 'VTable groups' : 'Class groups' }}</div>
+                @for (g of modeGroups(); track g.id) {
+                  <div class="sv-ed-row">
+                    <span class="sv-ed-name">{{ g.name }}</span>
+                    <span class="sv-ed-vt">{{ g.members.length }} member(s)</span>
+                    <button class="lm-row-btn lm-danger-btn" (click)="deleteGroup(g.name)" title="Delete group">✕</button>
+                  </div>
+                }
+                <div class="sv-ed-addrow">
+                  <input class="sv-input sv-sm" type="text" placeholder="Group name" [value]="grpName()" (input)="set(grpName, $event)" />
+                  <input class="sv-input sv-xs" type="text" placeholder="#color" [value]="grpColor()" (input)="set(grpColor, $event)" />
+                  <button class="lm-tool-btn" [disabled]="busy() || !grpName()" (click)="createGroup()">+ Group</button>
+                </div>
+              </div>
+
+              <!-- ── Membership editor for the selected group ──────────── -->
+              @if (selectedGroup(); as grp) {
+                <div class="sv-ed-section">
+                  <div class="sv-ed-head">Members of {{ grp.name }}</div>
+                  @for (m of grp.members; track m.id) {
+                    <div class="sv-ed-row">
+                      <span class="sv-ed-name">{{ m.labelName }}</span>
+                      <span class="sv-ed-vt">{{ m.role || m.labelType }}</span>
+                      <button class="lm-row-btn lm-danger-btn" (click)="removeMember(grp.name, m.labelAddress)" title="Remove">✕</button>
+                    </div>
+                  }
+                  <div class="sv-ed-addrow">
+                    <select class="sv-select sv-sm" [value]="memberAddr()" (change)="set(memberAddr, $event)">
+                      <option value="">— label —</option>
+                      @for (e of entries(); track e.address) {
+                        <option [value]="e.address">{{ e.name }} ({{ e.type }})</option>
+                      }
+                    </select>
+                    <input class="sv-input sv-xs" type="text" placeholder="Role" [value]="memberRole()" (input)="set(memberRole, $event)" />
+                    <button class="lm-tool-btn" [disabled]="busy() || !memberAddr()" (click)="addMember(grp.name)">+ Member</button>
+                  </div>
+                </div>
+              }
+            }
+          </div>
+        }
+      </div>
     </div>
   `,
 })
@@ -137,33 +237,75 @@ export class StructureVisualizerPageComponent implements AfterViewInit {
   private readonly vscode = getVsCodeApi();
   private renderSeq = 0;
 
+  // ── Context & data ────────────────────────────────────────────────────
+  readonly gameName  = signal('');
   readonly gameId    = signal('');
   readonly sets      = signal<string[]>([]);
   readonly setName   = signal('');
   readonly entries   = signal<SvLabel[]>([]);
   readonly groups    = signal<SvGroup[]>([]);
-  readonly mode      = signal<Mode>('class');
-  readonly selectedKey = signal('');
-  readonly focusAddr = signal('');
-  readonly direction = signal('both');
-  readonly depth     = signal(3);
-  readonly scanAddr  = signal('');
-  readonly scanLen   = signal('');
-  readonly callGraph = signal<SvCallGraph | null>(null);
-  readonly busy      = signal(false);
-  readonly status    = signal('');
-  readonly error     = signal('');
-  readonly source    = signal('');
 
-  // ── Derived label collections ─────────────────────────────────────────
-  readonly structOptions  = computed(() => this.entries().filter(e => e.type === 'Struct' && !e.parentAddress));
-  readonly vtableOptions   = computed(() => this.entries().filter(e => e.type === 'ArrayOfPointers'));
-  readonly classGroups     = computed(() => this.groups().filter(g => g.kind === 'Class'));
-  readonly vtableGroups    = computed(() => this.groups().filter(g => g.kind === 'VTable'));
+  // ── View state ────────────────────────────────────────────────────────
+  readonly mode        = signal<Mode>('class');
+  readonly selectedKey = signal('');
+  readonly editMode    = signal(false);
+  readonly focusAddr   = signal('');
+  readonly direction   = signal('both');
+  readonly depth       = signal(3);
+  readonly scanAddr    = signal('');
+  readonly scanLen     = signal('');
+  readonly callGraph   = signal<SvCallGraph | null>(null);
+  readonly busy        = signal(false);
+  readonly status      = signal('');
+  readonly error       = signal('');
+  readonly source      = signal('');
+
+  // ── Editor form fields ────────────────────────────────────────────────
+  readonly lblName   = signal('');
+  readonly lblAddr   = signal('');
+  readonly lblKind   = signal('Struct');
+  readonly lblArgs   = signal('');
+  readonly fldOffset = signal('');
+  readonly fldName   = signal('');
+  readonly fldType   = signal('');
+  readonly grpName   = signal('');
+  readonly grpColor  = signal('');
+  readonly memberAddr = signal('');
+  readonly memberRole = signal('');
+
+  // ── Derived collections ───────────────────────────────────────────────
+  readonly structOptions = computed(() => this.entries().filter(e => e.type === 'Struct' && !e.parentAddress));
+  readonly vtableOptions  = computed(() => this.entries().filter(e => e.type === 'ArrayOfPointers'));
+  readonly classGroups    = computed(() => this.groups().filter(g => g.kind === 'Class'));
+  readonly vtableGroups   = computed(() => this.groups().filter(g => g.kind === 'VTable'));
+  readonly modeGroups     = computed(() => this.mode() === 'vtable' ? this.vtableGroups() : this.classGroups());
+
   private readonly nameMap = computed(() => {
     const m = new Map<string, string>();
     for (const e of this.entries()) { m.set(hexKey(e.address), e.name); }
     return m;
+  });
+
+  /** The label currently selected in class/vtable mode, if any. */
+  readonly selectedLabel = computed<SvLabel | null>(() => {
+    const [kind, value] = this.selectedKey().split(':', 2);
+    if (kind !== 'struct' && kind !== 'vt') { return null; }
+    return this.entries().find(e => e.address === value) ?? null;
+  });
+
+  readonly selectedChildren = computed<SvLabel[]>(() => {
+    const sel = this.selectedLabel();
+    if (!sel) { return []; }
+    return this.entries()
+      .filter(e => e.parentAddress && hexKey(e.parentAddress) === hexKey(sel.address))
+      .sort((a, b) => (a.offset ?? 0) - (b.offset ?? 0));
+  });
+
+  /** The group currently selected in class/vtable mode, if any. */
+  readonly selectedGroup = computed<SvGroup | null>(() => {
+    const [kind, value] = this.selectedKey().split(':', 2);
+    if (kind !== 'group') { return null; }
+    return this.groups().find(g => String(g.id) === value) ?? null;
   });
 
   constructor() {
@@ -173,7 +315,6 @@ export class StructureVisualizerPageComponent implements AfterViewInit {
       theme: 'dark',
       flowchart: { useMaxWidth: true },
     });
-    // Re-render whenever the selection or underlying data changes.
     effect(() => {
       const src = this.buildSource();
       void this.renderDiagram(src);
@@ -190,13 +331,21 @@ export class StructureVisualizerPageComponent implements AfterViewInit {
   private onMessage(data: unknown): void {
     const msg = data as { type?: string; [k: string]: unknown };
     switch (msg.type) {
-      case 'init':
-        break;
-      case 'sets':
+      case 'init': {
+        this.gameName.set(String(msg['gameName'] ?? ''));
+        this.gameId.set(String(msg['gameId'] ?? ''));
         this.sets.set((msg['sets'] as string[]) ?? []);
+        const active = String(msg['activeSet'] ?? '');
+        this.setName.set(active);
         this.busy.set(false);
-        this.status.set(`${this.sets().length} label set(s) found.`);
+        if (active) {
+          this.status.set(`Game ${this.gameName()} — loading set "${active}"…`);
+          this.loadData();
+        } else {
+          this.status.set(this.sets().length ? 'Pick a label set.' : 'No label sets for this game yet.');
+        }
         break;
+      }
       case 'data': {
         const ls = msg['labelSet'] as { entries?: SvLabel[] } | undefined;
         this.entries.set(ls?.entries ?? []);
@@ -207,6 +356,8 @@ export class StructureVisualizerPageComponent implements AfterViewInit {
       }
       case 'groups':
         this.groups.set((msg['groups'] as SvGroup[]) ?? []);
+        this.busy.set(false);
+        this.status.set('Groups updated.');
         break;
       case 'callGraph':
         this.callGraph.set(msg['graph'] as SvCallGraph);
@@ -226,25 +377,33 @@ export class StructureVisualizerPageComponent implements AfterViewInit {
     }
   }
 
-  // ── Toolbar actions ───────────────────────────────────────────────────
+  // ── Toolbar / mode ────────────────────────────────────────────────────
 
-  onGameId(e: Event): void { this.gameId.set((e.target as HTMLInputElement).value); }
-
-  loadSets(): void {
-    this.error.set('');
-    this.busy.set(true);
-    this.status.set('Loading label sets…');
-    this.vscode.postMessage({ type: 'loadSets', gameId: this.gameId().trim() });
+  onSetPick(e: Event): void {
+    this.setName.set((e.target as HTMLSelectElement).value);
+    this.loadData();
   }
 
-  onSetPick(e: Event): void { this.setName.set((e.target as HTMLSelectElement).value); }
+  reload(): void {
+    this.error.set('');
+    this.busy.set(true);
+    this.status.set('Reloading…');
+    this.vscode.postMessage({ type: 'refresh' });
+  }
+
+  newSet(): void {
+    this.error.set('');
+    this.vscode.postMessage({ type: 'createSet' });
+  }
 
   loadData(): void {
+    if (!this.setName()) { return; }
     this.error.set('');
     this.busy.set(true);
-    this.status.set('Loading labels & groups…');
-    this.vscode.postMessage({ type: 'loadData', gameId: this.gameId().trim(), setName: this.setName() });
+    this.vscode.postMessage({ type: 'loadData', setName: this.setName() });
   }
+
+  toggleEdit(): void { this.editMode.update(v => !v); }
 
   setMode(m: Mode): void {
     this.mode.set(m);
@@ -258,13 +417,19 @@ export class StructureVisualizerPageComponent implements AfterViewInit {
   onScanAddr(e: Event): void { this.scanAddr.set((e.target as HTMLInputElement).value); }
   onScanLen(e: Event): void { this.scanLen.set((e.target as HTMLInputElement).value); }
 
+  /** Generic input/select binder used by the editor forms. */
+  set(sig: { set(v: string): void }, e: Event): void {
+    sig.set((e.target as HTMLInputElement | HTMLSelectElement).value);
+  }
+
+  // ── Call graph ────────────────────────────────────────────────────────
+
   buildCallGraph(): void {
     this.error.set('');
     this.busy.set(true);
     this.status.set('Building call graph…');
     this.vscode.postMessage({
       type: 'getCallGraph',
-      gameId: this.gameId().trim(),
       address: this.focusAddr().trim(),
       depth: this.depth(),
       direction: this.direction(),
@@ -275,13 +440,97 @@ export class StructureVisualizerPageComponent implements AfterViewInit {
     this.error.set('');
     this.busy.set(true);
     this.status.set('Scanning code for calls…');
-    this.vscode.postMessage({
-      type: 'scanCallGraph',
-      gameId: this.gameId().trim(),
-      address: this.scanAddr().trim(),
-      length: parseInt(this.scanLen().trim().replace(/^0x/i, ''), this.scanLen().trim().toLowerCase().startsWith('0x') ? 16 : 10),
-    });
+    const raw = this.scanLen().trim();
+    const len = raw.toLowerCase().startsWith('0x') ? parseInt(raw.slice(2), 16) : parseInt(raw, 10);
+    this.vscode.postMessage({ type: 'scanCallGraph', address: this.scanAddr().trim(), length: len });
   }
+
+  // ── Editor actions ────────────────────────────────────────────────────
+
+  createLabel(): void {
+    const args = this.lblArgs().split(',').map(s => s.trim()).filter(Boolean);
+    const entry: Record<string, unknown> = {
+      address: this.lblAddr().trim(),
+      name: this.lblName().trim(),
+      type: this.lblKind(),
+    };
+    if (this.lblKind() === 'Function' && args.length) { entry['argRegs'] = args; }
+    this.send('saveLabel', { entry });
+    this.lblName.set(''); this.lblAddr.set(''); this.lblArgs.set('');
+    this.status.set('Creating label…');
+  }
+
+  addField(parent: SvLabel): void {
+    const offset = this.parseInt(this.fldOffset());
+    if (offset === undefined) { this.error.set('Field offset must be a number.'); return; }
+    const base = parent.address.replace(/:.*$/, '');
+    const entry: Record<string, unknown> = {
+      address: `${base}:+0x${offset.toString(16).toUpperCase().padStart(4, '0')}`,
+      parentAddress: base,
+      offset,
+      name: this.fldName().trim(),
+      type: 'Address',
+    };
+    const vt = this.fldType().trim();
+    if (vt) { entry['valueType'] = vt; }
+    this.send('saveLabel', { entry });
+    this.fldOffset.set(''); this.fldName.set(''); this.fldType.set('');
+    this.status.set('Adding field…');
+  }
+
+  deleteLabel(address: string): void {
+    this.send('deleteLabel', { address });
+    this.status.set('Deleting label…');
+  }
+
+  createGroup(): void {
+    this.send('saveGroup', {
+      name: this.grpName().trim(),
+      kind: this.mode() === 'vtable' ? 'VTable' : 'Class',
+      color: this.grpColor().trim() || undefined,
+    });
+    this.grpName.set(''); this.grpColor.set('');
+    this.status.set('Creating group…');
+  }
+
+  deleteGroup(groupName: string): void {
+    this.send('deleteGroup', { groupName });
+    this.status.set('Deleting group…');
+  }
+
+  addMember(groupName: string): void {
+    this.send('addMember', {
+      groupName,
+      labelAddress: this.memberAddr(),
+      role: this.memberRole().trim() || undefined,
+    });
+    this.memberAddr.set(''); this.memberRole.set('');
+    this.status.set('Adding member…');
+  }
+
+  removeMember(groupName: string, labelAddress: string): void {
+    this.send('removeMember', { groupName, labelAddress });
+    this.status.set('Removing member…');
+  }
+
+  private send(type: string, payload: Record<string, unknown>): void {
+    this.error.set('');
+    this.busy.set(true);
+    this.vscode.postMessage({ type, setName: this.setName(), ...payload });
+  }
+
+  private parseInt(raw: string): number | undefined {
+    const t = raw.trim();
+    if (!t) { return undefined; }
+    const n = t.toLowerCase().startsWith('0x') ? parseInt(t.slice(2), 16) : parseInt(t, 10);
+    return Number.isFinite(n) ? n : undefined;
+  }
+
+  hex(n: number | undefined): string {
+    return (n ?? 0).toString(16).toUpperCase();
+  }
+
+  // ── Export ────────────────────────────────────────────────────────────
 
   copySource(): void {
     const src = this.source();
@@ -289,12 +538,10 @@ export class StructureVisualizerPageComponent implements AfterViewInit {
   }
 
   exportSvg(): void {
-    const host = this.diagramRef?.nativeElement;
-    const svg = host?.querySelector('svg');
+    const svg = this.diagramRef?.nativeElement.querySelector('svg');
     if (!svg) { return; }
-    const blob = new Blob([svg.outerHTML], { type: 'image/svg+xml' });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
+    const url = URL.createObjectURL(new Blob([svg.outerHTML], { type: 'image/svg+xml' }));
+    const a = document.createElement('a');
     a.href = url;
     a.download = 'structure-diagram.svg';
     a.click();
@@ -303,7 +550,6 @@ export class StructureVisualizerPageComponent implements AfterViewInit {
 
   // ── Diagram building & rendering ──────────────────────────────────────
 
-  /** Compute the Mermaid source for the current mode + selection (signal-tracked). */
   private buildSource(): string {
     const mode = this.mode();
     if (mode === 'callgraph') {
@@ -347,10 +593,8 @@ export class StructureVisualizerPageComponent implements AfterViewInit {
 
   /** Attach click-to-navigate to any diagram node whose id encodes an address. */
   private wireNodeClicks(host: HTMLElement): void {
-    const nodes = host.querySelectorAll<SVGElement>('.node, .classGroup, g[id]');
-    nodes.forEach(node => {
-      const id = node.getAttribute('id') ?? '';
-      const m  = /[ncv]([0-9a-fA-F]{8})/.exec(id);
+    host.querySelectorAll<SVGElement>('.node, .classGroup, g[id]').forEach(node => {
+      const m = /[ncv]([0-9a-fA-F]{8})/.exec(node.getAttribute('id') ?? '');
       if (!m) { return; }
       node.style.cursor = 'pointer';
       node.addEventListener('click', () => {
