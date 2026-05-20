@@ -198,15 +198,12 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.MMI
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation.Replace("rd", CpuHelpers.RegName(args.Rd))
-                .Replace("rs", CpuHelpers.RegName(args.Rs)).Replace("rt", CpuHelpers.RegName(args.Rt));
-            if (cpu != null)
-            {
-                int rs = (int)(cpu.RegsLo[args.Rs] & 0xFFFFFFFF);
-                int rt = (int)(cpu.RegsLo[args.Rt] & 0xFFFFFFFF);
-                return $"{eq} => {rs} * {rt} = {(long)rs * rt}";
-            }
-            return eq;
+            if (cpu == null)
+                return $"HI:LO += {CpuHelpers.RegName(args.Rs)} * {CpuHelpers.RegName(args.Rt)}";
+            int rs = (int)(cpu.RegsLo[args.Rs] & 0xFFFFFFFF);
+            int rt = (int)(cpu.RegsLo[args.Rt] & 0xFFFFFFFF);
+            ulong hiLo = (cpu.HI << 32) | (cpu.LO & 0xFFFFFFFF);
+            return $"HI:LO = 0x{hiLo:X16} ({CpuHelpers.RegName(args.Rs)}=0x{(uint)rs:X8} * {CpuHelpers.RegName(args.Rt)}=0x{(uint)rt:X8})";
         }
     }
 
@@ -241,15 +238,12 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.MMI
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation.Replace("rd", CpuHelpers.RegName(args.Rd))
-                .Replace("rs", CpuHelpers.RegName(args.Rs)).Replace("rt", CpuHelpers.RegName(args.Rt));
-            if (cpu != null)
-            {
-                ulong rs = cpu.RegsLo[args.Rs] & 0xFFFFFFFF;
-                ulong rt = cpu.RegsLo[args.Rt] & 0xFFFFFFFF;
-                return $"{eq} => {rs} * {rt} = {rs * rt}";
-            }
-            return eq;
+            if (cpu == null)
+                return $"HI:LO += {CpuHelpers.RegName(args.Rs)} * {CpuHelpers.RegName(args.Rt)} (unsigned)";
+            ulong rs = cpu.RegsLo[args.Rs] & 0xFFFFFFFF;
+            ulong rt = cpu.RegsLo[args.Rt] & 0xFFFFFFFF;
+            ulong hiLo = (cpu.HI << 32) | (cpu.LO & 0xFFFFFFFF);
+            return $"HI:LO = 0x{hiLo:X16} ({CpuHelpers.RegName(args.Rs)}=0x{(uint)rs:X8} * {CpuHelpers.RegName(args.Rt)}=0x{(uint)rt:X8} unsigned)";
         }
     }
 
@@ -561,9 +555,12 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.MMI
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation.Replace("rd", CpuHelpers.RegName(args.Rd))
-                .Replace("rs", CpuHelpers.RegName(args.Rs)).Replace("rt", CpuHelpers.RegName(args.Rt));
-            return eq;
+            if (cpu == null)
+                return $"HI1:LO1 += {CpuHelpers.RegName(args.Rs)} * {CpuHelpers.RegName(args.Rt)}";
+            int rs = (int)(cpu.RegsLo[args.Rs] & 0xFFFFFFFF);
+            int rt = (int)(cpu.RegsLo[args.Rt] & 0xFFFFFFFF);
+            ulong hi1Lo1 = (cpu.HI1 << 32) | (cpu.LO1 & 0xFFFFFFFF);
+            return $"HI1:LO1 = 0x{hi1Lo1:X16} ({CpuHelpers.RegName(args.Rs)}=0x{(uint)rs:X8} * {CpuHelpers.RegName(args.Rt)}=0x{(uint)rt:X8})";
         }
     }
 
@@ -597,9 +594,12 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.MMI
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation.Replace("rd", CpuHelpers.RegName(args.Rd))
-                .Replace("rs", CpuHelpers.RegName(args.Rs)).Replace("rt", CpuHelpers.RegName(args.Rt));
-            return eq;
+            if (cpu == null)
+                return $"HI1:LO1 += {CpuHelpers.RegName(args.Rs)} * {CpuHelpers.RegName(args.Rt)} (unsigned)";
+            ulong rs = cpu.RegsLo[args.Rs] & 0xFFFFFFFF;
+            ulong rt = cpu.RegsLo[args.Rt] & 0xFFFFFFFF;
+            ulong hi1Lo1 = (cpu.HI1 << 32) | (cpu.LO1 & 0xFFFFFFFF);
+            return $"HI1:LO1 = 0x{hi1Lo1:X16} ({CpuHelpers.RegName(args.Rs)}=0x{(uint)rs:X8} * {CpuHelpers.RegName(args.Rt)}=0x{(uint)rt:X8} unsigned)";
         }
     }
 

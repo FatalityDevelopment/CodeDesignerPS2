@@ -78,10 +78,15 @@ namespace CodeDesigner.Ps2.Bridge.Services
                             if (iBytes is { Length: >= 4 })
                             {
                                 uint instr = BitConverter.ToUInt32(iBytes, 0);
-                                var liveBus = new ByteEditorMemoryBusAdapter(new DebugClientByteEditor(_ctx.Client));
+                                // Use the *mirrored* analysis bus, not the live PCSX2
+                                // PINE bus — comment-column hints must never dereference
+                                // arbitrary PCSX2 addresses.
+                                var analysisBus = _ctx.AnalysisClient != null
+                                    ? new ByteEditorMemoryBusAdapter(new DebugClientByteEditor(_ctx.AnalysisClient))
+                                    : null;
                                 string hint = MipsAnalyzer.AnalyzeSingleInstruction(
                                     instr, normalizedPc, snap.Cpu,
-                                    bus: liveBus,
+                                    bus: analysisBus,
                                     lookupLabel: a => _ctx.Labels.TryGetValue(a, out var e) ? e.Label : null,
                                     includeStateHints: true);
                                 if (!string.IsNullOrEmpty(hint))
