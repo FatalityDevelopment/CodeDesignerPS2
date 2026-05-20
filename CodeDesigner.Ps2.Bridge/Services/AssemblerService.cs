@@ -770,11 +770,17 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 var results        = new List<InstructionResult>();
                 var instructionList = new List<(uint instruction, uint address)>();
 
-                // Resolve a live memory bus so word-formatted rows can attempt
-                // to dereference pointers and resolve strings.
+                // Resolve a *mirrored* analysis memory bus so word-formatted rows
+                // and comment-text address hints can dereference pointers and
+                // resolve strings.
+                // Never reach into the live PCSX2 PINE bus from here — random
+                // address peeks over PINE are slow and leak unrelated game memory
+                // into the comment column. AnalysisStateService keeps an in-process
+                // mirror in AnalysisClient that is safe to poke at.
+                // When AnalysisClient is unattached, peeking is disabled entirely.
                 CodeDesigner.Ps2.Common.Interfaces.IPs2MemoryBus? analysisBus =
-                    _ctx.Client != null
-                        ? new ByteEditorMemoryBusAdapter(new DebugClientByteEditor(_ctx.Client))
+                    _ctx.AnalysisClient != null
+                        ? new ByteEditorMemoryBusAdapter(new DebugClientByteEditor(_ctx.AnalysisClient))
                         : null;
 
                 // Walk the byte buffer.  For every offset, check whether an

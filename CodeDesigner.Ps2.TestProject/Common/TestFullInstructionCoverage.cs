@@ -2426,10 +2426,12 @@ namespace CodeDesigner.Ps2.TestProject
         }
 
         [TestMethod]
-        public void AnalyzeSingleInstruction_J_AppendsStringHint()
+        public void AnalyzeSingleInstruction_J_DoesNotPeekCodeTargetBytes()
         {
-            // J pointing at an address that contains a string "Hello"
-            uint targetAddr = 0x00001000u;
+            // J targets are *code* addresses — even when their bytes happen to spell
+            // ASCII, the analyzer must not annotate them as strings (the bytes are
+            // instructions, not data).
+            uint targetAddr = 0x00100000u;
             uint enc = (0x02u << 26) | ((targetAddr >> 2) & 0x03FFFFFFu);
 
             var bus = new PS2MemoryBus();
@@ -2438,17 +2440,17 @@ namespace CodeDesigner.Ps2.TestProject
                 bus.WriteByte(targetAddr + (uint)i, str[i]);
 
             var cpu = new CpuState { PC = 0x00000000u };
-            // PC upper nibble = 0 so target stays in same region
             string analysis = MipsAnalyzer.AnalyzeSingleInstruction(enc, 0x00000000u, cpu, bus);
 
-            Assert.IsTrue(analysis.Contains("\"Hello\""),
-                $"Analysis should contain string hint '\"Hello\"' but got: {analysis}");
+            Assert.IsFalse(analysis.Contains("\"Hello\""),
+                $"Analysis must not ASCII-peek a branch/jump target, got: {analysis}");
         }
 
         [TestMethod]
-        public void AnalyzeSingleInstruction_JAL_AppendsLabelHint()
+        public void AnalyzeSingleInstruction_JAL_SubstitutesLabelInline()
         {
-            // JAL whose target has a user-defined label
+            // JAL whose target has a user-defined label — the comment should
+            // show the label *in place of* the raw hex address.
             uint targetAddr = 0x80400000u;
             uint enc = MipsEncoder.EncodeJ(0x03, 0x100000); // target = 0x80400000 from PC 0x80000000
 
@@ -2456,15 +2458,18 @@ namespace CodeDesigner.Ps2.TestProject
             string analysis = MipsAnalyzer.AnalyzeSingleInstruction(enc, 0x80000000u, cpu, null,
                 addr => addr == targetAddr ? "scePadRead" : null);
 
-            Assert.IsTrue(analysis.Contains("\"scePadRead\""),
-                $"Analysis should contain label hint '\"scePadRead\"' but got: {analysis}");
+            Assert.IsTrue(analysis.Contains("scePadRead"),
+                $"Analysis should inline the label, got: {analysis}");
+            Assert.IsFalse(analysis.Contains("0x80400000"),
+                $"Analysis must replace the address with the label, got: {analysis}");
         }
 
         [TestMethod]
         public void AnalyzeSingleInstruction_LabelPreferredOverString()
         {
-            // When both a label and a string are present, the label takes priority
-            uint targetAddr = 0x00001000u;
+            // When both a label and a string are present, the label substitutes
+            // the address and the string lookup never runs.
+            uint targetAddr = 0x00100000u;
             uint enc = (0x02u << 26) | ((targetAddr >> 2) & 0x03FFFFFFu);
 
             var bus = new PS2MemoryBus();
@@ -2476,17 +2481,17 @@ namespace CodeDesigner.Ps2.TestProject
             string analysis = MipsAnalyzer.AnalyzeSingleInstruction(enc, 0x00000000u, cpu, bus,
                 addr => addr == targetAddr ? "MyLabel" : null);
 
-            Assert.IsTrue(analysis.Contains("\"MyLabel\""),
-                $"Analysis should prefer label hint over string, got: {analysis}");
+            Assert.IsTrue(analysis.Contains("MyLabel"),
+                $"Analysis should inline the label, got: {analysis}");
             Assert.IsFalse(analysis.Contains("\"RawStr\""),
-                $"Analysis should not show raw string when label is available, got: {analysis}");
+                $"Analysis should not show raw string when label substitutes the address, got: {analysis}");
         }
 
         [TestMethod]
         public void AnalyzeSingleInstruction_NoHintForNonPrintable()
         {
             // Target address contains non-printable bytes — no string hint should appear
-            uint targetAddr = 0x00001000u;
+            uint targetAddr = 0x00100000u;
             uint enc = (0x02u << 26) | ((targetAddr >> 2) & 0x03FFFFFFu);
 
             var bus = new PS2MemoryBus();
@@ -2506,9 +2511,9 @@ namespace CodeDesigner.Ps2.TestProject
         [TestMethod]
         public void AnalyzeSingleInstruction_LW_AppendsStringHintAtLoadAddress()
         {
-            // LW $a0, 0($a1): $a0 ← [0x00001000], with a string at that address
+            // LW $a0, 0($a1): $a0 ← [0x00100000], with a string at that address
             var bus = new PS2MemoryBus();
-            uint strAddr = 0x00001000u;
+            uint strAddr = 0x00100000u;
             byte[] hello = System.Text.Encoding.ASCII.GetBytes("Hello\0");
             for (int i = 0; i < hello.Length; i++)
                 bus.WriteByte(strAddr + (uint)i, hello[i]);
@@ -2529,7 +2534,7 @@ namespace CodeDesigner.Ps2.TestProject
         {
             // LB $a0, 0($a1) — opcode=0x20
             var bus = new PS2MemoryBus();
-            uint strAddr = 0x00002000u;
+            uint strAddr = 0x00200000u;
             byte[] world = System.Text.Encoding.ASCII.GetBytes("World\0");
             for (int i = 0; i < world.Length; i++)
                 bus.WriteByte(strAddr + (uint)i, world[i]);
@@ -2549,7 +2554,7 @@ namespace CodeDesigner.Ps2.TestProject
         {
             // SW $a0, 0($a1) — opcode=0x2B; the effective address holds non-ASCII data
             var bus = new PS2MemoryBus();
-            uint dataAddr = 0x00003000u;
+            uint dataAddr = 0x00300000u;
             bus.WriteWord(dataAddr, 0xDEADBEEF);
 
             uint enc = (0x2Bu << 26) | (5u << 21) | (4u << 16) | 0u;
@@ -2560,16 +2565,16 @@ namespace CodeDesigner.Ps2.TestProject
             string analysis = MipsAnalyzer.AnalyzeSingleInstruction(enc, 0x80000000u, cpu, bus);
 
             // The store address should appear in the comment
-            Assert.IsTrue(analysis.Contains("3000") || analysis.Contains("$a0"),
+            Assert.IsTrue(analysis.Contains("300000") || analysis.Contains("a0"),
                 $"Analysis should mention the store address, got: {analysis}");
         }
 
         [TestMethod]
-        public void AnalyzeInstructions_SD_WithUnknownBase_ShowsOffsetNotFakeAddress()
+        public void AnalyzeInstructions_SD_WithUnknownBase_ShowsRegisterPlusOffset()
         {
             // SD $v0, $0018($a2).  In batch/static analysis $a2 starts unknown/zero,
-            // so the comment should keep the 16-bit displacement instead of implying
-            // it resolved to absolute address 0x00000018.
+            // so the comment should show "a2 + 0x0018" — never a bare offset that
+            // looks like an absolute address.
             uint enc = (0x3Fu << 26) | (6u << 21) | (2u << 16) | 0x0018u;
 
             var comments = MipsAnalyzer.AnalyzeInstructions(
@@ -2579,10 +2584,12 @@ namespace CodeDesigner.Ps2.TestProject
                 includeStateHints: false);
 
             string analysis = comments[0x001A3A30u];
-            Assert.IsTrue(analysis.Contains("[0x0018]"),
-                $"Expected 16-bit offset in SD analysis, got: {analysis}");
+            Assert.IsTrue(analysis.Contains("a2") && analysis.Contains("0x0018"),
+                $"Expected base register + 16-bit offset in SD analysis, got: {analysis}");
             Assert.IsFalse(analysis.Contains("[0x00000018]"),
                 $"Should not show unresolved offset as an 8-digit address, got: {analysis}");
+            Assert.IsFalse(System.Text.RegularExpressions.Regex.IsMatch(analysis, @"\[0x[0-9A-Fa-f]{4}\]"),
+                $"Should not show bare 4-digit offset masquerading as an address, got: {analysis}");
         }
 
         [TestMethod]

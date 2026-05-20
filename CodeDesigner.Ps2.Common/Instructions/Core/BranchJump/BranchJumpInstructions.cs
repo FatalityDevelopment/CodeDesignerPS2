@@ -1,6 +1,7 @@
 using CodeDesigner.Ps2.Common.Cpu.InstrArgs;
 using CodeDesigner.Ps2.Common.CPU;
 using System;
+using System.Collections.Generic;
 using System.Text;
 
 /*
@@ -1221,31 +1222,28 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
     internal static class CallAnalysisHelper
     {
         /// <summary>
-        /// Builds a compact call comment: "call &lt;prefix&gt; ($a0=X, $a1=X, ..., $tN=X)"
-        /// Always includes $a0–$a3; additionally appends any non-zero $t0–$t7 registers.
-        /// Values are formatted as compact uppercase hex without leading zeros.
+        /// Builds a call comment in the form
+        /// <c>call &lt;prefix&gt; (a0 = 0x01FFE7F0 | a1 = 0x00000000 | …)</c>.
+        /// Always shows <c>$a0–$a3</c>; appends any non-zero <c>$t0–$t7</c> registers.
+        /// Every value is formatted as a 32-bit zero-padded hex word so it can be
+        /// distinguished from arbitrary small constants in the comment text.
         /// </summary>
         internal static string BuildCallComment(CpuState cpu, string prefix)
         {
-            var sb = new StringBuilder();
-            sb.Append(prefix);
-            sb.Append(" (");
+            var parts = new List<string>(12);
             // a0-a3 (registers 4-7) always shown
             for (int i = 4; i <= 7; i++)
             {
-                if (i > 4) sb.Append(", ");
-                uint val = (uint)cpu.RegsLo[i];
-                sb.Append($"${CpuHelpers.RegName(i)}={val:X}");
+                parts.Add($"{CpuHelpers.RegName(i)} = {CpuHelpers.FormatRegisterValueHex(cpu.RegsLo[i])}");
             }
             // t0-t7 (registers 8-15) only when non-zero
             for (int i = 8; i <= 15; i++)
             {
-                uint val = (uint)cpu.RegsLo[i];
+                ulong val = cpu.RegsLo[i];
                 if (val != 0)
-                    sb.Append($", ${CpuHelpers.RegName(i)}={val:X}");
+                    parts.Add($"{CpuHelpers.RegName(i)} = {CpuHelpers.FormatRegisterValueHex(val)}");
             }
-            sb.Append(')');
-            return sb.ToString();
+            return $"{prefix} ({string.Join(" | ", parts)})";
         }
     }
 }

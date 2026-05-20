@@ -49,22 +49,36 @@ namespace CodeDesigner.Ps2.Common.CPU
         }
 
         /// <summary>
-        /// Format a load/store analysis memory reference.  When the base register is
-        /// unknown in a synthetic/static analysis pass, keep the 16-bit displacement
-        /// visible instead of implying it is a resolved 32-bit address.
+        /// Format a load/store analysis memory reference.
+        /// <para>
+        /// When the base register holds a known runtime value, returns the resolved
+        /// 32-bit address (<c>0xXXXXXXXX</c>) so the comment line up with PCSX2's
+        /// live state.  Otherwise returns <c>"baseReg + 0xNNNN"</c> — never the bare
+        /// offset, which would make a 16-bit displacement look like an address.
+        /// The <c>$zero</c> base register is treated as known (its value is always 0).
+        /// </para>
         /// </summary>
         public static string FormatMemoryReference(CpuState? cpu, int baseReg, int offset)
         {
-            if (cpu == null)
-                return FormatMemoryOffset(offset);
+            ushort disp = (ushort)(offset & 0xFFFF);
+            string sign = (short)disp < 0 ? "-" : "+";
+            string absHex = $"0x{(uint)System.Math.Abs((short)disp):X4}";
 
-            ulong baseLo = cpu.RegsLo[baseReg];
-            ulong baseHi = cpu.RegsHi[baseReg];
-            if (baseReg != 0 && baseLo == 0 && baseHi == 0)
-                return FormatMemoryOffset(offset);
+            if (cpu != null)
+            {
+                ulong baseLo = cpu.RegsLo[baseReg];
+                ulong baseHi = cpu.RegsHi[baseReg];
+                // $zero is always known. Any other register that is still 0 (lo+hi)
+                // in the cloned analysis state is treated as unresolved.
+                bool baseKnown = baseReg == 0 || baseLo != 0 || baseHi != 0;
+                if (baseKnown)
+                {
+                    uint addr = (uint)((int)baseLo + offset);
+                    return $"0x{addr:X8}";
+                }
+            }
 
-            uint addr = (uint)((int)baseLo + offset);
-            return $"0x{addr:X8}";
+            return $"{RegName(baseReg)} {sign} {absHex}";
         }
 
         /// <summary>
@@ -73,6 +87,15 @@ namespace CodeDesigner.Ps2.Common.CPU
         public static string FormatMemoryOffset(int offset)
         {
             return $"0x{offset & 0xFFFF:X4}";
+        }
+
+        /// <summary>
+        /// Format a 64-bit register value as a 32-bit zero-padded hex word for
+        /// comment annotations (e.g. call argument dumps).
+        /// </summary>
+        public static string FormatRegisterValueHex(ulong value)
+        {
+            return $"0x{(uint)value:X8}";
         }
 
         /// <summary>
