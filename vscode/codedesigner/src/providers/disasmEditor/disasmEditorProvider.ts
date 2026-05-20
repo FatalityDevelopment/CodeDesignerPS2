@@ -3228,6 +3228,13 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       // Get file list first, then export each entry (including directories, which
       // the server exports recursively).
       const files = await this.socketClient.hddListFiles(hddPath, partitionId);
+      if (files.length === 0) {
+        const msg = `No files found in "${partitionId}" to export.`;
+        getOutputChannel().warn(`[HDD] ${msg}`);
+        webview.postMessage({ type: 'hddActionResult', error: msg });
+        return;
+      }
+
       let exported = 0;
       for (const file of files) {
         try {

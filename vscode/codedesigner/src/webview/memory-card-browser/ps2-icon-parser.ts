@@ -23,7 +23,7 @@ export interface Ps2Icon {
   normals: number[][];
   uvs: number[][];
   colors: number[][];
-  textureRgb?: Uint8Array;
+  textureRgba?: Uint8Array;
 }
 
 const ICON_SYS_SIZE = 964;
@@ -144,10 +144,10 @@ export function parseIcon(bytes: Uint8Array): Ps2Icon {
 
     ensure(bytes, offset, 4, 'vertex color data');
     colors.push([
-      bytes[offset] / 255,
-      bytes[offset + 1] / 255,
-      bytes[offset + 2] / 255,
-      bytes[offset + 3] / 255,
+      normalizeIconColor(bytes[offset]),
+      normalizeIconColor(bytes[offset + 1]),
+      normalizeIconColor(bytes[offset + 2]),
+      normalizeIconColor(bytes[offset + 3]),
     ]);
     offset += 4;
 
@@ -175,14 +175,14 @@ export function parseIcon(bytes: Uint8Array): Ps2Icon {
     }
   }
 
-  let textureRgb: Uint8Array | undefined;
+  let textureRgba: Uint8Array | undefined;
   if ((texType & 0b0100) !== 0 && offset < bytes.length) {
     const texture = (texType & 0b1000) !== 0
       ? loadCompressedTexture(bytes, view, offset)
       : bytes.slice(offset, Math.min(offset + TEXTURE_BYTES, bytes.length));
 
     if (texture.length >= TEXTURE_BYTES) {
-      textureRgb = decodeBgr555(texture.slice(0, TEXTURE_BYTES));
+      textureRgba = decodeBgr555(texture.slice(0, TEXTURE_BYTES));
     }
   }
 
@@ -198,7 +198,7 @@ export function parseIcon(bytes: Uint8Array): Ps2Icon {
     normals,
     uvs,
     colors,
-    textureRgb,
+    textureRgba,
   };
 }
 
@@ -267,16 +267,25 @@ function loadCompressedTexture(bytes: Uint8Array, view: DataView, offset: number
 }
 
 function decodeBgr555(texture: Uint8Array): Uint8Array {
-  const out = new Uint8Array(TEXTURE_WIDTH * TEXTURE_HEIGHT * 3);
+  const out = new Uint8Array(TEXTURE_WIDTH * TEXTURE_HEIGHT * 4);
   const view = new DataView(texture.buffer, texture.byteOffset, texture.byteLength);
-  let rgbOffset = 0;
+  let rgbaOffset = 0;
   for (let offset = 0; offset + 1 < texture.length; offset += 2) {
     const value = view.getUint16(offset, true);
-    out[rgbOffset++] = (value & 0x1f) << 3;
-    out[rgbOffset++] = ((value >> 5) & 0x1f) << 3;
-    out[rgbOffset++] = ((value >> 10) & 0x1f) << 3;
+    out[rgbaOffset++] = expand5(value & 0x1f);
+    out[rgbaOffset++] = expand5((value >> 5) & 0x1f);
+    out[rgbaOffset++] = expand5((value >> 10) & 0x1f);
+    out[rgbaOffset++] = value === 0 ? 0 : 255;
   }
   return out;
+}
+
+function expand5(value: number): number {
+  return (value << 3) | (value >> 2);
+}
+
+function normalizeIconColor(value: number): number {
+  return Math.max(0, Math.min(1, value / 128));
 }
 
 function decodeSjis(bytes: Uint8Array): string {

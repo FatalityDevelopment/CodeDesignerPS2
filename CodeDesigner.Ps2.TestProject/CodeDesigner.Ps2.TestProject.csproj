@@ -18,6 +18,7 @@
     <ProjectReference Include="..\CodeDesigner.Ps2.CheatEngine\CodeDesigner.Ps2.CheatEngine.csproj" />
     <ProjectReference Include="..\CodeDesigner.Ps2.Common\CodeDesigner.Ps2.Common.csproj" />
     <ProjectReference Include="..\CodeDesigner.Ps2.EmulatorCore\CodeDesigner.Ps2.EmulatorCore.csproj" />
+    <ProjectReference Include="..\CodeDesigner.Ps2.HddManager\CodeDesigner.Ps2.HddManager.csproj" />
     <ProjectReference Include="..\CodeDesigner.Ps2.IsoManager\CodeDesigner.Ps2.IsoManager.csproj" />
     <ProjectReference Include="..\CodeDesigner.Ps2.MCManager\CodeDesigner.Ps2.MCManager.csproj" />
     <ProjectReference Include="..\CodeDesigner.Ps2.Recompiler\CodeDesigner.Ps2.Recompiler.csproj" />

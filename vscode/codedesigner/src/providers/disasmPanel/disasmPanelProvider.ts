@@ -498,9 +498,12 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 case 'openLabelManager':
                     this.editorProvider.openLabelManagerTab();
                     break;
-                // ── Memory Card Manager ───────────────────────────────────
+                // ── Memory Card Browser ───────────────────────────────────
                 case 'openMemoryCard':
-                    this.editorProvider.openMemoryCardOverlay();
+                    await vscode.commands.executeCommand('codedesigner.openMemoryCardBrowser');
+                    break;
+                case 'openZipperWorkbench':
+                    await vscode.commands.executeCommand('codedesigner.openZipperWorkbench');
                     break;
                 // ── HDD Image Manager ─────────────────────────────────────
                 case 'openHdd':

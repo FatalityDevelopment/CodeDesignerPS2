@@ -46,6 +46,13 @@ interface CommandMessage {
     ExportDir?: string;
     ImportDir?: string;
     McOverwrite?: boolean;
+    // FileFormats/Zipper fields
+    ZipperEntryIndex?: number;
+    ZipperSection?: string;
+    SaveMode?: string;
+    SaveTitle?: string;
+    SaveTitleLength?: number;
+    SigningKeyPath?: string;
     // HDD_* fields
     HddPath?: string;
     PartitionId?: string;
@@ -600,6 +607,72 @@ export interface McSaveInfo {
 export interface McFileInfo {
     Name: string;
     Size: number;
+}
+
+export interface ZipperEntryInfo {
+    index: number;
+    name: string;
+    path: string;
+    size: number;
+    kind: string;
+    extension?: string;
+    type?: number;
+}
+
+export interface ZipperSaveRecordInfo {
+    fieldName: string;
+    type: number;
+    flags: number;
+    count: number;
+    valOffset: number;
+    tableOffset: number;
+    strOffset: number;
+}
+
+export interface ZipperInspectResult {
+    format: string;
+    role: 'archive' | 'structured-container' | 'game-save' | 'apache-patch-archive' | string;
+    path: string;
+    fileName: string;
+    size: number;
+    summary: string;
+    canExtract: boolean;
+    entries: ZipperEntryInfo[];
+    apache?: {
+        hasFtScore: boolean;
+        hasZSealEtc: boolean;
+    } | null;
+    zed?: {
+        rootValue: number;
+        stringBasePointer: number;
+        headerWord5C: number;
+        dataAlignment: number;
+    } | null;
+    save?: {
+        title: string;
+        decryptedSize: number;
+        header: {
+            saveType: number;
+            slotIndex: number;
+            dataSize: number;
+            moduleCount: number;
+            field5C: number;
+            field60: number;
+        };
+        modules: string[];
+        records: ZipperSaveRecordInfo[];
+    } | null;
+}
+
+export interface ZipperOperationResult {
+    outputDirectory?: string;
+    outputPath?: string;
+    writtenFiles: string[];
+    count: number;
+    section?: string;
+    buildVersion?: string;
+    publicModulusHex?: string;
+    generatedNewKey?: boolean;
 }
 
 /**
@@ -2961,6 +3034,110 @@ export class SocketClient {
             throw new Error(response.Error || 'MC_READ_FILE failed');
         }
         return response.Data ?? '';
+    }
+
+    // FileFormats / Zipper workbench
+
+    public async zipperInspect(inputPath: string): Promise<ZipperInspectResult> {
+        const response = await this.sendCommand({ Command: 'ZIPPER_INSPECT', InputPath: inputPath }, 30_000);
+        if (!response.Success) {
+            throw new Error(response.Error || 'ZIPPER_INSPECT failed');
+        }
+        return JSON.parse(response.Data ?? '{}') as ZipperInspectResult;
+    }
+
+    public async zipperExtractAll(inputPath: string, outputDirectory: string): Promise<ZipperOperationResult> {
+        const response = await this.sendCommand(
+            { Command: 'ZIPPER_EXTRACT_ALL', InputPath: inputPath, OutputDirectory: outputDirectory },
+            120_000,
+        );
+        if (!response.Success) {
+            throw new Error(response.Error || 'ZIPPER_EXTRACT_ALL failed');
+        }
+        return JSON.parse(response.Data ?? '{}') as ZipperOperationResult;
+    }
+
+    public async zipperExtractEntry(inputPath: string, entryIndex: number, outputPath: string): Promise<ZipperOperationResult> {
+        const response = await this.sendCommand(
+            { Command: 'ZIPPER_EXTRACT_ENTRY', InputPath: inputPath, ZipperEntryIndex: entryIndex, OutputPath: outputPath },
+            60_000,
+        );
+        if (!response.Success) {
+            throw new Error(response.Error || 'ZIPPER_EXTRACT_ENTRY failed');
+        }
+        return JSON.parse(response.Data ?? '{}') as ZipperOperationResult;
+    }
+
+    public async zipperSaveExportDecrypted(inputPath: string, outputPath: string): Promise<ZipperOperationResult> {
+        const response = await this.sendCommand(
+            { Command: 'ZIPPER_SAVE_EXPORT_DECRYPTED', InputPath: inputPath, OutputPath: outputPath },
+            60_000,
+        );
+        if (!response.Success) {
+            throw new Error(response.Error || 'ZIPPER_SAVE_EXPORT_DECRYPTED failed');
+        }
+        return JSON.parse(response.Data ?? '{}') as ZipperOperationResult;
+    }
+
+    public async zipperSaveCraft(
+        inputPath: string,
+        outputDirectory: string,
+        mode: 'active' | 'overflow' | 'extreme' | 'all',
+        title?: string,
+        titleLength?: number,
+    ): Promise<ZipperOperationResult> {
+        const response = await this.sendCommand(
+            {
+                Command: 'ZIPPER_SAVE_CRAFT',
+                InputPath: inputPath,
+                OutputDirectory: outputDirectory,
+                SaveMode: mode,
+                SaveTitle: title,
+                SaveTitleLength: titleLength,
+            },
+            60_000,
+        );
+        if (!response.Success) {
+            throw new Error(response.Error || 'ZIPPER_SAVE_CRAFT failed');
+        }
+        return JSON.parse(response.Data ?? '{}') as ZipperOperationResult;
+    }
+
+    public async apacheDecryptSection(
+        inputPath: string,
+        outputDirectory: string,
+        section: 'ftscore' | 'zsealetc',
+    ): Promise<ZipperOperationResult> {
+        const response = await this.sendCommand(
+            { Command: 'APACHE_DECRYPT_SECTION', InputPath: inputPath, OutputDirectory: outputDirectory, ZipperSection: section },
+            120_000,
+        );
+        if (!response.Success) {
+            throw new Error(response.Error || 'APACHE_DECRYPT_SECTION failed');
+        }
+        return JSON.parse(response.Data ?? '{}') as ZipperOperationResult;
+    }
+
+    public async apacheBuildPatch(
+        originalZdbPath: string,
+        ftScorePlaintextPath: string,
+        outputDirectory: string,
+        signingKeyPath?: string,
+    ): Promise<ZipperOperationResult> {
+        const response = await this.sendCommand(
+            {
+                Command: 'APACHE_BUILD_PATCH',
+                InputPath: originalZdbPath,
+                FilePath: ftScorePlaintextPath,
+                OutputDirectory: outputDirectory,
+                SigningKeyPath: signingKeyPath,
+            },
+            300_000,
+        );
+        if (!response.Success) {
+            throw new Error(response.Error || 'APACHE_BUILD_PATCH failed');
+        }
+        return JSON.parse(response.Data ?? '{}') as ZipperOperationResult;
     }
 
     // ═══════════════════════════════════════════════════════════════════════

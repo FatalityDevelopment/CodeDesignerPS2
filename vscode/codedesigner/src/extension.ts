@@ -10,6 +10,7 @@ import { CompatBrowserProvider } from './providers/compatBrowser/compatBrowserPr
 import { CheatsEditorProvider } from './providers/cheatsEditor/cheatsEditorProvider';
 import { StructureVisualizerProvider } from './providers/structureVisualizer/structureVisualizerProvider';
 import { MemoryCardBrowserProvider } from './providers/memoryCardBrowser/memoryCardBrowserProvider';
+import { ZipperWorkbenchProvider } from './providers/zipperWorkbench/zipperWorkbenchProvider';
 import { SocketClient } from './socketClient';
 
 let socketClient: SocketClient | null = null;
@@ -343,6 +344,18 @@ export function activate(context: vscode.ExtensionContext) {
 		(uri?: vscode.Uri) => memoryCardBrowserProvider.open(uri?.fsPath),
 	);
 	context.subscriptions.push(openMemoryCardBrowserCommand);
+
+	// Standalone FileFormats/Zipper workbench for ZDB/ZAR/ZED containers,
+	// SOCOM II saves, and APACHE00.ZDB patch builds.
+	const zipperWorkbenchProvider = new ZipperWorkbenchProvider(context.extensionUri, socketClient);
+	const openZipperWorkbenchCommand = vscode.commands.registerCommand(
+		'codedesigner.openZipperWorkbench',
+		(uri?: vscode.Uri) => {
+			const filePath = uri?.fsPath ?? vscode.window.activeTextEditor?.document.uri.fsPath;
+			zipperWorkbenchProvider.open(filePath);
+		},
+	);
+	context.subscriptions.push(openZipperWorkbenchCommand);
 
 	// ── Structure Visualizer ────────────────────────────────────────────────
 	// Standalone webview that renders Mermaid diagrams of a game's structure:

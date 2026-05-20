@@ -149,12 +149,12 @@ export class Ps2IconRenderer {
       this.geometries.push(this.buildGeometry(icon, shape, nextShape));
     }
 
-    if (icon.textureRgb) {
+    if (icon.textureRgba) {
       this.texture = new THREE.DataTexture(
-        icon.textureRgb,
+        icon.textureRgba,
         128,
         128,
-        THREE.RGBFormat,
+        THREE.RGBAFormat,
         THREE.UnsignedByteType,
       );
       this.texture.flipY = false;
@@ -170,6 +170,7 @@ export class Ps2IconRenderer {
         tweenFactor: { value: 0 },
         texture0: { value: this.texture },
         hasTexture: { value: Boolean(this.texture) },
+        vertexColorStrength: { value: hasUsefulVertexColors(icon) ? 1 : 0 },
         ambient: { value: vec4(iconSys.ambient, [0.35, 0.35, 0.35, 1]) },
         lightDirs: { value: iconSys.lightDirs.map(v => vec4(v, [0, 0, -1, 0])) },
         lightColors: { value: iconSys.lightColors.map(v => vec4(v, [0.55, 0.55, 0.55, 1])) },
@@ -196,31 +197,30 @@ export class Ps2IconRenderer {
 
         uniform sampler2D texture0;
         uniform bool hasTexture;
-        uniform vec4 ambient;
-        uniform vec4 lightDirs[MAX_NUM_TOTAL_LIGHTS];
-        uniform vec4 lightColors[MAX_NUM_TOTAL_LIGHTS];
+        uniform float vertexColorStrength;
         varying vec2 vUv;
         varying vec3 vNormal;
         varying vec4 vColor;
 
         void main() {
-          vec3 normal = normalize(vNormal);
-          vec3 base = hasTexture ? texture2D(texture0, vUv).rgb : vColor.rgb;
-          vec3 diffuse = vec3(0.0);
-
-          for (int i = 0; i < MAX_NUM_TOTAL_LIGHTS; i++) {
-            vec3 lightDir = normalize(-lightDirs[i].xyz);
-            float amount = max(dot(lightDir, normal), 0.0);
-            diffuse += amount * lightColors[i].rgb;
+          vec4 base;
+          if (hasTexture) {
+            base = texture2D(texture0, vUv);
+          } else {
+            base = vec4(mix(vec3(0.82), vColor.rgb, vertexColorStrength), 1.0);
           }
 
-          vec3 color = clamp((ambient.rgb + diffuse) * base, 0.0, 1.0);
-          gl_FragColor = vec4(color, 1.0);
+          if (base.a < 0.05) {
+            discard;
+          }
+
+          gl_FragColor = vec4(clamp(base.rgb, 0.0, 1.0), base.a);
         }
       `,
       side: THREE.DoubleSide,
       depthTest: true,
       depthWrite: true,
+      transparent: true,
     });
 
     this.mesh = new THREE.Mesh(this.geometries[0], this.material);
@@ -306,6 +306,19 @@ export class Ps2IconRenderer {
 function vec4(value: number[] | undefined, fallback: number[]): THREE.Vector4 {
   const v = value && value.length >= 4 ? value : fallback;
   return new THREE.Vector4(v[0], v[1], v[2], v[3]);
+}
+
+function hasUsefulVertexColors(icon: Ps2Icon): boolean {
+  if (icon.colors.length === 0) {
+    return false;
+  }
+
+  let total = 0;
+  for (const color of icon.colors) {
+    total += (color[0] ?? 0) + (color[1] ?? 0) + (color[2] ?? 0);
+  }
+
+  return total / (icon.colors.length * 3) > 0.04;
 }
 
 function clamp01(value: number): number {

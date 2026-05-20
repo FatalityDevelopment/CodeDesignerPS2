@@ -100,6 +100,7 @@ const webviewConfig = {
     'joker-maker':        './src/webview/joker-maker/main.ts',
     'structure-visualizer': './src/webview/structure-visualizer/main.ts',
     'memory-card-browser': './src/webview/memory-card-browser/main.ts',
+    'zipper-workbench': './src/webview/zipper-workbench/main.ts',
   },
   output: {
     path: path.resolve(__dirname, 'dist/webview'),

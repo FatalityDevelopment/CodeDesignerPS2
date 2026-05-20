@@ -43,6 +43,13 @@ namespace CodeDesigner.Ps2.Bridge
         public string? ExportDir { get; set; }
         public string? ImportDir { get; set; }
         public bool?   McOverwrite { get; set; }
+        // FileFormats/Zipper fields
+        public int?    ZipperEntryIndex { get; set; }
+        public string? ZipperSection { get; set; }
+        public string? SaveMode { get; set; }
+        public string? SaveTitle { get; set; }
+        public int?    SaveTitleLength { get; set; }
+        public string? SigningKeyPath { get; set; }
         // HDD_LIST / HDD_LIST_FILES / HDD_EXPORT / HDD_IMPORT / HDD_DELETE / HDD_CREATE fields
         public string? HddPath { get; set; }
         public string? PartitionId { get; set; }

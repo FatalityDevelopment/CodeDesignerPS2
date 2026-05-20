@@ -356,12 +356,16 @@ const NET_POLL_MS = 4000;
                 <app-icon name="tag" [size]="14" /><span>Labels</span>
               </button>
               <button (click)="openMemoryCardClick.emit()"
-                      title="Open the Memory Card Manager to browse and edit PS2 memory cards">
+                      title="Open the PS2 Memory Card Browser">
                 <app-icon name="save" [size]="14" /><span>Mem Card</span>
               </button>
               <button (click)="openHddClick.emit()"
                       title="Open the HDD Image Manager to browse and edit PS2 HDD images">
                 <app-icon name="harddrive" [size]="14" /><span>HDD</span>
+              </button>
+              <button (click)="openZipperClick.emit()"
+                      title="Open the Zipper FileFormats workbench">
+                <app-icon name="database" [size]="14" /><span>Zipper</span>
               </button>
               <button (click)="openSnapshotManagerClick.emit()"
                       title="Open the Snapshot Manager to browse and manage memory snapshots">
@@ -612,6 +616,7 @@ export class SettingsTabComponent implements OnDestroy {
   readonly openCheatsEditorClick = output<void>();
   readonly openMemoryCardClick   = output<void>();
   readonly openHddClick          = output<void>();
+  readonly openZipperClick       = output<void>();
   readonly openMemoryViewClick = output<string>();
   readonly openDnsMappingClick   = output<void>();
   readonly openNetConfigClick    = output<void>();
