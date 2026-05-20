@@ -232,7 +232,13 @@ body {
     display: grid;
     grid-template-columns: 10ch 12ch 26ch 8ch 34ch 66ch;
     padding: 2px 6px;
+    position: relative;
     cursor: default;
+}
+
+.row.comment-tooltip-visible {
+    overflow: visible;
+    z-index: 80;
 }
  
 .row.active {
@@ -319,7 +325,10 @@ body {
     background: #264f78;
 }
  
-.addr { color: #c586c0; } 
+.addr { color: #c586c0; }
+.addr.has-comment-tooltip {
+    cursor: help;
+}
 .bytes { color: #9cdcfe; } 
 .label { color: #4ec9b0; } 
 .op { color: #dcdcaa; } 
@@ -330,6 +339,28 @@ body {
     overflow: hidden;
     text-overflow: ellipsis;
 } 
+
+.comment.has-comment-tooltip {
+    cursor: help;
+}
+
+.comment-tooltip {
+    position: fixed;
+    z-index: 10000;
+    max-width: min(760px, calc(100vw - 24px));
+    max-height: min(360px, calc(100vh - 24px));
+    padding: 7px 9px;
+    background: var(--vscode-editorHoverWidget-background, #252526);
+    color: var(--vscode-editorHoverWidget-foreground, var(--vscode-editor-foreground, #d4d4d4));
+    border: 1px solid var(--vscode-editorHoverWidget-border, #454545);
+    border-radius: 4px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+    line-height: 1.45;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    overflow: auto;
+    pointer-events: none;
+}
 
 .search-match-highlight {
     background: #f9826c;
@@ -521,7 +552,20 @@ body {
 .dbg-arg-comma  { color: #8b949e; }
 .dbg-arg-offset { color: #a8afb8; }
 
+.comment-address {
+  color: var(--vscode-editor-foreground, #d4d4d4);
+}
+
+.comment-label,
 .comment-resolved {
+    color: #4ec9b0;
+}
+
+.comment-string {
+    color: #9cdcfe;
+}
+
+.comment-value {
     color: #6a9955;
 }
 

@@ -26,6 +26,7 @@
     "src/webview/diff-viewer/main.ts",
     "src/webview/joker-maker/main.ts",
     "src/webview/structure-visualizer/main.ts",
+    "src/webview/memory-card-browser/main.ts",
     "src/webview/typings.d.ts"
   ],
   "exclude": [

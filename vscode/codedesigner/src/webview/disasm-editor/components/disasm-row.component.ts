@@ -5,6 +5,7 @@ import {
   output,
   computed,
   inject,
+  signal,
   ChangeDetectionStrategy,
 } from '@angular/core';
 import { EditorState } from '../state/editor.state';
@@ -33,18 +34,42 @@ import { DisasmRow } from '../state/types';
       [class.breakpoint]="hasBreakpoint()"
       [class.breakpoint-active]="hasBreakpoint()"
       [class.breakpoint-hit]="isBreakpointHit()"
+      [class.comment-tooltip-visible]="commentTooltipVisible()"
       [attr.data-index]="localIndex()"
       [attr.data-global-index]="globalIndex()"
       (click)="onClick()"
       (dblclick)="onDblClick()"
       (contextmenu)="onContextMenu($event)"
     >
-      <span class="addr" [innerHTML]="addrHtml()"></span>
+      <span
+        class="addr"
+        [class.has-comment-tooltip]="hasCommentTooltip()"
+        [innerHTML]="addrHtml()"
+        (mouseenter)="showFullComment($event)"
+        (mousemove)="moveFullComment($event)"
+        (mouseleave)="hideFullComment()"
+      ></span>
       <span class="bytes" [innerHTML]="bytesHtml()"></span>
       <span class="label" [innerHTML]="labelHtml()"></span>
       <span class="op" [innerHTML]="opHtml()"></span>
       <span class="args" [innerHTML]="argsHtml()"></span>
-      <span class="comment" [innerHTML]="commentHtml()"></span>
+      <span
+        class="comment"
+        [class.has-comment-tooltip]="hasCommentTooltip()"
+        [innerHTML]="commentHtml()"
+        (mouseenter)="showFullComment($event)"
+        (mousemove)="moveFullComment($event)"
+        (mouseleave)="hideFullComment()"
+      ></span>
+      @if (commentTooltipVisible()) {
+        <span
+          class="comment-tooltip"
+          [style.left.px]="commentTooltipLeft()"
+          [style.top.px]="commentTooltipTop()"
+          [style.bottom.px]="commentTooltipBottom()"
+          [innerHTML]="commentTooltipHtml()"
+        ></span>
+      }
     </div>
   `,
 })
@@ -62,6 +87,12 @@ export class DisasmRowComponent {
 
   /** Pointer label map for resolving address labels */
   readonly pointerLabelMap = input<Map<string, string>>(new Map());
+
+  /** Fixed-position full-comment tooltip state. */
+  protected readonly commentTooltipVisible = signal(false);
+  protected readonly commentTooltipLeft = signal(12);
+  protected readonly commentTooltipTop = signal<number | null>(12);
+  protected readonly commentTooltipBottom = signal<number | null>(null);
 
   /** Output events */
   readonly select = output<number>();
@@ -207,6 +238,14 @@ export class DisasmRowComponent {
     this.highlightSearch(this.colorizeComment(this.data().comment || ''), 'comment')
   );
 
+  protected readonly commentTooltipHtml = computed(() =>
+    this.colorizeComment(this.data().comment || '')
+  );
+
+  protected readonly hasCommentTooltip = computed(() =>
+    (this.data().comment || '').trim().length > 0
+  );
+
   // ═══════════════════════════════════════════════════════════════════════════
   // Event Handlers
   // ═══════════════════════════════════════════════════════════════════════════
@@ -233,9 +272,42 @@ export class DisasmRowComponent {
     });
   }
 
+  protected showFullComment(event: MouseEvent): void {
+    if (!this.hasCommentTooltip()) { return; }
+    this.positionFullComment(event);
+    this.commentTooltipVisible.set(true);
+  }
+
+  protected moveFullComment(event: MouseEvent): void {
+    if (!this.commentTooltipVisible()) { return; }
+    this.positionFullComment(event);
+  }
+
+  protected hideFullComment(): void {
+    this.commentTooltipVisible.set(false);
+  }
+
   // ═══════════════════════════════════════════════════════════════════════════
   // Utility Methods
   // ═══════════════════════════════════════════════════════════════════════════
+
+  private positionFullComment(event: MouseEvent): void {
+    const margin = 12;
+    const maxWidth = Math.min(760, window.innerWidth - margin * 2);
+    const preferredLeft = event.clientX + 14;
+    const preferredTop = event.clientY + 18;
+    const left = Math.max(margin, Math.min(preferredLeft, window.innerWidth - maxWidth - margin));
+
+    this.commentTooltipLeft.set(left);
+
+    if (window.innerHeight - preferredTop < 220 && event.clientY > window.innerHeight / 2) {
+      this.commentTooltipTop.set(null);
+      this.commentTooltipBottom.set(Math.max(margin, window.innerHeight - event.clientY + margin));
+    } else {
+      this.commentTooltipBottom.set(null);
+      this.commentTooltipTop.set(preferredTop);
+    }
+  }
 
   /** Convert virtual address to physical address for EE memory */
   private toPhysAddr(v: number): number {
@@ -380,15 +452,151 @@ export class DisasmRowComponent {
 
   private colorizeComment(text: string): string {
     if (!text) { return text; }
-    let html = this.escapeHtml(text);
-    html = html.replace(/(&quot;.*?&quot;)/g, '<span class="comment-resolved">$1</span>');
-    html = html.split(/(<[^>]+>)/g).map(part => {
-      if (part.startsWith('<')) { return part; }
-      return part
-        .replace(/\b(0x[0-9a-f]{8}|[0-9a-f]{8})\b/gi, '<span class="comment-resolved">$1</span>')
-        .replace(/\b(0x[0-9a-f]{4})\b/gi, '<span class="comment-offset">$1</span>');
-    }).join('');
+
+    const labels = this.commentLabelNames();
+    let html = '';
+
+    for (let i = 0; i < text.length;) {
+      const quoted = this.matchQuotedString(text, i);
+      if (quoted) {
+        html += `<span class="comment-string">${this.escapeHtml(quoted)}</span>`;
+        i += quoted.length;
+        continue;
+      }
+
+      const address = this.matchPlausibleAddress(text, i);
+      if (address) {
+        html += `<span class="comment-address">${this.escapeHtml(address)}</span>`;
+        i += address.length;
+        continue;
+      }
+
+      const wordValue = this.matchWordValue(text, i);
+      if (wordValue) {
+        html += `<span class="comment-value">${this.escapeHtml(wordValue)}</span>`;
+        i += wordValue.length;
+        continue;
+      }
+
+      const offset = this.matchOffset(text, i);
+      if (offset) {
+        html += `<span class="comment-offset">${this.escapeHtml(offset)}</span>`;
+        i += offset.length;
+        continue;
+      }
+
+      const label = this.matchKnownLabel(text, i, labels);
+      if (label) {
+        html += `<span class="comment-label">${this.escapeHtml(label)}</span>`;
+        i += label.length;
+        continue;
+      }
+
+      html += this.escapeHtml(text[i]);
+      i++;
+    }
+
     return html;
+  }
+
+  private commentLabelNames(): string[] {
+    const labels = new Set<string>();
+    const add = (value: unknown) => {
+      if (typeof value !== 'string') { return; }
+      const trimmed = value.trim();
+      if (trimmed.length < 2) { return; }
+      if (/^(?:0x)?[0-9a-f]+$/i.test(trimmed)) { return; }
+      labels.add(trimmed);
+
+      const stringLabel = trimmed.match(/^([^:]+):\s*".*"$/);
+      if (stringLabel?.[1]?.trim()) {
+        labels.add(stringLabel[1].trim());
+      }
+    };
+
+    add(this.data().label);
+    for (const label of this.pointerLabelMap().values()) { add(label); }
+    for (const entry of this.state.symLabels()) { add(entry.label); }
+
+    return Array.from(labels).sort((a, b) => b.length - a.length);
+  }
+
+  private matchQuotedString(text: string, index: number): string | undefined {
+    if (text[index] !== '"') { return undefined; }
+
+    for (let i = index + 1; i < text.length; i++) {
+      if (text[i] === '"' && text[i - 1] !== '\\') {
+        return text.slice(index, i + 1);
+      }
+    }
+
+    return text.slice(index);
+  }
+
+  private matchPlausibleAddress(text: string, index: number): string | undefined {
+    if (!this.isTokenBoundary(text[index - 1])) { return undefined; }
+
+    const match = text.slice(index).match(/^(?:0x[0-9a-f]{8}|[0-9a-f]{8})(?![A-Za-z0-9_])/i);
+    if (!match) { return undefined; }
+
+    const token = match[0];
+    const value = parseInt(token.replace(/^0x/i, ''), 16) >>> 0;
+    return this.isPlausibleAddressValue(value) ? token : undefined;
+  }
+
+  private matchOffset(text: string, index: number): string | undefined {
+    if (!this.isTokenBoundary(text[index - 1])) { return undefined; }
+
+    const match = text.slice(index).match(/^0x[0-9a-f]{4}(?![A-Za-z0-9_])/i);
+    return match?.[0];
+  }
+
+  private matchWordValue(text: string, index: number): string | undefined {
+    if (!this.isTokenBoundary(text[index - 1])) { return undefined; }
+
+    const match = text.slice(index).match(/^(?:0x[0-9a-f]{8}|[0-9a-f]{8})(?![A-Za-z0-9_])/i);
+    return match?.[0];
+  }
+
+  private isPlausibleAddressValue(value: number): boolean {
+    if (value >= 0x00010000 && value < 0x02000000) { return true; }
+    if (value >= 0x10000000 && value < 0x10010000) { return true; }
+    if (value >= 0x12000000 && value < 0x12002000) { return true; }
+    if (value >= 0x1fc00000 && value < 0x20000000) { return true; }
+    if (value >= 0x70000000 && value < 0x70004000) { return true; }
+    if (value >= 0x80010000 && value < 0x82000000) { return true; }
+    if (value >= 0xa0010000 && value < 0xa2000000) { return true; }
+    if (value >= 0xbfc00000 && value < 0xc0000000) { return true; }
+    return false;
+  }
+
+  private matchKnownLabel(text: string, index: number, labels: string[]): string | undefined {
+    for (const label of labels) {
+      if (!text.startsWith(label, index)) { continue; }
+      if (!this.hasLabelBoundary(text, index, label.length)) { continue; }
+      return label;
+    }
+
+    return undefined;
+  }
+
+  private hasLabelBoundary(text: string, index: number, length: number): boolean {
+    const first = text[index];
+    const last = text[index + length - 1];
+    const before = text[index - 1];
+    const after = text[index + length];
+
+    if (this.isIdentifierChar(first) && this.isIdentifierChar(before)) { return false; }
+    if (this.isIdentifierChar(last) && this.isIdentifierChar(after)) { return false; }
+    return true;
+  }
+
+  private isTokenBoundary(ch: string | undefined): boolean {
+    return ch === undefined || !/[A-Za-z0-9_]/.test(ch);
+  }
+
+  private isIdentifierChar(ch: string | undefined): boolean {
+    return ch !== undefined && /[A-Za-z0-9_]/.test(ch);
   }
 
   /** Highlight search matches within text */

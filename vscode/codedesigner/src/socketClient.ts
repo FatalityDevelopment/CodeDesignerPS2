@@ -42,6 +42,7 @@ interface CommandMessage {
     // MC_* fields
     McPath?: string;
     SaveName?: string;
+    McFileName?: string;
     ExportDir?: string;
     ImportDir?: string;
     McOverwrite?: boolean;
@@ -2944,6 +2945,22 @@ export class SocketClient {
         if (!response.Success) {
             throw new Error(response.Error || 'MC_FORMAT failed');
         }
+    }
+
+    /**
+     * Read a raw file from a save-game directory inside a PS2 memory card image.
+     * @param mcPath Absolute path to the .ps2 memory card file.
+     * @param saveName Name of the save directory.
+     * @param fileName Name of the file within that save directory.
+     */
+    public async mcReadFile(mcPath: string, saveName: string, fileName: string): Promise<string> {
+        const response = await this.sendCommand(
+            { Command: 'MC_READ_FILE', McPath: mcPath, SaveName: saveName, McFileName: fileName }
+        );
+        if (!response.Success) {
+            throw new Error(response.Error || 'MC_READ_FILE failed');
+        }
+        return response.Data ?? '';
     }
 
     // ═══════════════════════════════════════════════════════════════════════

@@ -1,0 +1,1257 @@
+{
+  "setName": "CodeDesigner labels",
+  "gameId": "SCUS-97275",
+  "isBuiltIn": false,
+  "entries": [
+    {
+      "address": "0x00000000",
+      "name": "EE_RAM_BASE",
+      "type": "Function"
+    },
+    {
+      "address": "0x00008000",
+      "name": "EE_KERNEL_BASE",
+      "comment": "EE kernel / OS loaded here by BIOS"
+    },
+    {
+      "address": "0x01FFFFFF",
+      "name": "EE_RAM_END",
+      "comment": "EE Main RAM top (32 MB, physical)"
+    },
+    {
+      "address": "0x70000000",
+      "name": "EE_SCRATCHPAD",
+      "comment": "EE Scratchpad RAM (16 KB)"
+    },
+    {
+      "address": "0x70003FFF",
+      "name": "EE_SCRATCHPAD_END",
+      "comment": "EE Scratchpad RAM end"
+    },
+    {
+      "address": "0x80000000",
+      "name": "EE_TLB_REFILL_BEV0",
+      "comment": "EE TLB refill exception vector (Status.BEV=0)"
+    },
+    {
+      "address": "0x80000080",
+      "name": "EE_EXCEPTION_BEV0",
+      "comment": "EE general exception vector (Status.BEV=0)"
+    },
+    {
+      "address": "0x80000100",
+      "name": "EE_PERFCNT_BEV0",
+      "comment": "EE performance counter overflow exception (BEV=0)"
+    },
+    {
+      "address": "0x80000180",
+      "name": "EE_DEBUG_BEV0",
+      "comment": "EE debug exception vector (BEV=0)"
+    },
+    {
+      "address": "0x80010000",
+      "name": "EE_BIOS_ENTRY",
+      "comment": "BIOS code entry point (KSEG0 mirror)"
+    },
+    {
+      "address": "0x800109FC",
+      "name": "EE_MODULE_INSTALL",
+      "comment": "BIOS: outer module-install loop"
+    },
+    {
+      "address": "0x800108B0",
+      "name": "EE_BIOS_FILL_LOOP",
+      "comment": "BIOS: BNEL byte-fill loop (fast-forwarded)"
+    },
+    {
+      "address": "0x80010018",
+      "name": "EE_BIOS_PUTS",
+      "comment": "BIOS: null-terminated string print (fast-forwarded)"
+    },
+    {
+      "address": "0x80012978",
+      "name": "EE_VU0_READY_POLL",
+      "comment": "BIOS: VU0-ready poll loop"
+    },
+    {
+      "address": "0x1FC00000",
+      "name": "BIOS_ROM_BASE",
+      "comment": "BIOS ROM (physical) \u2013 4 MB"
+    },
+    {
+      "address": "0x1FFFFFFF",
+      "name": "BIOS_ROM_END",
+      "comment": "BIOS ROM end (physical)"
+    },
+    {
+      "address": "0xBFC00000",
+      "name": "BIOS_RESET",
+      "comment": "Reset / NMI vector (KSEG1 mirror of BIOS ROM)"
+    },
+    {
+      "address": "0xBFC00100",
+      "name": "BIOS_TLB_REFILL_BEV1",
+      "comment": "TLB refill exception (Status.BEV=1)"
+    },
+    {
+      "address": "0xBFC00180",
+      "name": "BIOS_EXCEPTION_BEV1",
+      "comment": "General exception vector (Status.BEV=1)"
+    },
+    {
+      "address": "0xBFC00200",
+      "name": "BIOS_PERFCNT_BEV1",
+      "comment": "Performance counter overflow (Status.BEV=1)"
+    },
+    {
+      "address": "0x1A000000",
+      "name": "EE_IOP_RAM_MIRROR",
+      "comment": "EE physical mirror of IOP RAM (2 MB wrap)"
+    },
+    {
+      "address": "0x1C000000",
+      "name": "EE_IOP_VTLB_MIRROR",
+      "comment": "EE VTLB mirror of IOP RAM (PCSX2 vtlb.cpp)"
+    },
+    {
+      "address": "0x20000000",
+      "name": "EE_RAM_UNCACHED",
+      "comment": "EE uncached direct-mapped window for Main RAM"
+    },
+    {
+      "address": "0x10000000",
+      "name": "T0_COUNT",
+      "comment": "EE Timer 0 \u2013 TN_COUNT"
+    },
+    {
+      "address": "0x10000010",
+      "name": "T0_MODE",
+      "comment": "EE Timer 0 \u2013 TN_MODE (EQUF/OVFF flags)"
+    },
+    {
+      "address": "0x10000020",
+      "name": "T0_COMP",
+      "comment": "EE Timer 0 \u2013 TN_COMP (compare target)"
+    },
+    {
+      "address": "0x10000030",
+      "name": "T0_HOLD",
+      "comment": "EE Timer 0 \u2013 TN_HOLD"
+    },
+    {
+      "address": "0x10000800",
+      "name": "T1_COUNT",
+      "comment": "EE Timer 1 \u2013 TN_COUNT"
+    },
+    {
+      "address": "0x10000810",
+      "name": "T1_MODE",
+      "comment": "EE Timer 1 \u2013 TN_MODE"
+    },
+    {
+      "address": "0x10000820",
+      "name": "T1_COMP",
+      "comment": "EE Timer 1 \u2013 TN_COMP"
+    },
+    {
+      "address": "0x10000830",
+      "name": "T1_HOLD",
+      "comment": "EE Timer 1 \u2013 TN_HOLD"
+    },
+    {
+      "address": "0x10001000",
+      "name": "T2_COUNT",
+      "comment": "EE Timer 2 \u2013 TN_COUNT"
+    },
+    {
+      "address": "0x10001010",
+      "name": "T2_MODE",
+      "comment": "EE Timer 2 \u2013 TN_MODE"
+    },
+    {
+      "address": "0x10001020",
+      "name": "T2_COMP",
+      "comment": "EE Timer 2 \u2013 TN_COMP"
+    },
+    {
+      "address": "0x10001800",
+      "name": "T3_COUNT",
+      "comment": "EE Timer 3 \u2013 TN_COUNT"
+    },
+    {
+      "address": "0x10001810",
+      "name": "T3_MODE",
+      "comment": "EE Timer 3 \u2013 TN_MODE"
+    },
+    {
+      "address": "0x10001820",
+      "name": "T3_COMP",
+      "comment": "EE Timer 3 \u2013 TN_COMP"
+    },
+    {
+      "address": "0x10002000",
+      "name": "IPU_CMD",
+      "comment": "IPU \u2013 Command register"
+    },
+    {
+      "address": "0x10002010",
+      "name": "IPU_CTRL",
+      "comment": "IPU \u2013 Control register"
+    },
+    {
+      "address": "0x10002020",
+      "name": "IPU_BP",
+      "comment": "IPU \u2013 BP (bit pointer)"
+    },
+    {
+      "address": "0x10002030",
+      "name": "IPU_TOP",
+      "comment": "IPU \u2013 TOP (FIFO top bits)"
+    },
+    {
+      "address": "0x10003000",
+      "name": "GIF_CTRL",
+      "comment": "GIF \u2013 GIF_CTRL"
+    },
+    {
+      "address": "0x10003010",
+      "name": "GIF_MODE",
+      "comment": "GIF \u2013 GIF_MODE"
+    },
+    {
+      "address": "0x10003020",
+      "name": "GIF_STAT",
+      "comment": "GIF \u2013 GIF_STAT"
+    },
+    {
+      "address": "0x10003040",
+      "name": "GIF_TAG0",
+      "comment": "GIF \u2013 GIF_TAG0"
+    },
+    {
+      "address": "0x10003050",
+      "name": "GIF_TAG1",
+      "comment": "GIF \u2013 GIF_TAG1"
+    },
+    {
+      "address": "0x10003060",
+      "name": "GIF_TAG2",
+      "comment": "GIF \u2013 GIF_TAG2"
+    },
+    {
+      "address": "0x10003070",
+      "name": "GIF_TAG3",
+      "comment": "GIF \u2013 GIF_TAG3"
+    },
+    {
+      "address": "0x10003080",
+      "name": "GIF_CNT",
+      "comment": "GIF \u2013 GIF_CNT"
+    },
+    {
+      "address": "0x10003090",
+      "name": "GIF_P3CNT",
+      "comment": "GIF \u2013 GIF_P3CNT"
+    },
+    {
+      "address": "0x100030A0",
+      "name": "GIF_P3TAG",
+      "comment": "GIF \u2013 GIF_P3TAG"
+    },
+    {
+      "address": "0x10003800",
+      "name": "VIF0_STAT",
+      "comment": "VIF0 \u2013 VIF0_STAT"
+    },
+    {
+      "address": "0x10003810",
+      "name": "VIF0_FBRST",
+      "comment": "VIF0 \u2013 VIF0_FBRST (force-break/reset)"
+    },
+    {
+      "address": "0x10003820",
+      "name": "VIF0_ERR",
+      "comment": "VIF0 \u2013 VIF0_ERR"
+    },
+    {
+      "address": "0x10003830",
+      "name": "VIF0_MARK",
+      "comment": "VIF0 \u2013 VIF0_MARK"
+    },
+    {
+      "address": "0x10003840",
+      "name": "VIF0_CYCLE",
+      "comment": "VIF0 \u2013 VIF0_CYCLE"
+    },
+    {
+      "address": "0x10003850",
+      "name": "VIF0_MODE",
+      "comment": "VIF0 \u2013 VIF0_MODE"
+    },
+    {
+      "address": "0x10003860",
+      "name": "VIF0_NUM",
+      "comment": "VIF0 \u2013 VIF0_NUM (remaining data words)"
+    },
+    {
+      "address": "0x10003870",
+      "name": "VIF0_MASK",
+      "comment": "VIF0 \u2013 VIF0_MASK"
+    },
+    {
+      "address": "0x10003880",
+      "name": "VIF0_CODE",
+      "comment": "VIF0 \u2013 VIF0_CODE (latest VIFcode)"
+    },
+    {
+      "address": "0x10003890",
+      "name": "VIF0_ITOPS",
+      "comment": "VIF0 \u2013 VIF0_ITOPS"
+    },
+    {
+      "address": "0x100038D0",
+      "name": "VIF0_ITOP",
+      "comment": "VIF0 \u2013 VIF0_ITOP"
+    },
+    {
+      "address": "0x10003900",
+      "name": "VIF0_ROW0",
+      "comment": "VIF0 \u2013 ROW register 0 (STROW)"
+    },
+    {
+      "address": "0x10003910",
+      "name": "VIF0_ROW1",
+      "comment": "VIF0 \u2013 ROW register 1"
+    },
+    {
+      "address": "0x10003920",
+      "name": "VIF0_ROW2",
+      "comment": "VIF0 \u2013 ROW register 2"
+    },
+    {
+      "address": "0x10003930",
+      "name": "VIF0_ROW3",
+      "comment": "VIF0 \u2013 ROW register 3"
+    },
+    {
+      "address": "0x10003940",
+      "name": "VIF0_COL0",
+      "comment": "VIF0 \u2013 COL register 0 (STCOL)"
+    },
+    {
+      "address": "0x10003950",
+      "name": "VIF0_COL1",
+      "comment": "VIF0 \u2013 COL register 1"
+    },
+    {
+      "address": "0x10003960",
+      "name": "VIF0_COL2",
+      "comment": "VIF0 \u2013 COL register 2"
+    },
+    {
+      "address": "0x10003970",
+      "name": "VIF0_COL3",
+      "comment": "VIF0 \u2013 COL register 3"
+    },
+    {
+      "address": "0x10003C00",
+      "name": "VIF1_STAT",
+      "comment": "VIF1 \u2013 VIF1_STAT"
+    },
+    {
+      "address": "0x10003C10",
+      "name": "VIF1_FBRST",
+      "comment": "VIF1 \u2013 VIF1_FBRST"
+    },
+    {
+      "address": "0x10003C20",
+      "name": "VIF1_ERR",
+      "comment": "VIF1 \u2013 VIF1_ERR"
+    },
+    {
+      "address": "0x10003C30",
+      "name": "VIF1_MARK",
+      "comment": "VIF1 \u2013 VIF1_MARK"
+    },
+    {
+      "address": "0x10003C40",
+      "name": "VIF1_CYCLE",
+      "comment": "VIF1 \u2013 VIF1_CYCLE"
+    },
+    {
+      "address": "0x10003C50",
+      "name": "VIF1_MODE",
+      "comment": "VIF1 \u2013 VIF1_MODE"
+    },
+    {
+      "address": "0x10003C60",
+      "name": "VIF1_NUM",
+      "comment": "VIF1 \u2013 VIF1_NUM"
+    },
+    {
+      "address": "0x10003C70",
+      "name": "VIF1_MASK",
+      "comment": "VIF1 \u2013 VIF1_MASK"
+    },
+    {
+      "address": "0x10003C80",
+      "name": "VIF1_CODE",
+      "comment": "VIF1 \u2013 VIF1_CODE"
+    },
+    {
+      "address": "0x10003C90",
+      "name": "VIF1_ITOPS",
+      "comment": "VIF1 \u2013 VIF1_ITOPS"
+    },
+    {
+      "address": "0x10003CA0",
+      "name": "VIF1_BASE",
+      "comment": "VIF1 \u2013 VIF1_BASE (double-buffering base)"
+    },
+    {
+      "address": "0x10003CB0",
+      "name": "VIF1_OFST",
+      "comment": "VIF1 \u2013 VIF1_OFST (double-buffering offset)"
+    },
+    {
+      "address": "0x10003CC0",
+      "name": "VIF1_TOPS",
+      "comment": "VIF1 \u2013 VIF1_TOPS"
+    },
+    {
+      "address": "0x10003CD0",
+      "name": "VIF1_ITOP",
+      "comment": "VIF1 \u2013 VIF1_ITOP"
+    },
+    {
+      "address": "0x10003CE0",
+      "name": "VIF1_TOP",
+      "comment": "VIF1 \u2013 VIF1_TOP"
+    },
+    {
+      "address": "0x10003D00",
+      "name": "VIF1_ROW0",
+      "comment": "VIF1 \u2013 ROW register 0"
+    },
+    {
+      "address": "0x10003D10",
+      "name": "VIF1_ROW1",
+      "comment": "VIF1 \u2013 ROW register 1"
+    },
+    {
+      "address": "0x10003D20",
+      "name": "VIF1_ROW2",
+      "comment": "VIF1 \u2013 ROW register 2"
+    },
+    {
+      "address": "0x10003D30",
+      "name": "VIF1_ROW3",
+      "comment": "VIF1 \u2013 ROW register 3"
+    },
+    {
+      "address": "0x10003D40",
+      "name": "VIF1_COL0",
+      "comment": "VIF1 \u2013 COL register 0"
+    },
+    {
+      "address": "0x10003D50",
+      "name": "VIF1_COL1",
+      "comment": "VIF1 \u2013 COL register 1"
+    },
+    {
+      "address": "0x10003D60",
+      "name": "VIF1_COL2",
+      "comment": "VIF1 \u2013 COL register 2"
+    },
+    {
+      "address": "0x10003D70",
+      "name": "VIF1_COL3",
+      "comment": "VIF1 \u2013 COL register 3"
+    },
+    {
+      "address": "0x10008000",
+      "name": "DMA_CH0_CHCR",
+      "comment": "DMAC CH0 VIF0 \u2013 CHCR"
+    },
+    {
+      "address": "0x10008010",
+      "name": "DMA_CH0_MADR",
+      "comment": "DMAC CH0 VIF0 \u2013 MADR"
+    },
+    {
+      "address": "0x10008020",
+      "name": "DMA_CH0_QWC",
+      "comment": "DMAC CH0 VIF0 \u2013 QWC"
+    },
+    {
+      "address": "0x10008030",
+      "name": "DMA_CH0_TADR",
+      "comment": "DMAC CH0 VIF0 \u2013 TADR"
+    },
+    {
+      "address": "0x10008040",
+      "name": "DMA_CH0_ASR0",
+      "comment": "DMAC CH0 VIF0 \u2013 ASR0"
+    },
+    {
+      "address": "0x10008050",
+      "name": "DMA_CH0_ASR1",
+      "comment": "DMAC CH0 VIF0 \u2013 ASR1"
+    },
+    {
+      "address": "0x10009000",
+      "name": "DMA_CH1_CHCR",
+      "comment": "DMAC CH1 VIF1 \u2013 CHCR"
+    },
+    {
+      "address": "0x10009010",
+      "name": "DMA_CH1_MADR",
+      "comment": "DMAC CH1 VIF1 \u2013 MADR"
+    },
+    {
+      "address": "0x10009020",
+      "name": "DMA_CH1_QWC",
+      "comment": "DMAC CH1 VIF1 \u2013 QWC"
+    },
+    {
+      "address": "0x10009030",
+      "name": "DMA_CH1_TADR",
+      "comment": "DMAC CH1 VIF1 \u2013 TADR"
+    },
+    {
+      "address": "0x1000A000",
+      "name": "DMA_CH2_CHCR",
+      "comment": "DMAC CH2 GIF \u2013 CHCR"
+    },
+    {
+      "address": "0x1000A010",
+      "name": "DMA_CH2_MADR",
+      "comment": "DMAC CH2 GIF \u2013 MADR"
+    },
+    {
+      "address": "0x1000A020",
+      "name": "DMA_CH2_QWC",
+      "comment": "DMAC CH2 GIF \u2013 QWC"
+    },
+    {
+      "address": "0x1000A030",
+      "name": "DMA_CH2_TADR",
+      "comment": "DMAC CH2 GIF \u2013 TADR"
+    },
+    {
+      "address": "0x1000B000",
+      "name": "DMA_CH3_CHCR",
+      "comment": "DMAC CH3 IPU_FROM \u2013 CHCR"
+    },
+    {
+      "address": "0x1000B010",
+      "name": "DMA_CH3_MADR",
+      "comment": "DMAC CH3 IPU_FROM \u2013 MADR"
+    },
+    {
+      "address": "0x1000B020",
+      "name": "DMA_CH3_QWC",
+      "comment": "DMAC CH3 IPU_FROM \u2013 QWC"
+    },
+    {
+      "address": "0x1000B400",
+      "name": "DMA_CH4_CHCR",
+      "comment": "DMAC CH4 IPU_TO \u2013 CHCR"
+    },
+    {
+      "address": "0x1000B410",
+      "name": "DMA_CH4_MADR",
+      "comment": "DMAC CH4 IPU_TO \u2013 MADR"
+    },
+    {
+      "address": "0x1000B420",
+      "name": "DMA_CH4_QWC",
+      "comment": "DMAC CH4 IPU_TO \u2013 QWC"
+    },
+    {
+      "address": "0x1000C000",
+      "name": "DMA_CH5_CHCR",
+      "comment": "DMAC CH5 SIF0 \u2013 CHCR"
+    },
+    {
+      "address": "0x1000C010",
+      "name": "DMA_CH5_MADR",
+      "comment": "DMAC CH5 SIF0 \u2013 MADR"
+    },
+    {
+      "address": "0x1000C020",
+      "name": "DMA_CH5_QWC",
+      "comment": "DMAC CH5 SIF0 \u2013 QWC"
+    },
+    {
+      "address": "0x1000C400",
+      "name": "DMA_CH6_CHCR",
+      "comment": "DMAC CH6 SIF1 \u2013 CHCR"
+    },
+    {
+      "address": "0x1000C410",
+      "name": "DMA_CH6_MADR",
+      "comment": "DMAC CH6 SIF1 \u2013 MADR"
+    },
+    {
+      "address": "0x1000C420",
+      "name": "DMA_CH6_QWC",
+      "comment": "DMAC CH6 SIF1 \u2013 QWC"
+    },
+    {
+      "address": "0x1000C800",
+      "name": "DMA_CH7_CHCR",
+      "comment": "DMAC CH7 SIF2 \u2013 CHCR"
+    },
+    {
+      "address": "0x1000C810",
+      "name": "DMA_CH7_MADR",
+      "comment": "DMAC CH7 SIF2 \u2013 MADR"
+    },
+    {
+      "address": "0x1000C820",
+      "name": "DMA_CH7_QWC",
+      "comment": "DMAC CH7 SIF2 \u2013 QWC"
+    },
+    {
+      "address": "0x1000D000",
+      "name": "DMA_CH8_CHCR",
+      "comment": "DMAC CH8 SPR_FROM \u2013 CHCR"
+    },
+    {
+      "address": "0x1000D010",
+      "name": "DMA_CH8_MADR",
+      "comment": "DMAC CH8 SPR_FROM \u2013 MADR"
+    },
+    {
+      "address": "0x1000D020",
+      "name": "DMA_CH8_QWC",
+      "comment": "DMAC CH8 SPR_FROM \u2013 QWC"
+    },
+    {
+      "address": "0x1000D030",
+      "name": "DMA_CH8_SADR",
+      "comment": "DMAC CH8 SPR_FROM \u2013 SADR"
+    },
+    {
+      "address": "0x1000D400",
+      "name": "DMA_CH9_CHCR",
+      "comment": "DMAC CH9 SPR_TO \u2013 CHCR"
+    },
+    {
+      "address": "0x1000D410",
+      "name": "DMA_CH9_MADR",
+      "comment": "DMAC CH9 SPR_TO \u2013 MADR"
+    },
+    {
+      "address": "0x1000D420",
+      "name": "DMA_CH9_QWC",
+      "comment": "DMAC CH9 SPR_TO \u2013 QWC"
+    },
+    {
+      "address": "0x1000D430",
+      "name": "DMA_CH9_SADR",
+      "comment": "DMAC CH9 SPR_TO \u2013 SADR"
+    },
+    {
+      "address": "0x1000E000",
+      "name": "D_CTRL",
+      "comment": "DMAC global D_CTRL"
+    },
+    {
+      "address": "0x1000E010",
+      "name": "D_STAT",
+      "comment": "DMAC global D_STAT (channel IRQ status/mask)"
+    },
+    {
+      "address": "0x1000E020",
+      "name": "D_PCR",
+      "comment": "DMAC global D_PCR (priority control)"
+    },
+    {
+      "address": "0x1000E030",
+      "name": "D_SQWC",
+      "comment": "DMAC global D_SQWC (skip QWC)"
+    },
+    {
+      "address": "0x1000E040",
+      "name": "D_RBSR",
+      "comment": "DMAC global D_RBSR (ring-buffer size)"
+    },
+    {
+      "address": "0x1000E050",
+      "name": "D_RBOR",
+      "comment": "DMAC global D_RBOR (ring-buffer offset)"
+    },
+    {
+      "address": "0x1000E060",
+      "name": "D_STADR",
+      "comment": "DMAC global D_STADR (stall address)"
+    },
+    {
+      "address": "0x1000F000",
+      "name": "INTC_STAT",
+      "comment": "EE INTC_STAT \u2013 write 1 to clear"
+    },
+    {
+      "address": "0x1000F010",
+      "name": "INTC_MASK",
+      "comment": "EE INTC_MASK \u2013 write 1 to toggle"
+    },
+    {
+      "address": "0x1000F100",
+      "name": "SBUS_UART_BASE",
+      "comment": "EE SBUS serial UART (reads return 0, writes discarded)"
+    },
+    {
+      "address": "0x1000F130",
+      "name": "SBUS_F130",
+      "comment": "SBUS UART TX-busy status (bits 15:12 == 0x8)"
+    },
+    {
+      "address": "0x1000F200",
+      "name": "SIF_MSCOM",
+      "comment": "SIF EE\u2192IOP command register"
+    },
+    {
+      "address": "0x1000F210",
+      "name": "SIF_SMCOM",
+      "comment": "SIF IOP\u2192EE command register"
+    },
+    {
+      "address": "0x1000F220",
+      "name": "SIF_MSFLAG",
+      "comment": "SIF EE\u2192IOP flag (bit 16 = SIFMAN start)"
+    },
+    {
+      "address": "0x1000F230",
+      "name": "SIF_SMFLAG",
+      "comment": "SIF IOP\u2192EE flag (bit 30 = handshake done)"
+    },
+    {
+      "address": "0x1000F240",
+      "name": "SIF_F240",
+      "comment": "SIF status (read always OR-in 0xF0000102)"
+    },
+    {
+      "address": "0x1000F250",
+      "name": "SIF_F250",
+      "comment": "SIF F250"
+    },
+    {
+      "address": "0x1000F260",
+      "name": "SIF_F260",
+      "comment": "SIF F260 (IOP SIF mirror base = 0x1D000060)"
+    },
+    {
+      "address": "0x1000F430",
+      "name": "MCH_RICM",
+      "comment": "MCH RDRAM init command"
+    },
+    {
+      "address": "0x1000F440",
+      "name": "MCH_DRD",
+      "comment": "MCH RDRAM data read"
+    },
+    {
+      "address": "0x1000F520",
+      "name": "MCH_RDRAM_CFG",
+      "comment": "MCH RDRAM config readback (returns 0x1201)"
+    },
+    {
+      "address": "0x12000000",
+      "name": "GS_PMODE",
+      "comment": "GS \u2013 PMODE (output circuit selector)"
+    },
+    {
+      "address": "0x12000010",
+      "name": "GS_SMODE1",
+      "comment": "GS \u2013 SMODE1 (sync mode 1)"
+    },
+    {
+      "address": "0x12000020",
+      "name": "GS_SMODE2",
+      "comment": "GS \u2013 SMODE2 (sync mode 2)"
+    },
+    {
+      "address": "0x12000030",
+      "name": "GS_SRFSH",
+      "comment": "GS \u2013 SRFSH (SDRAM refresh)"
+    },
+    {
+      "address": "0x12000040",
+      "name": "GS_SYNCH1",
+      "comment": "GS \u2013 SYNCH1 (horizontal sync)"
+    },
+    {
+      "address": "0x12000050",
+      "name": "GS_SYNCH2",
+      "comment": "GS \u2013 SYNCH2"
+    },
+    {
+      "address": "0x12000060",
+      "name": "GS_SYNCV",
+      "comment": "GS \u2013 SYNCV (vertical sync)"
+    },
+    {
+      "address": "0x12000070",
+      "name": "GS_DISPFB1",
+      "comment": "GS \u2013 DISPFB1 (display buffer 1)"
+    },
+    {
+      "address": "0x12000080",
+      "name": "GS_DISPLAY1",
+      "comment": "GS \u2013 DISPLAY1 (output circuit 1)"
+    },
+    {
+      "address": "0x12000090",
+      "name": "GS_DISPFB2",
+      "comment": "GS \u2013 DISPFB2 (display buffer 2)"
+    },
+    {
+      "address": "0x120000A0",
+      "name": "GS_DISPLAY2",
+      "comment": "GS \u2013 DISPLAY2 (output circuit 2)"
+    },
+    {
+      "address": "0x120000B0",
+      "name": "GS_EXTBUF",
+      "comment": "GS \u2013 EXTBUF (external input buffer)"
+    },
+    {
+      "address": "0x120000C0",
+      "name": "GS_EXTDATA",
+      "comment": "GS \u2013 EXTDATA"
+    },
+    {
+      "address": "0x120000D0",
+      "name": "GS_EXTWRITE",
+      "comment": "GS \u2013 EXTWRITE"
+    },
+    {
+      "address": "0x120000E0",
+      "name": "GS_BGCOLOR",
+      "comment": "GS \u2013 BGCOLOR (background color)"
+    },
+    {
+      "address": "0x12001000",
+      "name": "GS_CSR",
+      "comment": "GS \u2013 CSR (status / signal / finish / interrupt)"
+    },
+    {
+      "address": "0x12001010",
+      "name": "GS_IMR",
+      "comment": "GS \u2013 IMR (interrupt mask)"
+    },
+    {
+      "address": "0x12001040",
+      "name": "GS_BUSDIR",
+      "comment": "GS \u2013 BUSDIR (local bus direction)"
+    },
+    {
+      "address": "0x12001080",
+      "name": "GS_SIGLBLID",
+      "comment": "GS \u2013 SIGLBLID (signal/label ID)"
+    },
+    {
+      "address": "0x1D000000",
+      "name": "SIF_IOP_MIRROR_BASE",
+      "comment": "SIF IOP-side register mirror base (SIF_F260 default)"
+    },
+    {
+      "address": "0x1D000020",
+      "name": "IOP_SIF_MSCOM",
+      "comment": "IOP-side SIF: MSCOM mirror"
+    },
+    {
+      "address": "0x1D000030",
+      "name": "IOP_SIF_SMCOM",
+      "comment": "IOP-side SIF: SMCOM mirror"
+    },
+    {
+      "address": "0x1D000040",
+      "name": "IOP_SIF_MSFLAG",
+      "comment": "IOP-side SIF: MSFLAG mirror"
+    },
+    {
+      "address": "0x1D000060",
+      "name": "IOP_SIF_F240",
+      "comment": "IOP-side SIF: F240 status mirror"
+    },
+    {
+      "address": "0x1F800000",
+      "name": "IOP_SCRATCH",
+      "comment": "IOP scratch pad (Dcache mode)"
+    },
+    {
+      "address": "0x1F801000",
+      "name": "IOP_EXP1_BASE",
+      "comment": "IOP expansion region 1"
+    },
+    {
+      "address": "0x1F801060",
+      "name": "IOP_RAM_SIZE",
+      "comment": "IOP RAM size register"
+    },
+    {
+      "address": "0x1F801070",
+      "name": "IOP_I_STAT",
+      "comment": "IOP interrupt status (I_STAT)"
+    },
+    {
+      "address": "0x1F801074",
+      "name": "IOP_I_MASK",
+      "comment": "IOP interrupt mask (I_MASK)"
+    },
+    {
+      "address": "0x1F801078",
+      "name": "IOP_I_CTRL",
+      "comment": "IOP interrupt control (I_CTRL, read-destructive)"
+    },
+    {
+      "address": "0x1F801080",
+      "name": "IOP_DMA_CH0_MADR",
+      "comment": "IOP DMAC CH0 \u2013 MADR"
+    },
+    {
+      "address": "0x1F801084",
+      "name": "IOP_DMA_CH0_BCR",
+      "comment": "IOP DMAC CH0 \u2013 BCR"
+    },
+    {
+      "address": "0x1F801088",
+      "name": "IOP_DMA_CH0_CHCR",
+      "comment": "IOP DMAC CH0 \u2013 CHCR"
+    },
+    {
+      "address": "0x1F801090",
+      "name": "IOP_DMA_CH1_MADR",
+      "comment": "IOP DMAC CH1 \u2013 MADR"
+    },
+    {
+      "address": "0x1F801094",
+      "name": "IOP_DMA_CH1_BCR",
+      "comment": "IOP DMAC CH1 \u2013 BCR"
+    },
+    {
+      "address": "0x1F801098",
+      "name": "IOP_DMA_CH1_CHCR",
+      "comment": "IOP DMAC CH1 \u2013 CHCR"
+    },
+    {
+      "address": "0x1F8010A0",
+      "name": "IOP_DMA_CH2_MADR",
+      "comment": "IOP DMAC CH2 SPU \u2013 MADR"
+    },
+    {
+      "address": "0x1F8010A4",
+      "name": "IOP_DMA_CH2_BCR",
+      "comment": "IOP DMAC CH2 SPU \u2013 BCR"
+    },
+    {
+      "address": "0x1F8010A8",
+      "name": "IOP_DMA_CH2_CHCR",
+      "comment": "IOP DMAC CH2 SPU \u2013 CHCR"
+    },
+    {
+      "address": "0x1F8010B0",
+      "name": "IOP_DMA_CH3_MADR",
+      "comment": "IOP DMAC CH3 CDVD \u2013 MADR"
+    },
+    {
+      "address": "0x1F8010B4",
+      "name": "IOP_DMA_CH3_BCR",
+      "comment": "IOP DMAC CH3 CDVD \u2013 BCR"
+    },
+    {
+      "address": "0x1F8010B8",
+      "name": "IOP_DMA_CH3_CHCR",
+      "comment": "IOP DMAC CH3 CDVD \u2013 CHCR"
+    },
+    {
+      "address": "0x1F8010F0",
+      "name": "IOP_DPCR",
+      "comment": "IOP DMAC priority control (DPCR)"
+    },
+    {
+      "address": "0x1F8010F4",
+      "name": "IOP_DICR",
+      "comment": "IOP DMAC interrupt control (DICR)"
+    },
+    {
+      "address": "0x1F801100",
+      "name": "IOP_T0_COUNT",
+      "comment": "IOP Timer 0 \u2013 counter"
+    },
+    {
+      "address": "0x1F801104",
+      "name": "IOP_T0_MODE",
+      "comment": "IOP Timer 0 \u2013 mode"
+    },
+    {
+      "address": "0x1F801108",
+      "name": "IOP_T0_TARGET",
+      "comment": "IOP Timer 0 \u2013 target"
+    },
+    {
+      "address": "0x1F801110",
+      "name": "IOP_T1_COUNT",
+      "comment": "IOP Timer 1 \u2013 counter"
+    },
+    {
+      "address": "0x1F801114",
+      "name": "IOP_T1_MODE",
+      "comment": "IOP Timer 1 \u2013 mode"
+    },
+    {
+      "address": "0x1F801118",
+      "name": "IOP_T1_TARGET",
+      "comment": "IOP Timer 1 \u2013 target"
+    },
+    {
+      "address": "0x1F801120",
+      "name": "IOP_T2_COUNT",
+      "comment": "IOP Timer 2 \u2013 counter"
+    },
+    {
+      "address": "0x1F801124",
+      "name": "IOP_T2_MODE",
+      "comment": "IOP Timer 2 \u2013 mode"
+    },
+    {
+      "address": "0x1F801128",
+      "name": "IOP_T2_TARGET",
+      "comment": "IOP Timer 2 \u2013 target"
+    },
+    {
+      "address": "0x1F801480",
+      "name": "IOP_DMA_CH4_MADR",
+      "comment": "IOP DMAC CH4 SPU2 \u2013 MADR"
+    },
+    {
+      "address": "0x1F801484",
+      "name": "IOP_DMA_CH4_BCR",
+      "comment": "IOP DMAC CH4 SPU2 \u2013 BCR"
+    },
+    {
+      "address": "0x1F801488",
+      "name": "IOP_DMA_CH4_CHCR",
+      "comment": "IOP DMAC CH4 SPU2 \u2013 CHCR"
+    },
+    {
+      "address": "0x1F801500",
+      "name": "IOP_DMA_CH7_MADR",
+      "comment": "IOP DMAC CH7 (SPU2) \u2013 MADR"
+    },
+    {
+      "address": "0x1F801504",
+      "name": "IOP_DMA_CH7_BCR",
+      "comment": "IOP DMAC CH7 \u2013 BCR"
+    },
+    {
+      "address": "0x1F801508",
+      "name": "IOP_DMA_CH7_CHCR",
+      "comment": "IOP DMAC CH7 \u2013 CHCR"
+    },
+    {
+      "address": "0x1F801570",
+      "name": "IOP_DPCR2",
+      "comment": "IOP DMAC DPCR2 (CH7\u2013CH12 priority)"
+    },
+    {
+      "address": "0x1F801574",
+      "name": "IOP_DICR2",
+      "comment": "IOP DMAC DICR2 (CH7\u2013CH12 IRQ control)"
+    },
+    {
+      "address": "0x1F801580",
+      "name": "IOP_T3_COUNT",
+      "comment": "IOP Timer 3 \u2013 counter (32-bit)"
+    },
+    {
+      "address": "0x1F801584",
+      "name": "IOP_T3_MODE",
+      "comment": "IOP Timer 3 \u2013 mode"
+    },
+    {
+      "address": "0x1F801588",
+      "name": "IOP_T3_TARGET",
+      "comment": "IOP Timer 3 \u2013 target"
+    },
+    {
+      "address": "0x1F801590",
+      "name": "IOP_T4_COUNT",
+      "comment": "IOP Timer 4 \u2013 counter (32-bit)"
+    },
+    {
+      "address": "0x1F801594",
+      "name": "IOP_T4_MODE",
+      "comment": "IOP Timer 4 \u2013 mode"
+    },
+    {
+      "address": "0x1F801598",
+      "name": "IOP_T4_TARGET",
+      "comment": "IOP Timer 4 \u2013 target"
+    },
+    {
+      "address": "0x1F8015A0",
+      "name": "IOP_T5_COUNT",
+      "comment": "IOP Timer 5 \u2013 counter (32-bit)"
+    },
+    {
+      "address": "0x1F8015A4",
+      "name": "IOP_T5_MODE",
+      "comment": "IOP Timer 5 \u2013 mode"
+    },
+    {
+      "address": "0x1F8015A8",
+      "name": "IOP_T5_TARGET",
+      "comment": "IOP Timer 5 \u2013 target"
+    },
+    {
+      "address": "0x1F402000",
+      "name": "CDVD_NCMD",
+      "comment": "CDVD \u2013 NCmd command register (NCMD_READ_CD=0x06)"
+    },
+    {
+      "address": "0x1F402004",
+      "name": "CDVD_NCMD_STATUS",
+      "comment": "CDVD \u2013 NCmd status"
+    },
+    {
+      "address": "0x1F402005",
+      "name": "CDVD_ERROR",
+      "comment": "CDVD \u2013 error code"
+    },
+    {
+      "address": "0x1F402006",
+      "name": "CDVD_HWINFO",
+      "comment": "CDVD \u2013 hardware info"
+    },
+    {
+      "address": "0x1F402007",
+      "name": "CDVD_NCMD_DATA",
+      "comment": "CDVD \u2013 NCmd parameter FIFO"
+    },
+    {
+      "address": "0x1F402008",
+      "name": "CDVD_DRIVE_STATUS",
+      "comment": "CDVD \u2013 drive status"
+    },
+    {
+      "address": "0x1F402009",
+      "name": "CDVD_TRAY_STATUS",
+      "comment": "CDVD \u2013 tray status"
+    },
+    {
+      "address": "0x1F40200A",
+      "name": "CDVD_CURRENT_LBA",
+      "comment": "CDVD \u2013 current sector address"
+    },
+    {
+      "address": "0x1F402016",
+      "name": "CDVD_SCMD",
+      "comment": "CDVD \u2013 SCmd command register"
+    },
+    {
+      "address": "0x1F402017",
+      "name": "CDVD_SCMD_STATUS",
+      "comment": "CDVD \u2013 SCmd status"
+    },
+    {
+      "address": "0x1F402018",
+      "name": "CDVD_SCMD_DATA",
+      "comment": "CDVD \u2013 SCmd data port"
+    },
+    {
+      "address": "0x1F808200",
+      "name": "SIO2_SEND3_BASE",
+      "comment": "SIO2 \u2013 SEND3 queue start (16 slots \u00D7 4 bytes)"
+    },
+    {
+      "address": "0x1F808240",
+      "name": "SIO2_SEND1",
+      "comment": "SIO2 \u2013 SEND1"
+    },
+    {
+      "address": "0x1F808248",
+      "name": "SIO2_SEND2",
+      "comment": "SIO2 \u2013 SEND2"
+    },
+    {
+      "address": "0x1F808260",
+      "name": "SIO2_FIFO_IN",
+      "comment": "SIO2 \u2013 FIFO_IN (write FIFO)"
+    },
+    {
+      "address": "0x1F808264",
+      "name": "SIO2_FIFO_OUT",
+      "comment": "SIO2 \u2013 FIFO_OUT (read FIFO)"
+    },
+    {
+      "address": "0x1F808268",
+      "name": "SIO2_CTRL",
+      "comment": "SIO2 \u2013 CTRL (bit0=start transfer)"
+    },
+    {
+      "address": "0x1F808270",
+      "name": "SIO2_RECV1",
+      "comment": "SIO2 \u2013 RECV1 (status)"
+    },
+    {
+      "address": "0x1F808274",
+      "name": "SIO2_RECV2",
+      "comment": "SIO2 \u2013 RECV2 (byte count)"
+    },
+    {
+      "address": "0x000169A0",
+      "name": "step while BD=1 and branch=0",
+      "type": "String"
+    },
+    {
+      "address": "0x00000024",
+      "name": "FNC_0x00000024",
+      "comment": "; No operation"
+    },
+    {
+      "address": "0x00001CEF",
+      "name": "$!0e",
+      "type": "String"
+    },
+    {
+      "address": "0x00003A2B",
+      "name": "$!8C",
+      "type": "String"
+    },
+    {
+      "address": "0x000155C8",
+      "name": "cdrom0:\\SCUS_972.75;1",
+      "type": "String"
+    },
+    {
+      "address": "0x00016530",
+      "name": "send req err",
+      "type": "String"
+    },
+    {
+      "address": "0x00000010",
+      "name": "FNC_0x00000010",
+      "comment": "; t9 = 0x00000000 \u0022FNC_EE_RAM_BASE\u0022"
+    },
+    {
+      "address": "000a0000",
+      "name": "Test Struct",
+      "type": "Struct"
+    },
+    {
+      "address": "000c0000",
+      "name": "test_vtable",
+      "type": "Struct"
+    },
+    {
+      "address": "0x00C716D0",
+      "name": "Test",
+      "type": "Struct"
+    }
+  ]
+}

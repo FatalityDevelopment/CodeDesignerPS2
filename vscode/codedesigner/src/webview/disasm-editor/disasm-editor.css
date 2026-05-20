@@ -382,8 +382,14 @@ app-icon,
     align-items: center;
     padding: 0 6px;
     line-height: 20px;
+    position: relative;
     overflow: hidden;
     cursor: default;
+}
+
+.row.comment-tooltip-visible {
+    overflow: visible;
+    z-index: 80;
 }
  
 .row.active {
@@ -470,7 +476,10 @@ app-icon,
     background: var(--vscode-editor-selectionBackground, #264f78);
 }
  
-.addr { color: #c586c0; } 
+.addr { color: #c586c0; }
+.addr.has-comment-tooltip {
+    cursor: help;
+}
 .bytes { color: #9cdcfe; } 
 .label { color: #4ec9b0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } 
 .op { color: #dcdcaa; } 
@@ -481,6 +490,28 @@ app-icon,
     overflow: hidden;
     text-overflow: ellipsis;
 } 
+
+.comment.has-comment-tooltip {
+    cursor: help;
+}
+
+.comment-tooltip {
+    position: fixed;
+    z-index: 10000;
+    max-width: min(760px, calc(100vw - 24px));
+    max-height: min(360px, calc(100vh - 24px));
+    padding: 7px 9px;
+    background: var(--vscode-editorHoverWidget-background, #252526);
+    color: var(--vscode-editorHoverWidget-foreground, var(--vscode-editor-foreground, #d4d4d4));
+    border: 1px solid var(--vscode-editorHoverWidget-border, #454545);
+    border-radius: 4px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+    line-height: 1.45;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    overflow: auto;
+    pointer-events: none;
+}
 
 .branch-offset-annotation {
     color: #6a9955;
@@ -4207,7 +4238,20 @@ app-icon,
     color: #737980 !important;
 }
 
+.comment-address {
+  color: var(--vscode-editor-foreground, #d4d4d4);
+}
+
+.comment-label,
 .comment-resolved {
+    color: #4ec9b0;
+}
+
+.comment-string {
+    color: #9cdcfe;
+}
+
+.comment-value {
     color: #6a9955;
 }
 

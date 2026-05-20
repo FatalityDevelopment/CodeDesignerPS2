@@ -58,11 +58,8 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
-            if (cpu == null) return string.Empty;
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            string address = CpuHelpers.FormatMemoryReference(cpu, args.Rs, offset);
-            byte value = (byte)(cpu.RegsLo[args.Rt] & 0xFF);
-            return $"[{address}] ← {CpuHelpers.RegName(args.Rt)}=0x{value:X2}";
+            return CpuHelpers.FormatGprStoreAnalysis(cpu, args.Rt, args.Rs, offset);
         }
     }
 
@@ -116,11 +113,8 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
-            if (cpu == null) return string.Empty;
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            string address = CpuHelpers.FormatMemoryReference(cpu, args.Rs, offset);
-            ushort value = (ushort)(cpu.RegsLo[args.Rt] & 0xFFFF);
-            return $"[{address}] ← {CpuHelpers.RegName(args.Rt)}=0x{value:X4}";
+            return CpuHelpers.FormatGprStoreAnalysis(cpu, args.Rt, args.Rs, offset);
         }
     }
 
@@ -176,11 +170,8 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
-            if (cpu == null) return string.Empty;
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            string address = CpuHelpers.FormatMemoryReference(cpu, args.Rs, offset);
-            uint value = (uint)(cpu.RegsLo[args.Rt] & 0xFFFFFFFF);
-            return $"[{address}] ← {CpuHelpers.RegName(args.Rt)}=0x{value:X8}";
+            return CpuHelpers.FormatGprStoreAnalysis(cpu, args.Rt, args.Rs, offset);
         }
     }
 
@@ -241,11 +232,8 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
-            if (cpu == null) return string.Empty;
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            string address = CpuHelpers.FormatMemoryReference(cpu, args.Rs, offset);
-            ulong value = cpu.RegsLo[args.Rt];
-            return $"[{address}] ← {CpuHelpers.RegName(args.Rt)}=0x{value:X16}";
+            return CpuHelpers.FormatGprStoreAnalysis(cpu, args.Rt, args.Rs, offset);
         }
     }
 
@@ -317,10 +305,8 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
-            if (cpu == null) return string.Empty;
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            string address = CpuHelpers.FormatMemoryReference(cpu, args.Rs, offset);
-            return $"[{address}] ← {CpuHelpers.RegName(args.Rt)}";
+            return CpuHelpers.FormatGprStoreAnalysis(cpu, args.Rt, args.Rs, offset);
         }
     }
 
@@ -392,10 +378,8 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
-            if (cpu == null) return string.Empty;
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            string address = CpuHelpers.FormatMemoryReference(cpu, args.Rs, offset);
-            return $"[{address}] ← {CpuHelpers.RegName(args.Rt)}";
+            return CpuHelpers.FormatGprStoreAnalysis(cpu, args.Rt, args.Rs, offset);
         }
     }
 
@@ -476,10 +460,8 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
-            if (cpu == null) return string.Empty;
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            string address = CpuHelpers.FormatMemoryReference(cpu, args.Rs, offset);
-            return $"[{address}] ← {CpuHelpers.RegName(args.Rt)}";
+            return CpuHelpers.FormatGprStoreAnalysis(cpu, args.Rt, args.Rs, offset);
         }
     }
 
@@ -560,10 +542,8 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
-            if (cpu == null) return string.Empty;
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            string address = CpuHelpers.FormatMemoryReference(cpu, args.Rs, offset);
-            return $"[{address}] ← {CpuHelpers.RegName(args.Rt)}";
+            return CpuHelpers.FormatGprStoreAnalysis(cpu, args.Rt, args.Rs, offset);
         }
     }
 
@@ -631,12 +611,8 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
-            if (cpu == null) return string.Empty;
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            string address = CpuHelpers.FormatMemoryReference(cpu, args.Rs, offset);
-            ulong lo = cpu.RegsLo[args.Rt];
-            ulong hi = cpu.RegsHi[args.Rt];
-            return $"[{address}] ← {CpuHelpers.RegName(args.Rt)}=0x{hi:X16}{lo:X16}";
+            return CpuHelpers.FormatGprStoreAnalysis(cpu, args.Rt, args.Rs, offset);
         }
     }
 }

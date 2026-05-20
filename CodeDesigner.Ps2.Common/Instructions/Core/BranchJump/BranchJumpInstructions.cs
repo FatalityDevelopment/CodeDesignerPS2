@@ -623,14 +623,14 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_J args, CpuState? cpu = null, uint? pc = null)
         {
-            if (!pc.HasValue) return $"call 0x{args.Addr << 2:X8}";
+            if (!pc.HasValue) return $"→ 0x{args.Addr << 2:X8}";
             uint pcUpper = (pc.Value + 4) & 0xF0000000;
             uint target = pcUpper | (args.Addr << 2);
             if (cpu != null)
             {
-                return CallAnalysisHelper.BuildCallComment(cpu, $"call 0x{target:X8}");
+                return CallAnalysisHelper.BuildCallComment(cpu, $"→ 0x{target:X8}");
             }
-            return $"call 0x{target:X8}";
+            return $"→ 0x{target:X8}";
         }
     }
 
@@ -716,9 +716,9 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
             if (cpu != null)
             {
                 uint target = (uint)cpu.RegsLo[args.Rs];
-                return CallAnalysisHelper.BuildCallComment(cpu, $"call 0x{target:X8}");
+                return CallAnalysisHelper.BuildCallComment(cpu, $"→ 0x{target:X8}");
             }
-            return $"call {CpuHelpers.RegName(args.Rs)}";
+            return $"→ {CpuHelpers.RegName(args.Rs)}";
         }
     }
 
@@ -782,9 +782,9 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
             if (cpu != null)
             {
                 bool taken = (long)cpu.RegsLo[args.Rs] < 0;
-                return $"call 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
+                return $"→ 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
             }
-            return $"call 0x{target:X8}";
+            return $"→ 0x{target:X8}";
         }
     }
 
@@ -848,9 +848,9 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
             if (cpu != null)
             {
                 bool taken = (long)cpu.RegsLo[args.Rs] >= 0;
-                return $"call 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
+                return $"→ 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
             }
-            return $"call 0x{target:X8}";
+            return $"→ 0x{target:X8}";
         }
     }
 
@@ -914,9 +914,9 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
             if (cpu != null)
             {
                 bool taken = (long)cpu.RegsLo[args.Rs] < 0;
-                return $"call 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
+                return $"→ 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
             }
-            return $"call 0x{target:X8}";
+            return $"→ 0x{target:X8}";
         }
     }
 
@@ -980,9 +980,9 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
             if (cpu != null)
             {
                 bool taken = (long)cpu.RegsLo[args.Rs] >= 0;
-                return $"call 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
+                return $"→ 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
             }
-            return $"call 0x{target:X8}";
+            return $"→ 0x{target:X8}";
         }
     }
 

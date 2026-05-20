@@ -1,0 +1,488 @@
+{
+  "setName": "socom2-dnas-network",
+  "gameId": "SCUS-97275",
+  "isBuiltIn": false,
+  "entries": [
+    {
+      "address": "0x0041AAC0",
+      "name": "STR_CSMInitNetwork",
+      "comment": "CSimpleStateMachine state name: Init Network",
+      "type": "String"
+    },
+    {
+      "address": "0x0041AAD0",
+      "name": "STR_CSimpleStateMachine",
+      "comment": "Class name string for state machine framework",
+      "type": "String"
+    },
+    {
+      "address": "0x0041AAE8",
+      "name": "CSimpleStateMachine_Descriptor",
+      "comment": "CSM root descriptor; \u002B0x00=ptr\u2192class name str, \u002B0x08=self-ref, \u002B0x18=CSMInitNetwork ptr, \u002B0x1C=0xFFFFFFD2 (state ID -46)",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x0041E480",
+      "name": "STR_CSMDownloadPatch",
+      "comment": "CSM state name: Download Patch",
+      "type": "String"
+    },
+    {
+      "address": "0x0041E5B0",
+      "name": "STR_DNASInitFailure",
+      "comment": "DNAS error message string",
+      "type": "String"
+    },
+    {
+      "address": "0x0041E5D0",
+      "name": "STR_InitializeDNAS",
+      "comment": "DNAS init log/debug string",
+      "type": "String"
+    },
+    {
+      "address": "0x0041E8F0",
+      "name": "STR_DNASProductID",
+      "comment": "DNAS product authentication ID for this disc",
+      "type": "String"
+    },
+    {
+      "address": "0x0041EA10",
+      "name": "STR_CSMDNASAuthenticate",
+      "comment": "CSM state name: DNAS Authentication state",
+      "type": "String"
+    },
+    {
+      "address": "0x0041EA28",
+      "name": "CSMDNASAuthenticate_Descriptor",
+      "comment": "Descriptor node for CSMDNASAuthenticate; ptr at \u002B0x00 \u2192 CSimpleStateMachine_Descriptor",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x0041EA40",
+      "name": "STR_DNAS_ERROR_CODE",
+      "comment": "Valve variable name for DNAS error code",
+      "type": "String"
+    },
+    {
+      "address": "0x0041EAD0",
+      "name": "STR_MP_DNAS_ERROR",
+      "comment": "Valve variable name for MP DNAS error",
+      "type": "String"
+    },
+    {
+      "address": "0x0041EAE0",
+      "name": "STR_CannotOpenDNASAuthfile",
+      "comment": "DNAS authfile open failure error string",
+      "type": "String"
+    },
+    {
+      "address": "0x004219E0",
+      "name": "STR_CSMGetServerList",
+      "comment": "CSM state name: Get Server List",
+      "type": "String"
+    },
+    {
+      "address": "0x00423C50",
+      "name": "STR_IRX_DNAS271",
+      "comment": "IOP module loader path for DNAS auth module",
+      "type": "String"
+    },
+    {
+      "address": "0x00412DC0",
+      "name": "STR_libnetb_Version",
+      "comment": "libnetb EE-side networking library version string; CVS header at 0x00412D48",
+      "type": "String"
+    },
+    {
+      "address": "0x00419A20",
+      "name": "STR_FN_DNASAuthenticate",
+      "comment": "Script/valve system registered function name",
+      "type": "String"
+    },
+    {
+      "address": "0x0041C430",
+      "name": "STR_mp_major_game_state",
+      "comment": "Valve variable name: live major game state (screen identifier)",
+      "type": "String"
+    },
+    {
+      "address": "0x0041C450",
+      "name": "STR_mp_minor_game_state",
+      "comment": "Valve variable name: live minor game state (sub-screen)",
+      "type": "String"
+    },
+    {
+      "address": "0x006B66D7",
+      "name": "STR_ONLINE_LOBBY_STATE",
+      "comment": "Live UI state string in online lobby RDR widget data region",
+      "type": "String"
+    },
+    {
+      "address": "0x00563388",
+      "name": "STR_socket",
+      "comment": "socket string \u2014 context unread; likely IOP/libnetb export name reference",
+      "type": "String"
+    },
+    {
+      "address": "0x0041E498",
+      "name": "CSMDownloadPatch_Descriptor",
+      "comment": "\u002B0x00=ptr to CSimpleStateMachine_Descriptor (parent); 0x18 bytes after STR_CSMDownloadPatch",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x004219F8",
+      "name": "CSMGetServerList_Descriptor",
+      "comment": "\u002B0x00=ptr to CSimpleStateMachine_Descriptor (parent); 0x18 bytes after STR_CSMGetServerList",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x00410C50",
+      "name": "STR_MEDIUS_LOBBY_NAME",
+      "comment": "Valve variable name for Medius lobby name display",
+      "dynamic": true,
+      "type": "String"
+    },
+    {
+      "address": "0x00408690",
+      "name": "MediusHandlerTable",
+      "comment": "Medius\u002Bgame message dispatch table; entries from ID=0x01 to ID=0xD0; format=[msgTypeId:4,nameStr:4,handlerFn:4,relatedFn:4]; entries 0x01-0x97=in-game msgs, 0x98-0xD0=Medius lobby/network msgs",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x00277700",
+      "name": "Medius_LobbyConnect",
+      "comment": "Medius message handler: LobbyConnect (msgType=0x98)",
+      "type": "Function"
+    },
+    {
+      "address": "0x00275C70",
+      "name": "Medius_LobbyDisconnect",
+      "comment": "Medius message handler: LobbyDisconnect (msgType=0x99)",
+      "type": "Function"
+    },
+    {
+      "address": "0x00276040",
+      "name": "Medius_UpdateAcctInfo",
+      "comment": "Medius message handler: UpdateAcctInfo (msgType=0x9A)",
+      "type": "Function"
+    },
+    {
+      "address": "0x00275B10",
+      "name": "Medius_UpdateServerInfo",
+      "comment": "Medius message handler: UpdateServerInfo (msgType=0x9B)",
+      "type": "Function"
+    },
+    {
+      "address": "0x0027E6D0",
+      "name": "Medius_ClanGameClosed",
+      "comment": "Medius message handler: ClanGameClosed (msgType=0x9C)",
+      "type": "Function"
+    },
+    {
+      "address": "0x0027B3A0",
+      "name": "Medius_GetFriendsList",
+      "comment": "Medius message handler: GetFriendsList (msgType=0x9D)",
+      "type": "Function"
+    },
+    {
+      "address": "0x0027B110",
+      "name": "Medius_AddFriend",
+      "comment": "Medius message handler: AddFriend (msgType=0xA3)",
+      "type": "Function"
+    },
+    {
+      "address": "0x0027ADF0",
+      "name": "Medius_GetGameInfo",
+      "comment": "Medius message handler: GetGameInfo (msgType=0xAC)",
+      "type": "Function"
+    },
+    {
+      "address": "0x0027ABF0",
+      "name": "Medius_GetPlayerInfo",
+      "comment": "Medius message handler: GetPlayerInfo (msgType=0xAD); fn2=0x0027AC90",
+      "type": "Function"
+    },
+    {
+      "address": "0x0027AA20",
+      "name": "Medius_RemoveFriend",
+      "comment": "msgType=0x9E",
+      "type": "Function"
+    },
+    {
+      "address": "0x0027B170",
+      "name": "Medius_GetLeaderMessages",
+      "comment": "msgType=0x9F",
+      "type": "Function"
+    },
+    {
+      "address": "0x0027B1A0",
+      "name": "Medius_ModifyClanMessage",
+      "comment": "msgType=0xA0",
+      "type": "Function"
+    },
+    {
+      "address": "0x0027B2A0",
+      "name": "Medius_DeleteClanMessage",
+      "comment": "msgType=0xA1",
+      "type": "Function"
+    },
+    {
+      "address": "0x0027B310",
+      "name": "Medius_GetClanRanking",
+      "comment": "msgType=0xA2",
+      "type": "Function"
+    },
+    {
+      "address": "0x0027AB50",
+      "name": "Medius_GetFriendInfo",
+      "comment": "msgType=0xA4",
+      "type": "Function"
+    },
+    {
+      "address": "0x0027B340",
+      "name": "Medius_GetIgnoreList",
+      "comment": "msgType=0xA5",
+      "type": "Function"
+    },
+    {
+      "address": "0x0027A980",
+      "name": "Medius_RemoveFromIgnore",
+      "comment": "msgType=0xA6",
+      "type": "Function"
+    },
+    {
+      "address": "0x0027AFF0",
+      "name": "Medius_AddToIgnore",
+      "comment": "msgType=0xA7",
+      "type": "Function"
+    },
+    {
+      "address": "0x0027AF50",
+      "name": "Medius_ConfirmFriend",
+      "comment": "msgType=0xA8",
+      "type": "Function"
+    },
+    {
+      "address": "0x0027AEB0",
+      "name": "Medius_RejectFriend",
+      "comment": "msgType=0xA9",
+      "type": "Function"
+    },
+    {
+      "address": "0x0027B050",
+      "name": "Medius_AddFriendDirectly",
+      "comment": "msgType=0xAA",
+      "type": "Function"
+    },
+    {
+      "address": "0x0027AAC0",
+      "name": "Medius_GetClanMemberInfo",
+      "comment": "msgType=0xAE",
+      "type": "Function"
+    },
+    {
+      "address": "0x00276260",
+      "name": "Medius_GetMUISPersonaInfo",
+      "comment": "msgType=0xAF; fn2=0x002765B0",
+      "type": "Function"
+    },
+    {
+      "address": "0x00277120",
+      "name": "Medius_DeleteMUISPersona",
+      "comment": "msgType=0xB0",
+      "type": "Function"
+    },
+    {
+      "address": "0x00275CC0",
+      "name": "Medius_CompareValues",
+      "comment": "msgType=0xB1; fn2=0x00275ED0",
+      "type": "Function"
+    },
+    {
+      "address": "0x00277500",
+      "name": "Medius_MUISPersonaExists",
+      "comment": "msgType=0xB2",
+      "type": "Function"
+    },
+    {
+      "address": "0x00275850",
+      "name": "Medius_GetAvailableMPMissions",
+      "comment": "msgType=0xB3",
+      "type": "Function"
+    },
+    {
+      "address": "0x00282390",
+      "name": "Medius_DoAllSelCharsHaveEquip1",
+      "comment": "msgType=0xB4",
+      "type": "Function"
+    },
+    {
+      "address": "0x00282380",
+      "name": "Medius_DoAllSelCharsHaveEquip2",
+      "comment": "msgType=0xB5",
+      "type": "Function"
+    },
+    {
+      "address": "0x00282370",
+      "name": "Medius_DoAllSelCharsHaveEquip3",
+      "comment": "msgType=0xB6",
+      "type": "Function"
+    },
+    {
+      "address": "0x0027F850",
+      "name": "Medius_HostLANGame",
+      "comment": "msgType=0xB7",
+      "type": "Function"
+    },
+    {
+      "address": "0x0027E750",
+      "name": "Medius_ClanGameSwapSides",
+      "comment": "msgType=0xB8",
+      "type": "Function"
+    },
+    {
+      "address": "0x0027E8A0",
+      "name": "Medius_CanJoinRoom",
+      "comment": "msgType=0xB9",
+      "type": "Function"
+    },
+    {
+      "address": "0x00277680",
+      "name": "Medius_CharacterProfile",
+      "comment": "msgType=0xBA; fn2=0x00276CB0",
+      "type": "Function"
+    },
+    {
+      "address": "0x002781A0",
+      "name": "Medius_SuspendMenuInput",
+      "comment": "msgType=0xBB",
+      "type": "Function"
+    },
+    {
+      "address": "0x00276E70",
+      "name": "Medius_GetMissionInformation",
+      "comment": "msgType=0xBC; fn2=0x00277000",
+      "type": "Function"
+    },
+    {
+      "address": "0x002823A0",
+      "name": "Medius_CopyUIVar",
+      "comment": "msgType=0xBD; fn2=0x00281080",
+      "type": "Function"
+    },
+    {
+      "address": "0x0027B8F0",
+      "name": "Medius_CanInviteMorePlayersToClan",
+      "comment": "msgType=0xBE",
+      "type": "Function"
+    },
+    {
+      "address": "0x0027BB60",
+      "name": "Medius_ClearCareerStats",
+      "comment": "msgType=0xBF",
+      "type": "Function"
+    },
+    {
+      "address": "0x0027E650",
+      "name": "Medius_GameRejectsRank",
+      "comment": "msgType=0xC0",
+      "type": "Function"
+    },
+    {
+      "address": "0x0027D080",
+      "name": "Medius_IsControllerConnected",
+      "comment": "msgType=0xC1",
+      "type": "Function"
+    },
+    {
+      "address": "0x0027BB30",
+      "name": "Medius_SetCareerStatsUIVars",
+      "comment": "msgType=0xC2",
+      "type": "Function"
+    },
+    {
+      "address": "0x002CD660",
+      "name": "Medius_DownloadPatch",
+      "comment": "msgType=0xC3",
+      "type": "Function"
+    },
+    {
+      "address": "0x002CD650",
+      "name": "Medius_DeletePatch",
+      "comment": "msgType=0xC4",
+      "type": "Function"
+    },
+    {
+      "address": "0x00277630",
+      "name": "Medius_VerifyPatchLevel",
+      "comment": "msgType=0xC5",
+      "type": "Function"
+    },
+    {
+      "address": "0x0027A1D0",
+      "name": "Medius_RemoveNonSuppressionMaps",
+      "comment": "msgType=0xC6",
+      "type": "Function"
+    },
+    {
+      "address": "0x002CF330",
+      "name": "Medius_DNASAuthenticate",
+      "comment": "msgType=0xC7",
+      "type": "Function"
+    },
+    {
+      "address": "0x0027D120",
+      "name": "Medius_SetScreenOrigin",
+      "comment": "msgType=0xC8",
+      "type": "Function"
+    },
+    {
+      "address": "0x00282360",
+      "name": "Medius_DoAllSelCharsHaveLockedEquip1",
+      "comment": "msgType=0xC9",
+      "type": "Function"
+    },
+    {
+      "address": "0x00282350",
+      "name": "Medius_DoAllSelCharsHaveLockedEquip2",
+      "comment": "msgType=0xCA",
+      "type": "Function"
+    },
+    {
+      "address": "0x00282340",
+      "name": "Medius_DoAllSelCharsHaveLockedEquip3",
+      "comment": "msgType=0xCB",
+      "type": "Function"
+    },
+    {
+      "address": "0x0027F2A0",
+      "name": "Medius_IsMemcardSaveOK",
+      "comment": "msgType=0xCC",
+      "type": "Function"
+    },
+    {
+      "address": "0x00279950",
+      "name": "Medius_HardDriveOperation",
+      "comment": "msgType=0xCD",
+      "type": "Function"
+    },
+    {
+      "address": "0x0027B370",
+      "name": "Medius_GetFriendInvitations",
+      "comment": "msgType=0xCE",
+      "type": "Function"
+    },
+    {
+      "address": "0x00282070",
+      "name": "Medius_CanCharactersSelectUIWeapon",
+      "comment": "msgType=0xCF",
+      "type": "Function"
+    },
+    {
+      "address": "0x0027EA40",
+      "name": "Medius_InitializeOnlineArmory",
+      "comment": "msgType=0xD0; last entry in MediusHandlerTable",
+      "type": "Function"
+    }
+  ]
+}

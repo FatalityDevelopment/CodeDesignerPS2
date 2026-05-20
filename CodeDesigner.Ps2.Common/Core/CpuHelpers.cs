@@ -82,6 +82,52 @@ namespace CodeDesigner.Ps2.Common.CPU
         }
 
         /// <summary>
+        /// Format an indexed load/store reference, resolving only when both source
+        /// registers carry known values in the analysis state.
+        /// </summary>
+        public static string FormatIndexedMemoryReference(CpuState? cpu, int baseReg, int indexReg, bool alignWord = false)
+        {
+            if (cpu != null && IsRegisterKnown(cpu, baseReg) && IsRegisterKnown(cpu, indexReg))
+            {
+                ulong addr = cpu.RegsLo[baseReg] + cpu.RegsLo[indexReg];
+                if (alignWord)
+                {
+                    addr &= ~3UL;
+                }
+
+                return $"0x{(uint)addr:X8}";
+            }
+
+            string reference = $"{RegName(baseReg)} + {RegName(indexReg)}";
+            return alignWord ? $"({reference}) & ~3" : reference;
+        }
+
+        /// <summary>
+        /// Format a GPR load analysis comment after the instruction has executed.
+        /// </summary>
+        public static string FormatGprLoadAnalysis(CpuState? cpu, int targetReg, int baseReg, int offset)
+        {
+            if (cpu == null) return string.Empty;
+            string address = FormatMemoryReference(cpu, baseReg, offset);
+            return $"{RegName(targetReg)} ← [{address}] = {FormatRegisterValueHex(cpu.RegsLo[targetReg])}";
+        }
+
+        /// <summary>
+        /// Format a GPR store analysis comment using the source register value.
+        /// </summary>
+        public static string FormatGprStoreAnalysis(CpuState? cpu, int sourceReg, int baseReg, int offset)
+        {
+            if (cpu == null) return string.Empty;
+            string address = FormatMemoryReference(cpu, baseReg, offset);
+            return $"[{address}] ← {RegName(sourceReg)} = {FormatRegisterValueHex(cpu.RegsLo[sourceReg])}";
+        }
+
+        private static bool IsRegisterKnown(CpuState cpu, int reg)
+        {
+            return reg == 0 || cpu.RegsLo[reg] != 0 || cpu.RegsHi[reg] != 0;
+        }
+
+        /// <summary>
         /// Format a 16-bit load/store displacement for analysis comments.
         /// </summary>
         public static string FormatMemoryOffset(int offset)

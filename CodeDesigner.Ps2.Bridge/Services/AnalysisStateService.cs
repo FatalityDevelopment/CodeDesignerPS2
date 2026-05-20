@@ -77,6 +77,16 @@ namespace CodeDesigner.Ps2.Bridge.Services
                     return;
                 }
 
+                // PCSX2 is the source of truth for live bytes/register panels,
+                // but disassembly comments must not issue extra PINE reads.
+                // Keep comment analysis static in PCSX2 mode so a slow or
+                // unsupported debugger opcode cannot block the EE RAM view.
+                if (_ctx.PineClient is not null && ReferenceEquals(_ctx.Client, _ctx.PineClient))
+                {
+                    _mirrorValid = false;
+                    return;
+                }
+
                 // The mirror is only meaningful when execution is paused — a
                 // running-state register file changes every cycle. Skip cleanly
                 // when running so callers don't pay for a 38 MB read that

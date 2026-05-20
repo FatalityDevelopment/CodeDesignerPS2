@@ -1,0 +1,24 @@
+{
+  "bios": [
+    {
+      "name": "SCPH-70012_BIOS_V12_USA_200",
+      "path": "c:\\Users\\tholu\\Desktop\\CodeDesigner\\CodeDesigner.Ps2.Bridge\\Resources\\Bios\\SCPH-70012_BIOS_V12_USA_200.bin"
+    }
+  ],
+  "games": [
+    {
+      "name": "SOCOM II - U.S. Navy SEALs",
+      "path": "c:\\Users\\tholu\\Desktop\\SOCOM II - U.S. Navy SEALs.iso"
+    },
+    {
+      "name": "DNAS",
+      "path": "c:\\Users\\tholu\\Desktop\\DNAS.BIN"
+    }
+  ],
+  "emulators": [
+    {
+      "type": "pcsx2-qtx64-dbg",
+      "path": "c:\\Users\\tholu\\Desktop\\CodeDesigner\\pcsx2\\bin\\pcsx2-qtx64-dbg.exe"
+    }
+  ]
+}

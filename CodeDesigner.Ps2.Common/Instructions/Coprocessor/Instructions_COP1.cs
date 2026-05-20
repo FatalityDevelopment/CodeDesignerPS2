@@ -374,7 +374,8 @@ namespace CodeDesigner.Ps2.Common.Instructions.CoprocessorInstructions
             if (cpu != null)
             {
                 string address = CpuHelpers.FormatMemoryReference(cpu, args.Rs, offset);
-                return $"$f{args.Rt} ← [{address}]";
+                uint bits = BitConverter.SingleToUInt32Bits(cpu.FPR[args.Rt]);
+                return $"$f{args.Rt} ← [{address}] = 0x{bits:X8}";
             }
             return $"$f{args.Rt} ← [{CpuHelpers.FormatMemoryOffset(offset)}]";
         }
@@ -435,7 +436,7 @@ namespace CodeDesigner.Ps2.Common.Instructions.CoprocessorInstructions
                 string address = CpuHelpers.FormatMemoryReference(cpu, args.Rs, offset);
                 float value = cpu.FPR[args.Rt];
                 uint bits = BitConverter.SingleToUInt32Bits(value);
-                return $"[{address}] ← $f{args.Rt} = {value} (0x{bits:X8})";
+                return $"[{address}] ← $f{args.Rt} = 0x{bits:X8} ({value})";
             }
             return $"[{CpuHelpers.FormatMemoryOffset(offset)}] ← $f{args.Rt}";
         }
@@ -1621,9 +1622,14 @@ namespace CodeDesigner.Ps2.Common.Instructions.CoprocessorInstructions
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            string eq = Equation.Replace("ft", $"$f{args.Rt}").Replace("base", CpuHelpers.RegName(args.Rs)).Replace("offset", offset.ToString());
-            if (cpu != null) { ulong addr = (ulong)((long)cpu.RegsLo[args.Rs] + offset); return $"{eq} => addr=0x{addr:X16}"; }
-            return eq;
+            if (cpu != null)
+            {
+                string address = CpuHelpers.FormatMemoryReference(cpu, args.Rs, offset);
+                uint lo = BitConverter.SingleToUInt32Bits(cpu.FPR[args.Rt]);
+                uint hi = args.Rt + 1 < cpu.FPR.Length ? BitConverter.SingleToUInt32Bits(cpu.FPR[args.Rt + 1]) : 0;
+                return $"$f{args.Rt}:$f{args.Rt + 1} ← [{address}] = lo 0x{lo:X8} | hi 0x{hi:X8}";
+            }
+            return $"$f{args.Rt}:$f{args.Rt + 1} ← [{CpuHelpers.FormatMemoryOffset(offset)}]";
         }
     }
 
@@ -1673,14 +1679,14 @@ namespace CodeDesigner.Ps2.Common.Instructions.CoprocessorInstructions
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            string eq = Equation.Replace("ft", $"$f{args.Rt}").Replace("base", CpuHelpers.RegName(args.Rs)).Replace("offset", offset.ToString());
             if (cpu != null)
             {
-                ulong addr = (ulong)((long)cpu.RegsLo[args.Rs] + offset);
-                float val = cpu.FPR[args.Rt];
-                return $"{eq} => store {val} to addr=0x{addr:X16}";
+                string address = CpuHelpers.FormatMemoryReference(cpu, args.Rs, offset);
+                uint lo = BitConverter.SingleToUInt32Bits(cpu.FPR[args.Rt]);
+                uint hi = args.Rt + 1 < cpu.FPR.Length ? BitConverter.SingleToUInt32Bits(cpu.FPR[args.Rt + 1]) : 0;
+                return $"[{address}] ← $f{args.Rt}:$f{args.Rt + 1} = lo 0x{lo:X8} | hi 0x{hi:X8}";
             }
-            return eq;
+            return $"[{CpuHelpers.FormatMemoryOffset(offset)}] ← $f{args.Rt}:$f{args.Rt + 1}";
         }
     }
 

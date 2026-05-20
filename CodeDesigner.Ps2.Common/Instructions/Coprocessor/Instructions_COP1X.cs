@@ -58,9 +58,13 @@ namespace CodeDesigner.Ps2.Common.Instructions.CoprocessorInstructions
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation.Replace("fd", $"$f{args.Rd}").Replace("base", CpuHelpers.RegName(args.Rs)).Replace("index", CpuHelpers.RegName(args.Rt));
-            if (cpu != null) { ulong addr = cpu.RegsLo[args.Rs] + cpu.RegsLo[args.Rt]; return $"{eq} => addr=0x{addr:X16}"; }
-            return eq;
+            if (cpu != null)
+            {
+                string address = CpuHelpers.FormatIndexedMemoryReference(cpu, args.Rs, args.Rt);
+                uint bits = BitConverter.SingleToUInt32Bits(cpu.FPR[args.Rd]);
+                return $"$f{args.Rd} ← [{address}] = 0x{bits:X8}";
+            }
+            return $"$f{args.Rd} ← [{CpuHelpers.RegName(args.Rs)} + {CpuHelpers.RegName(args.Rt)}]";
         }
     }
 
@@ -93,9 +97,14 @@ namespace CodeDesigner.Ps2.Common.Instructions.CoprocessorInstructions
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation.Replace("fd", $"$f{args.Rd}").Replace("base", CpuHelpers.RegName(args.Rs)).Replace("index", CpuHelpers.RegName(args.Rt));
-            if (cpu != null) { ulong addr = cpu.RegsLo[args.Rs] + cpu.RegsLo[args.Rt]; return $"{eq} => addr=0x{addr:X16}"; }
-            return eq;
+            if (cpu != null)
+            {
+                string address = CpuHelpers.FormatIndexedMemoryReference(cpu, args.Rs, args.Rt);
+                uint lo = BitConverter.SingleToUInt32Bits(cpu.FPR[args.Rd]);
+                uint hi = args.Rd + 1 < cpu.FPR.Length ? BitConverter.SingleToUInt32Bits(cpu.FPR[args.Rd + 1]) : 0;
+                return $"$f{args.Rd}:$f{args.Rd + 1} ← [{address}] = lo 0x{lo:X8} | hi 0x{hi:X8}";
+            }
+            return $"$f{args.Rd}:$f{args.Rd + 1} ← [{CpuHelpers.RegName(args.Rs)} + {CpuHelpers.RegName(args.Rt)}]";
         }
     }
 
@@ -126,9 +135,13 @@ namespace CodeDesigner.Ps2.Common.Instructions.CoprocessorInstructions
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation.Replace("fd", $"$f{args.Rd}").Replace("base", CpuHelpers.RegName(args.Rs)).Replace("index", CpuHelpers.RegName(args.Rt));
-            if (cpu != null) { ulong addr = (cpu.RegsLo[args.Rs] + cpu.RegsLo[args.Rt]) & ~3UL; return $"{eq} => addr=0x{addr:X16}"; }
-            return eq;
+            if (cpu != null)
+            {
+                string address = CpuHelpers.FormatIndexedMemoryReference(cpu, args.Rs, args.Rt, alignWord: true);
+                uint bits = BitConverter.SingleToUInt32Bits(cpu.FPR[args.Rd]);
+                return $"$f{args.Rd} ← [{address}] = 0x{bits:X8}";
+            }
+            return $"$f{args.Rd} ← [({CpuHelpers.RegName(args.Rs)} + {CpuHelpers.RegName(args.Rt)}) & ~3]";
         }
     }
 
@@ -158,9 +171,13 @@ namespace CodeDesigner.Ps2.Common.Instructions.CoprocessorInstructions
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation.Replace("fs", $"$f{args.Shamt}").Replace("base", CpuHelpers.RegName(args.Rs)).Replace("index", CpuHelpers.RegName(args.Rt));
-            if (cpu != null) { ulong addr = cpu.RegsLo[args.Rs] + cpu.RegsLo[args.Rt]; return $"{eq} => addr=0x{addr:X16}, val={cpu.FPR[args.Shamt]}"; }
-            return eq;
+            if (cpu != null)
+            {
+                string address = CpuHelpers.FormatIndexedMemoryReference(cpu, args.Rs, args.Rt);
+                uint bits = BitConverter.SingleToUInt32Bits(cpu.FPR[args.Shamt]);
+                return $"[{address}] ← $f{args.Shamt} = 0x{bits:X8} ({cpu.FPR[args.Shamt]})";
+            }
+            return $"[{CpuHelpers.RegName(args.Rs)} + {CpuHelpers.RegName(args.Rt)}] ← $f{args.Shamt}";
         }
     }
 
@@ -192,9 +209,14 @@ namespace CodeDesigner.Ps2.Common.Instructions.CoprocessorInstructions
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation.Replace("fs", $"$f{args.Shamt}").Replace("base", CpuHelpers.RegName(args.Rs)).Replace("index", CpuHelpers.RegName(args.Rt));
-            if (cpu != null) { ulong addr = cpu.RegsLo[args.Rs] + cpu.RegsLo[args.Rt]; return $"{eq} => addr=0x{addr:X16}, val={cpu.FPR[args.Shamt]}"; }
-            return eq;
+            if (cpu != null)
+            {
+                string address = CpuHelpers.FormatIndexedMemoryReference(cpu, args.Rs, args.Rt);
+                uint lo = BitConverter.SingleToUInt32Bits(cpu.FPR[args.Shamt]);
+                uint hi = args.Shamt + 1 < cpu.FPR.Length ? BitConverter.SingleToUInt32Bits(cpu.FPR[args.Shamt + 1]) : 0u;
+                return $"[{address}] ← $f{args.Shamt}:$f{args.Shamt + 1} = lo 0x{lo:X8} | hi 0x{hi:X8}";
+            }
+            return $"[{CpuHelpers.RegName(args.Rs)} + {CpuHelpers.RegName(args.Rt)}] ← $f{args.Shamt}:$f{args.Shamt + 1}";
         }
     }
 
@@ -225,9 +247,13 @@ namespace CodeDesigner.Ps2.Common.Instructions.CoprocessorInstructions
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation.Replace("fs", $"$f{args.Shamt}").Replace("base", CpuHelpers.RegName(args.Rs)).Replace("index", CpuHelpers.RegName(args.Rt));
-            if (cpu != null) { ulong addr = (cpu.RegsLo[args.Rs] + cpu.RegsLo[args.Rt]) & ~3UL; return $"{eq} => addr=0x{addr:X16}, val={cpu.FPR[args.Shamt]}"; }
-            return eq;
+            if (cpu != null)
+            {
+                string address = CpuHelpers.FormatIndexedMemoryReference(cpu, args.Rs, args.Rt, alignWord: true);
+                uint bits = BitConverter.SingleToUInt32Bits(cpu.FPR[args.Shamt]);
+                return $"[{address}] ← $f{args.Shamt} = 0x{bits:X8} ({cpu.FPR[args.Shamt]})";
+            }
+            return $"[({CpuHelpers.RegName(args.Rs)} + {CpuHelpers.RegName(args.Rt)}) & ~3] ← $f{args.Shamt}";
         }
     }
 
@@ -252,9 +278,12 @@ namespace CodeDesigner.Ps2.Common.Instructions.CoprocessorInstructions
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation.Replace("base", CpuHelpers.RegName(args.Rs)).Replace("index", CpuHelpers.RegName(args.Rt));
-            if (cpu != null) { ulong addr = cpu.RegsLo[args.Rs] + cpu.RegsLo[args.Rt]; return $"{eq} => addr=0x{addr:X16} (hint only)"; }
-            return eq;
+            if (cpu != null)
+            {
+                string address = CpuHelpers.FormatIndexedMemoryReference(cpu, args.Rs, args.Rt);
+                return $"prefetch [{address}] (hint only)";
+            }
+            return $"prefetch [{CpuHelpers.RegName(args.Rs)} + {CpuHelpers.RegName(args.Rt)}] (hint only)";
         }
     }
 

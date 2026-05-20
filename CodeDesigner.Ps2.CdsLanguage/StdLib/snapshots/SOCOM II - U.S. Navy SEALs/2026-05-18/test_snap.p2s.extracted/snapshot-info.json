@@ -1,0 +1,19 @@
+{
+  "name": "test_snap",
+  "timestamp": "2026-05-18T02:58:58.0163151Z",
+  "isoName": "",
+  "regions": [
+    {
+      "Label": "EE RAM",
+      "File": "EEmem.bin",
+      "BaseAddress": 0,
+      "Size": 33554432
+    },
+    {
+      "Label": "IOP RAM",
+      "File": "IOPmem.bin",
+      "BaseAddress": 469762048,
+      "Size": 2097152
+    }
+  ]
+}

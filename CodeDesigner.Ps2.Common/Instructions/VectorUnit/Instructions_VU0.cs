@@ -1139,14 +1139,13 @@ namespace CodeDesigner.Ps2.Common.Instructions.VectorUnitInstructions
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            string eq = Equation.Replace("vft", VU0State.GetVFRegisterName(args.Rt))
-                .Replace("base", CpuHelpers.RegName(args.Rs)).Replace("offset", offset.ToString());
             if (cpu != null)
             {
-                ulong addr = (ulong)((long)cpu.RegsLo[args.Rs] + offset);
-                return $"{eq} => addr = 0x{addr:X16}";
+                string address = CpuHelpers.FormatMemoryReference(cpu, args.Rs, offset);
+                Vector4 v = cpu.VU0.ReadVF(args.Rt);
+                return $"{VU0State.GetVFRegisterName(args.Rt)} ← [{address}] = <0x{BitConverter.SingleToUInt32Bits(v.X):X8}, 0x{BitConverter.SingleToUInt32Bits(v.Y):X8}, 0x{BitConverter.SingleToUInt32Bits(v.Z):X8}, 0x{BitConverter.SingleToUInt32Bits(v.W):X8}>";
             }
-            return eq;
+            return $"{VU0State.GetVFRegisterName(args.Rt)} ← [{CpuHelpers.FormatMemoryOffset(offset)}]";
         }
     }
 
@@ -1192,15 +1191,13 @@ namespace CodeDesigner.Ps2.Common.Instructions.VectorUnitInstructions
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            string eq = Equation.Replace("vft", VU0State.GetVFRegisterName(args.Rt))
-                .Replace("base", CpuHelpers.RegName(args.Rs)).Replace("offset", offset.ToString());
             if (cpu != null)
             {
-                ulong addr = (ulong)((long)cpu.RegsLo[args.Rs] + offset);
+                string address = CpuHelpers.FormatMemoryReference(cpu, args.Rs, offset);
                 System.Numerics.Vector4 v = cpu.VU0.ReadVF(args.Rt);
-                return $"{eq} => addr=0x{addr:X16}, value={v}";
+                return $"[{address}] ← {VU0State.GetVFRegisterName(args.Rt)} = <0x{BitConverter.SingleToUInt32Bits(v.X):X8}, 0x{BitConverter.SingleToUInt32Bits(v.Y):X8}, 0x{BitConverter.SingleToUInt32Bits(v.Z):X8}, 0x{BitConverter.SingleToUInt32Bits(v.W):X8}>";
             }
-            return eq;
+            return $"[{CpuHelpers.FormatMemoryOffset(offset)}] ← {VU0State.GetVFRegisterName(args.Rt)}";
         }
     }
 

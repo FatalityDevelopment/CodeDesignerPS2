@@ -773,11 +773,9 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 // Resolve a *mirrored* analysis memory bus so word-formatted rows
                 // and comment-text address hints can dereference pointers and
                 // resolve strings.
-                // Never reach into the live PCSX2 PINE bus from here — random
-                // address peeks over PINE are slow and leak unrelated game memory
-                // into the comment column. AnalysisStateService keeps an in-process
-                // mirror in AnalysisClient that is safe to poke at.
-                // When AnalysisClient is unattached, peeking is disabled entirely.
+                // Never reach into PCSX2 PINE from here. Comment hints may use
+                // the analysis emulator/static mirror only, which keeps ASCII
+                // and pointer annotations without arbitrary live PINE reads.
                 CodeDesigner.Ps2.Common.Interfaces.IPs2MemoryBus? analysisBus =
                     _ctx.AnalysisClient != null
                         ? new ByteEditorMemoryBusAdapter(new DebugClientByteEditor(_ctx.AnalysisClient))

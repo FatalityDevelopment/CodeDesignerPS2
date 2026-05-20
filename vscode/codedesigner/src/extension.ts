@@ -9,6 +9,7 @@ import { Ps2FileEditorProvider } from './providers/ps2FileEditor/ps2FileEditorPr
 import { CompatBrowserProvider } from './providers/compatBrowser/compatBrowserProvider';
 import { CheatsEditorProvider } from './providers/cheatsEditor/cheatsEditorProvider';
 import { StructureVisualizerProvider } from './providers/structureVisualizer/structureVisualizerProvider';
+import { MemoryCardBrowserProvider } from './providers/memoryCardBrowser/memoryCardBrowserProvider';
 import { SocketClient } from './socketClient';
 
 let socketClient: SocketClient | null = null;
@@ -334,6 +335,14 @@ export function activate(context: vscode.ExtensionContext) {
 		() => compatBrowserProvider.open(),
 	);
 	context.subscriptions.push(openCompatBrowserCommand);
+
+	// Standalone PS2 memory-card browser with save metadata and 3D icon preview.
+	const memoryCardBrowserProvider = new MemoryCardBrowserProvider(context.extensionUri, socketClient);
+	const openMemoryCardBrowserCommand = vscode.commands.registerCommand(
+		'codedesigner.openMemoryCardBrowser',
+		(uri?: vscode.Uri) => memoryCardBrowserProvider.open(uri?.fsPath),
+	);
+	context.subscriptions.push(openMemoryCardBrowserCommand);
 
 	// ── Structure Visualizer ────────────────────────────────────────────────
 	// Standalone webview that renders Mermaid diagrams of a game's structure:

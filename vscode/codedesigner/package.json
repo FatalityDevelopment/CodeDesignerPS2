@@ -68,6 +68,11 @@
         "title": "CodeDesigner: Open PS2 Game Compatibility"
       },
       {
+        "command": "codedesigner.openMemoryCardBrowser",
+        "title": "CodeDesigner: Open PS2 Memory Card Browser",
+        "icon": "$(save)"
+      },
+      {
         "command": "codedesigner.openCheatsEditor",
         "title": "CodeDesigner: Open PS2 Cheats Editor"
       },
@@ -130,6 +135,11 @@
           "group": "navigation"
         },
         {
+          "command": "codedesigner.openMemoryCardBrowser",
+          "when": "view == disasm.disasmPanel",
+          "group": "navigation"
+        },
+        {
           "command": "codedesigner.pointerManager.addPointer",
           "when": "view == disasm.pointerManager",
           "group": "navigation"
@@ -165,6 +175,13 @@
           "command": "codedesigner.pointerManager.goToAddress",
           "when": "view == disasm.pointerManager && (viewItem == pointerNode || viewItem == childLabelNode || viewItem == childPointerNode)",
           "group": "2_navigate@1"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "codedesigner.openMemoryCardBrowser",
+          "when": "resourceExtname == .ps2 || resourceExtname == .mcd || resourceExtname == .mc2",
+          "group": "navigation"
         }
       ]
     },
@@ -287,9 +304,11 @@
     "@angular/forms": "^19.2.19",
     "@angular/platform-browser": "^19.2.19",
     "@angular/platform-browser-dynamic": "^19.2.19",
+    "@types/three": "^0.184.1",
     "@vscode/webview-ui-toolkit": "^1.4.0",
     "mermaid": "^11.4.1",
     "rxjs": "^7.8.2",
+    "three": "^0.184.0",
     "zone.js": "^0.15.0"
   },
   "overrides": {
