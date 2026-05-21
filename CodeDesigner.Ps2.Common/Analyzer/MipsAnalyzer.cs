@@ -433,6 +433,20 @@ namespace CodeDesigner.Ps2.Common
         private const uint MinPlausibleAddress = 0x00010000u;
 
         /// <summary>
+        /// Returns true when <paramref name="addr"/> looks like a real PS2 address
+        /// rather than a small constant masquerading as one. Combines the existing
+        /// <see cref="MinPlausibleAddress"/> floor with an upper-halfword check
+        /// (<c>(addr &gt;&gt; 16) != 0</c>): values like <c>0x00000020</c> or
+        /// <c>0x000000FF</c> are rejected outright, while <c>0x00123456</c> passes
+        /// because its upper halfword is <c>0x0012</c>.
+        /// </summary>
+        private static bool IsPlausibleAddress(uint addr)
+        {
+            if ((addr >> 16) == 0) return false;
+            return addr >= MinPlausibleAddress;
+        }
+
+        /// <summary>
         /// Scans <paramref name="analysis"/> for hex address patterns
         /// (<c>0x{8 hex}</c> and <c>[0x{8 hex}]</c>) and enriches them.
         /// <para>
@@ -465,7 +479,7 @@ namespace CodeDesigner.Ps2.Common
                 analysis = Regex.Replace(analysis, AddressPattern, m =>
                 {
                     uint addr = Convert.ToUInt32(m.Groups[2].Value, 16);
-                    if (addr < MinPlausibleAddress) return m.Value;
+                    if (!IsPlausibleAddress(addr)) return m.Value;
                     string? label = lookupLabel(addr);
                     return string.IsNullOrWhiteSpace(label)
                         ? m.Value
@@ -483,7 +497,7 @@ namespace CodeDesigner.Ps2.Common
                 if (alreadyAnnotated) continue;
 
                 uint addr = Convert.ToUInt32(m.Groups[2].Value, 16);
-                if (addr < MinPlausibleAddress) continue;
+                if (!IsPlausibleAddress(addr)) continue;
 
                 // MMIO register name does not require a bus and works for code/data alike.
                 if (s_mmioNames.TryGetValue(addr, out string? mmioName))

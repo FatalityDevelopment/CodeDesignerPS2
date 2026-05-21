@@ -768,6 +768,17 @@ namespace CodeDesigner.Ps2.Bridge.Services
                     }
                 }
 
+                // ── Auto-detect strings in this page (no DB writes) ───────────
+                // A byte range is auto-rendered as .asciiz when:
+                //   - The full string + null terminator fits in the page buffer.
+                //   - All bytes are printable ASCII; length >= MinAutoStringLength.
+                //   - The preceding byte is a null (clean delimiter) or the
+                //     string starts at byteIndex 0.
+                //   - No user DataFormatOverride covers any byte of the range.
+                // Auto-detect strings have no DB row; the user's overrides
+                // remain authoritative when present.
+                var autoStrings = ComputeAutoStringRanges(byteBuf, overrides, baseAddr);
+
                 var results        = new List<InstructionResult>();
                 var instructionList = new List<(uint instruction, uint address)>();
 
@@ -777,10 +788,18 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 // Never reach into PCSX2 PINE from here. Comment hints may use
                 // the analysis emulator/static mirror only, which keeps ASCII
                 // and pointer annotations without arbitrary live PINE reads.
-                CodeDesigner.Ps2.Common.Interfaces.IPs2MemoryBus? analysisBus =
+                CodeDesigner.Ps2.Common.Interfaces.IPs2MemoryBus? mirrorBus =
                     _ctx.AnalysisClient != null
                         ? new ByteEditorMemoryBusAdapter(new DebugClientByteEditor(_ctx.AnalysisClient))
                         : null;
+
+                // Layer the disasm-page bytes on top of the mirror bus so the
+                // analyzer can resolve strings/pointers that live within the
+                // current page even when no mirror is attached. Out-of-page
+                // reads still fall back to the mirror (when available); they
+                // never reach PCSX2 PINE.
+                CodeDesigner.Ps2.Common.Interfaces.IPs2MemoryBus analysisBus =
+                    new PageBytesMemoryBus(byteBuf, baseAddr, mirrorBus);
 
                 // Walk the byte buffer.  For every offset, check whether an
                 // override covers it; if so emit data rows, otherwise emit an
@@ -835,6 +854,38 @@ namespace CodeDesigner.Ps2.Bridge.Services
                         continue;
                     }
 
+                    // ── Auto-detected string at this offset ───────────────────
+                    // Emit a single .asciiz row covering the printable ASCII run
+                    // plus its null terminator. Computed earlier; never overlaps
+                    // a user override.
+                    if (autoStrings.TryGetValue(byteIndex, out var autoHit))
+                    {
+                        int totalBytes = autoHit.Length + 1; // include null
+                        // Absorb trailing zero alignment padding so the next
+                        // instruction row stays 4-byte aligned.
+                        int padded = (totalBytes + 3) & ~3;
+                        int paddedEnd = byteIndex + padded;
+                        bool paddingClean = paddedEnd <= byteBuf.Length;
+                        for (int p = byteIndex + totalBytes; paddingClean && p < paddedEnd; p++)
+                        {
+                            if (byteBuf[p] != 0x00) paddingClean = false;
+                        }
+                        int consumed = paddingClean ? padded : totalBytes;
+
+                        string asciiz = $".asciiz \"{EscapeCommentString(autoHit.Value)}\"";
+                        results.Add(new InstructionResult
+                        {
+                            Address       = rowAddr,
+                            ByteLength    = consumed,
+                            Hex           = "0x" + BitConverter.ToString(byteBuf, byteIndex, consumed).Replace("-", ""),
+                            Assembly      = asciiz,
+                            Success       = true,
+                            AutoFormatted = true,
+                        });
+                        byteIndex += consumed;
+                        continue;
+                    }
+
                     // No override at this address.  Treat as a 4-byte instruction
                     // row — if we have fewer than 4 bytes left fall back to a
                     // byte row to keep the output aligned with the source.
@@ -860,13 +911,31 @@ namespace CodeDesigner.Ps2.Bridge.Services
 
                         // Treat ".word 0x..." (unknown opcode) the same way as
                         // before: surface "unknown" in the op column and move
-                        // the original directive into the comment.
+                        // the original directive into the comment. When the word
+                        // value passes the EE-pointer classifier (upper halfword
+                        // non-zero + alignment + RAM/scratchpad range) we also
+                        // append a target hint — label, ASCII string from the
+                        // mirror bus, or raw address.
                         string assembly = disasm;
                         string? unknownComment = null;
                         if (disasm.StartsWith(".word ", StringComparison.Ordinal))
                         {
                             assembly = "unknown";
                             unknownComment = disasm.Substring(".word ".Length);
+
+                            if (Ps2AddressClassifier.IsValidEePointer(instruction))
+                            {
+                                string? targetLabel = _ctx.Labels.TryGetValue(instruction, out var le)
+                                    ? le.Label
+                                    : null;
+                                string? ptrHint = !string.IsNullOrEmpty(targetLabel)
+                                    ? $"-> {targetLabel} (0x{instruction:X8})"
+                                    : TryResolvePointerComment(instruction, analysisBus)
+                                      ?? $"-> 0x{instruction:X8}";
+                                unknownComment = string.IsNullOrEmpty(unknownComment)
+                                    ? ptrHint
+                                    : $"{unknownComment}  {ptrHint}";
+                            }
                         }
 
                         results.Add(new InstructionResult
@@ -1102,6 +1171,58 @@ namespace CodeDesigner.Ps2.Bridge.Services
             text.IndexOf('.') < 0
             && text.IndexOf('E') < 0
             && text.IndexOf('e') < 0;
+
+        /// <summary>
+        /// Minimum printable-ASCII run length the per-page auto-detector treats
+        /// as a string. Higher than the user-facing string scanner's minimum
+        /// (which is 4) because the auto-detector runs against MIPS code pages
+        /// where short ASCII sequences can occur incidentally.
+        /// </summary>
+        private const int MinAutoStringLength = 6;
+
+        /// <summary>
+        /// Computes the set of auto-detect <c>.asciiz</c> ranges for the current
+        /// disassembly page. A range is kept only when:
+        ///   - The full string + null terminator fits inside <paramref name="byteBuf"/>.
+        ///   - All bytes are printable ASCII (0x20–0x7E).
+        ///   - Length is at least <see cref="MinAutoStringLength"/>.
+        ///   - The byte immediately before the string is 0x00 (clean delimiter)
+        ///     or the string starts at offset 0.
+        ///   - No user <see cref="Database.Entities.DataFormatOverride"/> covers
+        ///     any byte of the candidate range — overrides always win.
+        /// </summary>
+        private static Dictionary<int, StringScanner.Hit> ComputeAutoStringRanges(
+            byte[] byteBuf,
+            IReadOnlyList<Database.Entities.DataFormatOverride> overrides,
+            uint baseAddr)
+        {
+            var byOffset = new Dictionary<int, StringScanner.Hit>();
+            if (byteBuf.Length == 0) return byOffset;
+
+            foreach (var hit in StringScanner.FindStrings(byteBuf, baseAddr, MinAutoStringLength))
+            {
+                // Clean delimiter: preceded by null, or at the start of the page.
+                if (hit.ByteOffset > 0 && byteBuf[hit.ByteOffset - 1] != 0x00) continue;
+
+                // Full string + null must fit in the buffer.
+                int endExclusive = hit.ByteOffset + hit.Length + 1;
+                if (endExclusive > byteBuf.Length) continue;
+
+                // Skip when any user override touches the candidate range.
+                long rangeStart = baseAddr + (uint)hit.ByteOffset;
+                long rangeEnd   = baseAddr + (uint)endExclusive;
+                bool overlaps = false;
+                foreach (var ovr in overrides)
+                {
+                    long ovrEnd = ovr.Address + ovr.Length;
+                    if (ovr.Address < rangeEnd && ovrEnd > rangeStart) { overlaps = true; break; }
+                }
+                if (overlaps) continue;
+
+                byOffset[hit.ByteOffset] = hit;
+            }
+            return byOffset;
+        }
 
         private static string? TryResolveInlineAsciiString(byte[] buf, int index, int maxBytes)
         {

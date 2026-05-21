@@ -730,7 +730,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             op: op,
             args: args,
             comment: result.Comment || "",  // Use comment from backend analyzer
-            formatted: !!result.DataFormatKind,
+            formatted: !!result.DataFormatKind || !!result.AutoFormatted,
             dataFormatKind: result.DataFormatKind,
           });
         } else if (result.Error) {
@@ -2558,7 +2558,6 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       const cache = this._panelScanCache.get(panel) ?? {};
       if (kind === 'strings') {
         const strings = await this.socketClient.scanLiveStrings(baseAddress, totalBytes, region);
-        await this._formatStringScanResults(strings);
         cache.strings = strings;
         this._panelScanCache.set(panel, cache);
         panel.webview.postMessage({ type: 'stringsUpdated', strings });
@@ -2622,7 +2621,6 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       const cache = this._panelScanCache.get(panel) ?? {};
       if (kind === 'strings') {
         const strings = await this.socketClient.getStrings(fileData, baseAddress);
-        await this._formatStringScanResults(strings);
         cache.strings = strings;
         this._panelScanCache.set(panel, cache);
         panel.webview.postMessage({ type: 'stringsUpdated', strings });
@@ -3903,7 +3901,6 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             let entries: LabelManagerEntry[] = [];
             if (kind === 'strings') {
               const results = await this.socketClient.scanLiveStrings(baseAddress, totalBytes, region);
-              await this._formatStringScanResults(results);
               entries = results.map(r => ({
                 address: r.address,
                 name: r.value.length > 40 ? r.value.substring(0, 40) + '…' : r.value,
