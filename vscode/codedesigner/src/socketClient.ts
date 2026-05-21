@@ -869,6 +869,12 @@ interface InstructionResult {
     ByteLength?: number;
     /** Data-format kind when this row came from a persisted override. */
     DataFormatKind?: DataFormatKind;
+    /**
+     * True for rows the disassembler auto-rendered as data (e.g. `.asciiz`
+     * produced by per-page string detection) without a persisted override.
+     * Styled like an override row, but not user-editable as one.
+     */
+    AutoFormatted?: boolean;
 }
 
 export type DataFormatKind = 'byte' | 'half' | 'word' | 'dword' | 'qword' | 'float' | 'double';

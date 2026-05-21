@@ -51,33 +51,11 @@ namespace CodeDesigner.Ps2.Bridge.Services
         private const int MaxLuiWindow = 128;
 
         /// <summary>
-        /// Minimum physical address a pointer must target to be considered valid.
-        /// The first 64 KB of EE physical RAM is the exception-vector / BIOS-stub area;
-        /// game data and heap allocations never live that low, so small constants such as
-        /// 0x00000001 that accidentally match the address range are rejected.
+        /// Tests whether <paramref name="val"/> is a plausible EE virtual address.
+        /// Delegates to <see cref="Ps2AddressClassifier.IsValidEePointer"/>, which
+        /// also enforces the <c>(val &gt;&gt; 16) != 0</c> upper-halfword pre-check.
         /// </summary>
-        private const uint MinValidPointerPhysAddr = 0x00010000u;
-
-        /// <summary>
-        /// Tests whether <paramref name="val"/> is a plausible EE virtual address:
-        /// user-mode or KSEG0/KSEG1 main RAM (physical 0x10000–32 MB), or EE scratchpad
-        /// (0x70000000–0x70003FFF).
-        /// </summary>
-        private static bool IsValidEePointerValue(uint val)
-        {
-            if (val == 0) return false;
-
-            // Pointers are always 4-byte aligned in MIPS — reject unaligned values.
-            if ((val & 3) != 0) return false;
-
-            uint phys = val >= 0x80000000u && val < 0xC0000000u ? val & 0x1FFFFFFFu : val;
-
-            // Reject the exception-vector / BIOS-stub area (physical < 0x00010000).
-            if (phys < MinValidPointerPhysAddr) return false;
-
-            return phys < EeMainRamSizeBytes ||
-                   (val >= 0x70000000u && val < 0x70000000u + EeScratchpadSizeBytes);
-        }
+        private static bool IsValidEePointerValue(uint val) => Ps2AddressClassifier.IsValidEePointer(val);
 
         /// <summary>
         /// Normalises <paramref name="vaddr"/> to its EE physical equivalent and adds it
@@ -216,34 +194,15 @@ namespace CodeDesigner.Ps2.Bridge.Services
 
             try
             {
-                var bytes   = Convert.FromBase64String(base64Data);
+                var bytes = Convert.FromBase64String(base64Data);
                 var results = new List<StringEntry>();
-                const int MinLength = 4;
-
-                int i = 0;
-                while (i < bytes.Length)
+                foreach (var hit in StringScanner.FindStrings(bytes, startAddress))
                 {
-                    if (bytes[i] >= 0x20 && bytes[i] <= 0x7E)
+                    results.Add(new StringEntry
                     {
-                        int start = i;
-                        while (i < bytes.Length && bytes[i] >= 0x20 && bytes[i] <= 0x7E)
-                            i++;
-
-                        // Must be null-terminated and meet minimum length
-                        if (i < bytes.Length && bytes[i] == 0x00 && (i - start) >= MinLength)
-                        {
-                            results.Add(new StringEntry
-                            {
-                                Address = $"0x{(startAddress + (uint)start):X8}",
-                                Value   = Encoding.ASCII.GetString(bytes, start, i - start)
-                            });
-                        }
-                        i++; // step past the null / non-printable byte
-                    }
-                    else
-                    {
-                        i++;
-                    }
+                        Address = $"0x{hit.Address:X8}",
+                        Value   = hit.Value
+                    });
                 }
 
                 return JsonSerializer.Serialize(new CommandResponse
@@ -506,30 +465,13 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 bool useIop = string.Equals(region, "iop", StringComparison.OrdinalIgnoreCase);
                 var bytes   = _ctx.Memory.ReadLiveBytes(address, length, useIop);
                 var results = new List<StringEntry>();
-                const int MinLength = 4;
-
-                int i = 0;
-                while (i < bytes.Length)
+                foreach (var hit in StringScanner.FindStrings(bytes, address))
                 {
-                    if (bytes[i] >= 0x20 && bytes[i] <= 0x7E)
+                    results.Add(new StringEntry
                     {
-                        int start = i;
-                        while (i < bytes.Length && bytes[i] >= 0x20 && bytes[i] <= 0x7E)
-                            i++;
-                        if (i < bytes.Length && bytes[i] == 0x00 && (i - start) >= MinLength)
-                        {
-                            results.Add(new StringEntry
-                            {
-                                Address = $"0x{(address + (uint)start):X8}",
-                                Value   = Encoding.ASCII.GetString(bytes, start, i - start)
-                            });
-                        }
-                        i++;
-                    }
-                    else
-                    {
-                        i++;
-                    }
+                        Address = $"0x{hit.Address:X8}",
+                        Value   = hit.Value
+                    });
                 }
 
                 return JsonSerializer.Serialize(new CommandResponse
