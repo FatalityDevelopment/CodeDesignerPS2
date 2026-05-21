@@ -10,6 +10,7 @@ import { CompatBrowserProvider } from './providers/compatBrowser/compatBrowserPr
 import { CheatsEditorProvider } from './providers/cheatsEditor/cheatsEditorProvider';
 import { StructureVisualizerProvider } from './providers/structureVisualizer/structureVisualizerProvider';
 import { MemoryCardBrowserProvider } from './providers/memoryCardBrowser/memoryCardBrowserProvider';
+import { HddBrowserProvider } from './providers/hddBrowser/hddBrowserProvider';
 import { ZipperWorkbenchProvider } from './providers/zipperWorkbench/zipperWorkbenchProvider';
 import { SocketClient } from './socketClient';
 
@@ -344,6 +345,17 @@ export function activate(context: vscode.ExtensionContext) {
 		(uri?: vscode.Uri) => memoryCardBrowserProvider.open(uri?.fsPath),
 	);
 	context.subscriptions.push(openMemoryCardBrowserCommand);
+
+	// Standalone PS2 HDD browser with APA/PFS partition tables and save/app icons.
+	const hddBrowserProvider = new HddBrowserProvider(context.extensionUri, socketClient);
+	const openHddBrowserCommand = vscode.commands.registerCommand(
+		'codedesigner.openHddBrowser',
+		(uri?: vscode.Uri) => {
+			const filePath = uri?.fsPath ?? vscode.window.activeTextEditor?.document.uri.fsPath;
+			hddBrowserProvider.open(filePath);
+		},
+	);
+	context.subscriptions.push(openHddBrowserCommand);
 
 	// Standalone FileFormats/Zipper workbench for ZDB/ZAR/ZED containers,
 	// SOCOM II saves, and APACHE00.ZDB patch builds.

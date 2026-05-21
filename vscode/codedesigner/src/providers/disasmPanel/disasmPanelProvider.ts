@@ -507,7 +507,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                     break;
                 // ── HDD Image Manager ─────────────────────────────────────
                 case 'openHdd':
-                    this.editorProvider.openHddOverlay();
+                    await vscode.commands.executeCommand('codedesigner.openHddBrowser');
                     break;
                 // ── DNS Mapping editor ────────────────────────────────────
                 case 'openDnsMapping':

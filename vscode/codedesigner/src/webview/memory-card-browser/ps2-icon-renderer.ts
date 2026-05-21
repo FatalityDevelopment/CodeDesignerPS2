@@ -5,8 +5,8 @@ export class Ps2IconRenderer {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly bgScene = new THREE.Scene();
   private readonly scene = new THREE.Scene();
-  private readonly bgCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-  private readonly camera = new THREE.PerspectiveCamera(50, 4 / 3, 0.1, 100);
+  private readonly bgCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 2);
+  private readonly camera = new THREE.PerspectiveCamera(45, 4 / 3, 0.1, 100);
   private readonly resizeObserver: ResizeObserver;
 
   private frameId = 0;
@@ -16,7 +16,7 @@ export class Ps2IconRenderer {
   private bgObjects: THREE.Object3D[] = [];
   private geometries: THREE.BufferGeometry[] = [];
   private texture: THREE.DataTexture | null = null;
-  private material: THREE.ShaderMaterial | null = null;
+  private material: THREE.Material | null = null;
   private mesh: THREE.Mesh | null = null;
 
   constructor(private readonly canvas: HTMLCanvasElement) {
@@ -29,9 +29,12 @@ export class Ps2IconRenderer {
     this.renderer.autoClear = false;
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 
-    this.camera.position.set(0, -4, -10);
+    this.bgCamera.position.set(0, 0, 1);
+    this.bgCamera.lookAt(0, 0, 0);
+
+    this.camera.position.set(0, 0, 6);
     this.camera.up.set(0, -1, 0);
-    this.camera.lookAt(0, -2, 0);
+    this.camera.lookAt(0, 0, 0);
 
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(canvas);
@@ -143,10 +146,11 @@ export class Ps2IconRenderer {
   }
 
   private buildIcon(iconSys: Ps2IconSys, icon: Ps2Icon): void {
+    const fit = computeIconFit(icon);
     this.geometries = [];
     for (let shape = 0; shape < icon.animationShapes; shape++) {
       const nextShape = shape + 1 >= icon.animationShapes ? 0 : shape + 1;
-      this.geometries.push(this.buildGeometry(icon, shape, nextShape));
+      this.geometries.push(this.buildGeometry(icon, shape, nextShape, fit));
     }
 
     if (icon.textureRgba) {
@@ -162,10 +166,23 @@ export class Ps2IconRenderer {
       this.texture.minFilter = THREE.LinearFilter;
       this.texture.wrapS = THREE.ClampToEdgeWrapping;
       this.texture.wrapT = THREE.ClampToEdgeWrapping;
+      this.texture.generateMipmaps = false;
+      this.texture.unpackAlignment = 1;
+      this.texture.colorSpace = THREE.SRGBColorSpace;
       this.texture.needsUpdate = true;
     }
 
-    this.material = new THREE.ShaderMaterial({
+    this.material = icon.animationShapes <= 1
+      ? new THREE.MeshBasicMaterial({
+          map: this.texture ?? undefined,
+          color: this.texture ? 0xffffff : 0xd8d8d8,
+          side: THREE.DoubleSide,
+          transparent: Boolean(this.texture),
+          alphaTest: this.texture ? 0.05 : 0,
+          depthTest: true,
+          depthWrite: true,
+        })
+      : new THREE.ShaderMaterial({
       uniforms: {
         tweenFactor: { value: 0 },
         texture0: { value: this.texture },
@@ -227,7 +244,7 @@ export class Ps2IconRenderer {
     this.scene.add(this.mesh);
   }
 
-  private buildGeometry(icon: Ps2Icon, shape: number, nextShape: number): THREE.BufferGeometry {
+  private buildGeometry(icon: Ps2Icon, shape: number, nextShape: number, fit: IconFit): THREE.BufferGeometry {
     const position = new Float32Array(icon.vertexCount * 3);
     const nextPosition = new Float32Array(icon.vertexCount * 3);
     const normal = new Float32Array(icon.vertexCount * 3);
@@ -235,8 +252,8 @@ export class Ps2IconRenderer {
     const vertexColor = new Float32Array(icon.vertexCount * 4);
 
     for (let i = 0; i < icon.vertexCount; i++) {
-      position.set(icon.vertices[i][shape], i * 3);
-      nextPosition.set(icon.vertices[i][nextShape], i * 3);
+      position.set(transformVertex(icon.vertices[i][shape], fit), i * 3);
+      nextPosition.set(transformVertex(icon.vertices[i][nextShape], fit), i * 3);
       normal.set(icon.normals[i], i * 3);
       uv.set(icon.uvs[i], i * 2);
       vertexColor.set(icon.colors[i], i * 4);
@@ -271,8 +288,11 @@ export class Ps2IconRenderer {
       this.mesh.geometry = this.geometries[shape];
     }
 
-    this.material.uniforms['tweenFactor'].value = tween;
-    this.mesh.rotation.y = elapsed / 2;
+    if (this.material instanceof THREE.ShaderMaterial) {
+      this.material.uniforms['tweenFactor'].value = tween;
+    }
+    this.mesh.rotation.x = -0.08;
+    this.mesh.rotation.y = 0.35 + elapsed / 2;
   }
 
   private disposeSceneObjects(): void {
@@ -306,6 +326,49 @@ export class Ps2IconRenderer {
 function vec4(value: number[] | undefined, fallback: number[]): THREE.Vector4 {
   const v = value && value.length >= 4 ? value : fallback;
   return new THREE.Vector4(v[0], v[1], v[2], v[3]);
+}
+
+interface IconFit {
+  center: [number, number, number];
+  scale: number;
+}
+
+function computeIconFit(icon: Ps2Icon): IconFit {
+  const min = [Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY];
+  const max = [Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY];
+
+  for (const vertex of icon.vertices) {
+    for (const shape of vertex) {
+      for (let axis = 0; axis < 3; axis++) {
+        min[axis] = Math.min(min[axis], shape[axis] ?? 0);
+        max[axis] = Math.max(max[axis], shape[axis] ?? 0);
+      }
+    }
+  }
+
+  const size = [
+    max[0] - min[0],
+    max[1] - min[1],
+    max[2] - min[2],
+  ];
+  const maxSize = Math.max(size[0], size[1], size[2]);
+
+  return {
+    center: [
+      (min[0] + max[0]) / 2,
+      (min[1] + max[1]) / 2,
+      (min[2] + max[2]) / 2,
+    ],
+    scale: Number.isFinite(maxSize) && maxSize > 0 ? 3.4 / maxSize : 1,
+  };
+}
+
+function transformVertex(vertex: number[], fit: IconFit): [number, number, number] {
+  return [
+    ((vertex[0] ?? 0) - fit.center[0]) * fit.scale,
+    ((vertex[1] ?? 0) - fit.center[1]) * fit.scale,
+    ((vertex[2] ?? 0) - fit.center[2]) * fit.scale,
+  ];
 }
 
 function hasUsefulVertexColors(icon: Ps2Icon): boolean {

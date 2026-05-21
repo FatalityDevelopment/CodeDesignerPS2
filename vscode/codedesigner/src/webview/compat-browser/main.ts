@@ -1,4 +1,4 @@
-// Zoneless Angular 19 — no zone.js import needed
+// Zoneless Angular 19, no zone.js import needed
 import { bootstrapApplication } from '@angular/platform-browser';
 import { provideExperimentalZonelessChangeDetection } from '@angular/core';
 import { CompatBrowserPageComponent } from './compat-browser-page.component';

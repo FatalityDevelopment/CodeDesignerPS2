@@ -54,6 +54,7 @@ namespace CodeDesigner.Ps2.Bridge
         public string? HddPath { get; set; }
         public string? PartitionId { get; set; }
         public string? FileName { get; set; }
+        public string? HddFileSource { get; set; }
         public int?    HddSizeGb { get; set; }
         // Runtime mode control fields
         public string? Pcsx2Host { get; set; }

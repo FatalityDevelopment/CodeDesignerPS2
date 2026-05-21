@@ -9,4 +9,5 @@ public sealed class HddFileEntry
     public DateTime Created { get; init; }
     public DateTime Modified { get; init; }
     public ushort Attributes { get; init; }
+    public string Source { get; init; } = "pfs";
 }

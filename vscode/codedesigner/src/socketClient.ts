@@ -57,6 +57,7 @@ interface CommandMessage {
     HddPath?: string;
     PartitionId?: string;
     FileName?: string;
+    HddFileSource?: string;
     HddSizeGb?: number;
     // Save-state file path (SAVESTATETOFILE / LOADSTATEFROMFILE)
     FilePath?: string;
@@ -697,6 +698,7 @@ export interface HddFileEntryInfo {
     Size:        number;
     IsDirectory: boolean;
     Modified:    string;
+    Source?:     'pfs' | 'header' | string;
 }
 
 /**
@@ -3172,15 +3174,31 @@ export class SocketClient {
     }
 
     /**
+     * Read a file from an HDD partition and return base64 bytes.
+     * @param hddPath     Absolute path to the HDD.raw file.
+     * @param partitionId Partition ID.
+     * @param fileName    Root-level file name to read.
+     */
+    public async hddReadFile(hddPath: string, partitionId: string, fileName: string, source?: string): Promise<string> {
+        const response = await this.sendCommand(
+            { Command: 'HDD_READ_FILE', HddPath: hddPath, PartitionId: partitionId, FileName: fileName, HddFileSource: source }
+        );
+        if (!response.Success) {
+            throw new Error(response.Error || 'HDD_READ_FILE failed');
+        }
+        return response.Data ?? '';
+    }
+
+    /**
      * Export a file from an HDD partition to the host filesystem.
      * @param hddPath     Absolute path to the HDD.raw file.
      * @param partitionId Partition ID.
      * @param fileName    Name of the file to export.
      * @param exportDir   Destination directory on the host.
      */
-    public async hddExport(hddPath: string, partitionId: string, fileName: string, exportDir: string): Promise<string> {
+    public async hddExport(hddPath: string, partitionId: string, fileName: string, exportDir: string, source?: string): Promise<string> {
         const response = await this.sendCommand(
-            { Command: 'HDD_EXPORT', HddPath: hddPath, PartitionId: partitionId, FileName: fileName, ExportDir: exportDir }
+            { Command: 'HDD_EXPORT', HddPath: hddPath, PartitionId: partitionId, FileName: fileName, ExportDir: exportDir, HddFileSource: source }
         );
         if (!response.Success) {
             throw new Error(response.Error || 'HDD_EXPORT failed');

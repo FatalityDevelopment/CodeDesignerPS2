@@ -7,5 +7,6 @@ namespace CodeDesigner.Ps2.Bridge
         public long   Size         { get; set; }
         public bool   IsDirectory  { get; set; }
         public string Modified     { get; set; } = string.Empty;
+        public string Source       { get; set; } = "pfs";
     }
 }

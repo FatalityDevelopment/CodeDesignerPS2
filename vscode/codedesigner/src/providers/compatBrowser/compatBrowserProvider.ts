@@ -30,7 +30,7 @@ export class CompatBrowserProvider {
 
         const panel = vscode.window.createWebviewPanel(
             'codedesigner.compatBrowser',
-            '🎮 PS2 Game Compatibility',
+            'PS2 Game Compatibility',
             vscode.ViewColumn.One,
             {
                 enableScripts:           true,
@@ -83,7 +83,7 @@ export class CompatBrowserProvider {
             if (games.length === 0 && autoSyncIfEmpty) {
                 webview.postMessage({
                     type: 'compatStatus',
-                    message: 'No local data — downloading PCSX2 compatibility list…',
+                    message: 'No local data - downloading PCSX2 compatibility list...',
                     busy: true,
                 });
                 await this.socketClient.compatSync();
@@ -100,7 +100,7 @@ export class CompatBrowserProvider {
 
     private async _sync(webview: vscode.Webview): Promise<void> {
         try {
-            webview.postMessage({ type: 'compatStatus', message: 'Syncing with PCSX2…', busy: true });
+            webview.postMessage({ type: 'compatStatus', message: 'Syncing with PCSX2...', busy: true });
             const summary = await this.socketClient.compatSync();
             const games = await this.socketClient.compatList();
             webview.postMessage({ type: 'compatData', games });
@@ -147,7 +147,7 @@ export class CompatBrowserProvider {
         if (!cleanTitle) {
             webview.postMessage({
                 type: 'compatError',
-                message: `This game has no title — cannot look it up on Vimm's Lair.`,
+                message: `This game has no title - cannot look it up on Vimm's Lair.`,
             });
             return;
         }
@@ -155,7 +155,7 @@ export class CompatBrowserProvider {
         try {
             webview.postMessage({
                 type: 'compatStatus',
-                message: `Looking up ${cleanTitle} on Vimm's Lair…`,
+                message: `Looking up ${cleanTitle} on Vimm's Lair...`,
                 busy: false,
             });
             const dl = await resolveVimmDownload(cleanTitle);
@@ -233,7 +233,7 @@ export class CompatBrowserProvider {
 <script nonce="${nonce}">${getWebviewErrorHandlerScript()}</script>
 </head>
 <body>
-<app-compat-browser-page><p style="color:#888;font-family:sans-serif;padding:16px;font-size:13px;">Loading PS2 Game Compatibility…</p></app-compat-browser-page>
+<app-compat-browser-page><p style="color:#888;font-family:sans-serif;padding:16px;font-size:13px;">Loading PS2 Game Compatibility...</p></app-compat-browser-page>
 <script src="${scriptUri}"></script>
 </body>
 </html>`;

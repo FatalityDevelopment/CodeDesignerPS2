@@ -182,7 +182,7 @@ export function parseIcon(bytes: Uint8Array): Ps2Icon {
       : bytes.slice(offset, Math.min(offset + TEXTURE_BYTES, bytes.length));
 
     if (texture.length >= TEXTURE_BYTES) {
-      textureRgba = decodeBgr555(texture.slice(0, TEXTURE_BYTES));
+      textureRgba = decodeAbgr1555(texture.slice(0, TEXTURE_BYTES));
     }
   }
 
@@ -266,16 +266,17 @@ function loadCompressedTexture(bytes: Uint8Array, view: DataView, offset: number
   return new Uint8Array(out.slice(0, TEXTURE_BYTES));
 }
 
-function decodeBgr555(texture: Uint8Array): Uint8Array {
+function decodeAbgr1555(texture: Uint8Array): Uint8Array {
   const out = new Uint8Array(TEXTURE_WIDTH * TEXTURE_HEIGHT * 4);
   const view = new DataView(texture.buffer, texture.byteOffset, texture.byteLength);
   let rgbaOffset = 0;
   for (let offset = 0; offset + 1 < texture.length; offset += 2) {
     const value = view.getUint16(offset, true);
+    const rgb = value & 0x7fff;
     out[rgbaOffset++] = expand5(value & 0x1f);
     out[rgbaOffset++] = expand5((value >> 5) & 0x1f);
     out[rgbaOffset++] = expand5((value >> 10) & 0x1f);
-    out[rgbaOffset++] = value === 0 ? 0 : 255;
+    out[rgbaOffset++] = rgb === 0 ? 0 : 255;
   }
   return out;
 }

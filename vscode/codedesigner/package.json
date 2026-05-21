@@ -73,6 +73,11 @@
         "icon": "$(save)"
       },
       {
+        "command": "codedesigner.openHddBrowser",
+        "title": "CodeDesigner: Open PS2 HDD Browser",
+        "icon": "$(database)"
+      },
+      {
         "command": "codedesigner.openZipperWorkbench",
         "title": "CodeDesigner: Open Zipper FileFormats",
         "icon": "$(archive)"
@@ -145,6 +150,11 @@
           "group": "navigation"
         },
         {
+          "command": "codedesigner.openHddBrowser",
+          "when": "view == disasm.disasmPanel",
+          "group": "navigation"
+        },
+        {
           "command": "codedesigner.openZipperWorkbench",
           "when": "view == disasm.disasmPanel",
           "group": "navigation"
@@ -191,6 +201,11 @@
         {
           "command": "codedesigner.openMemoryCardBrowser",
           "when": "resourceExtname == .ps2 || resourceExtname == .mcd || resourceExtname == .mc2",
+          "group": "navigation"
+        },
+        {
+          "command": "codedesigner.openHddBrowser",
+          "when": "resourceExtname == .raw || resourceExtname == .hdd || resourceExtname == .img",
           "group": "navigation"
         },
         {

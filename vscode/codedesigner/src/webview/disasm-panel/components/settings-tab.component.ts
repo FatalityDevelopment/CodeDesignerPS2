@@ -360,7 +360,7 @@ const NET_POLL_MS = 4000;
                 <app-icon name="save" [size]="14" /><span>Mem Card</span>
               </button>
               <button (click)="openHddClick.emit()"
-                      title="Open the HDD Image Manager to browse and edit PS2 HDD images">
+                      title="Open the PS2 HDD Browser">
                 <app-icon name="harddrive" [size]="14" /><span>HDD</span>
               </button>
               <button (click)="openZipperClick.emit()"

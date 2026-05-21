@@ -17,6 +17,20 @@ public sealed class Ps2HddImage : IDisposable
     private const int PartitionNameOffset = 0x7F;
     private const int PartitionIdOffset = 0x10;
     private const int ApaSubPartitionsOffset = 0x200;        // apa_header_t.subs
+    private const int PpaaStartOffset = 0x1000;              // Parent Partition Attribute Area
+    private const int PpaaHeaderSize = 512;
+    private const int PpaaMaxBytes = 4 * 1024 * 1024;
+    private const string PpaaMagic = "PS2ICON3D";
+
+    private static readonly string[] PpaaFileNames =
+    {
+        "system.cnf",
+        "icon.sys",
+        "list.ico",
+        "del.ico",
+        "boot.kelf",
+        "boot.kirx",
+    };
 
     // ── PFS constants ───────────────────────────────────────────────────────
     private const uint PfsMagic = 0x50465300;               // "PFS\0" LE
@@ -247,7 +261,7 @@ public sealed class Ps2HddImage : IDisposable
     {
         EnsureOpen();
         var part = FindPartition(partitionId);
-        return ListFilesInPartition(part);
+        return ListAllFilesInPartition(part);
     }
 
     /// <summary>Exports a file from a partition to a host directory.</summary>
@@ -256,6 +270,32 @@ public sealed class Ps2HddImage : IDisposable
         EnsureOpen();
         var part = FindPartition(partitionId);
         ExportFileFromPartition(part, fileName, outputPath);
+    }
+
+    /// <summary>Exports a PPAA/header file from a partition to a host directory.</summary>
+    public void ExportHeaderFile(string partitionId, string fileName, string outputPath)
+    {
+        EnsureOpen();
+        var part = FindPartition(partitionId);
+        byte[] bytes = ReadHeaderFileFromPartition(part, fileName);
+        Directory.CreateDirectory(outputPath);
+        File.WriteAllBytes(Path.Combine(outputPath, fileName), bytes);
+    }
+
+    /// <summary>Reads a root-level file from a partition.</summary>
+    public byte[] ReadFile(string partitionId, string fileName)
+    {
+        EnsureOpen();
+        var part = FindPartition(partitionId);
+        return ReadFileFromPartition(part, fileName);
+    }
+
+    /// <summary>Reads a PPAA/header file from a partition.</summary>
+    public byte[] ReadHeaderFile(string partitionId, string fileName)
+    {
+        EnsureOpen();
+        var part = FindPartition(partitionId);
+        return ReadHeaderFileFromPartition(part, fileName);
     }
 
     /// <summary>
@@ -525,6 +565,53 @@ public sealed class Ps2HddImage : IDisposable
         return inode;
     }
 
+    private HddFileEntry[] ListAllFilesInPartition(ApaPartition part)
+    {
+        return ListHeaderFilesInPartition(part)
+            .Concat(ListFilesInPartition(part))
+            .ToArray();
+    }
+
+    private HddFileEntry[] ListHeaderFilesInPartition(ApaPartition part)
+    {
+        byte[]? header = TryReadPpaaHeader(part);
+        if (header == null) return [];
+
+        var entries = new List<HddFileEntry>();
+        for (int i = 0; i < 62; i++)
+        {
+            int entryOffset = 0x10 + (i * 8);
+            if (entryOffset + 8 > header.Length) break;
+
+            uint offset = BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(entryOffset));
+            uint size = BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(entryOffset + 4));
+            if (size == 0) break;
+            if (offset == 0 || offset >= PpaaMaxBytes || (ulong)offset + size > PpaaMaxBytes)
+                continue;
+
+            string name = PpaaFileName(i);
+            if (i == 4)
+            {
+                byte[] sample = ReadPpaaFileBytes(part, offset, Math.Min(size, 4));
+                if (sample.Length >= 4 && sample[0] == 0x7F && sample[1] == (byte)'E' && sample[2] == (byte)'L' && sample[3] == (byte)'F')
+                    name = "boot.elf";
+            }
+
+            entries.Add(new HddFileEntry
+            {
+                Name = name,
+                Size = size,
+                IsDirectory = false,
+                Created = part.Created,
+                Modified = part.Created,
+                Attributes = 0,
+                Source = "header",
+            });
+        }
+
+        return entries.ToArray();
+    }
+
     private HddFileEntry[] ListFilesInPartition(ApaPartition part)
     {
         PfsSuperblock sb;
@@ -669,6 +756,115 @@ public sealed class Ps2HddImage : IDisposable
         PfsSuperblock sb = ReadPfsSuperblock(part);
         var rootInode = ReadInode(part, sb.Root, sb.ZoneSize);
         ExportEntryFromDir(part, sb, rootInode, fileName, outputPath, partId: part.Id);
+    }
+
+    private byte[] ReadFileFromPartition(ApaPartition part, string fileName)
+    {
+        PfsSuperblock sb = ReadPfsSuperblock(part);
+        var rootInode = ReadInode(part, sb.Root, sb.ZoneSize);
+        return ReadFileFromDir(part, sb, rootInode, fileName, part.Id);
+    }
+
+    private byte[] ReadHeaderFileFromPartition(ApaPartition part, string fileName)
+    {
+        byte[]? header = TryReadPpaaHeader(part);
+        if (header == null)
+            throw new FileNotFoundException($"Partition '{part.Id}' has no PPAA header files.");
+
+        for (int i = 0; i < 62; i++)
+        {
+            int entryOffset = 0x10 + (i * 8);
+            if (entryOffset + 8 > header.Length) break;
+
+            uint offset = BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(entryOffset));
+            uint size = BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(entryOffset + 4));
+            if (size == 0) break;
+            if (offset == 0 || offset >= PpaaMaxBytes || (ulong)offset + size > PpaaMaxBytes)
+                continue;
+
+            string name = PpaaFileName(i);
+            if (!string.Equals(name, fileName, StringComparison.OrdinalIgnoreCase) &&
+                !(i == 4 && string.Equals(fileName, "boot.elf", StringComparison.OrdinalIgnoreCase)))
+                continue;
+
+            return ReadPpaaFileBytes(part, offset, size);
+        }
+
+        throw new FileNotFoundException($"Header file '{fileName}' not found in partition '{part.Id}'.");
+    }
+
+    private byte[]? TryReadPpaaHeader(ApaPartition part)
+    {
+        long absOffset = (long)part.Start * SectorSize + PpaaStartOffset;
+        if (absOffset < 0 || absOffset + PpaaHeaderSize > _stream!.Length)
+            return null;
+
+        _stream.Position = absOffset;
+        var header = new byte[PpaaHeaderSize];
+        int read = _stream.Read(header);
+        if (read < PpaaHeaderSize)
+            return null;
+
+        string magic = Encoding.ASCII.GetString(header, 0, PpaaMagic.Length);
+        return magic == PpaaMagic ? header : null;
+    }
+
+    private byte[] ReadPpaaFileBytes(ApaPartition part, uint ppaaRelativeOffset, uint size)
+    {
+        if (size == 0) return [];
+        if (ppaaRelativeOffset >= PpaaMaxBytes || (ulong)ppaaRelativeOffset + size > PpaaMaxBytes)
+            throw new InvalidDataException($"Invalid PPAA file bounds in partition '{part.Id}'.");
+
+        long absOffset = (long)part.Start * SectorSize + PpaaStartOffset + ppaaRelativeOffset;
+        if (absOffset < 0 || absOffset + size > _stream!.Length)
+            throw new EndOfStreamException($"PPAA file escapes HDD image bounds in partition '{part.Id}'.");
+
+        _stream.Position = absOffset;
+        var bytes = new byte[checked((int)size)];
+        int read = _stream.Read(bytes);
+        if (read < bytes.Length)
+            throw new EndOfStreamException($"Failed to read PPAA file in partition '{part.Id}'.");
+        return bytes;
+    }
+
+    private static string PpaaFileName(int index)
+        => index < PpaaFileNames.Length ? PpaaFileNames[index] : $"HEADER_{index}";
+
+    private byte[] ReadFileFromDir(ApaPartition part, PfsSuperblock sb, PfsInode dirInode, string fileName, string partId)
+    {
+        var dirData = ReadInodeData(part, sb, dirInode);
+
+        int offset = 0;
+        while (offset + 8 < dirData.Length)
+        {
+            uint inodeRef = BinaryPrimitives.ReadUInt32LittleEndian(dirData.AsSpan(offset));
+            byte sub = dirData[offset + 4];
+            byte pLen = dirData[offset + 5];
+            ushort rawALen = BinaryPrimitives.ReadUInt16LittleEndian(dirData.AsSpan(offset + 6));
+            int aLen = rawALen & PfsDentryLengthMask;
+
+            if (aLen == 0) break;
+            if ((aLen & 3) != 0 || offset + aLen > dirData.Length) break;
+
+            if (pLen > 0 && offset + 8 + pLen <= dirData.Length)
+            {
+                string name = Encoding.ASCII.GetString(dirData, offset + 8, pLen).TrimEnd('\0');
+                if (string.Equals(name, fileName, StringComparison.OrdinalIgnoreCase))
+                {
+                    var fileBlockRef = new BlockInfo { Number = inodeRef, SubPart = sub, Count = 1 };
+                    var fileInode = ReadInode(part, fileBlockRef, sb.ZoneSize);
+                    if (IsDirectory(fileInode.Mode))
+                        throw new InvalidOperationException($"Entry '{fileName}' in partition '{partId}' is a directory.");
+
+                    var fileData = ReadInodeData(part, sb, fileInode);
+                    return fileData.AsSpan(0, (int)Math.Min(fileInode.Size, fileData.Length)).ToArray();
+                }
+            }
+
+            offset += aLen;
+        }
+
+        throw new FileNotFoundException($"File '{fileName}' not found in partition '{partId}'.");
     }
 
     /// <summary>

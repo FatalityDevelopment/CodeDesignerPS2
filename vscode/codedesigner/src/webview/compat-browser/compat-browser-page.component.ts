@@ -1,15 +1,16 @@
 import {
-  Component,
   AfterViewInit,
+  Component,
+  OnDestroy,
   ViewEncapsulation,
   computed,
   effect,
   signal,
 } from '@angular/core';
+import { IconComponent } from '../shared/icon.component';
 import { getVsCodeApi } from '../shared/vscode-api';
 import './compat-browser-page.css';
 
-/** One PCSX2 compatibility entry — mirrors CompatGameInfo on the C# side. */
 interface CompatGame {
   discId: number;
   gameId: number;
@@ -27,52 +28,59 @@ interface CompatGame {
 
 const PAGE_SIZE = 50;
 
-/**
- * Standalone webview that browses PCSX2's game-compatibility list.
- *
- * Mirrors the layout of pcsx2.net/compat — a searchable, filterable table of
- * games with a compatibility rating — and adds a cover-art thumbnail plus a
- * (currently inert) Cheats button per row.
- */
 @Component({
   selector: 'app-compat-browser-page',
   standalone: true,
+  imports: [IconComponent],
   encapsulation: ViewEncapsulation.None,
   template: `
     <div class="cb-shell">
-      <!-- ── Toolbar ───────────────────────────────────────────────────── -->
       <div class="cb-toolbar">
-        <div class="cb-toolbar-title">PS2 Game Compatibility</div>
+        <div class="cb-toolbar-title">
+          <app-icon name="gamepad2" [size]="16" />
+          <span>PS2 Game Compatibility</span>
+        </div>
         <div class="cb-toolbar-spacer"></div>
-        <input
-          class="cb-search"
-          type="text"
-          placeholder="Search title or serial…"
-          [value]="search()"
-          (input)="onSearch($event)" />
-        <select class="cb-select" [value]="statusFilter()" (change)="onStatusFilter($event)">
-          <option value="">All statuses</option>
-          @for (s of statuses(); track s) {
-            <option [value]="s">{{ s }}</option>
-          }
-        </select>
-        <select class="cb-select" [value]="regionFilter()" (change)="onRegionFilter($event)">
-          <option value="">All regions</option>
-          @for (r of regions(); track r) {
-            <option [value]="r">{{ r }}</option>
-          }
-        </select>
+
+        <label class="cb-search">
+          <app-icon name="search" [size]="14" />
+          <input
+            type="text"
+            placeholder="Search title or serial"
+            [value]="search()"
+            (input)="onSearch($event)" />
+        </label>
+
+        <label class="cb-filter">
+          <span>Status</span>
+          <select class="cb-select" [value]="statusFilter()" (change)="onStatusFilter($event)">
+            <option value="">All</option>
+            @for (s of statuses(); track s) {
+              <option [value]="s">{{ s }}</option>
+            }
+          </select>
+        </label>
+
+        <label class="cb-filter">
+          <span>Region</span>
+          <select class="cb-select" [value]="regionFilter()" (change)="onRegionFilter($event)">
+            <option value="">All</option>
+            @for (r of regions(); track r) {
+              <option [value]="r">{{ r }}</option>
+            }
+          </select>
+        </label>
+
         <button class="cb-btn cb-primary-btn" [disabled]="busy()" (click)="refresh()">
-          {{ busy() ? 'Working…' : '⟳ Refresh' }}
+          <app-icon name="refreshcw" [size]="14" />
+          <span>{{ busy() ? 'Working' : 'Refresh' }}</span>
         </button>
       </div>
 
-      <!-- ── Status line ───────────────────────────────────────────────── -->
       @if (statusMsg()) {
         <div class="cb-status" [class.cb-status-error]="statusIsError()">{{ statusMsg() }}</div>
       }
 
-      <!-- ── Result list ───────────────────────────────────────────────── -->
       <div class="cb-list">
         @if (!busy() && filtered().length === 0) {
           <div class="cb-empty">
@@ -83,6 +91,7 @@ const PAGE_SIZE = 50;
             }
           </div>
         }
+
         @for (g of pageGames(); track g.discId) {
           <div class="cb-row">
             <div class="cb-cover">
@@ -92,10 +101,11 @@ const PAGE_SIZE = 50;
                 <div class="cb-cover-ph">{{ initial(g.title) }}</div>
               }
             </div>
+
             <div class="cb-info">
               <div class="cb-title">{{ g.title }}</div>
               <div class="cb-meta">
-                <span class="cb-serial">{{ g.serial || '—' }}</span>
+                <span class="cb-serial">{{ g.serial || '-' }}</span>
                 @if (g.region) { <span class="cb-region">{{ g.region }}</span> }
                 @if (g.crc) { <span class="cb-crc">CRC {{ g.crc }}</span> }
               </div>
@@ -108,47 +118,75 @@ const PAGE_SIZE = 50;
                 }
               </div>
             </div>
+
             <div class="cb-status-cell">
               <span class="cb-badge" [class]="'cb-badge-' + statusClass(g.status)">
                 {{ g.status || 'Unknown' }}
               </span>
             </div>
+
             <div class="cb-actions">
               @if (g.wikiLink) {
                 <a class="cb-link-btn" [href]="g.wikiLink" target="_blank" rel="noopener"
-                   title="Open the PCSX2 wiki page">Wiki</a>
+                   title="Open the PCSX2 wiki page">
+                  <app-icon name="bookopen" [size]="13" />
+                  <span>Wiki</span>
+                </a>
+              } @else {
+                <span class="cb-action-spacer"></span>
               }
+
               @if (g.forumLink) {
                 <a class="cb-link-btn" [href]="g.forumLink" target="_blank" rel="noopener"
-                   title="Open the PCSX2 forum thread">Forum</a>
+                   title="Open the PCSX2 forum thread">
+                  <app-icon name="link" [size]="13" />
+                  <span>Forum</span>
+                </a>
+              } @else {
+                <span class="cb-action-spacer"></span>
               }
+
               @if (canDownload(g)) {
                 <button class="cb-link-btn cb-download-btn"
                         title="Download this USA game's ROM from Vimm's Lair"
-                        (click)="downloadGame(g)">⬇ Download</button>
+                        (click)="downloadGame(g)">
+                  <app-icon name="download" [size]="13" />
+                  <span>Download</span>
+                </button>
+              } @else {
+                <span class="cb-action-spacer"></span>
               }
+
               <button class="cb-link-btn cb-cheats-btn" title="Open cheats for this game"
-                      (click)="openCheats(g)">🎮 Cheats</button>
+                      (click)="openCheats(g)">
+                <app-icon name="sparkles" [size]="13" />
+                <span>Cheats</span>
+              </button>
             </div>
           </div>
         }
       </div>
 
-      <!-- ── Pager ─────────────────────────────────────────────────────── -->
       @if (pageCount() > 1) {
         <div class="cb-pager">
-          <button class="cb-btn" [disabled]="page() === 0" (click)="goPage(page() - 1)">‹ Prev</button>
+          <button class="cb-btn" [disabled]="page() === 0" (click)="goPage(page() - 1)">
+            <app-icon name="arrowleft" [size]="13" />
+            <span>Prev</span>
+          </button>
           <span class="cb-pager-label">
             Page {{ page() + 1 }} / {{ pageCount() }}
-            · {{ filtered().length }} game{{ filtered().length === 1 ? '' : 's' }}
+            - {{ filtered().length }} game{{ filtered().length === 1 ? '' : 's' }}
           </span>
-          <button class="cb-btn" [disabled]="page() >= pageCount() - 1" (click)="goPage(page() + 1)">Next ›</button>
+          <button class="cb-btn" [disabled]="page() >= pageCount() - 1" (click)="goPage(page() + 1)">
+            <span>Next</span>
+            <app-icon name="arrowright" [size]="13" />
+          </button>
         </div>
       }
     </div>
   `,
 })
-export class CompatBrowserPageComponent implements AfterViewInit {
+export class CompatBrowserPageComponent implements AfterViewInit, OnDestroy {
   private readonly vscode = getVsCodeApi();
 
   readonly allGames = signal<CompatGame[]>([]);
@@ -157,12 +195,10 @@ export class CompatBrowserPageComponent implements AfterViewInit {
   readonly regionFilter = signal('');
   readonly page = signal(0);
   readonly busy = signal(true);
-  readonly statusMsg = signal('Loading…');
+  readonly statusMsg = signal('Loading...');
   readonly statusIsError = signal(false);
 
-  /** serial → cover data-URI ('' once a request failed, so it isn't retried). */
   private readonly coverMap = signal<Record<string, string>>({});
-  /** serials a cover request is already in-flight or resolved for. */
   private readonly coverRequested = new Set<string>();
 
   readonly statuses = computed(() => {
@@ -200,8 +236,36 @@ export class CompatBrowserPageComponent implements AfterViewInit {
     return this.filtered().slice(start, start + PAGE_SIZE);
   });
 
+  private readonly onMessage = (event: MessageEvent): void => {
+    const data = event.data as { type: string; [key: string]: unknown };
+    switch (data['type']) {
+      case 'compatData':
+        this.allGames.set((data['games'] as CompatGame[]) ?? []);
+        this.page.set(0);
+        this.busy.set(false);
+        this.statusMsg.set('');
+        this.statusIsError.set(false);
+        break;
+      case 'compatStatus':
+        this.statusMsg.set((data['message'] as string) ?? '');
+        this.statusIsError.set(false);
+        this.busy.set((data['busy'] as boolean) ?? false);
+        break;
+      case 'compatError':
+        this.statusMsg.set((data['message'] as string) ?? 'Error');
+        this.statusIsError.set(true);
+        this.busy.set(false);
+        break;
+      case 'compatCover': {
+        const serial = data['serial'] as string;
+        const uri = (data['dataUri'] as string) ?? '';
+        this.coverMap.update(m => ({ ...m, [serial]: uri }));
+        break;
+      }
+    }
+  };
+
   constructor() {
-    // Whenever the visible page changes, fetch any covers we don't have yet.
     effect(() => {
       for (const g of this.pageGames()) {
         if (g.serial) { this.requestCover(g.serial); }
@@ -210,38 +274,13 @@ export class CompatBrowserPageComponent implements AfterViewInit {
   }
 
   ngAfterViewInit(): void {
-    window.addEventListener('message', (event: MessageEvent) => {
-      const data = event.data as { type: string; [key: string]: unknown };
-      switch (data['type']) {
-        case 'compatData':
-          this.allGames.set((data['games'] as CompatGame[]) ?? []);
-          this.page.set(0);
-          this.busy.set(false);
-          this.statusMsg.set('');
-          this.statusIsError.set(false);
-          break;
-        case 'compatStatus':
-          this.statusMsg.set((data['message'] as string) ?? '');
-          this.statusIsError.set(false);
-          this.busy.set((data['busy'] as boolean) ?? false);
-          break;
-        case 'compatError':
-          this.statusMsg.set((data['message'] as string) ?? 'Error');
-          this.statusIsError.set(true);
-          this.busy.set(false);
-          break;
-        case 'compatCover': {
-          const serial = data['serial'] as string;
-          const uri = (data['dataUri'] as string) ?? '';
-          this.coverMap.update(m => ({ ...m, [serial]: uri }));
-          break;
-        }
-      }
-    });
+    window.addEventListener('message', this.onMessage);
     this.vscode.postMessage({ type: 'ready' });
   }
 
-  // ── Event handlers ─────────────────────────────────────────────────────
+  ngOnDestroy(): void {
+    window.removeEventListener('message', this.onMessage);
+  }
 
   onSearch(e: Event): void {
     this.search.set((e.target as HTMLInputElement).value);
@@ -264,7 +303,7 @@ export class CompatBrowserPageComponent implements AfterViewInit {
 
   refresh(): void {
     this.busy.set(true);
-    this.statusMsg.set('Syncing with PCSX2…');
+    this.statusMsg.set('Syncing with PCSX2...');
     this.statusIsError.set(false);
     this.vscode.postMessage({ type: 'refresh' });
   }
@@ -273,7 +312,6 @@ export class CompatBrowserPageComponent implements AfterViewInit {
     this.vscode.postMessage({ type: 'openCheats', serial: g.serial, title: g.title });
   }
 
-  /** Vimm's Lair only carries USA releases, so downloads are offered for those. */
   canDownload(g: CompatGame): boolean {
     return g.region === 'NTSC-U';
   }
@@ -282,9 +320,6 @@ export class CompatBrowserPageComponent implements AfterViewInit {
     this.vscode.postMessage({ type: 'downloadGame', title: g.title });
   }
 
-  // ── View helpers ───────────────────────────────────────────────────────
-
-  /** Returns the cached cover data-URI for a serial, or null when none. */
   cover(serial: string | undefined): string | null {
     if (!serial) { return null; }
     const uri = this.coverMap()[serial];
@@ -306,8 +341,6 @@ export class CompatBrowserPageComponent implements AfterViewInit {
       default:         return 'unknown';
     }
   }
-
-  // ── Cover loading ──────────────────────────────────────────────────────
 
   private requestCover(serial: string): void {
     if (this.coverRequested.has(serial)) { return; }
