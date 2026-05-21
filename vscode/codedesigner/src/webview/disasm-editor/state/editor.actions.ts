@@ -412,7 +412,10 @@ export class EditorActions {
    * Trigger string scan.
    */
   scanStrings(): void {
-    this.bridge.postMessage({ type: 'scanStrings' });
+    const pageSize = this.state.pageSize();
+    const cursor = this.state.cursor();
+    const startIndex = pageSize > 0 ? Math.floor(cursor / pageSize) * pageSize : 0;
+    this.bridge.postMessage({ type: 'scanStrings', startIndex });
   }
 
   /**

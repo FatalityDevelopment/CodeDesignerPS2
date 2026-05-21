@@ -14,7 +14,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
             reg.Add(_ => HandleGetNavHistory(),                                  "GETNAVHISTORY");
             reg.Add(c => HandleRecordNav(c.Address, c.NavSource ?? "user"),      "RECORDNAV");
             reg.Add(_ => HandleClearNavHistory(),                                "CLEARNAVHISTORY");
-            reg.Add(c => HandleNavigateTo(c.Address),                            "NAVIGATETO");
+            reg.Add(c => HandleNavigateTo(c.Address, c.NavSource ?? "navigate"), "NAVIGATETO");
         }
 
         // ── GETNAVHISTORY ─────────────────────────────────────────────────────
@@ -70,13 +70,13 @@ namespace CodeDesigner.Ps2.Bridge.Services
         /// <c>ai_activity</c> notification so the VS Code disasm view (when Follow
         /// AI is enabled) jumps to the address automatically.
         /// </summary>
-        private string HandleNavigateTo(uint? address)
+        private string HandleNavigateTo(uint? address, string source)
         {
             if (address == null)
                 return Responses.Error("Address is required for NAVIGATETO");
 
             uint display = AddressTranslator.NormalizePcToKseg0(address.Value);
-            _ctx.RecordNavEntry(address.Value, "navigate");
+            _ctx.RecordNavEntry(address.Value, source);
             return Responses.Success($"Navigate to 0x{display:X8}");
         }
     }

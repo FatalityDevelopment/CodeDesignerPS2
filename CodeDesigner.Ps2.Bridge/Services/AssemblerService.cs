@@ -807,7 +807,16 @@ namespace CodeDesigner.Ps2.Bridge.Services
                             if (ovr.Kind == Database.Entities.DataFormatKind.Word)
                             {
                                 uint val = BitConverter.ToUInt32(byteBuf, byteIndex);
-                                cmt = TryResolvePointerString(val, analysisBus);
+                                cmt = TryResolvePointerComment(val, analysisBus)
+                                      ?? (LooksLikeRamPointer(val) ? $"-> 0x{val:X8}" : null);
+                            }
+                            else if (ovr.Kind == Database.Entities.DataFormatKind.Byte
+                                     && rAddr == unchecked((uint)ovr.Address))
+                            {
+                                int maxStringBytes = System.Math.Min(
+                                    (int)System.Math.Min(ovr.Length, int.MaxValue),
+                                    byteBuf.Length - byteIndex);
+                                cmt = TryResolveInlineAsciiString(byteBuf, byteIndex, maxStringBytes);
                             }
 
                             results.Add(new InstructionResult
@@ -1094,13 +1103,30 @@ namespace CodeDesigner.Ps2.Bridge.Services
             && text.IndexOf('E') < 0
             && text.IndexOf('e') < 0;
 
+        private static string? TryResolveInlineAsciiString(byte[] buf, int index, int maxBytes)
+        {
+            if (maxBytes <= 0 || index < 0 || index >= buf.Length) return null;
+
+            int end = System.Math.Min(buf.Length, index + maxBytes);
+            var sb = new System.Text.StringBuilder();
+            for (int i = index; i < end; i++)
+            {
+                byte b = buf[i];
+                if (b == 0)
+                {
+                    return sb.Length >= 3 ? $"-> \"{EscapeCommentString(sb.ToString())}\"" : null;
+                }
+                if (b < 0x20 || b > 0x7E) return null;
+                sb.Append((char)b);
+            }
+
+            return sb.Length >= 3 ? $"-> \"{EscapeCommentString(sb.ToString())}\"" : null;
+        }
+
         /// <summary>
-        /// When <paramref name="value"/> looks like a PS2 RAM pointer, tries to
-        /// read up to 64 printable ASCII bytes starting at that address from the
-        /// supplied memory bus.  Returns a <c>-&gt; "string"</c> comment on
-        /// success, or <c>null</c> when the value does not point at a printable
-        /// null-terminated string, when no bus is available, or when any read
-        /// throws.
+        /// When <paramref name="value"/> looks like a PS2 RAM pointer, returns
+        /// a <c>-&gt; 0xADDRESS</c> comment and appends a printable ASCII string
+        /// when one can be read from the supplied memory bus.
         ///
         /// <para>
         /// Plausible pointer windows:
@@ -1111,11 +1137,12 @@ namespace CodeDesigner.Ps2.Bridge.Services
         /// </list>
         /// </para>
         /// </summary>
-        private static string? TryResolvePointerString(
+        private static string? TryResolvePointerComment(
             uint value, CodeDesigner.Ps2.Common.Interfaces.IPs2MemoryBus? bus)
         {
-            if (bus is null) return null;
             if (!LooksLikeRamPointer(value)) return null;
+            string target = $"0x{value:X8}";
+            if (bus is null) return $"-> {target}";
 
             try
             {
@@ -1129,20 +1156,24 @@ namespace CodeDesigner.Ps2.Bridge.Services
                         // Require at least 3 printable chars to consider this a
                         // real string and not random data that happens to start
                         // with a zero byte.
-                        if (sb.Length < 3) return null;
-                        return $"-> \"{sb}\"";
+                        if (sb.Length < 3) return $"-> {target}";
+                        return $"-> {target} \"{EscapeCommentString(sb.ToString())}\"";
                     }
-                    if (b < 0x20 || b > 0x7E) return null; // non-printable → bail
+                    if (b < 0x20 || b > 0x7E) return $"-> {target}";
                     sb.Append((char)b);
                 }
-                // No null terminator within MaxLen; truncate and mark.
-                return sb.Length >= 3 ? $"-> \"{sb}…\"" : null;
+                if (sb.Length >= 3)
+                    return $"-> {target} \"{EscapeCommentString(sb.ToString())}...\"";
+                return $"-> {target}";
             }
             catch
             {
-                return null;
+                return $"-> {target}";
             }
         }
+
+        private static string EscapeCommentString(string text) =>
+            text.Replace("\\", "\\\\").Replace("\"", "\\\"");
 
         /// <summary>True when <paramref name="address"/> falls inside the EE RAM windows usable as a pointer target.</summary>
         private static bool LooksLikeRamPointer(uint address)

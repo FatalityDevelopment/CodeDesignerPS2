@@ -36,6 +36,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
         {
             reg.Add(c => HandleGet(c),    "GETDATAFORMATS");
             reg.Add(c => HandleSet(c),    "SETDATAFORMAT");
+            reg.Add(c => HandleSetMany(c), "SETDATAFORMATS");
             reg.Add(c => HandleClear(c),  "CLEARDATAFORMAT");
         }
 
@@ -115,8 +116,57 @@ namespace CodeDesigner.Ps2.Bridge.Services
             }
         }
 
-        // ── CLEARDATAFORMAT ───────────────────────────────────────────────────
+        // SETDATAFORMATS
+        private string HandleSetMany(CommandMessage c)
+        {
+            try
+            {
+                if (c.DataFormatOverrides is null || c.DataFormatOverrides.Count == 0)
+                {
+                    return Responses.Json(new CommandResponse
+                    {
+                        Success = true,
+                        Command = "SETDATAFORMATS",
+                        DataFormatOverrides = new List<DataFormatOverrideInfo>(),
+                        Message = "0 override(s) set",
+                    });
+                }
 
+                var spans = new List<(long Address, int Length, DataFormatKind Kind)>();
+                foreach (var info in c.DataFormatOverrides)
+                {
+                    if (info.Length <= 0)
+                        return Responses.Error("Each SETDATAFORMATS entry must have a positive length");
+
+                    DataFormatKind kind = ParseKind(info.Kind);
+                    int unit = DbDataFormatRepository.ByteSizeOf(kind);
+                    if (info.Length % unit != 0)
+                        return Responses.Error(
+                            $"Length ({info.Length}) must be a multiple of {unit} for {kind}");
+
+                    spans.Add((info.Address, info.Length, kind));
+                }
+
+                var saved = _ctx.DataFormatRepo
+                    .UpsertManyAsync(c.GameId, spans)
+                    .GetAwaiter().GetResult();
+
+                var infos = saved.Select(ToInfo).ToList();
+                return Responses.Json(new CommandResponse
+                {
+                    Success = true,
+                    Command = "SETDATAFORMATS",
+                    DataFormatOverrides = infos,
+                    Message = $"{infos.Count} override(s) set",
+                });
+            }
+            catch (Exception ex)
+            {
+                return Responses.Error($"SETDATAFORMATS failed: {ex.Message}");
+            }
+        }
+
+        // CLEARDATAFORMAT
         private string HandleClear(CommandMessage c)
         {
             try

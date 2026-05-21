@@ -110,7 +110,7 @@ namespace CodeDesigner.Ps2.Bridge
         public string? MemberName { get; set; }
 
         // RECORDNAV / GETADDRESSHISTORY fields
-        /// <summary>Navigation source label (e.g. "user", "mcp", "navigate") for RECORDNAV.</summary>
+        /// <summary>Navigation source label (e.g. "user", "mcp", "navigate") for address-bearing history entries.</summary>
         public string? NavSource { get; set; }
         /// <summary>Root directory to scan for snapshot-info.json files (GETADDRESSHISTORY).</summary>
         public string? SnapshotDir { get; set; }
@@ -126,6 +126,11 @@ namespace CodeDesigner.Ps2.Bridge
         /// bytes in the selected <see cref="Region"/>.
         /// </summary>
         public List<uint>? Addresses { get; set; }
+
+        /// <summary>
+        /// Batch data-format override payload for SETDATAFORMATS.
+        /// </summary>
+        public List<DataFormatOverrideInfo>? DataFormatOverrides { get; set; }
 
         // PINEADDWATCH / PINEREMOVEWATCH / PINELISTWATCHES fields
         /// <summary>

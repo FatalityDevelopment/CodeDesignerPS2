@@ -69,16 +69,6 @@ const NET_POLL_MS = 4000;
                       title="Browse for emulator executable">…</button>
             </div>
 
-            @if (hasSelectedEmulator()) {
-              <div class="pcsx2-note">
-                @if (isPcsx2Selected()) {
-                  PCSX2 selected. Run launches the emulator, starts the CodeDesigner
-                  control server, and attaches once PINE and the GS stream are up.
-                } @else {
-                  External emulator selected. Run starts it with the selected BIOS, PINE port, and game when available.
-                }
-              </div>
-            }
 
             <div class="row">
               <select id="biosSelect"

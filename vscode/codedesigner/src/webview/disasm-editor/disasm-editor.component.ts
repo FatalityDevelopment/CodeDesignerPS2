@@ -1137,6 +1137,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     address: number;
     state: DisasmEditorService['state'];
     pushNavHistory: () => void;
+    recordNavigation: (address: number) => void;
     checkAndLoadPage: () => boolean;
     updateCursor: (scrollBlock?: ScrollLogicalPosition | null) => void;
   }): void {
@@ -1144,6 +1145,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     const physBase = this.toPhysicalAddress(params.state.baseAddress);
     const instrIndex = Math.floor((physAddr - physBase) / 4);
     if (instrIndex < 0 || instrIndex >= params.state.totalInstructions) { return; }
+    params.recordNavigation(params.address);
     params.pushNavHistory();
     params.state.cursor = instrIndex;
     this.pendingPageScrollBlock = 'center';
@@ -2068,6 +2070,8 @@ export class DisasmEditorComponent implements AfterViewInit {
   }): void {
     this.searchRuntime.prevMatch = params.prevSearchMatch;
     this.searchRuntime.nextMatch = params.nextSearchMatch;
+    const recordNavigation = (address: number) =>
+      params.vscode.postMessage({ type: 'recordNav', address });
 
     this.gotoRuntime.navigate = (addr: number) => {
       const physAddr = params.toPhysicalAddress(addr);
@@ -2078,6 +2082,7 @@ export class DisasmEditorComponent implements AfterViewInit {
         params.gotoStatus.set(`Navigating to 0x${addr.toString(16).toUpperCase()}...`);
         return;
       }
+      recordNavigation(addr);
       params.pushNavHistory();
       params.state.cursor = instrIndex;
       params.state.searchActive = false;
@@ -2259,6 +2264,7 @@ export class DisasmEditorComponent implements AfterViewInit {
         params.vscode.postMessage({ type: 'gotoRegion', address: addr });
         return;
       }
+      recordNavigation(addr);
       params.pushNavHistory();
       params.state.cursor = instrIndex;
       if (params.checkAndLoadPage()) {
@@ -2642,6 +2648,7 @@ export class DisasmEditorComponent implements AfterViewInit {
       address,
       state,
       pushNavHistory,
+      recordNavigation: (addr: number) => vscode.postMessage({ type: 'recordNav', address: addr }),
       checkAndLoadPage,
       updateCursor,
     });

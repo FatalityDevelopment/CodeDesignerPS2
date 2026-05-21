@@ -175,7 +175,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     this._livePanels[0].webview.postMessage({ type: messageType });
   }
 
-  public navigateToAddress(address: number): void {
+  public navigateToAddress(address: number, source: 'user' | 'mcp' = 'user'): void {
     const physAddr = DisasmEditorProvider._toPhysAddr(address);
     const target = this._livePanelInfo.find(info =>
         physAddr >= info.physBaseAddress &&
@@ -184,10 +184,15 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     if (target) {
         target.panel.reveal(undefined, false);
         target.panel.webview.postMessage({ type: 'gotoAddress', address });
-        // Record this navigation in the server-side history so the AI can
-        // query what the user has been looking at.
-        this.socketClient?.recordNav(address, 'user').catch(() => { /* non-fatal */ });
+        // Record this routed navigation in the server-side history using the
+        // caller's source so user jumps and Follow AI jumps stay distinct.
+        this._recordNav(address, source);
     }
+  }
+
+  private _recordNav(address: unknown, source: 'user' | 'mcp' = 'user'): void {
+    if (typeof address !== 'number' || !Number.isFinite(address)) { return; }
+    this.socketClient?.recordNav(address >>> 0, source).catch(() => { /* non-fatal */ });
   }
 
   constructor(socketClient: SocketClient | null, private readonly _extensionUri: vscode.Uri) {
@@ -202,7 +207,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       // Navigate the disassembly view when the AI works at a known address.
       socketClient.onActivityNotification((event: AiActivityEvent) => {
         if (this._followAiEnabled) {
-          this.navigateToAddress(event.address);
+          this.navigateToAddress(event.address, 'mcp');
         }
       });
       // Automatically enable Follow AI mode when the MCP server starts a session.
@@ -834,6 +839,10 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         );
         return;
       }
+      if (message.type === 'recordNav') {
+        this._recordNav(message.address, message.source === 'mcp' ? 'mcp' : 'user');
+        return;
+      }
       if (!fileData) { return; }
       if (message.type === "updateHex") {
         this.sendHexView(
@@ -849,7 +858,13 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         await this.handleSearch(webviewPanel, message.query, message.mode,
           DisasmEditorProvider.BASE_ADDRESS, fileData.length, undefined, fileData);
       } else if (message.type === "scanStrings") {
-        await this.handleFileScan('strings', webviewPanel, fileData, DisasmEditorProvider.BASE_ADDRESS);
+        await this.handleFileScan(
+          'strings',
+          webviewPanel,
+          fileData,
+          DisasmEditorProvider.BASE_ADDRESS,
+          message.startIndex as number | undefined,
+        );
       } else if (message.type === "scanFunctions") {
         await this.handleFileScan('functions', webviewPanel, fileData, DisasmEditorProvider.BASE_ADDRESS);
       } else if (message.type === "scanPointers") {
@@ -1268,6 +1283,10 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 );
                 return;
             }
+            if (message.type === 'recordNav') {
+                this._recordNav(message.address, message.source === 'mcp' ? 'mcp' : 'user');
+                return;
+            }
             if (message.type === 'requestPage') {
                 await this.sendLiveDisasmPage(panel, region, baseAddress, totalBytes, message.startIndex);
             } else if (message.type === 'updateHex') {
@@ -1428,7 +1447,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 await this.handleSearch(panel, message.query, message.mode,
                     baseAddress, totalBytes, region);
             } else if (message.type === 'scanStrings') {
-                await this.handleLiveScan('strings', panel, region, baseAddress, totalBytes);
+                await this.handleLiveScan('strings', panel, region, baseAddress, totalBytes, message.startIndex as number | undefined);
             } else if (message.type === 'scanFunctions') {
                 await this.handleLiveScan('functions', panel, region, baseAddress, totalBytes);
             } else if (message.type === 'scanPointers') {
@@ -1495,6 +1514,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                     // panel's existing position rather than forcing it into column one).
                     target.panel.reveal(undefined, false);
                     target.panel.webview.postMessage({ type: 'gotoAddress', address: addr });
+                    this._recordNav(addr, 'user');
                 } else {
                     // No region found — tell the requesting panel so it can show "out of range".
                     panel.webview.postMessage({ type: 'gotoRegionNotFound', address: addr });
@@ -2530,16 +2550,21 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     panel: vscode.WebviewPanel,
     region: string,
     baseAddress: number,
-    totalBytes: number
+    totalBytes: number,
+    refreshStartIndex?: number,
   ): Promise<void> {
     if (!this.socketClient?.isConnected()) { return; }
     try {
       const cache = this._panelScanCache.get(panel) ?? {};
       if (kind === 'strings') {
         const strings = await this.socketClient.scanLiveStrings(baseAddress, totalBytes, region);
+        await this._formatStringScanResults(strings);
         cache.strings = strings;
         this._panelScanCache.set(panel, cache);
         panel.webview.postMessage({ type: 'stringsUpdated', strings });
+        if (refreshStartIndex !== undefined) {
+          await this.sendLiveDisasmPage(panel, region, baseAddress, totalBytes, refreshStartIndex);
+        }
       } else if (kind === 'functions') {
         const functions = await this.socketClient.scanLiveFunctions(baseAddress, totalBytes, region);
         cache.functions = functions;
@@ -2589,16 +2614,21 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     kind: 'strings' | 'functions' | 'pointers' | 'floats' | 'integers',
     panel: vscode.WebviewPanel,
     fileData: Buffer,
-    baseAddress: number
+    baseAddress: number,
+    refreshStartIndex?: number,
   ): Promise<void> {
     if (!this.socketClient?.isConnected()) { return; }
     try {
       const cache = this._panelScanCache.get(panel) ?? {};
       if (kind === 'strings') {
         const strings = await this.socketClient.getStrings(fileData, baseAddress);
+        await this._formatStringScanResults(strings);
         cache.strings = strings;
         this._panelScanCache.set(panel, cache);
         panel.webview.postMessage({ type: 'stringsUpdated', strings });
+        if (refreshStartIndex !== undefined) {
+          await this.sendDisasmPage(panel, fileData, refreshStartIndex);
+        }
       } else if (kind === 'functions') {
         const functions = await this.socketClient.getFunctions(fileData, baseAddress);
         cache.functions = functions;
@@ -2634,6 +2664,57 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         panel.webview.postMessage({ type: 'integersUpdated', integers: [] });
       }
     }
+  }
+
+  private async _formatStringScanResults(strings: StringEntry[]): Promise<void> {
+    if (!this.socketClient?.isConnected() || strings.length === 0) { return; }
+
+    const gameId = this._currentGameSerial || undefined;
+    const overrides: Array<{ address: number; length: number; kind: DataFormatKind }> = [];
+    for (const entry of strings) {
+      const address = this._parseAddressString(entry.address);
+      if (address === undefined) { continue; }
+
+      const length = Math.max(1, Buffer.byteLength(entry.value ?? '', 'ascii') + 1);
+      overrides.push({ address, length, kind: 'byte' });
+    }
+
+    if (overrides.length === 0) { return; }
+
+    try {
+      await this.socketClient.setDataFormats(overrides, gameId);
+      return;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[SYMBOLS] Bulk string formatting failed, falling back to per-entry saves: ${msg}`);
+    }
+
+    let failures = 0;
+    for (const override of overrides) {
+      try {
+        await this.socketClient.setDataFormat(override.address, override.length, override.kind, gameId);
+      } catch (err) {
+        failures++;
+        if (failures === 1) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.warn(`[SYMBOLS] Failed to format string scan result at 0x${override.address.toString(16)}: ${msg}`);
+        }
+      }
+    }
+
+    if (failures > 0) {
+      vscode.window.showWarningMessage(
+        `Formatted ${overrides.length - failures} string scan result(s); ${failures} could not be saved.`
+      );
+    }
+  }
+
+  private _parseAddressString(address: string): number | undefined {
+    const text = address.trim();
+    if (!text) { return undefined; }
+    const hex = text.startsWith('0x') || text.startsWith('0X') ? text.slice(2) : text;
+    const parsed = Number.parseInt(hex, 16);
+    return Number.isFinite(parsed) ? (parsed >>> 0) : undefined;
   }
 
   /**
@@ -3822,6 +3903,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             let entries: LabelManagerEntry[] = [];
             if (kind === 'strings') {
               const results = await this.socketClient.scanLiveStrings(baseAddress, totalBytes, region);
+              await this._formatStringScanResults(results);
               entries = results.map(r => ({
                 address: r.address,
                 name: r.value.length > 40 ? r.value.substring(0, 40) + '…' : r.value,

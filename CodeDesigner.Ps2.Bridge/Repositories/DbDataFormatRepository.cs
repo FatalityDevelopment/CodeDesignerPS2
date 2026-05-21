@@ -128,6 +128,89 @@ namespace CodeDesigner.Ps2.Bridge.Repositories
         }
 
         /// <summary>
+        /// Inserts a batch of non-overlapping overrides, deleting existing rows
+        /// that touch any new span, and saves the batch in one database write.
+        /// </summary>
+        internal async Task<IReadOnlyList<DataFormatOverride>> UpsertManyAsync(
+            string? gameId,
+            IReadOnlyList<(long Address, int Length, DataFormatKind Kind)> overrides)
+        {
+            if (overrides.Count == 0)
+                return System.Array.Empty<DataFormatOverride>();
+
+            var normalized = overrides
+                .OrderBy(o => o.Address)
+                .Select(o => (
+                    o.Address,
+                    o.Length,
+                    o.Kind,
+                    EndExclusive: o.Address + o.Length))
+                .ToList();
+
+            long previousEnd = long.MinValue;
+            foreach (var item in normalized)
+            {
+                if (item.Length <= 0)
+                    throw new System.ArgumentException("length must be positive", nameof(overrides));
+
+                int unit = ByteSizeOf(item.Kind);
+                if (item.Length % unit != 0)
+                    throw new System.ArgumentException(
+                        $"length ({item.Length}) must be a multiple of {unit} for {item.Kind}",
+                        nameof(overrides));
+
+                if (item.Address < previousEnd)
+                    throw new System.ArgumentException("overrides must not overlap", nameof(overrides));
+
+                previousEnd = item.EndExclusive;
+            }
+
+            int? discId = await ResolveDiscIdAsync(gameId);
+            long minAddress = normalized[0].Address;
+            long maxAddress = normalized[^1].EndExclusive;
+
+            var candidates = await _db.DataFormatOverrides
+                .Where(o => o.GameDiscId == discId)
+                .Where(o => o.Address < maxAddress)
+                .Where(o => o.Address + o.Length > minAddress)
+                .ToListAsync();
+
+            var overlapping = new List<DataFormatOverride>();
+            int incomingIndex = 0;
+            foreach (var existing in candidates.OrderBy(o => o.Address))
+            {
+                long existingEnd = existing.Address + existing.Length;
+                while (incomingIndex < normalized.Count
+                       && normalized[incomingIndex].EndExclusive <= existing.Address)
+                {
+                    incomingIndex++;
+                }
+
+                if (incomingIndex < normalized.Count
+                    && normalized[incomingIndex].Address < existingEnd)
+                {
+                    overlapping.Add(existing);
+                }
+            }
+            if (overlapping.Count > 0)
+                _db.DataFormatOverrides.RemoveRange(overlapping);
+
+            var now = System.DateTime.UtcNow;
+            var entities = normalized.Select(item => new DataFormatOverride
+            {
+                GameDiscId = discId,
+                Address = item.Address,
+                Length = item.Length,
+                Kind = item.Kind,
+                UpdatedAt = now,
+            }).ToList();
+
+            _db.DataFormatOverrides.AddRange(entities);
+            await _db.SaveChangesAsync();
+            return entities;
+        }
+
+        /// <summary>
         /// Removes every override whose byte range intersects
         /// <c>[address, address + length)</c>.  Returns the number of rows
         /// deleted.

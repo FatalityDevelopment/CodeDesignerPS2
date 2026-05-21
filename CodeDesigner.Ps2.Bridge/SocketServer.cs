@@ -740,7 +740,13 @@ namespace CodeDesigner.Ps2.Bridge
                     _activityAddressCommands.Contains(cmdNorm) &&
                     cmdNorm != "NAVIGATETO") // NAVIGATETO records explicitly in its handler
                 {
-                    RecordNavEntry(command.Address.Value, "mcp");
+                    var navSource = string.IsNullOrWhiteSpace(command.NavSource)
+                        ? "mcp"
+                        : command.NavSource!;
+                    if (!string.Equals(navSource, "user", StringComparison.OrdinalIgnoreCase))
+                    {
+                        RecordNavEntry(command.Address.Value, navSource);
+                    }
                 }
 
                 // Try the per-domain command dispatcher first. Returns null

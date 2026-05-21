@@ -85,7 +85,7 @@ interface CommandMessage {
     // RUNUNTILPC fields
     TargetPc?: number;
     TimeoutMs?: number;
-    // RECORDNAV fields
+    // Navigation-history source for address-bearing commands.
     NavSource?: string;
     // GETADDRESSHISTORY fields
     SnapshotDir?: string;
@@ -174,6 +174,8 @@ interface CommandMessage {
     // Data-format overrides (GETDATAFORMATS / SETDATAFORMAT / CLEARDATAFORMAT)
     /** One of "byte" | "half" | "word" | "dword" | "qword" | "float" | "double" for SETDATAFORMAT. */
     DataFormatKind?: string;
+    /** Batch override payload for SETDATAFORMATS. */
+    DataFormatOverrides?: Array<Omit<DataFormatOverrideInfo, 'id'>>;
 }
 
 /**
@@ -1374,7 +1376,19 @@ export class SocketClient {
      * Send a command and wait for response
      */
     private sendCommand(command: CommandMessage, timeoutMs: number = 10000): Promise<CommandResponse> {
-        return this.enqueueCommand(command, timeoutMs);
+        return this.enqueueCommand(this.withDefaultNavSource(command), timeoutMs);
+    }
+
+    private withDefaultNavSource(command: CommandMessage): CommandMessage {
+        if (command.Address === undefined || command.NavSource !== undefined) {
+            return command;
+        }
+
+        // The bridge auto-records address-bearing commands in navigation
+        // history. Commands sent by this client originate from the VS Code UI,
+        // so mark them as user activity unless the caller explicitly says
+        // otherwise.
+        return { ...command, NavSource: 'user' };
     }
 
     private enqueueCommand(command: CommandMessage, timeoutMs: number): Promise<CommandResponse> {
@@ -1635,6 +1649,26 @@ export class SocketClient {
             throw new Error(response.Error || 'SETDATAFORMAT failed');
         }
         return response.DataFormatOverrides?.[0];
+    }
+
+    /**
+     * Persist multiple data-format overrides in one bridge/database round trip.
+     */
+    public async setDataFormats(
+        overrides: Array<Pick<DataFormatOverrideInfo, 'address' | 'length' | 'kind'>>,
+        gameId?: string,
+    ): Promise<DataFormatOverrideInfo[]> {
+        const command: CommandMessage = {
+            Command: 'SETDATAFORMATS',
+            DataFormatOverrides: overrides,
+        };
+        if (gameId) command.GameId = gameId;
+
+        const response = await this.sendCommand(command);
+        if (!response.Success) {
+            throw new Error(response.Error || 'SETDATAFORMATS failed');
+        }
+        return response.DataFormatOverrides ?? [];
     }
 
     /**
