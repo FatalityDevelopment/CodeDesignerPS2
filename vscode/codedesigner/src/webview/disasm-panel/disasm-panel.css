@@ -724,10 +724,23 @@ app-cheats-tab {
     margin-left: 4px;
 }
 
-.acc-badge-ok {
-    font-size: 8px;
-    color: #5cff6d;
+.acc-status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
     flex-shrink: 0;
+    background: #c44;
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.08);
+}
+
+.acc-status-dot.acc-status-on {
+    background: #5cff6d;
+    box-shadow: 0 0 6px 1px rgba(92,255,109,0.55);
+}
+
+.acc-status-dot.acc-status-off {
+    background: #d14f4f;
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.08);
 }
 
 .acc-body {
@@ -775,6 +788,27 @@ app-cheats-tab {
     align-items: center;
     justify-content: center;
     gap: 6px;
+}
+
+.run-row .run-btn {
+    min-width: 0;
+}
+
+.run-row .kill-btn {
+    flex: 0 0 82px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    background: var(--vscode-button-secondaryBackground, #252526);
+    color: var(--vscode-button-secondaryForeground, var(--vscode-foreground, #d4d4d4));
+    border: 1px solid var(--vscode-panel-border, #313131);
+}
+
+.run-row .kill-btn:hover:not(:disabled) {
+    background: #6a2020;
+    border-color: #8a3434;
+    color: #ffcccc;
 }
 
 /* ── Step-button glyphs (Into / Over) ────────────────────────────────────── */
@@ -1446,6 +1480,9 @@ app-mcp-memory-overlay {
 }
 
 .mem-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
     padding-top: 0;
 }
 
@@ -1453,7 +1490,10 @@ app-mcp-memory-overlay {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 6px;
+    min-height: 26px;
+    padding-bottom: 7px;
+    border-bottom: 1px solid var(--vscode-panel-border, #313131);
+    margin-bottom: 0;
     gap: 6px;
 }
 
@@ -1475,14 +1515,17 @@ app-mcp-memory-overlay {
 }
 
 .mem-icon-btn {
-    background: transparent;
-    border: none;
+    width: 26px;
+    height: 24px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--vscode-button-secondaryBackground, #252526);
+    border: 1px solid var(--vscode-panel-border, #313131);
     color: var(--vscode-descriptionForeground);
-    font-size: 13px;
-    padding: 1px 4px;
+    padding: 0;
     cursor: pointer;
-    line-height: 1;
-    border-radius: 2px;
+    border-radius: 4px;
 }
 
 .mem-icon-btn:hover {
@@ -1491,13 +1534,18 @@ app-mcp-memory-overlay {
 }
 
 .mem-small-btn {
-    padding: 2px 8px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    height: 24px;
+    padding: 0 8px;
     font-size: 11px;
     background: var(--vscode-button-secondaryBackground, #3a3d41);
     color: var(--vscode-button-secondaryForeground, #cccccc);
-    border: none;
+    border: 1px solid var(--vscode-panel-border, #313131);
     cursor: pointer;
-    border-radius: 2px;
+    border-radius: 4px;
     white-space: nowrap;
 }
 
@@ -1521,9 +1569,10 @@ app-mcp-memory-overlay {
 
 .mem-status {
     font-size: 11px;
-    padding: 3px 6px;
-    border-radius: 2px;
-    margin-bottom: 6px;
+    padding: 5px 7px;
+    border-radius: 4px;
+    border: 1px solid var(--vscode-panel-border, #313131);
+    background: rgba(255,255,255,0.018);
     color: var(--vscode-descriptionForeground);
 }
 
@@ -1568,7 +1617,7 @@ app-mcp-memory-overlay {
 .mem-list {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 4px;
     overflow-y: auto;
 }
 
@@ -1584,21 +1633,24 @@ app-mcp-memory-overlay {
 .mem-empty {
     font-size: 11px;
     color: var(--vscode-descriptionForeground);
-    padding: 4px 0;
+    padding: 5px 0;
     font-style: italic;
 }
 
 .mem-item {
     display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 0;
-    border-bottom: 1px solid var(--vscode-panel-border, rgba(255,255,255,0.06));
+    align-items: flex-start;
+    gap: 8px;
+    padding: 6px 7px;
+    border: 1px solid var(--vscode-panel-border, #313131);
+    border-radius: 4px;
+    background: rgba(255,255,255,0.018);
     font-size: 12px;
 }
 
-.mem-item:last-child {
-    border-bottom: none;
+.mem-item:hover {
+    background: rgba(255,255,255,0.04);
+    border-color: #4d4d4d;
 }
 
 .mem-item-info {
@@ -1628,6 +1680,7 @@ app-mcp-memory-overlay {
     align-items: center;
     gap: 3px;
     flex-shrink: 0;
+    padding-top: 1px;
 }
 
 .mem-item-confirm {
@@ -1638,13 +1691,19 @@ app-mcp-memory-overlay {
 }
 
 .mem-item-btn {
-    padding: 2px 7px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    min-width: 26px;
+    height: 24px;
+    padding: 0 7px;
     font-size: 11px;
     background: var(--vscode-button-secondaryBackground, #3a3d41);
     color: var(--vscode-button-secondaryForeground, #cccccc);
-    border: none;
+    border: 1px solid var(--vscode-panel-border, #313131);
     cursor: pointer;
-    border-radius: 2px;
+    border-radius: 4px;
     white-space: nowrap;
 }
 

@@ -15,11 +15,19 @@ import './disasm-panel.css';
 
 /** Poll interval for the MCP server process status badge. */
 const MCP_POLL_MS = 8000;
+/** Poll interval for the selected emulator process status dot. */
+const EMULATOR_PROCESS_POLL_MS = 4000;
 
 /** Message sent by the provider when connection state changes. */
 interface ConnectionStatusMsg {
   type: 'connectionStatus';
   connected: boolean;
+}
+
+/** Message sent by the provider with the selected emulator process status. */
+interface EmulatorProcessStatusMsg {
+  command: 'emulatorProcessStatus';
+  running: boolean;
 }
 
 /** Message sent by the provider when the emulator pauses or resumes. */
@@ -192,6 +200,8 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
   networkStatus: NetworkStatus | null = null;
   /** True when the CodeDesigner MCP server process is running. */
   mcpOnline = false;
+  /** True when the selected emulator process is running. */
+  emulatorProcessRunning = false;
   /** AI agent profiles shown in the Agents section. */
   agents: AgentSummary[] = [];
   agentsError = '';
@@ -202,6 +212,7 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
   panelIconUri = '';
   private subs: Subscription[] = [];
   private mcpPollTimer?: ReturnType<typeof setInterval>;
+  private emulatorProcessPollTimer?: ReturnType<typeof setInterval>;
 
   @ViewChild(SettingsTabComponent) private settingsTab?: SettingsTabComponent;
 
@@ -215,6 +226,7 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
         if (!msg.connected) { this.isPcsx2 = false; }
         // Reload memories when the socket connects (in case the first load failed while disconnected)
         if (msg.connected) { this.settingsTab?.load(); }
+        this.requestEmulatorProcessStatus();
       }),
       this.bridge.on<Pcsx2ModeChangedMsg>('pcsx2ModeChanged').subscribe(msg => {
         this.isPcsx2 = msg.isPcsx2;
@@ -297,6 +309,9 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
       this.bridge.on<McpStatusMsg>('mcpStatus').subscribe(msg => {
         this.mcpOnline = !!msg.online;
       }),
+      this.bridge.on<EmulatorProcessStatusMsg>('emulatorProcessStatus').subscribe(msg => {
+        this.emulatorProcessRunning = !!msg.running;
+      }),
       // AI agent profiles for the Agents section
       this.bridge.on<AgentsResultMsg>('agentsResult').subscribe(msg => {
         this.agents = msg.entries ?? [];
@@ -312,6 +327,8 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
     // Poll the MCP server process status for the always-visible status badge.
     this.requestMcpStatus();
     this.mcpPollTimer = setInterval(() => this.requestMcpStatus(), MCP_POLL_MS);
+    this.requestEmulatorProcessStatus();
+    this.emulatorProcessPollTimer = setInterval(() => this.requestEmulatorProcessStatus(), EMULATOR_PROCESS_POLL_MS);
   }
 
   ngAfterViewInit(): void {
@@ -322,11 +339,17 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
   ngOnDestroy(): void {
     this.subs.forEach(s => s.unsubscribe());
     if (this.mcpPollTimer !== undefined) { clearInterval(this.mcpPollTimer); }
+    if (this.emulatorProcessPollTimer !== undefined) { clearInterval(this.emulatorProcessPollTimer); }
   }
 
   /** Ask the provider whether the MCP server process is running. */
   requestMcpStatus(): void {
     this.bridge.postMessage({ command: 'requestMcpStatus' });
+  }
+
+  /** Ask the provider whether the selected emulator process is currently running. */
+  requestEmulatorProcessStatus(): void {
+    this.bridge.postMessage({ command: 'requestEmulatorProcessStatus' });
   }
 
   // ── Status bar handlers ──────────────────────────────────────────────────
@@ -405,6 +428,13 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
     });
   }
 
+  killEmulatorProcess(): void {
+    this.bridge.postMessage({
+      command: 'killEmulatorProcess',
+      emulatorPath: this.selectedEmulator,
+    });
+  }
+
   startNetwork(): void {
     this.bridge.postMessage({ command: 'startNetwork' });
   }
@@ -459,6 +489,7 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
   onSelectedEmulatorChange(path: string): void {
     this.selectedEmulator = path;
     this.bridge.postMessage({ command: 'emulatorChanged', emulatorPath: path });
+    this.requestEmulatorProcessStatus();
   }
 
   onSelectedBiosChange(path: string): void {

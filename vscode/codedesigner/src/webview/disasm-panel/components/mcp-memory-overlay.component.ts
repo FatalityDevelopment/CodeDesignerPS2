@@ -7,6 +7,7 @@ import {
   computed,
   effect,
 } from '@angular/core';
+import { IconComponent } from '../../shared/icon.component';
 
 export interface McpMemoryEntry {
   id:        number;
@@ -37,6 +38,7 @@ const MEM_PREVIEW = 5;
 @Component({
   selector: 'app-mcp-memory-overlay',
   standalone: true,
+  imports: [IconComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
   template: `
@@ -44,11 +46,17 @@ const MEM_PREVIEW = 5;
 
   <!-- Section header -->
   <div class="mem-section-header">
-    <h4 class="mem-section-title">Memories</h4>
+    <h4 class="mem-section-title">Memory Store</h4>
     <div class="mem-header-actions">
-      <button class="mem-icon-btn" title="Refresh list" (click)="load()">&#x21BB;</button>
-      <button class="mem-small-btn" title="Import a .md file" (click)="importEntry.emit()">&#x2B06; Import</button>
-      <button class="mem-small-btn mem-primary-btn" title="Create new memory" (click)="onAddClick()">+ New</button>
+      <button class="mem-icon-btn" title="Refresh list" (click)="load()">
+        <app-icon name="refreshcw" [size]="12" />
+      </button>
+      <button class="mem-small-btn" title="Import a .md file" (click)="importEntry.emit()">
+        <app-icon name="upload" [size]="12" /><span>Import</span>
+      </button>
+      <button class="mem-small-btn mem-primary-btn" title="Create new memory" (click)="onAddClick()">
+        <app-icon name="plus" [size]="12" /><span>New</span>
+      </button>
     </div>
   </div>
 
@@ -120,10 +128,14 @@ const MEM_PREVIEW = 5;
                     (click)="editEntry.emit(entry)">Edit</button>
             <button class="mem-item-btn"
                     title="Export to .md file"
-                    (click)="exportEntry.emit(entry)">&#x2B07;</button>
+                    (click)="exportEntry.emit(entry)">
+              <app-icon name="download" [size]="12" />
+            </button>
             <button class="mem-item-btn mem-danger-btn"
                     title="Delete this entry"
-                    (click)="pendingDelete.set(entry.id)">&#x2715;</button>
+                    (click)="pendingDelete.set(entry.id)">
+              <app-icon name="x" [size]="12" />
+            </button>
           }
         </div>
       </div>
@@ -138,13 +150,63 @@ const MEM_PREVIEW = 5;
 </div>
   `,
   styles: [`
-    .mem-filter-bar { display: flex; gap: 4px; margin-bottom: 6px; }
-    .mem-filter-btn { padding: 2px 8px; font-size: 11px; cursor: pointer; border: 1px solid var(--vscode-button-border, transparent); background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); border-radius: 3px; }
-    .mem-filter-btn:hover { background: var(--vscode-button-secondaryHoverBackground); }
-    .mem-filter-active { background: var(--vscode-button-background) !important; color: var(--vscode-button-foreground) !important; }
-    .mem-item-badge { font-size: 10px; padding: 1px 5px; border-radius: 3px; margin-left: 4px; }
-    .mem-badge-shared { background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
-    .mem-badge-agent  { background: var(--vscode-statusBarItem-warningBackground, #f0a500); color: var(--vscode-statusBarItem-warningForeground, #fff); }
+    .mem-filter-bar {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 3px;
+      padding: 3px;
+      margin-bottom: 2px;
+      border: 1px solid var(--vscode-panel-border, #313131);
+      border-radius: 4px;
+      background: rgba(255,255,255,0.018);
+    }
+    .mem-filter-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 0;
+      height: 24px;
+      padding: 0 6px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 11px;
+      cursor: pointer;
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--vscode-descriptionForeground, #8f8f8f);
+      border-radius: 3px;
+    }
+    .mem-filter-btn:hover {
+      background: rgba(255,255,255,0.07);
+      color: var(--vscode-foreground, #d4d4d4);
+    }
+    .mem-filter-active {
+      background: var(--vscode-button-secondaryBackground, #252526) !important;
+      border-color: var(--vscode-panel-border, #454545) !important;
+      color: var(--vscode-foreground, #d4d4d4) !important;
+    }
+    .mem-item-badge {
+      display: inline-flex;
+      align-items: center;
+      align-self: flex-start;
+      height: 16px;
+      margin-top: 3px;
+      padding: 0 6px;
+      border-radius: 3px;
+      font-size: 10px;
+      line-height: 1;
+    }
+    .mem-badge-shared {
+      background: rgba(78, 201, 176, 0.14);
+      border: 1px solid rgba(78, 201, 176, 0.28);
+      color: #7bd9c8;
+    }
+    .mem-badge-agent {
+      background: rgba(232, 160, 48, 0.14);
+      border: 1px solid rgba(232, 160, 48, 0.32);
+      color: #e8a030;
+    }
   `],
 })
 export class McpMemoryOverlayComponent {

@@ -250,6 +250,12 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 if (t === this.emulatorProcessTerminal) {
                     getOutputChannel().info('Built-in emulator process exited.');
                     this.emulatorProcessTerminal = undefined;
+                    void this.postEmulatorProcessStatus();
+                }
+                if (t === this._pcsx2Terminal) {
+                    getOutputChannel().info('Emulator launcher terminal closed.');
+                    this._pcsx2Terminal = undefined;
+                    void this.postEmulatorProcessStatus();
                 }
             })
         );
@@ -352,6 +358,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                         msg.biosPath ?? this.selectedBiosPath,
                         msg.gamePath ?? this.selectedGamePath
                     );
+                    break;
+                case 'killEmulatorProcess':
+                    await this.handleKillEmulatorProcess(msg.emulatorPath ?? this.selectedEmulatorPath);
                     break;
                 case 'snapshot':
                     await this.handleSnapshot();
@@ -524,6 +533,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 // ── MCP server process status ─────────────────────────────
                 case 'requestMcpStatus':
                     await this.handleRequestMcpStatus();
+                    break;
+                case 'requestEmulatorProcessStatus':
+                    await this.handleRequestEmulatorProcessStatus();
                     break;
                 // ── AI agent profiles ─────────────────────────────────────
                 case 'requestAgents':
@@ -1024,6 +1036,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         });
         // Restore Follow-AI button state (the editor provider owns the flag).
         this.webview.postMessage({ command: 'followAiState', enabled: this.editorProvider.followAiEnabled });
+        void this.postEmulatorProcessStatus();
         void this.postLoadedGame();
     }
 
@@ -1532,6 +1545,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         this._bridgeMode = false;
         this._pendingRunMode = null;
         this.webview?.postMessage({ command: 'connectionStatus', connected: false });
+        void this.postEmulatorProcessStatus();
     }
 
     private startRuntimeMode(mode: 'emulator' | 'pcsx2', biosPath: string, gamePath: string): void {
@@ -1714,6 +1728,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 terminal.show(true);
             }
 
+            void this.postEmulatorProcessStatus(emulatorPath);
+            setTimeout(() => void this.postEmulatorProcessStatus(emulatorPath), 1500);
             return true;
         }
 
@@ -1799,6 +1815,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             void this.capturePcsx2PidFromFile(pidPath);
             out.info(`PCSX2 launched. Emu log: ${emuLogPath}`);
             this._launchedPcsx2InSession = true;
+            void this.postEmulatorProcessStatus(emulatorPath);
+            setTimeout(() => void this.postEmulatorProcessStatus(emulatorPath), 1500);
             return true;
         }
 
@@ -1815,6 +1833,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         terminal.show(true);
         out.info('PCSX2 started via terminal manager.');
         this._launchedPcsx2InSession = true;
+        void this.postEmulatorProcessStatus(emulatorPath);
+        setTimeout(() => void this.postEmulatorProcessStatus(emulatorPath), 1500);
         return true;
     }
 
@@ -1973,6 +1993,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         });
         terminal.show(false);
         this.emulatorProcessTerminal = terminal;
+        void this.postEmulatorProcessStatus();
+        setTimeout(() => void this.postEmulatorProcessStatus(), 1500);
         return true;
     }
 
@@ -3942,6 +3964,208 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         this.webview?.postMessage({ command: 'mcpStatus', online });
     }
 
+    /** Escape a string for a single-quoted PowerShell literal. */
+    private static psQuote(value: string): string {
+        return `'${value.replace(/'/g, "''")}'`;
+    }
+
+    /** Run a short child process and capture stdout/stderr. */
+    private static execFileCapture(
+        file: string,
+        args: string[],
+        timeout = 4000,
+    ): Promise<{ stdout: string; stderr: string }> {
+        return new Promise((resolve, reject) => {
+            child_process.execFile(file, args, { timeout, windowsHide: true }, (err, stdout, stderr) => {
+                if (err) { reject(err); return; }
+                resolve({ stdout: String(stdout ?? ''), stderr: String(stderr ?? '') });
+            });
+        });
+    }
+
+    /** True when a process with the exact executable path is currently running. */
+    private static async isProcessRunningByPath(exePath: string): Promise<boolean> {
+        if (!exePath) { return false; }
+
+        if (process.platform === 'win32') {
+            const imageName = path.basename(exePath).replace(/'/g, "''");
+            const script = [
+                `$target = ${DisasmPanelProvider.psQuote(exePath)}`,
+                '$target = [System.IO.Path]::GetFullPath($target)',
+                `$procs = @(Get-CimInstance Win32_Process -Filter "Name='${imageName}'" | Where-Object { $_.ExecutablePath -and ([System.IO.Path]::GetFullPath($_.ExecutablePath) -ieq $target) })`,
+                'if ($procs.Count -gt 0) { "1" }',
+            ].join('; ');
+            try {
+                const { stdout } = await DisasmPanelProvider.execFileCapture(
+                    'powershell.exe',
+                    ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script],
+                );
+                return stdout.trim().length > 0;
+            } catch {
+                return false;
+            }
+        }
+
+        const resolved = path.resolve(exePath);
+        try {
+            const { stdout } = await DisasmPanelProvider.execFileCapture('ps', ['-axo', 'pid=,args=']);
+            return stdout.split(/\r?\n/).some(line => line.includes(resolved));
+        } catch {
+            return false;
+        }
+    }
+
+    /** Kill all processes whose executable path exactly matches the provided path. */
+    private static async killProcessesByPath(exePath: string): Promise<boolean> {
+        if (!exePath) { return false; }
+
+        if (process.platform === 'win32') {
+            const imageName = path.basename(exePath).replace(/'/g, "''");
+            const script = [
+                `$target = ${DisasmPanelProvider.psQuote(exePath)}`,
+                '$target = [System.IO.Path]::GetFullPath($target)',
+                `$procs = @(Get-CimInstance Win32_Process -Filter "Name='${imageName}'" | Where-Object { $_.ExecutablePath -and ([System.IO.Path]::GetFullPath($_.ExecutablePath) -ieq $target) })`,
+                'foreach ($p in $procs) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }',
+                'if ($procs.Count -gt 0) { "1" }',
+            ].join('; ');
+            try {
+                const { stdout } = await DisasmPanelProvider.execFileCapture(
+                    'powershell.exe',
+                    ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script],
+                    6000,
+                );
+                return stdout.trim().length > 0;
+            } catch {
+                return false;
+            }
+        }
+
+        const resolved = path.resolve(exePath);
+        try {
+            const { stdout } = await DisasmPanelProvider.execFileCapture('ps', ['-axo', 'pid=,args=']);
+            const pids = stdout
+                .split(/\r?\n/)
+                .map(line => line.trim())
+                .filter(line => line.includes(resolved))
+                .map(line => Number(line.split(/\s+/, 1)[0]))
+                .filter(pid => Number.isFinite(pid) && pid > 0);
+            for (const pid of pids) {
+                try { process.kill(pid, 'SIGTERM'); } catch { /* ignore */ }
+            }
+            return pids.length > 0;
+        } catch {
+            return false;
+        }
+    }
+
+    /** Candidate emulator executable paths whose process state can be probed or killed. */
+    private emulatorProcessCandidatePaths(emulatorPath = this.selectedEmulatorPath): string[] {
+        const candidates: string[] = [];
+        const selected = (emulatorPath ?? '').trim();
+        if (selected) {
+            candidates.push(this.resolvePath(selected));
+        }
+
+        const pcsx2Exe = DisasmPanelProvider.detectPcsx2Exe();
+        if ((!selected || this.isPcsx2Selection(selected)) && pcsx2Exe) {
+            candidates.push(pcsx2Exe);
+        }
+
+        const builtInExe = DisasmPanelProvider.findEmulatorExe();
+        if (!selected && builtInExe) {
+            candidates.push(builtInExe);
+        }
+
+        return Array.from(new Set(candidates.filter(Boolean).map(p => path.resolve(p))));
+    }
+
+    /** Detects the selected emulator, including instances left running before VS Code reopened. */
+    private async detectSelectedEmulatorProcessRunning(emulatorPath = this.selectedEmulatorPath): Promise<boolean> {
+        const selected = (emulatorPath ?? '').trim();
+        const host = (this.settings.pcsx2?.host ?? '127.0.0.1').trim() || '127.0.0.1';
+        const slot = this.settings.pcsx2?.slot ?? 28011;
+
+        // PINE listeners survive VS Code reloads and are the most reliable sign
+        // that PCSX2 is alive and attachable. For explicitly selected non-PCSX2
+        // emulators, prefer exact process-path checks below so another emulator
+        // on the same PINE port does not light this row green.
+        if ((!selected || this.isPcsx2Selection(selected)) && await DisasmPanelProvider.probePortListening(slot, host)) {
+            return true;
+        }
+
+        // With no explicit selection, also detect a leftover built-in emulator.
+        if (!selected && await DisasmPanelProvider.probePortListening(28012)) {
+            return true;
+        }
+
+        for (const candidate of this.emulatorProcessCandidatePaths(emulatorPath)) {
+            if (await DisasmPanelProvider.isProcessRunningByPath(candidate)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /** Probe the selected emulator process and push its status to the panel. */
+    private async postEmulatorProcessStatus(emulatorPath = this.selectedEmulatorPath): Promise<void> {
+        const running = await this.detectSelectedEmulatorProcessRunning(emulatorPath);
+        this.webview?.postMessage({ command: 'emulatorProcessStatus', running });
+    }
+
+    /** Webview request handler for the Connection-section emulator status dot. */
+    private async handleRequestEmulatorProcessStatus(): Promise<void> {
+        await this.postEmulatorProcessStatus();
+    }
+
+    /** Explicit user action: stop the selected emulator and refresh the process status. */
+    private async handleKillEmulatorProcess(emulatorPath: string): Promise<void> {
+        const out = getOutputChannel();
+        const selected = (emulatorPath ?? this.selectedEmulatorPath ?? '').trim();
+        if (selected) { this.selectedEmulatorPath = selected; }
+
+        let killed = false;
+        for (const candidate of this.emulatorProcessCandidatePaths(selected)) {
+            if (await DisasmPanelProvider.killProcessesByPath(candidate)) {
+                out.info(`Killed emulator process: ${candidate}`);
+                killed = true;
+            }
+        }
+
+        if (!selected || this.isPcsx2Selection(selected)) {
+            this.terminateOrphanedPcsx2ProcessesIfNeeded('user requested kill', true);
+            killed = true;
+        }
+
+        if (this._pcsx2Terminal) {
+            try { this._pcsx2Terminal.dispose(); } catch { /* ignore */ }
+            this._pcsx2Terminal = undefined;
+        }
+        if (this._pcsx2LogTimer) {
+            try { clearInterval(this._pcsx2LogTimer); } catch { /* ignore */ }
+            this._pcsx2LogTimer = undefined;
+        }
+
+        if (this.emulatorProcessTerminal) {
+            try { this.emulatorProcessTerminal.dispose(); } catch { /* ignore */ }
+            this.emulatorProcessTerminal = undefined;
+            killed = true;
+        }
+
+        if (this.emulatorTerminal) {
+            try { this.emulatorTerminal.dispose(); } catch { /* ignore */ }
+            this.emulatorTerminal = undefined;
+        }
+
+        try { this.socketClient.disconnect(); } catch { /* ignore */ }
+        this.cleanupProcess();
+
+        if (!killed) {
+            vscode.window.showInformationMessage('No running emulator process was detected.');
+        }
+        await this.postEmulatorProcessStatus(selected);
+    }
+
     /** Maps an agent name (by keyword) to a bundled Mortal Kombat profile picture. */
     private static readonly AGENT_IMAGE_MAP: ReadonlyArray<{ file: string; keywords: string[] }> = [
         { file: 'scorpion.png',    keywords: ['scorpion'] },
@@ -4198,6 +4422,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         });
         terminal.show(false);
         this.emulatorProcessTerminal = terminal;
+        void this.postEmulatorProcessStatus();
+        setTimeout(() => void this.postEmulatorProcessStatus(), 1500);
         return true;
     }
 

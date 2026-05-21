@@ -49,7 +49,10 @@ const NET_POLL_MS = 4000;
           <app-icon class="acc-chevron" [name]="connOpen() ? 'chevrondown' : 'chevronright'" [size]="13" />
           <app-icon class="acc-ico" name="link" [size]="14" />
           <span class="acc-title">Connection</span>
-          @if (isConnected()) { <span class="acc-badge-ok">●</span> }
+          <span class="acc-status-dot"
+                [class.acc-status-on]="emulatorProcessRunning()"
+                [class.acc-status-off]="!emulatorProcessRunning()"
+                [title]="emulatorProcessRunning() ? 'Emulator process is running' : 'No emulator process detected'"></span>
         </button>
         @if (connOpen()) {
           <div class="acc-body">
@@ -101,11 +104,16 @@ const NET_POLL_MS = 4000;
                       title="Browse for ISO, BIN, or ZIP disc image">…</button>
             </div>
 
-            <div class="row">
+            <div class="row run-row">
               <button id="runBtn" class="run-btn" (click)="runPcsx2Click.emit()"
                       [disabled]="!hasSelectedEmulator()"
                       title="Launch the emulator and attach the debugger">
                 <app-icon name="play" [size]="13" /><span>Run</span>
+              </button>
+              <button id="killEmulatorBtn" class="kill-btn" (click)="killEmulatorClick.emit()"
+                      [disabled]="!emulatorProcessRunning()"
+                      title="Kill the running emulator process">
+                <app-icon name="x" [size]="13" /><span>Kill</span>
               </button>
             </div>
 
@@ -514,7 +522,7 @@ const NET_POLL_MS = 4000;
           <app-icon class="acc-ico" name="database" [size]="14" />
           <span class="acc-title">Memories</span>
         </button>
-        <div [style.display]="memOpen() ? '' : 'none'">
+        <div class="acc-body" [style.display]="memOpen() ? '' : 'none'">
           <app-mcp-memory-overlay
             (listEntries)="listEntries.emit()"
             (addEntry)="addEntry.emit($event)"
@@ -579,6 +587,7 @@ export class SettingsTabComponent implements OnDestroy {
   readonly selectedBios   = input('');
   readonly selectedGame   = input('');
   readonly isConnected    = input(false);
+  readonly emulatorProcessRunning = input(false);
   readonly snapshots      = input<SnapshotEntry[]>([]);
   readonly currentGameName = input('');
   readonly navHistory        = input<NavHistoryEntry[]>([]);
@@ -595,6 +604,7 @@ export class SettingsTabComponent implements OnDestroy {
 
   readonly connectClick       = output<void>();
   readonly runPcsx2Click      = output<void>();
+  readonly killEmulatorClick  = output<void>();
   readonly startNetworkClick  = output<void>();
   readonly restartClick       = output<void>();
   readonly snapshotClick      = output<void>();
