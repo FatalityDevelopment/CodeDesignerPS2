@@ -745,12 +745,12 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         }
 
         // 3. Auto-detect the PCSX2 executable and add it to the emulators list.
-        //    Only PCSX2 entries appear in the selector; the Bridge is always
-        //    resolved from the install directory, never from this list.
+        //    Keep any user-selected PCSX2-compatible emulator entries too; the
+        //    Bridge is resolved from the install directory, never from this list.
         //    BIOS files must be provided and configured by the user.
         const pcsx2Exe = DisasmPanelProvider.detectPcsx2Exe();
+        const existing = this.settings.emulators ?? [];
         if (pcsx2Exe) {
-            const existing = (this.settings.emulators ?? []).filter(e => this.isPcsx2Entry(e));
             if (!existing.some(e => e.path === pcsx2Exe)) {
                 this.settings.emulators = [
                     { type: 'PCSX2', path: pcsx2Exe },
@@ -760,8 +760,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 this.settings.emulators = existing;
             }
         } else {
-            // Keep only PCSX2 entries — CodeDesigner Bridge is auto-detected.
-            this.settings.emulators = (this.settings.emulators ?? []).filter(e => this.isPcsx2Entry(e));
+            this.settings.emulators = existing;
         }
     }
 
@@ -1000,7 +999,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 
     private postInitMessage(): void {
         if (!this.webview) { return; }
-        // Only PCSX2 entries appear in the emulator selector; Bridge is auto-detected.
+        // User-selected emulator entries appear in the selector; Bridge is auto-detected.
         const emulators = (this.settings.emulators ?? []).map(e => ({ label: e.type, value: e.path }));
         // BIOS options come from user configuration only (BIOS files must be provided by the user).
         const biosOptions = (this.settings.bios ?? []).map(b => ({ label: b.name, value: b.path }));
@@ -1228,6 +1227,43 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         this.selectedBiosPath = biosPath;
         this.selectedGamePath = gamePath;
         out.show(true);
+
+        if (emulatorPath && !this.isPcsx2Selection(emulatorPath)) {
+            void (async () => {
+                try {
+                    const host = (this.settings.pcsx2?.host ?? '127.0.0.1').trim() || '127.0.0.1';
+                    const slot = this.settings.pcsx2?.slot ?? 28011;
+
+                    this._pendingRunMode = null;
+                    if (!this.socketClient.isConnected() && !this.emulatorTerminal) {
+                        this.launchControlServerAndConnect(emulatorPath);
+                    }
+
+                    if (!this.handleStartPcsx2(emulatorPath, biosPath, gamePath)) { return; }
+
+                    if (!await this._waitForSocketConnected(20000)) {
+                        out.error('Control socket never connected; cannot attach external emulator.');
+                        return;
+                    }
+
+                    if (!await this._waitForPortListening(slot, host, 20000)) {
+                        out.error(`External emulator PINE port did not open on ${host}:${slot}.`);
+                        return;
+                    }
+
+                    if (!await this._attachPcsx2()) {
+                        out.error('Failed to attach to the external emulator PINE socket.');
+                        return;
+                    }
+
+                    await this._registerBreakpointsAndResume(true);
+                    out.info('Attached to external emulator and sent RESUME.');
+                } catch (err: any) {
+                    out.error(`Run external emulator failed: ${err?.message ?? err}`);
+                }
+            })();
+            return;
+        }
 
         void (async () => {
           try {
@@ -1614,16 +1650,86 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         this.selectedBiosPath = biosPath;
         this.selectedGamePath = gamePath;
 
+        if (emulatorPath && !this.isPcsx2Selection(emulatorPath)) {
+            const emulatorExe = this.resolvePath(emulatorPath);
+            if (!fs.existsSync(emulatorExe)) {
+                const message = `Selected emulator not found: ${emulatorExe}`;
+                out.error(message);
+                vscode.window.showErrorMessage(message);
+                return false;
+            }
+
+            const args: string[] = [];
+            const pinePort = this.settings.pcsx2?.slot ?? 28011;
+            args.push('--pine', '--port', String(pinePort));
+            out.info(`External emulator PINE port: ${pinePort}`);
+
+            const resolvedBios = biosPath ? this.resolvePath(biosPath) : '';
+            if (resolvedBios && fs.existsSync(resolvedBios)) {
+                out.info(`External emulator BIOS selection: ${resolvedBios}`);
+                args.push('--bios', resolvedBios);
+            } else {
+                out.warn('No valid BIOS selected for emulator launch; starting without a BIOS argument.');
+            }
+
+            const resolvedDisc = gamePath ? this.resolvePath(gamePath) : '';
+            if (resolvedDisc && fs.existsSync(resolvedDisc)) {
+                out.info(`Emulator game selection: ${resolvedDisc}`);
+                args.push(resolvedDisc);
+            } else {
+                out.warn('No valid game selected for emulator launch; starting without a boot image.');
+            }
+
+            const preview = [emulatorExe, ...args]
+                .map(v => v.includes(' ') ? `"${v}"` : v)
+                .join(' ');
+            out.info(`Starting emulator: ${preview}`);
+
+            if (this._pcsx2Terminal) {
+                try { this._pcsx2Terminal.dispose(); } catch { /* ignore */ }
+                this._pcsx2Terminal = undefined;
+            }
+
+            if (process.platform === 'win32') {
+                const scriptPath = path.join(this.extensionPath, 'scripts', 'launch-pcsx2-hidden.ps1');
+                const logDir = path.join(this._globalStoragePath, 'pcsx2');
+                const emuLogPath = path.join(logDir, 'emulog.txt');
+                const pidPath = path.join(logDir, 'pid.txt');
+                try { fs.mkdirSync(logDir, { recursive: true }); } catch { /* ignore */ }
+                try { fs.writeFileSync(pidPath, ''); } catch { /* ignore */ }
+
+                const terminal = vscode.window.createTerminal({ name: 'Emulator Launcher', shellPath: 'powershell.exe', shellArgs: ['-NoLogo'] });
+                this._pcsx2Terminal = terminal;
+                terminal.show(true);
+                const psArgs = args.map(a => `'${a.replace(/'/g, "''")}'`).join(',');
+                const cmd = `& "${scriptPath}" -ExePath "${emulatorExe}" -EmuLogPath "${emuLogPath}" -PidPath "${pidPath}" -Pcsx2Mode:$false -ArgList @(${psArgs})`;
+                terminal.sendText(cmd, true);
+            } else {
+                const terminal = vscode.window.createTerminal({
+                    name: 'Emulator',
+                    shellPath: emulatorExe,
+                    shellArgs: args,
+                });
+                this._pcsx2Terminal = terminal;
+                terminal.show(true);
+            }
+
+            return true;
+        }
+
         // A launch always starts a fresh instance, so sweep a PCSX2 this session
         // started earlier — otherwise instances accumulate (disconnect now leaves
         // PCSX2 running). No-ops on the first launch of the session.
         this.terminateOrphanedPcsx2ProcessesIfNeeded('relaunch');
 
-        // Resolve PCSX2 path: prefer the passed value (from emulator selector if PCSX2 entry),
-        // then fall back to auto-detection.
+        // Resolve emulator path: prefer the selected executable even when it is a
+        // PCSX2-compatible fork with a different filename, then fall back to auto-detection.
         let pcsx2Exe = '';
-        if (emulatorPath && this.isPcsx2Selection(emulatorPath)) {
-            pcsx2Exe = this.resolvePath(emulatorPath);
+        if (emulatorPath) {
+            const selectedExe = this.resolvePath(emulatorPath);
+            if (fs.existsSync(selectedExe)) {
+                pcsx2Exe = selectedExe;
+            }
         }
         if (!pcsx2Exe || !fs.existsSync(pcsx2Exe)) {
             pcsx2Exe = DisasmPanelProvider.detectPcsx2Exe() ?? '';
@@ -1686,7 +1792,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             const terminal = vscode.window.createTerminal({ name: 'PCSX2 Launcher', shellPath: 'powershell.exe', shellArgs: ['-NoLogo'] });
             this._pcsx2Terminal = terminal;
             terminal.show(true);
-            const cmd = `& "${scriptPath}" -ExePath "${pcsx2Exe}" -EmuLogPath "${emuLogPath}" -PidPath "${pidPath}" -ArgList @(${pcsx2Args.map(a => `'${a.replace(/'/g, "''")}'`).join(',')})`;
+            const cmd = `& "${scriptPath}" -ExePath "${pcsx2Exe}" -EmuLogPath "${emuLogPath}" -PidPath "${pidPath}" -Pcsx2Mode:$true -ArgList @(${pcsx2Args.map(a => `'${a.replace(/'/g, "''")}'`).join(',')})`;
             terminal.sendText(cmd, true);
 
             this.startPcsx2LogParsing(emuLogPath);
@@ -1808,6 +1914,16 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             await new Promise(r => setTimeout(r, 200));
         }
         return this.socketClient.isConnected();
+    }
+
+    /** Polls until a loopback port accepts connections, or the timeout elapses. */
+    private async _waitForPortListening(port: number, host: string, timeoutMs: number): Promise<boolean> {
+        const deadline = Date.now() + timeoutMs;
+        while (Date.now() < deadline) {
+            if (await DisasmPanelProvider.probePortListening(port, host)) { return true; }
+            await new Promise(r => setTimeout(r, 200));
+        }
+        return DisasmPanelProvider.probePortListening(port, host);
     }
 
     /**

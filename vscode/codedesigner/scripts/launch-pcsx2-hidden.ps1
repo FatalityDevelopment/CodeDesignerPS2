@@ -2,17 +2,43 @@ param(
     [Parameter(Mandatory = $true)][string]$ExePath,
     [Parameter(Mandatory = $true)][string]$EmuLogPath,
     [Parameter(Mandatory = $true)][string]$PidPath,
+    [bool]$Pcsx2Mode = $false,
     [string[]]$ArgList = @()
 )
 
 $ErrorActionPreference = 'Stop'
 
 if (!(Test-Path -LiteralPath $ExePath)) {
-    throw "PCSX2 executable not found: $ExePath"
+    throw "Emulator executable not found: $ExePath"
+}
+
+$exeName = [System.IO.Path]::GetFileNameWithoutExtension($ExePath)
+$isPcsx2Launch = $Pcsx2Mode -or ($exeName -match '(?i)pcsx2')
+
+function Get-GenericArgList {
+    param([string[]]$InputArgs)
+    if (-not $InputArgs -or $InputArgs.Count -eq 0) { return @() }
+
+    $separatorIndex = [Array]::IndexOf($InputArgs, '--')
+    if ($separatorIndex -ge 0) {
+        if ($separatorIndex -ge ($InputArgs.Count - 1)) { return @() }
+        return @($InputArgs[($separatorIndex + 1)..($InputArgs.Count - 1)] | Where-Object { $_ })
+    }
+
+    $filtered = New-Object System.Collections.Generic.List[string]
+    for ($i = 0; $i -lt $InputArgs.Count; $i++) {
+        $arg = $InputArgs[$i]
+        if (-not $arg) { continue }
+        if ($arg -eq '-logfile') { $i++; continue }
+        if ($arg -in @('-batch', '-earlyconsolelog', '-nogui')) { continue }
+        $filtered.Add($arg)
+    }
+    return @($filtered)
 }
 
 # Ensure the output directories exist.
-foreach ($target in @($EmuLogPath, $PidPath)) {
+$targets = if ($isPcsx2Launch) { @($EmuLogPath, $PidPath) } else { @($PidPath) }
+foreach ($target in $targets) {
     $dir = Split-Path -Parent $target
     if ($dir -and !(Test-Path -LiteralPath $dir)) {
         New-Item -ItemType Directory -Path $dir -Force | Out-Null
@@ -20,7 +46,7 @@ foreach ($target in @($EmuLogPath, $PidPath)) {
 }
 
 # Drop a stale emu log so we only ever read the current run's output.
-if (Test-Path -LiteralPath $EmuLogPath) {
+if ($isPcsx2Launch -and (Test-Path -LiteralPath $EmuLogPath)) {
     Remove-Item -LiteralPath $EmuLogPath -Force -ErrorAction SilentlyContinue
 }
 
@@ -112,18 +138,35 @@ function Read-Appended {
     }
 }
 
-# Launch PCSX2 with its window hidden. PCSX2 writes its application log
-# (including the startup directory listing) to $EmuLogPath via its -logfile arg.
-if ($ArgList -and $ArgList.Count -gt 0) {
-    $proc = Start-Process -FilePath $ExePath -ArgumentList $ArgList -WindowStyle Hidden -PassThru
+# Launch PCSX2 with its window hidden. Generic emulators are launched normally
+# and skip the PCSX2 log-tailing flow.
+$launchArgs = if ($isPcsx2Launch) { $ArgList } else { Get-GenericArgList -InputArgs $ArgList }
+if ($launchArgs -and $launchArgs.Count -gt 0) {
+    if ($isPcsx2Launch) {
+        $proc = Start-Process -FilePath $ExePath -ArgumentList $launchArgs -WindowStyle Hidden -PassThru
+    }
+    else {
+        $proc = Start-Process -FilePath $ExePath -ArgumentList $launchArgs -PassThru
+    }
 }
 else {
-    $proc = Start-Process -FilePath $ExePath -WindowStyle Hidden -PassThru
+    if ($isPcsx2Launch) {
+        $proc = Start-Process -FilePath $ExePath -WindowStyle Hidden -PassThru
+    }
+    else {
+        $proc = Start-Process -FilePath $ExePath -PassThru
+    }
 }
 $proc.Id | Out-File -FilePath $PidPath -Encoding ascii -Force
 
 Write-Host ''
-Write-Host "  PCSX2 launched  (PID $($proc.Id))" -ForegroundColor DarkGray
+if ($isPcsx2Launch) {
+    Write-Host "  PCSX2 launched  (PID $($proc.Id))" -ForegroundColor DarkGray
+}
+else {
+    Write-Host "  Emulator launched  (PID $($proc.Id))" -ForegroundColor DarkGray
+    return
+}
 
 # Wait for PCSX2 to create the emu log.
 $deadline = (Get-Date).AddSeconds(20)

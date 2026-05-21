@@ -1893,14 +1893,25 @@ namespace CodeDesigner.Ps2.Bridge
             var ns = new NetworkStream(_socket!, ownsSocket: false);
             ns.Write(request, 0, request.Length);
             ns.Flush();
-            var buf = new byte[expectedReplySize];
-            int received = 0;
-            while (received < expectedReplySize)
+
+            var header = new byte[4];
+            ReadExact(ns, header, 0, 4);
+
+            int totalSize = (int)ReadU32LE(header, 0);
+            if (totalSize < 5 || totalSize > 1_000_000)
+                throw new InvalidDataException($"PINE reply has implausible size {totalSize}");
+
+            var buf = new byte[totalSize];
+            Buffer.BlockCopy(header, 0, buf, 0, 4);
+            ReadExact(ns, buf, 4, totalSize - 4);
+
+            if (totalSize != expectedReplySize)
             {
-                int n = ns.Read(buf, received, expectedReplySize - received);
-                if (n == 0) throw new IOException("Connection closed by PCSX2 PINE server");
-                received += n;
+                if (buf[4] != IPC_OK)
+                    throw PineFail($"fixed-size request expected {expectedReplySize} bytes, got {totalSize}");
+                throw new InvalidDataException($"PINE reply size {totalSize}, expected {expectedReplySize}");
             }
+
             return buf;
         }
 
@@ -1922,6 +1933,17 @@ namespace CodeDesigner.Ps2.Bridge
             got = 4;
             while (got < totalSize) { int n = ns.Read(buf, got, totalSize - got); if (n == 0) throw new IOException("PINE connection closed"); got += n; }
             return buf;
+        }
+
+        private static void ReadExact(NetworkStream ns, byte[] buffer, int offset, int count)
+        {
+            int got = 0;
+            while (got < count)
+            {
+                int n = ns.Read(buffer, offset + got, count - got);
+                if (n == 0) throw new IOException("PINE connection closed");
+                got += n;
+            }
         }
 
         private void EnsureConnected()

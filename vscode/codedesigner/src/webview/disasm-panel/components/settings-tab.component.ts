@@ -57,19 +57,23 @@ const NET_POLL_MS = 4000;
             <div class="row">
               <select id="emulatorSelect"
                       (change)="emulatorChange.emit($any($event.target).value)">
-                <option value="" [selected]="!selectedEmulator()">Select PCSX2...</option>
+                <option value="" [selected]="!selectedEmulator()">Select emulator...</option>
                 @for (e of emulators(); track e.value) {
                   <option [value]="e.value" [selected]="e.value === selectedEmulator()">{{e.label}}</option>
                 }
               </select>
               <button class="browse-btn" (click)="browseEmulatorClick.emit()"
-                      title="Browse for PCSX2 executable">…</button>
+                      title="Browse for emulator executable">…</button>
             </div>
 
-            @if (isPcsx2Selected()) {
+            @if (hasSelectedEmulator()) {
               <div class="pcsx2-note">
-                PCSX2 selected. Run PCSX2 launches the emulator, starts the CodeDesigner
-                control server, and attaches once PCSX2's PINE and GS stream are up.
+                @if (isPcsx2Selected()) {
+                  PCSX2 selected. Run launches the emulator, starts the CodeDesigner
+                  control server, and attaches once PINE and the GS stream are up.
+                } @else {
+                  External emulator selected. Run starts it with the selected BIOS, PINE port, and game when available.
+                }
               </div>
             }
 
@@ -99,7 +103,7 @@ const NET_POLL_MS = 4000;
 
             <div class="row">
               <button id="runBtn" class="run-btn" (click)="runPcsx2Click.emit()"
-                      [disabled]="!isPcsx2Selected()"
+                      [disabled]="!hasSelectedEmulator()"
                       title="Launch the emulator and attach the debugger">
                 <app-icon name="play" [size]="13" /><span>Run</span>
               </button>
@@ -137,7 +141,7 @@ const NET_POLL_MS = 4000;
                   <app-icon name="camera" [size]="14" /><span>Snapshot</span>
                 </button>
                 <button id="previewBtn" (click)="previewClick.emit()"
-                        title="Open the live PCSX2 display inside VS Code (requires the GSStreamServer-enabled PCSX2 build)">
+                        title="Open the live emulator display inside VS Code (requires GSStreamServer support)">
                   <app-icon name="monitor" [size]="14" /><span>Preview</span>
                 </button>
               }
@@ -688,9 +692,14 @@ export class SettingsTabComponent implements OnDestroy {
     return this.labelShowAll() ? l : l.slice(0, LIST_PREVIEW);
   });
 
-  // ── PCSX2 detection ──────────────────────────────────────────────────────────
+  // ── Emulator selection ───────────────────────────────────────────────────────
 
-  /** True when a PCSX2 emulator is explicitly selected in the dropdown. */
+  /** True when an external emulator is explicitly selected in the dropdown. */
+  readonly hasSelectedEmulator = computed(() =>
+    !!(this.selectedEmulator() ?? '').trim()
+  );
+
+  /** True when a PCSX2-named emulator is explicitly selected in the dropdown. */
   readonly isPcsx2Selected = computed(() =>
     (this.selectedEmulator() ?? '').toLowerCase().includes('pcsx2')
   );
