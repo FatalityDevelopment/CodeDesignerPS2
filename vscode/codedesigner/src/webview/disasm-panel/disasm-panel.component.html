@@ -62,6 +62,12 @@
     <span class="mcp-dot"></span>
     {{ mcpOnline ? 'Online' : 'Offline' }}
   </span>
+  @if (!mcpOnline) {
+    <button class="mcp-run-btn" (click)="runMcpServer()" title="Run CodeDesigner MCP server">
+      <app-icon name="play" [size]="12" />
+      <span>Run</span>
+    </button>
+  }
 </div>
 
 <div id="panel-views" role="tablist">

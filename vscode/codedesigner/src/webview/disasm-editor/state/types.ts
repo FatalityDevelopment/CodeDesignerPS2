@@ -4,6 +4,8 @@
 
 // ── Disassembly Row ───────────────────────────────────────────────────────────
 
+export type DataFormatKind = 'byte' | 'half' | 'word' | 'dword' | 'qword' | 'float' | 'double';
+
 export interface DisasmRow {
   addr: string;
   bytes: string;
@@ -11,6 +13,8 @@ export interface DisasmRow {
   op: string;
   args: string;
   comment: string;
+  formatted?: boolean;
+  dataFormatKind?: DataFormatKind;
 }
 
 // ── Search ────────────────────────────────────────────────────────────────────

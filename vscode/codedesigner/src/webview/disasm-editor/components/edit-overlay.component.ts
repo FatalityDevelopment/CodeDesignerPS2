@@ -64,7 +64,10 @@ export interface EditOverlayRefsRequest {
      (keydown.escape)="close()">
   <div id="edit-overlay-box">
     <div id="edit-overlay-header">
-      <span id="edit-overlay-title">Edit Address</span>
+      <div class="edit-overlay-header-copy">
+        <span id="edit-overlay-title">Address Editor</span>
+        <span class="edit-overlay-header-meta">0x{{ addressHex() }}</span>
+      </div>
       <button id="edit-overlay-close" title="Close (Escape)" (click)="close()">&#xD7;</button>
     </div>
     <div id="edit-overlay-tabs">
@@ -81,13 +84,19 @@ export interface EditOverlayRefsRequest {
     <div id="edit-overlay-tab-edit"
          class="edit-overlay-tab-content"
          [class.active]="activeTab() === 'edit'">
-      <div class="edit-overlay-field">
-        <label class="edit-overlay-label" for="edit-overlay-addr">Address</label>
-        <input type="text" id="edit-overlay-addr"
-               class="edit-overlay-input edit-overlay-input--disabled"
-               [value]="'0x' + addressHex()"
-               disabled
-               readonly />
+      <div class="edit-overlay-summary">
+        <div class="edit-overlay-summary-item">
+          <span>Address</span>
+          <code>0x{{ addressHex() }}</code>
+        </div>
+        <div class="edit-overlay-summary-item">
+          <span>Bytes</span>
+          <code>{{ bytesValue() || '--------' }}</code>
+        </div>
+        <div class="edit-overlay-summary-item edit-overlay-summary-item--wide">
+          <span>Current</span>
+          <code>{{ instrValue() || '(empty)' }}</code>
+        </div>
       </div>
       <div class="edit-overlay-field">
         <label class="edit-overlay-label" for="edit-overlay-instr-in">Instruction</label>

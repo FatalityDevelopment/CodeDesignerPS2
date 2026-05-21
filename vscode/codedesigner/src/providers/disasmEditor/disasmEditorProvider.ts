@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
-import { SocketClient, LabelEntry, StringEntry, FunctionEntry, PointerEntry, FloatEntry, IntegerEntry, SearchMatch, ReferenceEntry, AiActivityEvent, AiSessionStartEvent, AiLabelUpdateEvent, StructEntry, LabelManagerEntry, LabelSetPayload } from "../../socketClient";
+import { SocketClient, LabelEntry, StringEntry, FunctionEntry, PointerEntry, FloatEntry, IntegerEntry, SearchMatch, ReferenceEntry, AiActivityEvent, AiSessionStartEvent, AiLabelUpdateEvent, StructEntry, LabelManagerEntry, LabelSetPayload, type DataFormatKind } from "../../socketClient";
 import { getOutputChannel } from "../../extension";
 import { getNonce, getWebviewErrorHandlerScript } from "../../utils/nonce";
 
@@ -15,6 +15,8 @@ interface DisassembledRow {
   op: string;
   args: string;
   comment: string;
+  formatted?: boolean;
+  dataFormatKind?: DataFormatKind;
 }
 
 /** Cached scanner results stored per panel. */
@@ -687,7 +689,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
 
       // Call C# backend to disassemble.  Passing the current game serial lets
       // the bridge apply any persisted DataFormatOverrides so the response
-      // rows have variable byte length (.byte/.half/.word/.dword/.qword).
+      // rows have variable byte length (.byte/.half/.word/.dword/.qword/.float/.double).
       const hexCode = hexInstructions.join(' ');
       const gameId = this._currentGameSerial || undefined;
       console.log(`[DISASM] Disassembling ${hexInstructions.length} instructions starting at 0x${startAddr.toString(16)}`);
@@ -723,6 +725,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             op: op,
             args: args,
             comment: result.Comment || "",  // Use comment from backend analyzer
+            formatted: !!result.DataFormatKind,
+            dataFormatKind: result.DataFormatKind,
           });
         } else if (result.Error) {
           // Handle error case
@@ -992,7 +996,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
           fileData,
           message.address as number,
           message.length as number,
-          message.kind as 'byte' | 'half' | 'word' | 'dword' | 'qword',
+          message.kind as DataFormatKind,
           message.startIndex as number | undefined,
         );
       } else if (message.type === 'clearDataFormat') {
@@ -1752,7 +1756,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                     await this.socketClient.setDataFormat(
                         message.address as number,
                         message.length as number,
-                        message.kind as 'byte' | 'half' | 'word' | 'dword' | 'qword',
+                        message.kind as DataFormatKind,
                         gameId,
                     );
                 } catch (err) {
@@ -1886,6 +1890,16 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       return !!this.socketClient && this.socketClient.isConnected() && !this._isLiveReadBackoffActive() && !this._liveReadInFlight;
     }
 
+    private _tryBeginLiveBackendRequest(): boolean {
+      if (!this._canIssueLiveBackendRequest()) { return false; }
+      this._liveReadInFlight = true;
+      return true;
+    }
+
+    private _endLiveBackendRequest(): void {
+      this._liveReadInFlight = false;
+    }
+
     /**
      * Returns true when a live read cannot proceed because the socket is
      * simply busy with another in-flight request (as opposed to the backend
@@ -1995,7 +2009,10 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         // skip this refresh cycle.  Pushing placeholder zero-rows while the
         // previous read is still pending causes the visible "flickering" between
         // real memory and zeroes.
-        if (this._isLiveReadBusy()) { return; }
+        if (this._isLiveReadBusy()) {
+          panel.webview.postMessage({ type: 'disasmRefreshSkipped', startIndex });
+          return;
+        }
 
         if (!this._canIssueLiveBackendRequest()) {
           panel.webview.postMessage({
@@ -2008,7 +2025,10 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
 
         const socketClient = this.socketClient!;
         const startAddr = baseAddress + startOffset;
-        this._liveReadInFlight = true;
+        if (!this._tryBeginLiveBackendRequest()) {
+          panel.webview.postMessage({ type: 'disasmRefreshSkipped', startIndex });
+          return;
+        }
         try {
             const buffer = await socketClient.readMemory(startAddr, readLength, region);
             const rows   = await this.disassembleWithBackend(startAddr, buffer);
@@ -2022,7 +2042,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             startIndex,
           });
         } finally {
-          this._liveReadInFlight = false;
+          this._endLiveBackendRequest();
         }
     }
 
@@ -2043,7 +2063,9 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
 
         const socketClient = this.socketClient!;
         const alignedAddr = Math.max(baseAddress, ((highlightAddr & ~0xf) >>> 0) - 0x10);
-        this._liveReadInFlight = true;
+        if (!this._tryBeginLiveBackendRequest()) {
+          return;
+        }
         try {
             const buffer = await socketClient.readMemory(
                 alignedAddr, DisasmEditorProvider.HEX_VIEW_SIZE, region);
@@ -2059,7 +2081,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         this._handleLiveReadFailure(`sendLiveHexView at 0x${alignedAddr.toString(16)}`, err);
         this._postUnavailableHexView(panel, baseAddress, highlightAddr, highlightLength);
         } finally {
-          this._liveReadInFlight = false;
+          this._endLiveBackendRequest();
         }
     }
 
@@ -2845,7 +2867,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   }
 
   /**
-   * Persist a data-format override (.byte/.half/.word/.dword/.qword) for the
+   * Persist a data-format override (.byte/.half/.word/.dword/.qword/.float/.double) for the
    * requested span, then re-disassemble the surrounding page so the user sees
    * the change immediately.
    *
@@ -2860,7 +2882,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     fileData: Buffer,
     address: number,
     length: number,
-    kind: 'byte' | 'half' | 'word' | 'dword' | 'qword',
+    kind: DataFormatKind,
     startIndex?: number,
   ): Promise<void> {
     if (!this.socketClient?.isConnected()) {
@@ -3485,6 +3507,12 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         webview.postMessage({ type: 'labelManagerLiveValues', values: {} });
         return;
       }
+      if (this._isLiveReadBusy()) { return; }
+      if (!this._tryBeginLiveBackendRequest()) {
+        webview.postMessage({ type: 'labelManagerLiveValues', values: {} });
+        return;
+      }
+      try {
       const entries = action.entries ?? [];
       const values: Record<string, string> = {};
       const scalarEntries: Array<{ addrHex: string; addr: number; entryType?: string; valueType?: string }> = [];
@@ -3572,7 +3600,11 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
           }
         } catch { /* ignore unreadable addresses */ }
       }
+      this._handleLiveReadSuccess();
       webview.postMessage({ type: 'labelManagerLiveValues', values });
+      } finally {
+        this._endLiveBackendRequest();
+      }
       return;
     }
 
@@ -3584,6 +3616,12 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         webview.postMessage({ type: 'labelManagerMemberLiveValues', values: {} });
         return;
       }
+      if (this._isLiveReadBusy()) { return; }
+      if (!this._tryBeginLiveBackendRequest()) {
+        webview.postMessage({ type: 'labelManagerMemberLiveValues', values: {} });
+        return;
+      }
+      try {
       const members = action.members ?? [];
       const values: Record<string, string> = {};
       const sc = this.socketClient;
@@ -3658,7 +3696,11 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
           }
         } catch { /* ignore unreadable members */ }
       }
+      this._handleLiveReadSuccess();
       webview.postMessage({ type: 'labelManagerMemberLiveValues', values });
+      } finally {
+        this._endLiveBackendRequest();
+      }
       return;
     }
 

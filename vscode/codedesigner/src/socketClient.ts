@@ -172,7 +172,7 @@ interface CommandMessage {
     NetFilterPort?: number;
     NetFilterIP?: string;
     // Data-format overrides (GETDATAFORMATS / SETDATAFORMAT / CLEARDATAFORMAT)
-    /** One of "byte" | "half" | "word" | "dword" | "qword" for SETDATAFORMAT. */
+    /** One of "byte" | "half" | "word" | "dword" | "qword" | "float" | "double" for SETDATAFORMAT. */
     DataFormatKind?: string;
 }
 
@@ -865,7 +865,11 @@ interface InstructionResult {
     Address?: number;
     /** Row byte length (1/2/4/8/16). Defaults to 4 when absent. */
     ByteLength?: number;
+    /** Data-format kind when this row came from a persisted override. */
+    DataFormatKind?: DataFormatKind;
 }
+
+export type DataFormatKind = 'byte' | 'half' | 'word' | 'dword' | 'qword' | 'float' | 'double';
 
 /**
  * Wire payload for a single disassembler data-format override returned by
@@ -875,7 +879,7 @@ export interface DataFormatOverrideInfo {
     id: number;
     address: number;
     length: number;
-    kind: 'byte' | 'half' | 'word' | 'dword' | 'qword';
+    kind: DataFormatKind;
 }
 
 /** Number of bytes per element for a given data-format kind. */
@@ -886,6 +890,8 @@ export function dataFormatKindByteSize(kind: DataFormatOverrideInfo['kind']): nu
         case 'word':  return 4;
         case 'dword': return 8;
         case 'qword': return 16;
+        case 'float': return 4;
+        case 'double': return 8;
         default:      return 4;
     }
 }
@@ -1607,7 +1613,7 @@ export class SocketClient {
     /**
      * Persist a new override for the disassembler so the span
      * `[address, address + length)` is rendered as the given typed directive
-     * (`.byte`/`.half`/`.word`/`.dword`/`.qword`).  Any existing overrides that
+     * (`.byte`/`.half`/`.word`/`.dword`/`.qword`/`.float`/`.double`).  Any existing overrides that
      * overlap are replaced atomically.
      */
     public async setDataFormat(

@@ -13,8 +13,8 @@
 // anywhere in the same document — including before the definition appears.
 // Argument loading is collision-safe; cross-arg cycles are routed through $at.
 
-include "StdLib/stdlib.cds"
-include "StdLib/string.cds"
+include "stdlib.cds"
+include "string.cds"
 
 address $80100000
 

@@ -34,6 +34,12 @@ namespace CodeDesigner.Ps2.Bridge
         /// 1/2/4/8/16 for data-format rows (.byte/.half/.word/.dword/.qword).
         /// </summary>
         public int? ByteLength { get; set; }
+
+        /// <summary>
+        /// Wire data-format kind for rows produced by a persisted override.
+        /// Null for normal instruction rows and best-effort fallback bytes.
+        /// </summary>
+        public string? DataFormatKind { get; set; }
     }
 }
 

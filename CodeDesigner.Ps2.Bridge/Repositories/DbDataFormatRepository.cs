@@ -45,6 +45,8 @@ namespace CodeDesigner.Ps2.Bridge.Repositories
             DataFormatKind.Word  => 4,
             DataFormatKind.DWord => 8,
             DataFormatKind.QWord => 16,
+            DataFormatKind.Float => 4,
+            DataFormatKind.Double => 8,
             _                    => 4,
         };
 

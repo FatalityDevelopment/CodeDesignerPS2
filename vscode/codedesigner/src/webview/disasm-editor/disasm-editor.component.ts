@@ -3,6 +3,7 @@ import { getVsCodeApi } from '../shared/vscode-api';
 import {
   DisasmEditorService,
   DisasmRow,
+  type DataFormatKind,
   SearchMatch,
   RegisterData,
   ThreadEntry,
@@ -95,7 +96,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     findReferences: null as (() => void) | null,
     findCodeReferences: null as (() => void) | null,
     addToLabelManager: null as (() => void) | null,
-    formatAs: null as ((kind: 'byte' | 'half' | 'word' | 'dword' | 'qword') => void) | null,
+    formatAs: null as ((kind: DataFormatKind) => void) | null,
     clearFormat: null as (() => void) | null,
   };
 
@@ -419,7 +420,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     this.contextMenuRuntime.addToLabelManager?.();
   }
 
-  protected onCtxFormatAs(kind: 'byte' | 'half' | 'word' | 'dword' | 'qword'): void {
+  protected onCtxFormatAs(kind: DataFormatKind): void {
     this.contextMenuRuntime.formatAs?.(kind);
   }
 
@@ -780,7 +781,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     toggleBottomPanel: () => void;
     toggleSetPc: () => void;
     navigateBack: () => void;
-    setCursorRowFormat: (kind: 'byte' | 'half' | 'word' | 'dword' | 'qword') => void;
+    setCursorRowFormat: (kind: DataFormatKind) => void;
     clearCursorRowFormat: () => void;
   }): void {
     window.addEventListener('keydown', (e: KeyboardEvent) => {
@@ -832,6 +833,10 @@ export class DisasmEditorComponent implements AfterViewInit {
             e.preventDefault(); e.stopPropagation();
             params.setCursorRowFormat('word');
             return;
+          case 'f':
+            e.preventDefault(); e.stopPropagation();
+            params.setCursorRowFormat('float');
+            return;
           case 'd':
             e.preventDefault(); e.stopPropagation();
             params.setCursorRowFormat('dword');
@@ -841,6 +846,8 @@ export class DisasmEditorComponent implements AfterViewInit {
             params.setCursorRowFormat('qword');
             return;
           case 'a':
+          case 'c':
+          case 'u':
             e.preventDefault(); e.stopPropagation();
             params.clearCursorRowFormat();
             return;
@@ -1002,6 +1009,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     bottomPanelCallStack: WritableSignal<CallStackEntry[]>;
     bottomPanelBreakpoints: WritableSignal<Set<number>>;
     setpcStatus: WritableSignal<string>;
+    getPageStart: (index: number) => number;
     buildCallStackFrames: (
       regs: RegisterData,
       stackBytes: number[],
@@ -1049,6 +1057,12 @@ export class DisasmEditorComponent implements AfterViewInit {
         if (pageReady) {
           this.pendingPageScrollBlock = null;
           params.updateCursor('center');
+          if (params.state.isLive) {
+            params.vscode.postMessage({
+              type: 'requestPage',
+              startIndex: params.getPageStart(params.state.cursor),
+            });
+          }
         }
       } else {
         params.vscode.postMessage({ type: 'gotoRegion', address: params.pc });
@@ -1906,10 +1920,13 @@ export class DisasmEditorComponent implements AfterViewInit {
     params.svc.pageLoaded$.subscribe(({ startIndex, changed }) => {
       this.liveRuntime.refreshPending = false;
       if (startIndex === params.getPageStart(params.state.cursor)) {
-        if (!changed && this.pendingPageScrollBlock === null && !this.liveRuntime.paused) {
+        if (!changed && this.pendingPageScrollBlock === null) {
           return;
         }
-        const scrollBlock = this.liveRuntime.paused ? 'center' : this.pendingPageScrollBlock;
+        // Page loads should preserve the caller's scroll intent. Paused mode
+        // already sets `center` explicitly for PC jumps; keyboard page moves
+        // use start/end so crossing a page boundary does not snap to center.
+        const scrollBlock = this.pendingPageScrollBlock;
         this.pendingPageScrollBlock = null;
         params.renderDisassembly(scrollBlock);
       }
@@ -1956,6 +1973,7 @@ export class DisasmEditorComponent implements AfterViewInit {
         debugPanelWatches: params.debugPanelWatches,
         bottomPanelCallStack: params.bottomPanelCallStack,
         bottomPanelBreakpoints: params.bottomPanelBreakpoints,
+        getPageStart: params.getPageStart,
         requestRefresh: params.requestRefresh,
         vscode: params.vscode,
         checkAndLoadPage: params.checkAndLoadPage,
@@ -1980,8 +1998,10 @@ export class DisasmEditorComponent implements AfterViewInit {
     });
 
     params.svc.labelsUpdated$.subscribe(() => {
-      params.state.loadedPages.delete(params.getPageStart(params.state.cursor));
-      params.checkAndLoadPage();
+      params.vscode.postMessage({
+        type: 'requestPage',
+        startIndex: params.getPageStart(params.state.cursor),
+      });
     });
 
     params.svc.analysisUpdated$.subscribe(() => {
@@ -2210,11 +2230,11 @@ export class DisasmEditorComponent implements AfterViewInit {
      * so the user can right-click far below the cursor and still get the
      * format applied to the clicked address.
      */
-    this.contextMenuRuntime.formatAs = (kind: 'byte' | 'half' | 'word' | 'dword' | 'qword') => {
+    this.contextMenuRuntime.formatAs = (kind: DataFormatKind) => {
       if (!this._ctxRow) { return; }
       const address = parseInt(this._ctxRow.addr, 16);
       if (!Number.isFinite(address)) { return; }
-      const length = kind === 'qword' ? 16 : kind === 'dword' ? 8 : 4;
+      const length = kind === 'qword' ? 16 : (kind === 'dword' || kind === 'double') ? 8 : 4;
       const pageStart = params.getPageStart(params.state.cursor);
       this.svc.setDataFormat(address, length, kind, pageStart);
     };
@@ -2734,7 +2754,7 @@ export class DisasmEditorComponent implements AfterViewInit {
      * the following bytes (8 / 16 byte total).  The extension host persists
      * the override and re-fetches the page.
      */
-    const setCursorRowFormat = (kind: 'byte' | 'half' | 'word' | 'dword' | 'qword') => {
+    const setCursorRowFormat = (kind: DataFormatKind) => {
       const pageStart = getPageStart(state.cursor);
       const rows = state.loadedPages.get(pageStart);
       if (!rows) { return; }
@@ -2748,11 +2768,12 @@ export class DisasmEditorComponent implements AfterViewInit {
       const unit = kind === 'byte' ? 1
                  : kind === 'half' ? 2
                  : kind === 'word' ? 4
-                 : kind === 'dword' ? 8
+                 : kind === 'float' ? 4
+                 : (kind === 'dword' || kind === 'double') ? 8
                  : 16;
 
       // Default span = 4 bytes (the instruction row the cursor sits on).
-      // For dword/qword the user clearly wants more bytes covered, so widen
+      // For wide formats the user clearly wants more bytes covered, so widen
       // the span to the next multiple of the unit (8 or 16 bytes).
       let length = 4;
       if (unit > 4) length = unit;

@@ -17,15 +17,15 @@
 //  10. Formatting (sprintf with %d, %x, %s)
 // ============================================================================
 
-include "StdLib/string.cds"
-include "StdLib/strutils.cds"
-include "StdLib/mem.cds"
-include "StdLib/str_ext.cds"
-include "StdLib/hash.cds"
-include "StdLib/crc32.cds"
-include "StdLib/allocator.cds"
-include "StdLib/split.cds"
-include "StdLib/printf.cds"
+include "string.cds"
+include "strutils.cds"
+include "mem.cds"
+include "str_ext.cds"
+include "hash.cds"
+include "crc32.cds"
+include "allocator.cds"
+include "split.cds"
+include "printf.cds"
 
 // ============================================================================
 // TEST DATA SECTION

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using CodeDesigner.Ps2.CheatEngine;
@@ -817,6 +818,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
                                 Assembly   = asm,
                                 Success    = true,
                                 Comment    = cmt,
+                                DataFormatKind = DataFormatService.KindToWire(ovr.Kind),
                             });
 
                             byteIndex += unit;
@@ -1017,13 +1019,13 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 {
                     byte b = buf[index];
                     hex = $"0x{b:X2}";
-                    return $".byte 0x{b:X2}";
+                    return $".byte ${b:X2}";
                 }
                 case Database.Entities.DataFormatKind.Half:
                 {
                     ushort v = BitConverter.ToUInt16(buf, index);
                     hex = $"0x{v:X4}";
-                    return $".half 0x{v:X4}";
+                    return $".half ${v:X4}";
                 }
                 case Database.Entities.DataFormatKind.Word:
                 {
@@ -1044,14 +1046,53 @@ namespace CodeDesigner.Ps2.Bridge.Services
                     hex = $"0x{hi:X16}{lo:X16}";
                     return $".qword 0x{hi:X16}{lo:X16}";
                 }
+                case Database.Entities.DataFormatKind.Float:
+                {
+                    uint raw = BitConverter.ToUInt32(buf, index);
+                    float v = BitConverter.ToSingle(buf, index);
+                    hex = $"0x{raw:X8}";
+                    return $".float {FormatFloatLiteral(v)}";
+                }
+                case Database.Entities.DataFormatKind.Double:
+                {
+                    ulong raw = BitConverter.ToUInt64(buf, index);
+                    double v = BitConverter.ToDouble(buf, index);
+                    hex = $"0x{raw:X16}";
+                    return $".double {FormatDoubleLiteral(v)}";
+                }
                 default:
                 {
                     byte b = buf[index];
                     hex = $"0x{b:X2}";
-                    return $".byte 0x{b:X2}";
+                    return $".byte ${b:X2}";
                 }
             }
         }
+
+        private static string FormatFloatLiteral(float value)
+        {
+            if (float.IsNaN(value)) return "NaN";
+            if (float.IsPositiveInfinity(value)) return "Infinity";
+            if (float.IsNegativeInfinity(value)) return "-Infinity";
+
+            string text = value.ToString("G9", CultureInfo.InvariantCulture);
+            return LooksIntegralLiteral(text) ? text + ".0" : text;
+        }
+
+        private static string FormatDoubleLiteral(double value)
+        {
+            if (double.IsNaN(value)) return "NaN";
+            if (double.IsPositiveInfinity(value)) return "Infinity";
+            if (double.IsNegativeInfinity(value)) return "-Infinity";
+
+            string text = value.ToString("G17", CultureInfo.InvariantCulture);
+            return LooksIntegralLiteral(text) ? text + ".0" : text;
+        }
+
+        private static bool LooksIntegralLiteral(string text) =>
+            text.IndexOf('.') < 0
+            && text.IndexOf('E') < 0
+            && text.IndexOf('e') < 0;
 
         /// <summary>
         /// When <paramref name="value"/> looks like a PS2 RAM pointer, tries to

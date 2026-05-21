@@ -97,6 +97,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
      * onDidCloseTerminal hook so a subsequent Run respawns the process.
      */
     private emulatorProcessTerminal?: vscode.Terminal;
+    /** Terminal hosting the MCP stdio server when launched from the panel. */
+    private mcpServerTerminal?: vscode.Terminal;
     private settings: EmuSettings = {};
     private workspaceRoot: string = '';
     private snapshots: SnapshotEntry[] = [];
@@ -251,6 +253,11 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                     getOutputChannel().info('Built-in emulator process exited.');
                     this.emulatorProcessTerminal = undefined;
                     void this.postEmulatorProcessStatus();
+                }
+                if (t === this.mcpServerTerminal) {
+                    getOutputChannel().info('CodeDesigner MCP server terminal closed.');
+                    this.mcpServerTerminal = undefined;
+                    void this.handleRequestMcpStatus();
                 }
                 if (t === this._pcsx2Terminal) {
                     getOutputChannel().info('Emulator launcher terminal closed.');
@@ -534,6 +541,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 case 'requestMcpStatus':
                     await this.handleRequestMcpStatus();
                     break;
+                case 'runMcpServer':
+                    await this.handleRunMcpServer();
+                    break;
                 case 'requestEmulatorProcessStatus':
                     await this.handleRequestEmulatorProcessStatus();
                     break;
@@ -651,6 +661,19 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         const exeName = process.platform === 'win32'
             ? 'CodeDesigner.Ps2.Emulator.exe'
             : 'CodeDesigner.Ps2.Emulator';
+        const candidate = path.join(installDir, exeName);
+        return fs.existsSync(candidate) ? candidate : null;
+    }
+
+    /**
+     * Returns the deployed CodeDesigner.Ps2.McpServer executable path, or null
+     * when the MCP server project has not been built/deployed yet.
+     */
+    private static findMcpServerExe(): string | null {
+        const installDir = path.join(DisasmPanelProvider.getInstallDirectory(), 'McpServer');
+        const exeName = process.platform === 'win32'
+            ? 'CodeDesigner.Ps2.McpServer.exe'
+            : 'CodeDesigner.Ps2.McpServer';
         const candidate = path.join(installDir, exeName);
         return fs.existsSync(candidate) ? candidate : null;
     }
@@ -3962,6 +3985,43 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private async handleRequestMcpStatus(): Promise<void> {
         const online = await DisasmPanelProvider.detectMcpServerRunning();
         this.webview?.postMessage({ command: 'mcpStatus', online });
+    }
+
+    /** Launch the deployed MCP server executable from the panel status badge. */
+    private async handleRunMcpServer(): Promise<void> {
+        const out = getOutputChannel();
+
+        if (await DisasmPanelProvider.detectMcpServerRunning()) {
+            this.webview?.postMessage({ command: 'mcpStatus', online: true });
+            return;
+        }
+
+        if (this.mcpServerTerminal) {
+            try { this.mcpServerTerminal.dispose(); } catch { /* ignore */ }
+            this.mcpServerTerminal = undefined;
+        }
+
+        const exe = DisasmPanelProvider.findMcpServerExe();
+        if (!exe) {
+            const mcpDir = path.join(DisasmPanelProvider.getInstallDirectory(), 'McpServer');
+            const msg = `CodeDesigner.Ps2.McpServer not found in ${mcpDir}. Build the MCP server project first to deploy it.`;
+            out.error(msg);
+            vscode.window.showErrorMessage(msg);
+            this.webview?.postMessage({ command: 'mcpStatus', online: false });
+            return;
+        }
+
+        out.info(`Starting CodeDesigner MCP server: ${exe}`);
+        const terminal = vscode.window.createTerminal({
+            name: 'CodeDesigner MCP',
+            shellPath: exe,
+            shellArgs: [],
+        });
+        terminal.show(true);
+        this.mcpServerTerminal = terminal;
+
+        setTimeout(() => void this.handleRequestMcpStatus(), 1000);
+        setTimeout(() => void this.handleRequestMcpStatus(), 2500);
     }
 
     /** Escape a string for a single-quoted PowerShell literal. */

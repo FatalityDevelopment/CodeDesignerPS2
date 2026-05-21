@@ -7,6 +7,7 @@ import {
   computed,
 } from '@angular/core';
 import { IconComponent } from '../../shared/icon.component';
+import type { DataFormatKind } from '../state/types';
 
 /**
  * Context data passed when opening the menu via `open()`.
@@ -108,8 +109,14 @@ export interface ContextMenuData {
     <div class="ctx-menu-item" (click)="onFormatAs('word')">
       <span class="ctx-menu-icon">W</span>Format as .word
     </div>
+    <div class="ctx-menu-item" (click)="onFormatAs('float')">
+      <span class="ctx-menu-icon">F</span>Format as .float
+    </div>
     <div class="ctx-menu-item" (click)="onFormatAs('dword')">
       <span class="ctx-menu-icon">D</span>Format as .dword
+    </div>
+    <div class="ctx-menu-item" (click)="onFormatAs('double')">
+      <span class="ctx-menu-icon">64</span>Format as .double
     </div>
     <div class="ctx-menu-item" (click)="onFormatAs('qword')">
       <span class="ctx-menu-icon">Q</span>Format as .qword
@@ -149,7 +156,7 @@ export class ContextMenuComponent {
    * is the chosen data-format kind; the parent component forwards it to the
    * service so the override is persisted and the page refreshed.
    */
-  readonly formatAs = output<'byte' | 'half' | 'word' | 'dword' | 'qword'>();
+  readonly formatAs = output<DataFormatKind>();
   /** Emits when the user picks "Auto (clear override)". */
   readonly clearFormat = output<void>();
   readonly closed = output<void>();
@@ -249,7 +256,7 @@ export class ContextMenuComponent {
     this.close();
   }
 
-  onFormatAs(kind: 'byte' | 'half' | 'word' | 'dword' | 'qword'): void {
+  onFormatAs(kind: DataFormatKind): void {
     this.formatAs.emit(kind);
     this.close();
   }

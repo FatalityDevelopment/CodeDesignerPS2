@@ -4,6 +4,7 @@ import { VsCodeBridgeService } from '../shared/vscode-bridge.service';
 import { EditorState } from './state/editor.state';
 import {
   DisasmRow,
+  type DataFormatKind,
   SearchMatch,
   SymLabel,
   ModuleEntry,
@@ -15,6 +16,7 @@ import {
 // Re-export types for backward compatibility
 export type {
   DisasmRow,
+  DataFormatKind,
   SearchMatch,
   SymLabel,
   ThreadEntry,
@@ -154,6 +156,7 @@ export class DisasmEditorService implements OnDestroy {
     this._subs.push(
       this._bridge.on<Record<string, unknown>>('init').subscribe(msg => this._onInit(msg)),
       this._bridge.on<Record<string, unknown>>('disasmPage').subscribe(msg => this._onDisasmPage(msg)),
+      this._bridge.on<Record<string, unknown>>('disasmRefreshSkipped').subscribe(msg => this._onDisasmRefreshSkipped(msg)),
       this._bridge.on<Record<string, unknown>>('hexview').subscribe(msg => this._onHexView(msg)),
       this._bridge.on<Record<string, unknown>>('searchResults').subscribe(msg => this._onSearchResults(msg)),
       this._bridge.on<Record<string, unknown>>('status').subscribe(msg => this._onStatus(msg)),
@@ -198,13 +201,13 @@ export class DisasmEditorService implements OnDestroy {
 
   /**
    * Persist a data-format override that re-renders `[address, address+length)`
-   * as the given typed directive (`.byte`/`.half`/`.word`/`.dword`/`.qword`).
+   * as the given typed directive (`.byte`/`.half`/`.word`/`.dword`/`.qword`/`.float`/`.double`).
    * The extension host then refreshes the affected page.
    */
   setDataFormat(
     address: number,
     length: number,
-    kind: 'byte' | 'half' | 'word' | 'dword' | 'qword',
+    kind: DataFormatKind,
     startIndex?: number,
   ): void {
     this._bridge.postMessage({
@@ -304,7 +307,10 @@ export class DisasmEditorService implements OnDestroy {
           && e.op      === r.op
           && e.args    === r.args
           && e.bytes   === r.bytes
-          && e.label   === r.label) {
+          && e.label   === r.label
+          && e.comment === r.comment
+          && e.formatted === r.formatted
+          && e.dataFormatKind === r.dataFormatKind) {
           return e;
         }
         allSame = false;
@@ -332,6 +338,11 @@ export class DisasmEditorService implements OnDestroy {
     }
 
     this.pageLoaded$.next({ startIndex, changed: stableRows !== existing });
+  }
+
+  private _onDisasmRefreshSkipped(msg: Record<string, unknown>): void {
+    const startIndex = msg['startIndex'] as number;
+    this.pageLoaded$.next({ startIndex, changed: false });
   }
 
   private _onHexView(msg: Record<string, unknown>): void {
@@ -421,6 +432,8 @@ export class DisasmEditorService implements OnDestroy {
   private _applyAnalysisUpdates(analysis: Record<string, string>): void {
     let anyUpdated = false;
     const activePageStart = this.getPageStart(this.state.cursor);
+    const updatedPages = new Map<number, DisasmRow[]>();
+
     for (const [addrHex, comment] of Object.entries(analysis)) {
       const addr = parseInt(addrHex, 16);
       // Compute the instruction index relative to the base address.
@@ -429,20 +442,32 @@ export class DisasmEditorService implements OnDestroy {
       const instrIdx  = Math.floor((physAddr - physBase) / 4);
       if (instrIdx < 0 || instrIdx >= this.state.totalInstructions) { continue; }
       const pageStart = this.getPageStart(instrIdx);
-      const page      = this.state.loadedPages.get(pageStart);
+      const page      = updatedPages.get(pageStart) ?? this.state.loadedPages.get(pageStart);
       if (!page) { continue; }
       const local = instrIdx - pageStart;
       if (local >= 0 && local < page.length) {
         if ((page[local].comment ?? '') === (comment ?? '')) { continue; }
-        page[local].comment = comment;
-        // Keep the active disasmRows array in sync when this is the current page.
-        if (pageStart === activePageStart) {
-          this.state.disasmRows[local].comment = comment;
-        }
+        const nextPage = page.slice();
+        nextPage[local] = { ...nextPage[local], comment };
+        updatedPages.set(pageStart, nextPage);
         anyUpdated = true;
       }
     }
+
     if (anyUpdated) {
+      for (const [pageStart, page] of updatedPages) {
+        this.state.loadedPages.set(pageStart, page);
+        if (pageStart === activePageStart) {
+          this.state.disasmRows = page;
+        }
+      }
+      this.signals.loadedPages.update(pages => {
+        const newPages = new Map(pages);
+        for (const [pageStart, page] of updatedPages) {
+          newPages.set(pageStart, page);
+        }
+        return newPages;
+      });
       this.analysisUpdated$.next(analysis);
     }
   }

@@ -1,16 +1,16 @@
 // Quick tests / examples for StdLib routines.
 // Demonstrates the natural call-site syntax made available by stdlib.cds.
 
-include "StdLib/stdlib.cds"        // function declarations
-include "StdLib/string.cds"
-include "StdLib/strutils.cds"
-include "StdLib/mem.cds"
-include "StdLib/str_ext.cds"
-include "StdLib/hash.cds"
-include "StdLib/crc32.cds"
-include "StdLib/allocator.cds"
-include "StdLib/split.cds"
-include "StdLib/printf.cds"
+include "stdlib.cds"        // function declarations
+include "string.cds"
+include "strutils.cds"
+include "mem.cds"
+include "str_ext.cds"
+include "hash.cds"
+include "crc32.cds"
+include "allocator.cds"
+include "split.cds"
+include "printf.cds"
 
 // --- Data area for tests ----------------------------------------------------
 address $80101000

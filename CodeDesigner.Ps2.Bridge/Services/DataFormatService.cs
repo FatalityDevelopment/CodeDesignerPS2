@@ -142,7 +142,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
         // ── Helpers ───────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Parses a wire kind string ("byte"/"half"/"word"/"dword"/"qword",
+        /// Parses a wire kind string ("byte"/"half"/"word"/"dword"/"qword"/"float"/"double",
         /// case-insensitive) into the corresponding <see cref="DataFormatKind"/>.
         /// Throws an <see cref="ArgumentException"/> on unknown values.
         /// </summary>
@@ -153,6 +153,8 @@ namespace CodeDesigner.Ps2.Bridge.Services
             "word"  or "w"          => DataFormatKind.Word,
             "dword" or "d" or "dw"  => DataFormatKind.DWord,
             "qword" or "q" or "qw"  => DataFormatKind.QWord,
+            "float" or "f" or "single" or "float32" => DataFormatKind.Float,
+            "double" or "float64" => DataFormatKind.Double,
             _ => throw new ArgumentException($"Unknown data format kind: '{s}'"),
         };
 
@@ -163,6 +165,8 @@ namespace CodeDesigner.Ps2.Bridge.Services
             DataFormatKind.Word  => "word",
             DataFormatKind.DWord => "dword",
             DataFormatKind.QWord => "qword",
+            DataFormatKind.Float => "float",
+            DataFormatKind.Double => "double",
             _                    => "byte",
         };
 

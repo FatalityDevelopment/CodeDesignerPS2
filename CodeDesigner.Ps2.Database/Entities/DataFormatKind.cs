@@ -27,4 +27,6 @@ public enum DataFormatKind
     Word  = 2,
     DWord = 3,
     QWord = 4,
+    Float = 5,
+    Double = 6,
 }

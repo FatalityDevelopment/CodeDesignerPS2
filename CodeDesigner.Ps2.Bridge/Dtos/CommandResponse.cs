@@ -316,7 +316,7 @@ namespace CodeDesigner.Ps2.Bridge
         [System.Text.Json.Serialization.JsonPropertyName("length")]
         public int Length { get; set; }
 
-        /// <summary>One of "byte", "half", "word", "dword", "qword".</summary>
+        /// <summary>One of "byte", "half", "word", "dword", "qword", "float", "double".</summary>
         [System.Text.Json.Serialization.JsonPropertyName("kind")]
         public string Kind { get; set; } = "byte";
     }

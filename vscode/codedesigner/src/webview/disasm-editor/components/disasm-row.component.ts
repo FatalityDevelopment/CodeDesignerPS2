@@ -29,6 +29,7 @@ import { DisasmRow } from '../state/types';
       [class.current-pc]="isPc()"
       [class.branch-highlight]="isBranchHighlight()"
       [class.branch-path]="isBranchPath()"
+      [class.data-formatted]="isDataFormatted()"
       [class.search-match]="isSearchMatch()"
       [class.search-current]="isCurrentMatch()"
       [class.breakpoint]="hasBreakpoint()"
@@ -168,6 +169,11 @@ export class DisasmRowComponent {
 
     return rowAddr > low && rowAddr < high;
   });
+
+  /** Whether this row is rendered by a user-applied data-format override. */
+  protected readonly isDataFormatted = computed(() =>
+    !!this.data().formatted || !!this.data().dataFormatKind
+  );
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Computed HTML Content

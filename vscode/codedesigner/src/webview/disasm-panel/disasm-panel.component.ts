@@ -347,6 +347,11 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
     this.bridge.postMessage({ command: 'requestMcpStatus' });
   }
 
+  /** Ask the provider to launch the deployed MCP server executable. */
+  runMcpServer(): void {
+    this.bridge.postMessage({ command: 'runMcpServer' });
+  }
+
   /** Ask the provider whether the selected emulator process is currently running. */
   requestEmulatorProcessStatus(): void {
     this.bridge.postMessage({ command: 'requestEmulatorProcessStatus' });

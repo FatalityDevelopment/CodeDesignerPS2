@@ -277,6 +277,31 @@ app-icon,
     font-weight: 700;
 }
 
+.mcp-run-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    flex-shrink: 0;
+    height: 22px;
+    padding: 0 7px;
+    border: 1px solid var(--vscode-panel-border, #313131);
+    border-radius: 4px;
+    background: var(--vscode-button-secondaryBackground, #2f2f30);
+    color: var(--vscode-button-secondaryForeground, var(--vscode-foreground, #d4d4d4));
+    cursor: pointer;
+    font-family: var(--vscode-font-family, sans-serif);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0;
+    text-transform: none;
+}
+
+.mcp-run-btn:hover {
+    background: var(--vscode-button-secondaryHoverBackground, #3a3a3b);
+    color: var(--vscode-foreground, #d4d4d4);
+}
+
 .mcp-dot {
     width: 8px;
     height: 8px;

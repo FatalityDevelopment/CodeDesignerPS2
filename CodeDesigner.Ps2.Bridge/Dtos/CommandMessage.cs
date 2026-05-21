@@ -330,7 +330,8 @@ namespace CodeDesigner.Ps2.Bridge
         // ── Data-format overrides (GETDATAFORMATS / SETDATAFORMAT / CLEARDATAFORMAT) ──
         /// <summary>
         /// Format kind for SETDATAFORMAT — one of <c>"byte"</c>, <c>"half"</c>,
-        /// <c>"word"</c>, <c>"dword"</c>, <c>"qword"</c> (case-insensitive).
+        /// <c>"word"</c>, <c>"dword"</c>, <c>"qword"</c>, <c>"float"</c>,
+        /// <c>"double"</c> (case-insensitive).
         /// </summary>
         public string? DataFormatKind { get; set; }
     }
