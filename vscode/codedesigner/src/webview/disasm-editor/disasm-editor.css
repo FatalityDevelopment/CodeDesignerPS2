@@ -4112,8 +4112,8 @@ app-icon,
 
 #lm-table-wrap {
     overflow-y: auto;
-    flex: 1;
-    min-height: 80px;
+    flex: 1 1 auto;
+    min-height: 200px;
 }
 #lm-table {
     width: 100%;

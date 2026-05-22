@@ -1182,6 +1182,10 @@ export class LabelManagerOverlayComponent {
   onRunScanner(kind: ScannerKind): void {
     // Stop any active polling to avoid socket FIFO conflicts during the scan.
     this._stopPolling();
+    // Collapse the bottom editor so the scan-result table gets the full
+    // vertical room — otherwise a previously opened edit panel can squeeze
+    // the table down to its min-height.
+    this.editFormOpen.set(false);
     this.activeScannerKind.set(kind);
     this.scannerStatus.set('scanning');
     this.scanResultEntries.set([]);
@@ -1203,16 +1207,31 @@ export class LabelManagerOverlayComponent {
    * Converts raw scanner entries into LabelManagerEntry format for the tree.
    */
   setScanResults(kind: ScannerKind, entries: LabelManagerEntry[]): void {
+    console.log('[LabelManager] setScanResults', kind, 'received', entries.length, 'entries; sample:', entries[0]);
     this.activeScannerKind.set(kind);
     this.scannerStatus.set('done');
+    // Keep the editor collapsed so the result table always has room.
+    this.editFormOpen.set(false);
     this.scanResultEntries.set(entries);
     this.currentPage.set(0);
+    // Move off any active type filter so scan entries are not filtered out
+    // by a leftover type selection from a prior interaction.
+    this.typeFilter.set('');
+    this.filterText.set('');
     const count = entries.length;
     this.showStatus(`Scan complete: ${count} ${kind} found.`);
     // Restart polling if the user had live polling enabled before the scan.
     if (this.livePollingEnabled()) {
       this._updatePolling();
     }
+    // Defer one frame so OnPush can see the signal updates and re-run the
+    // table computed; logs the resolved filteredEntries length to confirm.
+    queueMicrotask(() => {
+      console.log('[LabelManager] post-scan filteredEntries=', this.filteredEntries().length,
+        'treeRows=', this.treeRows().length,
+        'activeSet=', this.activeSetName(),
+        'isBuiltIn=', this.activeSetIsBuiltIn());
+    });
   }
 
   // ── Pagination ──────────────────────────────────────────────────────────────
