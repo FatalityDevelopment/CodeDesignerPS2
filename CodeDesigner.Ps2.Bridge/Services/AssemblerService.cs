@@ -1291,7 +1291,9 @@ namespace CodeDesigner.Ps2.Bridge.Services
         /// <paramref name="index"/>, including the null terminator. Returns 0
         /// when the run is shorter than 3 visible chars, when a non-printable
         /// byte appears before the null, or when no null is found within the
-        /// buffer. Used by the byte-override path to auto-extend its span to
+        /// buffer. Common whitespace (\t, \n, \r) counts as printable so PS2
+        /// diagnostic strings like "invalid type\n\0" aren't aborted at the
+        /// newline. Used by the byte-override path to auto-extend its span to
         /// cover the whole string a user gestured at.
         /// </summary>
         private static int MeasureNullTerminatedAscii(byte[] buf, int index)
@@ -1306,7 +1308,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
                     int len = i - index;
                     return len >= 3 ? (len + 1) : 0;
                 }
-                if (b < 0x20 || b > 0x7E) return 0;
+                if (!StringScanner.IsAsciiStringChar(b)) return 0;
                 i++;
             }
             return 0; // ran off the buffer without finding null
@@ -1325,7 +1327,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 {
                     return sb.Length >= 3 ? $"-> \"{EscapeCommentString(sb.ToString())}\"" : null;
                 }
-                if (b < 0x20 || b > 0x7E) return null;
+                if (!StringScanner.IsAsciiStringChar(b)) return null;
                 sb.Append((char)b);
             }
 

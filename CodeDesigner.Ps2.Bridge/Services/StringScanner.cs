@@ -12,6 +12,18 @@ namespace CodeDesigner.Ps2.Bridge.Services
     {
         public const int MinStringLength = 4;
 
+        /// <summary>
+        /// True when <paramref name="b"/> can appear inside a printable
+        /// null-terminated string. Includes the standard printable ASCII range
+        /// (0x20–0x7E) plus common whitespace control chars (\t, \n, \r) that
+        /// regularly appear in PS2 firmware diagnostic strings — without these,
+        /// a single embedded newline in a string like "invalid type\n" would
+        /// abort the scan and leave the rest of the string formatted as MIPS
+        /// instruction garbage.
+        /// </summary>
+        public static bool IsAsciiStringChar(byte b) =>
+            (b >= 0x20 && b <= 0x7E) || b == 0x09 || b == 0x0A || b == 0x0D;
+
         public readonly struct Hit
         {
             public Hit(uint address, int byteOffset, int length, string value)
@@ -42,10 +54,10 @@ namespace CodeDesigner.Ps2.Bridge.Services
             int i = 0;
             while (i < bytes.Length)
             {
-                if (bytes[i] >= 0x20 && bytes[i] <= 0x7E)
+                if (IsAsciiStringChar(bytes[i]))
                 {
                     int start = i;
-                    while (i < bytes.Length && bytes[i] >= 0x20 && bytes[i] <= 0x7E)
+                    while (i < bytes.Length && IsAsciiStringChar(bytes[i]))
                         i++;
 
                     if (i < bytes.Length && bytes[i] == 0x00 && (i - start) >= minLength)
