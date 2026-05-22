@@ -2093,6 +2093,13 @@ export class DisasmEditorComponent implements AfterViewInit {
         return;
       }
       addr = alignedAddr;
+
+      // Re-fetch this page with DataFormatOverrides bypassed so the row the
+      // user typed lands on a clean 4-byte boundary even if user overrides
+      // would normally produce variable-stride rows around it. The next
+      // ordinary page refresh restores override-aware rendering.
+      const gotoPageStart = Math.floor(instrIndex / params.state.pageSize) * params.state.pageSize;
+      params.vscode.postMessage({ type: 'requestPage', startIndex: gotoPageStart, bypassOverrides: true });
       recordNavigation(addr);
       params.pushNavHistory();
       params.state.cursor = instrIndex;
@@ -2730,10 +2737,17 @@ export class DisasmEditorComponent implements AfterViewInit {
       // The extension host has routed navigation to this panel because this
       // region owns the address. Navigate directly without bouncing through
       // gotoRegion a second time.
-      const physAddr   = toPhysicalAddress(address);
+      const physAddrRaw   = toPhysicalAddress(address);
+      const physAligned   = (physAddrRaw & ~0x3) >>> 0;
       const physBase   = toPhysicalAddress(state.baseAddress);
-      const instrIndex = Math.floor((physAddr - physBase) / 4);
+      const instrIndex = Math.floor((physAligned - physBase) / 4);
       if (instrIndex < 0 || instrIndex >= state.totalInstructions) { return; }
+
+      // Force-reload the destination page with DataFormatOverrides bypassed so
+      // the goto target lands on a clean 4-byte boundary regardless of any
+      // variable-stride overrides the user has applied near it.
+      const gotoPageStart = Math.floor(instrIndex / state.pageSize) * state.pageSize;
+      vscode.postMessage({ type: 'requestPage', startIndex: gotoPageStart, bypassOverrides: true });
 
       pushNavHistory();
       const addrHex = `0x${address.toString(16).toUpperCase()}`;

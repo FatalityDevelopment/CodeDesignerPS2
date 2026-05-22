@@ -741,7 +741,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
    * @param buffer - Binary data to disassemble
    * @returns Array of disassembled instruction rows
    */
-  private async disassembleWithBackend(startAddr: number, buffer: Buffer): Promise<DisassembledRow[]> {
+  private async disassembleWithBackend(startAddr: number, buffer: Buffer, bypassOverrides: boolean = false): Promise<DisassembledRow[]> {
     const rows: DisassembledRow[] = [];
     
     // If no socket client or not connected, return empty array
@@ -774,7 +774,10 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       // the bridge apply any persisted DataFormatOverrides so the response
       // rows have variable byte length (.byte/.half/.word/.dword/.qword/.float/.double).
       const hexCode = hexInstructions.join(' ');
-      const gameId = this._currentGameSerial || undefined;
+      // Passing undefined gameId tells the backend to skip DataFormatOverrides
+      // for this page — used for goto loads so an unaligned override layout
+      // doesn't shift the row the user is trying to land on.
+      const gameId = bypassOverrides ? undefined : (this._currentGameSerial || undefined);
       console.log(`[DISASM] Disassembling ${hexInstructions.length} instructions starting at 0x${startAddr.toString(16)}`);
       const results = await this.socketClient.disassemble(hexCode, startAddr, gameId);
       console.log(`[DISASM] Received ${results.length} results from backend`);
@@ -1371,7 +1374,16 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 return;
             }
             if (message.type === 'requestPage') {
-                await this.sendLiveDisasmPage(panel, region, baseAddress, totalBytes, message.startIndex);
+                // Goto-triggered loads pass bypassOverrides=true so the page is
+                // rendered as raw 4-byte instructions even when DataFormatOverrides
+                // would otherwise produce variable-stride rows. Without this, a
+                // goto to an address inside a multi-byte data span lands on a
+                // row whose start address differs from what the user typed.
+                await this.sendLiveDisasmPage(
+                    panel, region, baseAddress, totalBytes,
+                    message.startIndex,
+                    message.bypassOverrides === true,
+                );
             } else if (message.type === 'updateHex') {
                 await this.sendLiveHexView(panel, region, baseAddress, message.address,
                     message.length || DisasmEditorProvider.INSTRUCTION_SIZE);
@@ -2101,7 +2113,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         region: string,
         baseAddress: number,
         totalBytes: number,
-        startIndex: number
+        startIndex: number,
+        bypassOverrides: boolean = false,
     ): Promise<void> {
         const startOffset = startIndex * DisasmEditorProvider.INSTRUCTION_SIZE;
         const maxBytes    = DisasmEditorProvider.PAGE_SIZE * DisasmEditorProvider.INSTRUCTION_SIZE;
@@ -2134,7 +2147,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         }
         try {
             const buffer = await socketClient.readMemory(startAddr, readLength, region);
-            const rows   = await this.disassembleWithBackend(startAddr, buffer);
+            const rows   = await this.disassembleWithBackend(startAddr, buffer, bypassOverrides);
           this._handleLiveReadSuccess();
             panel.webview.postMessage({ type: 'disasmPage', rows, startIndex });
         } catch (err: any) {
