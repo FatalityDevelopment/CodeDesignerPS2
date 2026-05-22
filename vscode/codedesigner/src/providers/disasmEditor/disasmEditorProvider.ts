@@ -201,10 +201,18 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
 
   public navigateToAddress(address: number, source: 'user' | 'mcp' = 'user'): void {
     const info = classifyAddress(address);
+    // Align to 4-byte instruction boundary. Goto targets can arrive unaligned
+    // from several sources — struct-member pointer dereferences ("0x80444444:+0x03"),
+    // String/byte-typed labels, runtime register values — but every live panel
+    // disassembles on a fixed 4-byte stride, so an unaligned cursor would render
+    // shifted rows (e.g. addresses ending in 7/B/F/3 instead of 0/4/8/C) with
+    // bytes spanning two real instructions. Snap down to the instruction this
+    // byte belongs to; the user can still see those bytes in the row.
+    const physAligned = info.physicalAddress & ~0x3;
     // Address the panel should display — use the EE-physical / EE-mirror form so
     // panels opened at physical bases (EE 0x00000000, IOP 0x1C000000, BIOS
     // 0x1FC00000, scratchpad 0x70000000) line up.
-    const displayAddr = info.physicalAddress;
+    const displayAddr = (physAligned >>> 0);
 
     // Region-first matching: prefer a panel whose recorded region matches the
     // classified region, only fall back to numeric-range matching if no
