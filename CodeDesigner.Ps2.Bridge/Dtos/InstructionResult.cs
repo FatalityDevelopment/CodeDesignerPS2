@@ -42,11 +42,11 @@ namespace CodeDesigner.Ps2.Bridge
         public string? DataFormatKind { get; set; }
 
         /// <summary>
-        /// True for rows the disassembler auto-rendered as data (e.g. an
-        /// <c>.asciiz</c> row produced by per-page string detection) without
-        /// a persisted <c>DataFormatOverride</c>. The webview styles these
-        /// the same way as override rows but should not surface "Clear
-        /// formatting" since there is nothing to clear in the database.
+        /// True for rows the disassembler auto-formatted (e.g. a printable-ASCII
+        /// run rendered as byte rows by per-page string detection) without a
+        /// persisted <c>DataFormatOverride</c>. The webview styles these the
+        /// same way as override rows but should not surface "Clear formatting"
+        /// since there is nothing to clear in the database.
         /// </summary>
         public bool? AutoFormatted { get; set; }
     }

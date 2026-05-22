@@ -768,15 +768,12 @@ namespace CodeDesigner.Ps2.Bridge.Services
                     }
                 }
 
-                // ── Auto-detect strings in this page (no DB writes) ───────────
-                // A byte range is auto-rendered as .asciiz when:
-                //   - The full string + null terminator fits in the page buffer.
-                //   - All bytes are printable ASCII; length >= MinAutoStringLength.
-                //   - The preceding byte is a null (clean delimiter) or the
-                //     string starts at byteIndex 0.
-                //   - No user DataFormatOverride covers any byte of the range.
-                // Auto-detect strings have no DB row; the user's overrides
-                // remain authoritative when present.
+                // Per-page string auto-detect — kept as a discovery aid, but
+                // emitted as byte rows (not a standalone .asciiz row) so the
+                // display path is identical to a user-applied Byte
+                // DataFormatOverride. The first row in the auto-detected span
+                // carries the full ASCII content as its comment, matching the
+                // user-override behaviour below.
                 var autoStrings = ComputeAutoStringRanges(byteBuf, overrides, baseAddr);
 
                 var results        = new List<InstructionResult>();
@@ -855,34 +852,48 @@ namespace CodeDesigner.Ps2.Bridge.Services
                     }
 
                     // ── Auto-detected string at this offset ───────────────────
-                    // Emit a single .asciiz row covering the printable ASCII run
-                    // plus its null terminator. Computed earlier; never overlaps
-                    // a user override.
+                    // Emit byte rows for the printable-ASCII run + null
+                    // terminator (and any trailing zero-pad needed to reach the
+                    // next 4-byte boundary). The first row carries the resolved
+                    // ASCII content as a comment so the user gets the same
+                    // "-> \"...\"" annotation a user-applied Byte override
+                    // would produce. AutoFormatted=true tells the webview these
+                    // came from heuristic detection rather than a DB override.
                     if (autoStrings.TryGetValue(byteIndex, out var autoHit))
                     {
-                        int totalBytes = autoHit.Length + 1; // include null
-                        // Absorb trailing zero alignment padding so the next
-                        // instruction row stays 4-byte aligned.
-                        int padded = (totalBytes + 3) & ~3;
-                        int paddedEnd = byteIndex + padded;
+                        int totalBytes = autoHit.Length + 1; // include the null
+                        int padded     = (totalBytes + 3) & ~3;
+                        int paddedEnd  = byteIndex + padded;
                         bool paddingClean = paddedEnd <= byteBuf.Length;
                         for (int p = byteIndex + totalBytes; paddingClean && p < paddedEnd; p++)
                         {
                             if (byteBuf[p] != 0x00) paddingClean = false;
                         }
                         int consumed = paddingClean ? padded : totalBytes;
+                        int spanEnd  = byteIndex + consumed;
 
-                        string asciiz = $".asciiz \"{EscapeCommentString(autoHit.Value)}\"";
-                        results.Add(new InstructionResult
+                        string? firstComment = $"-> \"{EscapeCommentString(autoHit.Value)}\"";
+                        while (byteIndex < spanEnd && byteIndex < byteBuf.Length)
                         {
-                            Address       = rowAddr,
-                            ByteLength    = consumed,
-                            Hex           = "0x" + BitConverter.ToString(byteBuf, byteIndex, consumed).Replace("-", ""),
-                            Assembly      = asciiz,
-                            Success       = true,
-                            AutoFormatted = true,
-                        });
-                        byteIndex += consumed;
+                            uint rAddr = (uint)(baseAddr + (uint)byteIndex);
+                            string asm = FormatDataDirective(byteBuf, byteIndex,
+                                Database.Entities.DataFormatKind.Byte, out string? hexStr);
+
+                            results.Add(new InstructionResult
+                            {
+                                Address       = rAddr,
+                                ByteLength    = 1,
+                                Hex           = hexStr,
+                                Assembly      = asm,
+                                Success       = true,
+                                Comment       = firstComment,
+                                DataFormatKind = DataFormatService.KindToWire(
+                                    Database.Entities.DataFormatKind.Byte),
+                                AutoFormatted = true,
+                            });
+                            firstComment = null;
+                            byteIndex += 1;
+                        }
                         continue;
                     }
 
@@ -1181,7 +1192,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
         private const int MinAutoStringLength = 6;
 
         /// <summary>
-        /// Computes the set of auto-detect <c>.asciiz</c> ranges for the current
+        /// Computes the set of auto-detect string ranges for the current
         /// disassembly page. A range is kept only when:
         ///   - The full string + null terminator fits inside <paramref name="byteBuf"/>.
         ///   - All bytes are printable ASCII (0x20–0x7E).
@@ -1201,14 +1212,11 @@ namespace CodeDesigner.Ps2.Bridge.Services
 
             foreach (var hit in StringScanner.FindStrings(byteBuf, baseAddr, MinAutoStringLength))
             {
-                // Clean delimiter: preceded by null, or at the start of the page.
                 if (hit.ByteOffset > 0 && byteBuf[hit.ByteOffset - 1] != 0x00) continue;
 
-                // Full string + null must fit in the buffer.
                 int endExclusive = hit.ByteOffset + hit.Length + 1;
                 if (endExclusive > byteBuf.Length) continue;
 
-                // Skip when any user override touches the candidate range.
                 long rangeStart = baseAddr + (uint)hit.ByteOffset;
                 long rangeEnd   = baseAddr + (uint)endExclusive;
                 bool overlaps = false;
