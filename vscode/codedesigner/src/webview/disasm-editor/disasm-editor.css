@@ -4260,6 +4260,18 @@ app-icon,
 .lm-badge-str   { background: #2a2000; color: #d7ba7d; border: 1px solid #4a3800; }
 .lm-badge-data  { background: #1a1a2a; color: #9090c0; border: 1px solid #30305a; }
 
+/* CodeDesigner-authored "system" sets (BuiltIn EE + runtime IOP modules). One amber
+ * badge replaces the per-type green/blue/magenta badges so the set reads as a single
+ * cohesive group distinct from user-authored labels. Paired with .lm-row-system below. */
+.lm-badge-system { background: #2a2208; color: #e0b341; border: 1px solid #5a4818; }
+
+/* Subtle amber wash on every row inside a system set so the entire table reads as
+ * read-only system data at a glance. Kept low-alpha so type-specific row classes
+ * (.lm-struct-row, .lm-fnc-row, .lm-hidden-row) still show through. */
+.lm-row-system > td { background: rgba(224, 179, 65, 0.05); }
+.lm-row-system .label,
+.lm-row-system .lm-label-name { color: #e0b341; }
+
 .lm-member-badge {
     background: #0e639c33;
     color: #9cdcfe;

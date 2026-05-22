@@ -102,6 +102,7 @@ namespace CodeDesigner.Ps2.LabelManager
             {
                 SetName   = "Built-in",
                 IsBuiltIn = true,
+                IsSystem  = true,
                 Entries   = entries,
             };
         }

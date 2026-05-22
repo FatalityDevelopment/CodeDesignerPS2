@@ -51,7 +51,10 @@ export class LabelManagerPageComponent implements AfterViewInit {
       this.zone.run(() => {
         switch (data['type']) {
           case 'labelManagerSets':
-            lm.setSets((data['sets'] as string[]) ?? []);
+            lm.setSets(
+              (data['sets'] as string[]) ?? [],
+              data['summaries'] as { setName: string; isBuiltIn: boolean; isSystem: boolean }[] | undefined,
+            );
             break;
           case 'labelManagerSet':
             lm.setActiveSet(data['set'] as LabelSetPayload);

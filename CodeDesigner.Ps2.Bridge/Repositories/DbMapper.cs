@@ -115,6 +115,7 @@ namespace CodeDesigner.Ps2.Bridge.Repositories
             GameDiscId = gameDiscId,
             GameId     = gameId ?? src.GameId,
             IsBuiltIn  = src.IsBuiltIn,
+            IsSystem   = src.IsSystem,
         };
 
         /// <summary>
@@ -143,6 +144,7 @@ namespace CodeDesigner.Ps2.Bridge.Repositories
                 // Surface the disc's serial as the GameId so callers can resolve it.
                 GameId    = src.GameDisc?.Serial ?? src.GameDiscId?.ToString() ?? src.GameId,
                 IsBuiltIn = src.IsBuiltIn,
+                IsSystem  = src.IsSystem,
                 Entries   = entries,
             };
         }

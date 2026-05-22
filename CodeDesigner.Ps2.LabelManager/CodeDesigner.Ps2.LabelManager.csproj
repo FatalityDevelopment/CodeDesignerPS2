@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Resources\BuiltIn.json" />
+    <EmbeddedResource Include="Resources\IopModuleExports.json" />
   </ItemGroup>
 
 </Project>

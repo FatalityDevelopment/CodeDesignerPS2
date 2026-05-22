@@ -79,6 +79,31 @@ public sealed partial class CodeDesignerPs2Tools
         return SimpleMessage(json);
     }
 
+    [McpServerTool(Name = "iop_labels_refresh")]
+    [Description("Scans every loaded IOP module in PCSX2 and refreshes the read-only 'IOP: <modname>' label sets — one set per module, populated with that module's exports and every import stub aimed at it (resolved via PCSX2's IopModuleNames table + ps2sdk overlay). Requires PCSX2 (PINE) mode. Idempotent: re-runs leave existing labels alone unless their address or name changed.")]
+    public async Task<string> IopLabelsRefresh(
+        [Description("Game identifier / ISO serial (e.g. 'SCUS-97130').")] string gameId,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(
+            new { Command = "IOPLABELSREFRESH", GameId = gameId },
+            cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    [McpServerTool(Name = "iop_labels_refresh_module")]
+    [Description("Refreshes the read-only 'IOP: <moduleName>' label set for a single IOP module. Use after a fresh IRX load when only one module is new. Requires PCSX2 (PINE) mode.")]
+    public async Task<string> IopLabelsRefreshModule(
+        [Description("Game identifier / ISO serial (e.g. 'SCUS-97130').")] string gameId,
+        [Description("IOP module name as reported by pcsx2_get_modules (e.g. 'secrman', 'cdvdman').")] string moduleName,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(
+            new { Command = "IOPLABELSREFRESHMODULE", GameId = gameId, SetName = moduleName },
+            cancellationToken);
+        return SimpleMessage(json);
+    }
+
     [McpServerTool(Name = "label_delete_set")]
     [DynamicDescription("label_delete_set_desc")]
     [Description("Permanently remove a label set and all its entries for a game. The built-in set cannot be deleted.")]

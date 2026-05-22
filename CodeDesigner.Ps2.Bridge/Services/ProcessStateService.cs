@@ -8,6 +8,14 @@ namespace CodeDesigner.Ps2.Bridge.Services
     internal sealed class ProcessStateService : ICommandService
     {
         private readonly IBridgeContext _ctx;
+
+        /// <summary>
+        /// Snapshot of the most recent IOP module list (as reported by PCSX2) keyed by
+        /// module name → text address. Used to detect new modules between GETMODULES
+        /// polls so the IOP labelizer only re-scans when a fresh IRX was loaded.
+        /// </summary>
+        private Dictionary<string, uint>? _lastModuleSnapshot;
+
         public ProcessStateService(IBridgeContext ctx) => _ctx = ctx;
 
         public void Register(CommandRegistry reg)
@@ -189,6 +197,9 @@ namespace CodeDesigner.Ps2.Bridge.Services
                     DataSize  = m.DataSize,
                     BssSize   = m.BssSize,
                 }).ToList();
+
+                MaybeRefreshIopLabels(modules);
+
                 return JsonSerializer.Serialize(new CommandResponse
                 {
                     Success = true,
@@ -197,6 +208,64 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 });
             }
             catch (Exception ex) { return Responses.Error($"PINE GetModules failed: {ex.Message}"); }
+        }
+
+        /// <summary>
+        /// Diff the current module list against the last snapshot and, for any newly
+        /// loaded IRX, fire a background refresh against the IOP labelizer so the
+        /// "IOP: &lt;modname&gt;" label sets stay current. Skips when no game context is
+        /// available (the labelizer needs a gameId to scope its DB writes).
+        /// </summary>
+        private void MaybeRefreshIopLabels(IReadOnlyList<PineClient.IopModule> modules)
+        {
+            string? gameId = _ctx.LabelMgr.GameId;
+            if (string.IsNullOrWhiteSpace(gameId)) { CaptureSnapshot(modules); return; }
+
+            var current = modules.ToDictionary(m => m.Name, m => m.TextAddr, StringComparer.OrdinalIgnoreCase);
+
+            // New module set on first call → label everything once.
+            if (_lastModuleSnapshot is null)
+            {
+                _lastModuleSnapshot = current;
+                FireAndForgetRefresh(gameId, moduleName: null);
+                return;
+            }
+
+            // Otherwise refresh per-module only for additions / address changes.
+            var newOrMoved = current
+                .Where(kv => !_lastModuleSnapshot.TryGetValue(kv.Key, out var prev) || prev != kv.Value)
+                .Select(kv => kv.Key)
+                .ToList();
+
+            _lastModuleSnapshot = current;
+
+            foreach (var name in newOrMoved)
+                FireAndForgetRefresh(gameId, name);
+        }
+
+        private void CaptureSnapshot(IReadOnlyList<PineClient.IopModule> modules)
+        {
+            _lastModuleSnapshot = modules.ToDictionary(m => m.Name, m => m.TextAddr, StringComparer.OrdinalIgnoreCase);
+        }
+
+        private void FireAndForgetRefresh(string gameId, string? moduleName)
+        {
+            _ = System.Threading.Tasks.Task.Run(async () =>
+            {
+                try
+                {
+                    var labelizer = new IopModuleLabelizer(_ctx);
+                    if (moduleName is null)
+                        await labelizer.RefreshAllAsync(gameId);
+                    else
+                        await labelizer.RefreshModuleAsync(gameId, moduleName);
+                    _ctx.SyncLegacyDictsFromLabelManager();
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[IopLabelizer] background refresh failed: {ex.Message}");
+                }
+            });
         }
 
         /// <summary>Handle GETSTACK — PCSX2 PINE only.</summary>
