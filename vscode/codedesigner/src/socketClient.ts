@@ -3427,6 +3427,14 @@ export class SocketClient {
         return (response as any).LabelSets ?? [];
     }
 
+    /** List all label set summaries (name + isBuiltIn + isSystem) for a game. */
+    public async getLabelSetSummaries(workspaceDir: string, gameId: string)
+        : Promise<{ setName: string; isBuiltIn: boolean; isSystem: boolean }[]> {
+        const response = await this.sendCommand({ Command: 'GETLABELSETS', WorkspaceDir: workspaceDir, GameId: gameId });
+        if (!response.Success) { throw new Error(response.Error || 'GETLABELSETS failed'); }
+        return (response as any).LabelSetSummaries ?? [];
+    }
+
     /** Return the full contents of a label set. Pass "Built-in" for the built-in set. */
     public async getLabelSet(workspaceDir: string, gameId: string, setName: string): Promise<LabelSetPayload> {
         const response = await this.sendCommand({ Command: 'GETLABELSET', WorkspaceDir: workspaceDir, GameId: gameId, SetName: setName });

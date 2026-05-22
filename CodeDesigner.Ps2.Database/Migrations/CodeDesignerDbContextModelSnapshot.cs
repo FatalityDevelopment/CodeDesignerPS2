@@ -445,6 +445,9 @@ namespace CodeDesigner.Ps2.Database.Migrations
                     b.Property<bool>("IsBuiltIn")
                         .HasColumnType("bit");
 
+                    b.Property<bool>("IsSystem")
+                        .HasColumnType("bit");
+
                     b.Property<string>("SetName")
                         .IsRequired()
                         .HasMaxLength(256)

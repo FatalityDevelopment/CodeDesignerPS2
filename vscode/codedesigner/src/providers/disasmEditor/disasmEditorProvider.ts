@@ -461,10 +461,11 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
 
       // Also refresh the label set list so newly created sets appear.
       const sets = await this.socketClient.getLabelSets(workspaceDir, gameDiscId);
+      const summaries = await this.socketClient.getLabelSetSummaries(workspaceDir, gameDiscId);
       for (const p of this._livePanels) {
-        p.webview.postMessage({ type: 'labelManagerSets', sets });
+        p.webview.postMessage({ type: 'labelManagerSets', sets, summaries });
       }
-      this._labelManagerPanel?.webview.postMessage({ type: 'labelManagerSets', sets });
+      this._labelManagerPanel?.webview.postMessage({ type: 'labelManagerSets', sets, summaries });
     } catch {
       // Non-fatal — the user can always manually refresh.
     }
@@ -3799,7 +3800,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       switch (action.type) {
         case 'refresh': {
           const sets = await this.socketClient.getLabelSets(workspaceDir, gameDiscId);
-          webview.postMessage({ type: 'labelManagerSets', sets });
+          const summaries = await this.socketClient.getLabelSetSummaries(workspaceDir, gameDiscId);
+          webview.postMessage({ type: 'labelManagerSets', sets, summaries });
           // Use the set the client was already viewing if it still exists, otherwise
           // fall back to the first user set or Built-in.
           const requestedName = action.activeSetName;
@@ -3832,7 +3834,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
           await this.socketClient.setActiveLabelSet(workspaceDir, gameDiscId, action.setName!);
           this._activeSetName = action.setName!;
           const sets = await this.socketClient.getLabelSets(workspaceDir, gameDiscId);
-          webview.postMessage({ type: 'labelManagerSets', sets });
+          const summaries = await this.socketClient.getLabelSetSummaries(workspaceDir, gameDiscId);
+          webview.postMessage({ type: 'labelManagerSets', sets, summaries });
           webview.postMessage({ type: 'labelManagerSet', set });
           webview.postMessage({ type: 'labelManagerStatus', message: `Created label set "${action.setName}".` });
           break;
@@ -3841,7 +3844,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
           await this.socketClient.deleteLabelSet(workspaceDir, gameDiscId, action.setName!);
           this._activeSetName = null;
           const sets = await this.socketClient.getLabelSets(workspaceDir, gameDiscId);
-          webview.postMessage({ type: 'labelManagerSets', sets });
+          const summaries = await this.socketClient.getLabelSetSummaries(workspaceDir, gameDiscId);
+          webview.postMessage({ type: 'labelManagerSets', sets, summaries });
           // Switch to Built-in after deletion.
           const builtIn = await this.socketClient.setActiveLabelSet(workspaceDir, gameDiscId, 'Built-in');
           webview.postMessage({ type: 'labelManagerSet', set: builtIn });
@@ -3854,7 +3858,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
           const set = await this.socketClient.renameLabelSet(workspaceDir, gameDiscId, action.setName!, action.newSetName!);
           this._activeSetName = set.setName;
           const sets = await this.socketClient.getLabelSets(workspaceDir, gameDiscId);
-          webview.postMessage({ type: 'labelManagerSets', sets });
+          const summaries = await this.socketClient.getLabelSetSummaries(workspaceDir, gameDiscId);
+          webview.postMessage({ type: 'labelManagerSets', sets, summaries });
           webview.postMessage({ type: 'labelManagerSet', set });
           webview.postMessage({ type: 'labelManagerStatus', message: `Renamed label set to "${set.setName}".` });
           break;
@@ -3881,7 +3886,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
           const set = await this.socketClient.importLabelSet(workspaceDir, gameDiscId, action.setName ?? 'Imported', action.json!);
           this._activeSetName = set.setName;
           const sets = await this.socketClient.getLabelSets(workspaceDir, gameDiscId);
-          webview.postMessage({ type: 'labelManagerSets', sets });
+          const summaries = await this.socketClient.getLabelSetSummaries(workspaceDir, gameDiscId);
+          webview.postMessage({ type: 'labelManagerSets', sets, summaries });
           webview.postMessage({ type: 'labelManagerSet', set });
           webview.postMessage({ type: 'labelManagerStatus', message: `Imported "${set.setName}" (${set.entries.length} entries).` });
           break;

@@ -22,6 +22,16 @@ namespace CodeDesigner.Ps2.LabelManager.Models
         [JsonPropertyName("isBuiltIn")]
         public bool IsBuiltIn { get; set; }
 
+        /// <summary>
+        /// True when this set is authored by CodeDesigner (built-in EE labels, runtime IOP
+        /// module exports, etc.) rather than the user. Drives a distinct UI rendering in the
+        /// Label Manager (amber badge + row tint) and is enforced as read-only on the client.
+        /// Distinct from <see cref="IsBuiltIn"/>: built-in sets ship in the binary, system
+        /// sets may also be generated dynamically at runtime.
+        /// </summary>
+        [JsonPropertyName("isSystem")]
+        public bool IsSystem { get; set; }
+
         [JsonPropertyName("entries")]
         public List<LabelEntry> Entries { get; set; } = [];
     }

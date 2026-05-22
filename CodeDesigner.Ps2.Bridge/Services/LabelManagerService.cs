@@ -32,6 +32,8 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 ? Responses.Error("Address is required for RESOLVELINKEDLIST")
                 : HandleResolveLinkedList(c.Address.Value, c.MemberOffset ?? 0),
                 "RESOLVELINKEDLIST");
+            reg.Add(c => HandleIopLabelsRefresh(c.GameId, moduleName: null),                                              "IOPLABELSREFRESH");
+            reg.Add(c => HandleIopLabelsRefresh(c.GameId, moduleName: c.SetName),                                         "IOPLABELSREFRESHMODULE");
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────
@@ -89,6 +91,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
             SetName    = s.SetName,
             GameDiscId = s.GameId,
             IsBuiltIn  = s.IsBuiltIn,
+            IsSystem   = s.IsSystem,
             Entries    = s.Entries.Select(ToWireEntry).ToList(),
         };
 
@@ -106,17 +109,32 @@ namespace CodeDesigner.Ps2.Bridge.Services
 
             try
             {
-                var userSets = _ctx.LabelRepo.GetSetNamesAsync(gameId).GetAwaiter().GetResult();
+                var summaries = _ctx.LabelRepo.GetSetSummariesAsync(gameId).GetAwaiter().GetResult();
 
-                // Always include the built-in set in the list.
-                var all = new List<string> { "Built-in" };
-                all.AddRange(userSets);
+                // Always include the built-in set in the list (and as a system set so
+                // the webview styles it with the amber treatment).
+                var names = new List<string> { "Built-in" };
+                var summaryList = new List<LabelSetSummary>
+                {
+                    new() { SetName = "Built-in", IsBuiltIn = true, IsSystem = true },
+                };
+                foreach (var s in summaries)
+                {
+                    names.Add(s.SetName);
+                    summaryList.Add(new LabelSetSummary
+                    {
+                        SetName   = s.SetName,
+                        IsBuiltIn = s.IsBuiltIn,
+                        IsSystem  = s.IsSystem,
+                    });
+                }
 
                 return JsonSerializer.Serialize(new CommandResponse
                 {
-                    Success   = true,
-                    Command   = "GETLABELSETS",
-                    LabelSets = all,
+                    Success           = true,
+                    Command           = "GETLABELSETS",
+                    LabelSets         = names,
+                    LabelSetSummaries = summaryList,
                 });
             }
             catch (Exception ex)
@@ -665,6 +683,42 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 msg += $" Skipped (read error): {string.Join(", ", skipped)}.";
 
             return Responses.Success(msg);
+        }
+
+        // ── IOPLABELSREFRESH / IOPLABELSREFRESHMODULE ────────────────────────
+
+        /// <summary>
+        /// Scans loaded IOP modules in PCSX2 and populates one read-only system label
+        /// set per module (<c>IOP: &lt;modname&gt;</c>) with the exports it provides plus
+        /// every import stub aimed at it. When <paramref name="moduleName"/> is supplied
+        /// only that one module is refreshed.
+        /// </summary>
+        private string HandleIopLabelsRefresh(string? gameId, string? moduleName)
+        {
+            gameId = RequireParam(gameId, "GameId", out var e);
+            if (gameId is null) return Responses.Error(e!);
+
+            if (_ctx.PineClient is null)
+                return Responses.Error("IOPLABELSREFRESH requires PCSX2 (PINE) mode.");
+
+            try
+            {
+                var labelizer = new IopModuleLabelizer(_ctx);
+                (int modules, int labels) result;
+                if (string.IsNullOrWhiteSpace(moduleName))
+                    result = labelizer.RefreshAllAsync(gameId).GetAwaiter().GetResult();
+                else
+                    result = labelizer.RefreshModuleAsync(gameId, moduleName).GetAwaiter().GetResult();
+
+                _ctx.SyncLegacyDictsFromLabelManager();
+
+                return Responses.Success(
+                    $"IOP label refresh: {result.modules} module(s), {result.labels} label(s).");
+            }
+            catch (Exception ex)
+            {
+                return Responses.Error($"IOPLABELSREFRESH failed: {ex.Message}");
+            }
         }
 
         // ── RESOLVELINKEDLIST ─────────────────────────────────────────────────

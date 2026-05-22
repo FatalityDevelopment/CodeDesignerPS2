@@ -52,8 +52,20 @@ export interface LabelSetPayload {
   setName:      string;
   gameDiscId?:  string;
   isBuiltIn:    boolean;
+  /**
+   * True for CodeDesigner-authored sets (built-in EE labels, runtime IOP module
+   * exports). Rendered with amber badge + row tint and treated as read-only.
+   */
+  isSystem?:    boolean;
   /** Flat list of ALL labels (roots + children at all depths). */
   entries:      LabelManagerEntry[];
+}
+
+/** Lightweight per-set metadata returned by GETLABELSETS alongside the name list. */
+export interface LabelSetSummary {
+  setName:    string;
+  isBuiltIn:  boolean;
+  isSystem:   boolean;
 }
 
 /** One row in the recursive label-manager tree view. */
@@ -189,7 +201,7 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
       <!-- Set selector -->
       <select id="lm-set-select" [value]="activeSetName()" (change)="onSetChange(asSelect($event).value)">
         @for (s of setNames(); track s) {
-          <option [value]="s">{{ s }}</option>
+          <option [value]="s">{{ isSystemSetName(s) ? '🔒 ' + s : s }}</option>
         }
       </select>
 
@@ -429,7 +441,8 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
               <!-- Top-level label entry row -->
               <tr [class.lm-struct-row]="effectiveType(row.entry!) === 'Pointer' || effectiveType(row.entry!) === 'Struct'"
                   [class.lm-fnc-row]="effectiveType(row.entry!) === 'Function'"
-                  [class.lm-hidden-row]="row.entry!.hidden">
+                  [class.lm-hidden-row]="row.entry!.hidden"
+                  [class.lm-row-system]="activeSetIsSystem()">
                 <td class="lm-col-vis">
                   @if (!isScannerView()) {
                   <button class="lm-vis-btn"
@@ -489,7 +502,9 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
               </tr>
             } @else {
               <!-- Child label sub-row (recursive; entry = the child LabelManagerEntry) -->
-              <tr class="lm-member-sub-row" [class.lm-hidden-row]="row.entry.hidden">
+              <tr class="lm-member-sub-row"
+                  [class.lm-hidden-row]="row.entry.hidden"
+                  [class.lm-row-system]="activeSetIsSystem()">
                 <td class="lm-col-vis">
                   @if (!isScannerView()) {
                   <button class="lm-vis-btn"
@@ -824,6 +839,14 @@ export class LabelManagerOverlayComponent {
   // ── State ────────────────────────────────────────────────────────────────────
   readonly visible       = signal(false);
   readonly setNames      = signal<string[]>(['Built-in']);
+  /**
+   * Metadata for each entry in <see cref="setNames"/>, in the same order. Lets the
+   * dropdown render system sets with a lock glyph without round-tripping each set
+   * individually.
+   */
+  readonly setSummaries  = signal<LabelSetSummary[]>([
+    { setName: 'Built-in', isBuiltIn: true, isSystem: true },
+  ]);
   readonly activeSetName = signal('Built-in');
   readonly currentSet    = signal<LabelSetPayload | null>(null);
   readonly filterText    = signal('');
@@ -923,9 +946,25 @@ export class LabelManagerOverlayComponent {
   /** Expose the unified type list to the template. */
   readonly unifiedTypes = UNIFIED_TYPES;
 
-  readonly activeSetIsBuiltIn = computed(() =>
-    this.activeSetName() === 'Built-in' || (this.currentSet()?.isBuiltIn ?? false)
-  );
+  readonly activeSetIsBuiltIn = computed(() => {
+    if (this.activeSetName() === 'Built-in') return true;
+    if (this.currentSet()?.isBuiltIn) return true;
+    // Treat CodeDesigner-authored system sets as read-only too. The set might be
+    // currently loaded (currentSet) or just listed in the dropdown summaries — fall
+    // back to the summary metadata so the lock applies before the set is opened.
+    if (this.currentSet()?.isSystem) return true;
+    return this.setSummaries().find(s => s.setName === this.activeSetName())?.isSystem ?? false;
+  });
+
+  /**
+   * True when the active set is a CodeDesigner-authored "system" set. Drives the
+   * amber badge + row tint UI treatment that distinguishes it from green user labels.
+   */
+  readonly activeSetIsSystem = computed(() => {
+    if (this.activeSetName() === 'Built-in') return true;
+    if (this.currentSet()?.isSystem) return true;
+    return this.setSummaries().find(s => s.setName === this.activeSetName())?.isSystem ?? false;
+  });
 
   /** True when scanner results are being displayed instead of a label set. */
   readonly isScannerView = computed(() => this.scanResultEntries().length > 0);
@@ -1120,10 +1159,30 @@ export class LabelManagerOverlayComponent {
     }
   }
 
-  setSets(names: string[]): void {
+  setSets(names: string[], summaries?: LabelSetSummary[]): void {
     // Ensure "Built-in" is always first and deduplicate set names.
     const rest = [...new Set(names.filter(n => n !== 'Built-in'))];
-    this.setNames.set(['Built-in', ...rest]);
+    const ordered = ['Built-in', ...rest];
+    this.setNames.set(ordered);
+
+    // Match summaries to the de-duplicated order. Missing entries default to
+    // user (non-system) so unknown sets render with the standard green styling.
+    if (summaries && summaries.length > 0) {
+      const byName = new Map(summaries.map(s => [s.setName, s] as const));
+      this.setSummaries.set(ordered.map(n =>
+        byName.get(n) ?? {
+          setName: n,
+          isBuiltIn: n === 'Built-in',
+          isSystem:  n === 'Built-in',
+        }
+      ));
+    } else {
+      this.setSummaries.set(ordered.map(n => ({
+        setName: n,
+        isBuiltIn: n === 'Built-in',
+        isSystem:  n === 'Built-in',
+      })));
+    }
   }
 
   setActiveSet(set: LabelSetPayload): void {
@@ -1808,9 +1867,20 @@ export class LabelManagerOverlayComponent {
   }
 
   typeBadgeClass(entry: LabelManagerEntry): string {
+    // CodeDesigner-authored system sets get a single amber badge for every entry
+    // type so they read as one cohesive group, distinct from the per-type green/
+    // blue/magenta badges that user-authored labels use.
+    if (this.activeSetIsSystem()) {
+      return 'lm-type-badge lm-badge-system';
+    }
     const etype = this.effectiveType(entry);
     const cls = TYPE_BADGE_CLASS[etype] ?? TYPE_BADGE_CLASS[entry.type ?? 'Address'] ?? '';
     return 'lm-type-badge ' + cls;
+  }
+
+  /** True when the dropdown entry <paramref name="setName"/> is a CodeDesigner-authored system set. */
+  isSystemSetName(setName: string): boolean {
+    return this.setSummaries().find(s => s.setName === setName)?.isSystem ?? false;
   }
 
   displayName(entry: LabelManagerEntry): string {

@@ -33,6 +33,15 @@ public class LabelSet
     /// <summary>True for the built-in set that ships with CodeDesigner (treated as read-only).</summary>
     public bool IsBuiltIn { get; set; }
 
+    /// <summary>
+    /// True for sets authored by CodeDesigner (built-in EE labels, runtime IOP module
+    /// exports, …) as opposed to user-authored sets. Drives a distinct UI rendering in the
+    /// Label Manager and is enforced as read-only on the client. Distinct from
+    /// <see cref="IsBuiltIn"/>: a system set need not ship in the binary — IOP per-module
+    /// sets are generated at runtime when an IRX is loaded.
+    /// </summary>
+    public bool IsSystem { get; set; }
+
     /// <summary>Labels belonging to this set.</summary>
     public List<Label> Labels { get; set; } = [];
 }

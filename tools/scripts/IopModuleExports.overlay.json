@@ -1,0 +1,17 @@
+{
+  "_note": "Overlay merged into IopModuleExports.json by Build-IopExports.ps1. Use this file for IOP modules ps2sdk documents but PCSX2's machine-generated IopModuleNames.cpp does not cover (e.g. secrman). Source: ps2sdk iop/*/include/*.h DECLARE_IMPORT_TABLE blocks.",
+  "modules": {
+    "secrman": {
+      "4":  "SecrSetMcCommandHandler",
+      "5":  "SecrSetMcDevIDHandler",
+      "6":  "SecrAuthCard",
+      "7":  "SecrResetAuthCard",
+      "8":  "SecrCardBootHeader",
+      "9":  "SecrCardBootBlock",
+      "10": "SecrCardBootFile",
+      "11": "SecrDiskBootHeader",
+      "12": "SecrDiskBootBlock",
+      "13": "SecrDiskBootFile"
+    }
+  }
+}

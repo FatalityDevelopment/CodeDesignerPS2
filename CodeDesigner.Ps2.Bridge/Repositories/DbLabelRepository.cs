@@ -94,6 +94,66 @@ namespace CodeDesigner.Ps2.Bridge.Repositories
                             .ToListAsync();
         }
 
+        /// <summary>
+        /// Returns lightweight metadata for every label set scoped to the resolved disc,
+        /// in the same order <see cref="GetSetNamesAsync"/> returns names. Used by
+        /// GETLABELSETS so the webview can style system sets distinctly without round-tripping
+        /// each set individually.
+        /// </summary>
+        internal async Task<IReadOnlyList<(string SetName, bool IsBuiltIn, bool IsSystem)>> GetSetSummariesAsync(string gameId)
+        {
+            var discId = await ResolveGameDiscIdAsync(gameId);
+            if (discId is null) return [];
+
+            var rows = await _db.LabelSets
+                                .Where(ls => ls.GameDiscId == discId && !ls.IsBuiltIn)
+                                .Select(ls => new { ls.SetName, ls.IsBuiltIn, ls.IsSystem })
+                                .OrderBy(r => r.SetName)
+                                .ToListAsync();
+
+            return rows.Select(r => (r.SetName, r.IsBuiltIn, r.IsSystem)).ToList();
+        }
+
+        /// <summary>
+        /// Creates (or returns the existing) label set with <paramref name="setName"/> for
+        /// <paramref name="gameId"/>, marked as a CodeDesigner-system set. Idempotent —
+        /// re-flips the flag on an existing set so reloads converge to the right shape.
+        /// </summary>
+        internal async Task<MgrSet> EnsureSystemSetAsync(string gameId, string setName)
+        {
+            var discId = await ResolveGameDiscIdAsync(gameId);
+            if (discId is null)
+                throw new InvalidOperationException(
+                    $"No GameDisc found for '{gameId}'. Ensure the disc is registered in the database.");
+
+            var entity = await _db.LabelSets
+                                  .Include(ls => ls.Labels)
+                                  .Include(ls => ls.GameDisc)
+                                  .FirstOrDefaultAsync(ls => ls.GameDiscId == discId && ls.SetName == setName);
+
+            if (entity is null)
+            {
+                entity = new DbLabelSet
+                {
+                    SetName    = setName,
+                    GameDiscId = discId,
+                    GameId     = gameId,
+                    IsBuiltIn  = false,
+                    IsSystem   = true,
+                };
+                _db.LabelSets.Add(entity);
+                await _db.SaveChangesAsync();
+                await _db.Entry(entity).Reference(e => e.GameDisc).LoadAsync();
+            }
+            else if (!entity.IsSystem)
+            {
+                entity.IsSystem = true;
+                await _db.SaveChangesAsync();
+            }
+
+            return DbMapper.ToMgrSet(entity);
+        }
+
         internal async Task<MgrSet?> LoadSetAsync(string gameId, string setName)
         {
             var discId = await ResolveGameDiscIdAsync(gameId);

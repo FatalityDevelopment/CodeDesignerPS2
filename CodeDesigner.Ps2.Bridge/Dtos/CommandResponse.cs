@@ -191,6 +191,9 @@ namespace CodeDesigner.Ps2.Bridge
         /// <summary>List of label set names for GETLABELSETS.</summary>
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public List<string>? LabelSets { get; set; }
+        /// <summary>Per-set metadata aligned with <see cref="LabelSets"/> (same order). Lets the webview style system sets distinctly without round-tripping per set.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public List<LabelSetSummary>? LabelSetSummaries { get; set; }
         /// <summary>Full label set payload for GETLABELSET / SETACTIVELABELSET / CREATELABELSET etc.</summary>
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public LabelSetPayload? LabelSet { get; set; }
@@ -336,6 +339,17 @@ namespace CodeDesigner.Ps2.Bridge
         public string SnapshotDateTime { get; set; } = string.Empty;
     }
 
+    /// <summary>Lightweight per-set metadata returned alongside <see cref="CommandResponse.LabelSets"/>.</summary>
+    public class LabelSetSummary
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("setName")]
+        public string SetName { get; set; } = string.Empty;
+        [System.Text.Json.Serialization.JsonPropertyName("isBuiltIn")]
+        public bool IsBuiltIn { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("isSystem")]
+        public bool IsSystem { get; set; }
+    }
+
     /// <summary>Wire payload for a complete label set returned by label-manager commands.</summary>
     public class LabelSetPayload
     {
@@ -345,6 +359,8 @@ namespace CodeDesigner.Ps2.Bridge
         public string? GameDiscId { get; set; }
         [System.Text.Json.Serialization.JsonPropertyName("isBuiltIn")]
         public bool IsBuiltIn { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("isSystem")]
+        public bool IsSystem { get; set; }
         [System.Text.Json.Serialization.JsonPropertyName("entries")]
         public List<LabelManagerEntry> Entries { get; set; } = [];
     }
