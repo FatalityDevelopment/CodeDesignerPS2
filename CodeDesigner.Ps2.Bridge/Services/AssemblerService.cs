@@ -809,9 +809,48 @@ namespace CodeDesigner.Ps2.Bridge.Services
                     if (ovr is not null)
                     {
                         int unit = Repositories.DbDataFormatRepository.ByteSizeOf(ovr.Kind);
-                        // Emit one row per element of the override span, but cap
-                        // at the actual buffer end to avoid reading past it.
+
+                        // When a Byte override sits inside a printable-ASCII run that
+                        // ends with a null, auto-extend the byte span until that null
+                        // (plus the 4-byte alignment pad that follows). The override
+                        // only has to mark the START of the string — the system fills
+                        // in the rest so the user doesn't have to size the override to
+                        // the exact string length, and every character of the string
+                        // renders as a byte row instead of half-string + half-MIPS.
                         long ovrEnd = ovr.Address + ovr.Length;
+                        bool extendedForString = false;
+                        string? leadingStringComment = null;
+                        if (ovr.Kind == Database.Entities.DataFormatKind.Byte
+                            && rowAddr == unchecked((uint)ovr.Address))
+                        {
+                            int stringRunBytes = MeasureNullTerminatedAscii(byteBuf, byteIndex);
+                            if (stringRunBytes > 0)
+                            {
+                                int padded   = (stringRunBytes + 3) & ~3;
+                                int paddedEnd = byteIndex + padded;
+                                bool paddingClean = paddedEnd <= byteBuf.Length;
+                                for (int p = byteIndex + stringRunBytes; paddingClean && p < paddedEnd; p++)
+                                {
+                                    if (byteBuf[p] != 0x00) paddingClean = false;
+                                }
+                                int extendedBytes = paddingClean ? padded : stringRunBytes;
+                                long stringEnd = baseAddr + (uint)byteIndex + (uint)extendedBytes;
+                                if (stringEnd > ovrEnd)
+                                {
+                                    ovrEnd = stringEnd;
+                                    extendedForString = true;
+                                }
+
+                                // ascii minus the trailing null
+                                string asciiContent = System.Text.Encoding.ASCII
+                                    .GetString(byteBuf, byteIndex, stringRunBytes - 1);
+                                leadingStringComment = $"-> \"{EscapeCommentString(asciiContent)}\"";
+                            }
+                        }
+
+                        // Emit one row per element of the (possibly extended) span,
+                        // but cap at the actual buffer end to avoid reading past it.
+                        bool firstRow = true;
                         while (byteIndex < byteBuf.Length && (baseAddr + (uint)byteIndex) < ovrEnd)
                         {
                             uint rAddr = (uint)(baseAddr + (uint)byteIndex);
@@ -827,8 +866,17 @@ namespace CodeDesigner.Ps2.Bridge.Services
                                       ?? (LooksLikeRamPointer(val) ? $"-> 0x{val:X8}" : null);
                             }
                             else if (ovr.Kind == Database.Entities.DataFormatKind.Byte
+                                     && firstRow && leadingStringComment is not null)
+                            {
+                                cmt = leadingStringComment;
+                            }
+                            else if (ovr.Kind == Database.Entities.DataFormatKind.Byte
+                                     && firstRow && leadingStringComment is null
                                      && rAddr == unchecked((uint)ovr.Address))
                             {
+                                // Byte override but not a string — keep the legacy
+                                // "best-effort inline ASCII" hint scoped to the
+                                // override's declared length.
                                 int maxStringBytes = System.Math.Min(
                                     (int)System.Math.Min(ovr.Length, int.MaxValue),
                                     byteBuf.Length - byteIndex);
@@ -844,9 +892,15 @@ namespace CodeDesigner.Ps2.Bridge.Services
                                 Success    = true,
                                 Comment    = cmt,
                                 DataFormatKind = DataFormatService.KindToWire(ovr.Kind),
+                                // Bytes appended by string-extension aren't in the
+                                // persisted override; flag them so the webview won't
+                                // expose "Clear formatting" for those tail rows.
+                                AutoFormatted = extendedForString
+                                    && (baseAddr + (uint)byteIndex + (uint)unit) > (ovr.Address + ovr.Length),
                             });
 
                             byteIndex += unit;
+                            firstRow = false;
                         }
                         continue;
                     }
@@ -1230,6 +1284,32 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 byOffset[hit.ByteOffset] = hit;
             }
             return byOffset;
+        }
+
+        /// <summary>
+        /// Returns the byte length of the printable-ASCII run starting at
+        /// <paramref name="index"/>, including the null terminator. Returns 0
+        /// when the run is shorter than 3 visible chars, when a non-printable
+        /// byte appears before the null, or when no null is found within the
+        /// buffer. Used by the byte-override path to auto-extend its span to
+        /// cover the whole string a user gestured at.
+        /// </summary>
+        private static int MeasureNullTerminatedAscii(byte[] buf, int index)
+        {
+            if (index < 0 || index >= buf.Length) return 0;
+            int i = index;
+            while (i < buf.Length)
+            {
+                byte b = buf[i];
+                if (b == 0)
+                {
+                    int len = i - index;
+                    return len >= 3 ? (len + 1) : 0;
+                }
+                if (b < 0x20 || b > 0x7E) return 0;
+                i++;
+            }
+            return 0; // ran off the buffer without finding null
         }
 
         private static string? TryResolveInlineAsciiString(byte[] buf, int index, int maxBytes)
