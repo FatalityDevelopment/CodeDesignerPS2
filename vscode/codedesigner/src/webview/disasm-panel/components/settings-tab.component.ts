@@ -588,6 +588,30 @@ const NET_POLL_MS = 4000;
                 <span class="mvb-label">VU1 data</span>
                 <span class="mvb-badge">16 KB</span>
               </button>
+              <button class="mem-view-btn" (click)="openMemoryViewClick.emit('IOP HW regs')"
+                      title="Open IOP hardware-register window (0x1F801000)">
+                <app-icon class="mvb-icon" name="memorystick" [size]="14" />
+                <span class="mvb-label">IOP HW regs</span>
+                <span class="mvb-badge">32 KB</span>
+              </button>
+              <button class="mem-view-btn" (click)="openMemoryViewClick.emit('GS priv regs')"
+                      title="Open GS privileged registers (0x12000000)">
+                <app-icon class="mvb-icon" name="memorystick" [size]="14" />
+                <span class="mvb-label">GS priv regs</span>
+                <span class="mvb-badge">8 KB</span>
+              </button>
+              <button class="mem-view-btn" (click)="openMemoryViewClick.emit('ROM1 (DVD)')"
+                      title="Open ROM1 — DVD player firmware (0x1E000000)">
+                <app-icon class="mvb-icon" name="disc3" [size]="14" />
+                <span class="mvb-label">ROM1 (DVD)</span>
+                <span class="mvb-badge">4 MB</span>
+              </button>
+              <button class="mem-view-btn" (click)="openMemoryViewClick.emit('ROM2 (CN ext)')"
+                      title="Open ROM2 — Chinese-region BIOS extensions (0x1E400000)">
+                <app-icon class="mvb-icon" name="disc3" [size]="14" />
+                <span class="mvb-label">ROM2 (CN ext)</span>
+                <span class="mvb-badge">4 MB</span>
+              </button>
             </div>
           </div>
         }

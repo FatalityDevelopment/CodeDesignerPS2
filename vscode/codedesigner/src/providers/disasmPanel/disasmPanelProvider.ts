@@ -105,8 +105,33 @@ const LIVE_REGIONS_ALL: LiveRegionDef[] = [
 
     // ── IOP side (mirrored into EE VTLB at 0x1C000000+) ─────────────────
     {
+        // PCSX2's vtlb_MapHandler maps the IOP mirror as 8 MB (covers the devkit
+        // ExtraIopRam case); retail games only use the first 2 MB.
         memoryRegion: MemoryRegion.IopRam,       region: 'iop',
-        address: 0x1C000000, size:  4 * 1024 * 1024, label: 'IOP RAM',       defaultOpen: false,
+        address: 0x1C000000, size:  8 * 1024 * 1024, label: 'IOP RAM',       defaultOpen: false,
+    },
+    {
+        // EE-side window into IOP hardware regs (timers, DMAC, SIF, USB, …).
+        memoryRegion: MemoryRegion.IopHardware,  region: 'ee',
+        address: 0x1F801000, size:       32 * 1024,  label: 'IOP HW regs',   defaultOpen: false,
+    },
+
+    // ── Graphics Synthesizer ────────────────────────────────────────────
+    {
+        // PMODE, SMODE1/2, SRFSH, SYNCH1/2, SYNCV, DISPFB1/2, DISPLAY1/2,
+        // EXTBUF/DATA/WRITE, BGCOLOR, CSR, IMR, BUSDIR, SIGLBLID.
+        memoryRegion: MemoryRegion.GsPrivRegs,   region: 'ee',
+        address: 0x12000000, size:        8 * 1024,  label: 'GS priv regs',  defaultOpen: false,
+    },
+
+    // ── Additional BIOS-era ROMs (PCSX2 Memory.cpp:415-417) ─────────────
+    {
+        memoryRegion: MemoryRegion.Rom1,         region: 'ee',
+        address: 0x1E000000, size:  4 * 1024 * 1024, label: 'ROM1 (DVD)',    defaultOpen: false,
+    },
+    {
+        memoryRegion: MemoryRegion.Rom2,         region: 'ee',
+        address: 0x1E400000, size:  4 * 1024 * 1024, label: 'ROM2 (CN ext)', defaultOpen: false,
     },
 
     // ── Vector Units (EE coprocessors; accessed through EE address space) ─

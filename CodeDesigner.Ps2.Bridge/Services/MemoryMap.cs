@@ -12,15 +12,15 @@ namespace CodeDesigner.Ps2.Bridge.Services
         Unknown      = 0,
 
         // ── R5900 (EE) ──────────────────────────────────────────────────────
-        EeRam        = 1,   // 0x00000000-0x01FFFFFF physical + KSEG0/1 + uncached mirrors
+        EeRam        = 1,   // 0x00000000-0x01FFFFFF (32 MB; 128 MB on devkits)
         EeScratchpad = 2,   // 0x70000000-0x70003FFF (16 KB)
-        EeHardware   = 3,   // 0x10000000-0x1F803FFF (timers, DMAC, GIF, VIF, IPU, GS priv, etc.)
-        EeBiosRom    = 4,   // 0x1FC00000-0x1FFFFFFF (KSEG0 0x9FC...; KSEG1 0xBFC...)
+        EeHardware   = 3,   // 0x10000000-0x1000FFFF (timers, DMAC, GIF, VIF, IPU, etc.)
+        EeBiosRom    = 4,   // ROM0: 0x1FC00000-0x1FFFFFFF (KSEG0 0x9FC..., KSEG1 0xBFC...)
 
         // ── R3000 (IOP) — mapped into EE VTLB at 0x1C000000+ (KSEG1 0xBC...) ─
-        IopRam       = 10,  // 0x00000000-0x001FFFFF (2 MB)
-        IopHardware  = 11,  // 0x1F800000-0x1F8FFFFF on IOP
-        IopBiosRom   = 12,  // 0x1FC00000-0x1FFFFFFF on IOP
+        IopRam       = 10,  // 0x00000000-0x001FFFFF (2 MB; 8 MB on devkits)
+        IopHardware  = 11,  // EE-side IOP HW window at 0x1F801000-0x1F8FFFFF
+        IopBiosRom   = 12,  // 0x1FC00000-0x1FFFFFFF on IOP (alias of ROM0)
 
         // ── Vector Units (R5900 coprocessors) ──────────────────────────────
         Vu0Code      = 20,  // 0x11000000-0x11000FFF (4 KB micro)
@@ -28,8 +28,13 @@ namespace CodeDesigner.Ps2.Bridge.Services
         Vu1Code      = 22,  // 0x11008000-0x1100BFFF (16 KB micro)
         Vu1Data      = 23,  // 0x1100C000-0x1100FFFF (16 KB data)
 
-        // ── Graphics Synthesizer local memory ───────────────────────────────
-        GsLocalMem   = 30,  // 0x14000000+ register window for GS HOST→LOCAL transfers
+        // ── Graphics Synthesizer ────────────────────────────────────────────
+        GsPrivRegs   = 30,  // 0x12000000-0x12001FFF (priv registers — PMODE, SMODE, …)
+        GsLocalMem   = 31,  // 0x14000000+ register window for HOST→LOCAL transfers
+
+        // ── Additional BIOS-era ROMs (4 MB each in PS2's physical map) ──────
+        Rom1         = 40,  // 0x1E000000-0x1E3FFFFF — DVD player firmware
+        Rom2         = 41,  // 0x1E400000-0x1E7FFFFF — Chinese-region extensions
     }
 
     /// <summary>Which CPU "owns" a region for purposes of disassembly and breakpointing.</summary>
@@ -74,16 +79,23 @@ namespace CodeDesigner.Ps2.Bridge.Services
     public static class MemoryMap
     {
         // ── Region bounds (physical) ─────────────────────────────────────────
-        public const uint EeRamSize           = 32 * 1024 * 1024;            // 32 MB
+        // Source: pcsx2/pcsx2/MemoryTypes.h Ps2MemSize + Memory.cpp VTLB map.
+        public const uint EeRamSize           = 32 * 1024 * 1024;            // 32 MB (128 MB devkit)
         public const uint EeScratchpadBase    = 0x70000000u;
         public const uint EeScratchpadSize    = 16 * 1024;
         public const uint EeHardwareBase      = 0x10000000u;
-        public const uint EeHardwareEnd       = 0x1F804000u;                 // exclusive
-        public const uint BiosRomPhysBase     = 0x1FC00000u;
+        public const uint EeHardwareEnd       = 0x10010000u;                 // exclusive (64 KB)
+        public const uint BiosRomPhysBase     = 0x1FC00000u;                 // ROM0
         public const uint BiosRomSize         = 4 * 1024 * 1024;
-        public const uint IopRamSize          = 2 * 1024 * 1024;             // 2 MB
-        public const uint IopHardwareBase     = 0x1F800000u;
-        public const uint IopHardwareEnd      = 0x1F900000u;                 // exclusive
+        public const uint Rom1PhysBase        = 0x1E000000u;                 // DVD player
+        public const uint Rom1Size            = 4 * 1024 * 1024;
+        public const uint Rom2PhysBase        = 0x1E400000u;                 // Chinese ext
+        public const uint Rom2Size            = 4 * 1024 * 1024;
+        public const uint GsPrivBase          = 0x12000000u;
+        public const uint GsPrivEnd           = 0x12002000u;                 // 8 KB
+        public const uint IopRamSize          = 8 * 1024 * 1024;             // 2 MB retail, 8 MB devkit
+        public const uint IopHardwareBase     = 0x1F801000u;
+        public const uint IopHardwareEnd      = 0x1F809000u;                 // exclusive (covers iopHw pages 01/03/08)
 
         // ── EE virtual mirrors ───────────────────────────────────────────────
         public const uint EeUncachedRamBase   = 0x20000000u;
@@ -144,9 +156,29 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 return EeRamInfo(addr, p);
             }
 
-            // ── EE BIOS ROM ─────────────────────────────────────────────────
+            // ── EE BIOS ROM (ROM0) ──────────────────────────────────────────
             if (InRange(phys, BiosRomPhysBase, BiosRomPhysBase + BiosRomSize))
                 return BiosRomInfo(addr, phys);
+
+            // ── ROM1 (DVD player firmware) ──────────────────────────────────
+            if (InRange(phys, Rom1PhysBase, Rom1PhysBase + Rom1Size))
+                return new AddressInfo(MemoryRegion.Rom1, CpuKind.Ee,
+                    addr, phys, phys | Kseg0Bit, phys | Kseg1Bit, phys | Kseg1Bit);
+
+            // ── ROM2 (Chinese-region extensions) ────────────────────────────
+            if (InRange(phys, Rom2PhysBase, Rom2PhysBase + Rom2Size))
+                return new AddressInfo(MemoryRegion.Rom2, CpuKind.Ee,
+                    addr, phys, phys | Kseg0Bit, phys | Kseg1Bit, phys | Kseg1Bit);
+
+            // ── GS privileged registers ─────────────────────────────────────
+            if (InRange(phys, GsPrivBase, GsPrivEnd))
+                return new AddressInfo(MemoryRegion.GsPrivRegs, CpuKind.Gs,
+                    addr, phys, phys | Kseg0Bit, phys | Kseg1Bit, phys | Kseg1Bit);
+
+            // ── IOP hardware registers ──────────────────────────────────────
+            if (InRange(phys, IopHardwareBase, IopHardwareEnd))
+                return new AddressInfo(MemoryRegion.IopHardware, CpuKind.Iop,
+                    addr, phys, phys | Kseg0Bit, phys | Kseg1Bit, phys | Kseg1Bit);
 
             // ── EE Hardware regs ────────────────────────────────────────────
             if (InRange(phys, EeHardwareBase, EeHardwareEnd))

@@ -18,10 +18,14 @@ const REGION_TO_PANEL_LABEL: Partial<Record<MemoryRegion, string>> = {
     [MemoryRegion.EeScratchpad]: 'Scratchpad',
     [MemoryRegion.EeHardware]:   'EE HW regs',
     [MemoryRegion.IopRam]:       'IOP RAM',
+    [MemoryRegion.IopHardware]:  'IOP HW regs',
     [MemoryRegion.Vu0Code]:      'VU0 micro',
     [MemoryRegion.Vu0Data]:      'VU0 data',
     [MemoryRegion.Vu1Code]:      'VU1 micro',
     [MemoryRegion.Vu1Data]:      'VU1 data',
+    [MemoryRegion.GsPrivRegs]:   'GS priv regs',
+    [MemoryRegion.Rom1]:         'ROM1 (DVD)',
+    [MemoryRegion.Rom2]:         'ROM2 (CN ext)',
 };
 
 /**

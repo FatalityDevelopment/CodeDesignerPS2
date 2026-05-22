@@ -15,11 +15,11 @@ export enum MemoryRegion {
     EeRam        = 1,
     EeScratchpad = 2,
     EeHardware   = 3,
-    EeBiosRom    = 4,
+    EeBiosRom    = 4,   // ROM0
 
     // R3000 (IOP) — mapped into EE VTLB at 0x1C000000+ (KSEG1 0xBC...)
     IopRam       = 10,
-    IopHardware  = 11,
+    IopHardware  = 11,  // 0x1F801000-0x1F808FFF (EE-side IOP HW window)
     IopBiosRom   = 12,
 
     // Vector Units
@@ -28,8 +28,13 @@ export enum MemoryRegion {
     Vu1Code      = 22,
     Vu1Data      = 23,
 
-    // Graphics Synthesizer local memory
-    GsLocalMem   = 30,
+    // Graphics Synthesizer
+    GsPrivRegs   = 30,  // 0x12000000-0x12001FFF (PMODE, SMODE, …)
+    GsLocalMem   = 31,
+
+    // BIOS-era ROMs
+    Rom1         = 40,  // 0x1E000000 — DVD player firmware
+    Rom2         = 41,  // 0x1E400000 — Chinese-region extensions
 }
 
 /** Which CPU "owns" a region for purposes of disassembly and breakpointing. */
@@ -72,10 +77,18 @@ const EE_RAM_SIZE         = 32 * 1024 * 1024;
 const EE_SCRATCHPAD_BASE  = 0x70000000;
 const EE_SCRATCHPAD_SIZE  = 16 * 1024;
 const EE_HARDWARE_BASE    = 0x10000000;
-const EE_HARDWARE_END     = 0x1F804000;
-const BIOS_ROM_PHYS_BASE  = 0x1FC00000;
+const EE_HARDWARE_END     = 0x10010000;            // 64 KB
+const BIOS_ROM_PHYS_BASE  = 0x1FC00000;            // ROM0
 const BIOS_ROM_SIZE       = 4 * 1024 * 1024;
-const IOP_RAM_SIZE        = 2 * 1024 * 1024;
+const ROM1_PHYS_BASE      = 0x1E000000;
+const ROM1_SIZE           = 4 * 1024 * 1024;
+const ROM2_PHYS_BASE      = 0x1E400000;
+const ROM2_SIZE           = 4 * 1024 * 1024;
+const GS_PRIV_BASE        = 0x12000000;
+const GS_PRIV_END         = 0x12002000;            // 8 KB
+const IOP_RAM_SIZE        = 8 * 1024 * 1024;       // 2 MB retail, 8 MB devkit
+const IOP_HARDWARE_BASE   = 0x1F801000;
+const IOP_HARDWARE_END    = 0x1F809000;
 const EE_UNCACHED_RAM_BASE = 0x20000000;
 const EE_UNCACHED_RAM_END  = 0x22000000;
 const EE_IOP_MIRROR_BASE  = 0x1C000000;
@@ -141,9 +154,49 @@ export function classifyAddress(addr: number, cpuHint?: CpuKind): AddressInfo {
         return eeRamInfo(v, u32(v - EE_UNCACHED_RAM_BASE));
     }
 
-    // EE BIOS ROM.
+    // EE BIOS ROM (ROM0).
     if (inRange(phys, BIOS_ROM_PHYS_BASE, BIOS_ROM_PHYS_BASE + BIOS_ROM_SIZE)) {
         return biosRomInfo(v, phys);
+    }
+
+    // ROM1 (DVD player firmware).
+    if (inRange(phys, ROM1_PHYS_BASE, ROM1_PHYS_BASE + ROM1_SIZE)) {
+        return {
+            region: MemoryRegion.Rom1, cpu: CpuKind.Ee,
+            rawAddress: v, physicalAddress: phys,
+            kseg0Address: u32(phys | KSEG0_BIT), kseg1Address: u32(phys | KSEG1_BIT),
+            clientAddress: u32(phys | KSEG1_BIT),
+        };
+    }
+
+    // ROM2 (Chinese-region extensions).
+    if (inRange(phys, ROM2_PHYS_BASE, ROM2_PHYS_BASE + ROM2_SIZE)) {
+        return {
+            region: MemoryRegion.Rom2, cpu: CpuKind.Ee,
+            rawAddress: v, physicalAddress: phys,
+            kseg0Address: u32(phys | KSEG0_BIT), kseg1Address: u32(phys | KSEG1_BIT),
+            clientAddress: u32(phys | KSEG1_BIT),
+        };
+    }
+
+    // GS privileged registers.
+    if (inRange(phys, GS_PRIV_BASE, GS_PRIV_END)) {
+        return {
+            region: MemoryRegion.GsPrivRegs, cpu: CpuKind.Gs,
+            rawAddress: v, physicalAddress: phys,
+            kseg0Address: u32(phys | KSEG0_BIT), kseg1Address: u32(phys | KSEG1_BIT),
+            clientAddress: u32(phys | KSEG1_BIT),
+        };
+    }
+
+    // IOP hardware registers (EE-side window into IOP HW).
+    if (inRange(phys, IOP_HARDWARE_BASE, IOP_HARDWARE_END)) {
+        return {
+            region: MemoryRegion.IopHardware, cpu: CpuKind.Iop,
+            rawAddress: v, physicalAddress: phys,
+            kseg0Address: u32(phys | KSEG0_BIT), kseg1Address: u32(phys | KSEG1_BIT),
+            clientAddress: u32(phys | KSEG1_BIT),
+        };
     }
 
     // EE Hardware regs.
@@ -187,7 +240,10 @@ export function regionLabel(r: MemoryRegion): string {
         case MemoryRegion.Vu0Data:      return 'VU0 data';
         case MemoryRegion.Vu1Code:      return 'VU1 micro';
         case MemoryRegion.Vu1Data:      return 'VU1 data';
+        case MemoryRegion.GsPrivRegs:   return 'GS priv regs';
         case MemoryRegion.GsLocalMem:   return 'GS local';
+        case MemoryRegion.Rom1:         return 'ROM1 (DVD)';
+        case MemoryRegion.Rom2:         return 'ROM2 (CN ext)';
         default:                        return 'Unknown';
     }
 }
