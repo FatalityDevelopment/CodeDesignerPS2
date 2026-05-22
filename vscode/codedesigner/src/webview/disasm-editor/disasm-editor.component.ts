@@ -2074,14 +2074,25 @@ export class DisasmEditorComponent implements AfterViewInit {
       params.vscode.postMessage({ type: 'recordNav', address });
 
     this.gotoRuntime.navigate = (addr: number) => {
-      const physAddr = params.toPhysicalAddress(addr);
+      // Align to 4-byte instruction boundary before resolving the row. The
+      // backend disassembler returns rows at startAddr + N*4, so an unaligned
+      // cursor shifts every row by the same offset and makes addresses end in
+      // 7/B/F/3 instead of 0/4/8/C. Aligning the typed goto input here mirrors
+      // what navigateToAddress does in the extension host, so all goto paths
+      // produce consistent row layouts.
+      const aligned = (params.toPhysicalAddress(addr) & ~0x3) >>> 0;
+      // Re-base the aligned physical back through the panel's segment so the
+      // routing below uses comparable forms.
+      const alignedAddr = ((addr & 0xE0000000) | aligned) >>> 0;
+      const physAddr = params.toPhysicalAddress(alignedAddr);
       const physBase = params.toPhysicalAddress(params.state.baseAddress);
       const instrIndex = Math.floor((physAddr - physBase) / 4);
       if (instrIndex < 0 || instrIndex >= params.state.totalInstructions) {
-        params.vscode.postMessage({ type: 'gotoRegion', address: addr });
-        params.gotoStatus.set(`Navigating to 0x${addr.toString(16).toUpperCase()}...`);
+        params.vscode.postMessage({ type: 'gotoRegion', address: alignedAddr });
+        params.gotoStatus.set(`Navigating to 0x${alignedAddr.toString(16).toUpperCase()}...`);
         return;
       }
+      addr = alignedAddr;
       recordNavigation(addr);
       params.pushNavHistory();
       params.state.cursor = instrIndex;
