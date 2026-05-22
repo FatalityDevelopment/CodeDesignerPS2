@@ -65,12 +65,10 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 byte[] text;
                 try
                 {
-                    // PINE Read32 reads EE-virtual memory; IOP RAM is exposed at the
-                    // EE VTLB mirror starting at 0xBC000000 (KSEG1). Translate the
-                    // raw IOP TextAddr so the scan reads the actual IRX bytes
-                    // instead of stray EE memory at the same numeric offset.
-                    uint readAddr = AddressTranslator.ToClientAddress(m.TextAddr, useIop: true);
-                    text = _ctx.PineClient.ReadBytes(readAddr, (int)Math.Min(m.TextSize, 0x200000));
+                    // PINE Read32 reads EE-virtual memory; MemoryMap.Classify with the
+                    // IOP hint routes the read through the EE VTLB mirror at 0xBC000000+.
+                    var iop = MemoryMap.Classify(m.TextAddr, CpuKind.Iop);
+                    text = _ctx.PineClient.ReadMemory(iop, (int)Math.Min(m.TextSize, 0x200000));
                 }
                 catch (Exception ex)
                 {
@@ -128,8 +126,11 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 byte[] text;
                 try
                 {
-                    uint readAddr = AddressTranslator.ToClientAddress(m.TextAddr, useIop: true);
-                    text = _ctx.PineClient.ReadBytes(readAddr, (int)Math.Min(m.TextSize, 0x200000));
+                    // MemoryMap.Classify with the IOP hint converts a raw IOP physical
+                    // address (e.g. 0x000A1200) into the EE VTLB mirror PINE needs
+                    // (e.g. 0xBC0A1200) for the read.
+                    var iop = MemoryMap.Classify(m.TextAddr, CpuKind.Iop);
+                    text = _ctx.PineClient.ReadMemory(iop, (int)Math.Min(m.TextSize, 0x200000));
                 }
                 catch (Exception ex)
                 {
@@ -221,12 +222,18 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 };
                 if (funcName is null) continue;
 
+                // The export-table function pointers are IOP-physical addresses
+                // (e.g. 0x000A1200). Map them to the EE-physical IOP mirror form
+                // (0x1C0A1200) — that's the form the IOP RAM live panel renders
+                // and the form the rest of the stack routes goto/navigate by.
+                uint labelAddr = MemoryMap.Classify(fptr, CpuKind.Iop).PhysicalAddress;
+
                 sink.Add(new MgrEntry
                 {
-                    Address = $"0x{fptr:X8}",
+                    Address = $"0x{labelAddr:X8}",
                     Name    = funcName,
                     Type    = MgrType.Function,
-                    Comment = $"{m.Name} export #{idx}",
+                    Comment = $"{m.Name} export #{idx} (iop 0x{fptr:X8})",
                 });
             }
         }
@@ -290,13 +297,16 @@ namespace CodeDesigner.Ps2.Bridge.Services
                     _ => IopExportsTable.Resolve(libName, index) ?? $"unk_{index}",
                 };
 
-                uint stubAddr = (uint)(importing.TextAddr + off);
+                uint stubAddrIop = (uint)(importing.TextAddr + off);
+                // Store at the EE-physical mirror form (0x1C0xxxxx) so goto routes
+                // to the IOP RAM live panel and the panel's disasm rows line up.
+                uint stubAddr = MemoryMap.Classify(stubAddrIop, CpuKind.Iop).PhysicalAddress;
                 sink.Add(new MgrEntry
                 {
                     Address = $"0x{stubAddr:X8}",
                     Name    = $"imp_{funcName}",
                     Type    = MgrType.Address,
-                    Comment = $"{importing.Name} → {libName}::{funcName} (#{index})",
+                    Comment = $"{importing.Name} → {libName}::{funcName} (#{index}, iop 0x{stubAddrIop:X8})",
                 });
             }
         }

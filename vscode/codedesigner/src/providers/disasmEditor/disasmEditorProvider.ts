@@ -4,6 +4,7 @@ import * as path from "path";
 import { SocketClient, LabelEntry, StringEntry, FunctionEntry, PointerEntry, FloatEntry, IntegerEntry, SearchMatch, ReferenceEntry, AiActivityEvent, AiSessionStartEvent, AiLabelUpdateEvent, StructEntry, LabelManagerEntry, LabelSetPayload, type DataFormatKind } from "../../socketClient";
 import { getOutputChannel } from "../../extension";
 import { getNonce, getWebviewErrorHandlerScript } from "../../utils/nonce";
+import { classifyAddress, MemoryRegion } from "../../shared/memoryRegions";
 
 /**
  * Structure for disassembled instruction row
@@ -45,7 +46,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   private _livePanelInfo: Array<{
     panel: vscode.WebviewPanel;
     label: string;
-    region: string;
+    region: string;                // legacy 'ee' | 'iop' tag passed to disasm reads
+    memoryRegion: MemoryRegion;    // canonical region enum used by navigateToAddress
     baseAddress: number;
     totalBytes: number;
     physBaseAddress: number;  // pre-computed physical base for fast address lookup
@@ -176,17 +178,36 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   }
 
   public navigateToAddress(address: number, source: 'user' | 'mcp' = 'user'): void {
-    const physAddr = DisasmEditorProvider._toPhysAddr(address);
-    const target = this._livePanelInfo.find(info =>
-        physAddr >= info.physBaseAddress &&
-        physAddr < info.physBaseAddress + info.totalBytes
+    const info = classifyAddress(address);
+    // Address the panel should display — use the EE-physical / EE-mirror form so
+    // panels opened at physical bases (EE 0x00000000, IOP 0x1C000000, BIOS
+    // 0x1FC00000, scratchpad 0x70000000) line up.
+    const displayAddr = info.physicalAddress;
+
+    // Region-first matching: prefer a panel whose recorded region matches the
+    // classified region, only fall back to numeric-range matching if no
+    // region-tagged panel exists yet. Without this, an IOP address numerically
+    // matched the EE RAM panel (both start at 0) and goto landed in the wrong
+    // view.
+    let target = this._livePanelInfo.find(p =>
+        p.memoryRegion === info.region &&
+        displayAddr >= p.physBaseAddress &&
+        displayAddr < p.physBaseAddress + p.totalBytes,
     );
+
+    if (!target) {
+        target = this._livePanelInfo.find(p =>
+            displayAddr >= p.physBaseAddress &&
+            displayAddr < p.physBaseAddress + p.totalBytes,
+        );
+    }
+
     if (target) {
         target.panel.reveal(undefined, false);
-        target.panel.webview.postMessage({ type: 'gotoAddress', address });
+        target.panel.webview.postMessage({ type: 'gotoAddress', address: displayAddr });
         // Record this routed navigation in the server-side history using the
         // caller's source so user jumps and Follow AI jumps stay distinct.
-        this._recordNav(address, source);
+        this._recordNav(displayAddr, source);
     }
   }
 
@@ -1191,6 +1212,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             // (e.g. BIOS ROM shown at KSEG0 0x9FC00000 instead of physical 0x1FC00000).
             existingInfo.baseAddress = baseAddress;
             existingInfo.physBaseAddress = DisasmEditorProvider._toPhysAddr(baseAddress);
+            existingInfo.memoryRegion   = classifyAddress(baseAddress).region;
             // Re-initialize with live data now that we have a connection
             if (connected) {
                 const totalInstructions = Math.floor(totalBytes / DisasmEditorProvider.INSTRUCTION_SIZE);
@@ -1226,7 +1248,11 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
 
         // Track this panel for pause/resume broadcast and address lookup.
         const physBase = DisasmEditorProvider._toPhysAddr(baseAddress);
-        const info = { panel, label, region, baseAddress, totalBytes, physBaseAddress: physBase };
+        // Classify the panel's base into a canonical MemoryRegion so goto can route
+        // by region rather than naive numeric range (IOP physical 0x000xxxxx
+        // would otherwise collide with EE RAM).
+        const memoryRegion = classifyAddress(baseAddress).region;
+        const info = { panel, label, region, memoryRegion, baseAddress, totalBytes, physBaseAddress: physBase };
         this._livePanels.push(panel);
         this._livePanelInfo.push(info);
         panel.onDidDispose(() => {

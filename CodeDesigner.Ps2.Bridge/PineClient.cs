@@ -413,8 +413,27 @@ namespace CodeDesigner.Ps2.Bridge
         // ═════════════════════════════════════════════════════════════════════
 
         /// <summary>
+        /// Reads <paramref name="length"/> bytes starting at the address classified
+        /// by <paramref name="addr"/>. Uses the classification's
+        /// <see cref="Services.AddressInfo.ClientAddress"/> so IOP addresses get
+        /// routed through the EE VTLB mirror at 0xBC000000+ automatically — callers
+        /// don't need to know the EE-side translation rules.
+        /// </summary>
+        public byte[] ReadMemory(Services.AddressInfo addr, int length) =>
+            ReadBytes(addr.ClientAddress, length);
+
+        /// <summary>
+        /// Convenience overload: classify <paramref name="address"/> first, then
+        /// route through the correct EE-virtual alias.
+        /// </summary>
+        public byte[] ReadMemory(uint address, int length) =>
+            ReadBytes(Services.MemoryMap.ToClientAddress(address), length);
+
+        /// <summary>
         /// Reads <paramref name="length"/> bytes from PCSX2 guest memory starting at
-        /// <paramref name="address"/> using batched PINE Read32 commands.
+        /// <paramref name="address"/> using batched PINE Read32 commands. The
+        /// address must already be in EE-virtual form (KSEG0/KSEG1) — for
+        /// region-aware reads use <see cref="ReadMemory(uint, int)"/>.
         /// </summary>
         public byte[] ReadBytes(uint address, int length)
         {
