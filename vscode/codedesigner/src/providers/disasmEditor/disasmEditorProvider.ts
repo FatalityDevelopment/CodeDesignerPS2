@@ -7,6 +7,24 @@ import { getNonce, getWebviewErrorHandlerScript } from "../../utils/nonce";
 import { classifyAddress, MemoryRegion } from "../../shared/memoryRegions";
 
 /**
+ * Maps {@link MemoryRegion} to the sidebar-menu label that opens the panel.
+ * Used by {@link DisasmEditorProvider.navigateToAddress} to auto-open the
+ * matching panel when the user gotos an address whose region has no panel yet.
+ * Kept in sync with the LIVE_REGIONS_ALL table in disasmPanelProvider.ts.
+ */
+const REGION_TO_PANEL_LABEL: Partial<Record<MemoryRegion, string>> = {
+    [MemoryRegion.EeRam]:        'EE RAM',
+    [MemoryRegion.EeBiosRom]:    'BIOS ROM',
+    [MemoryRegion.EeScratchpad]: 'Scratchpad',
+    [MemoryRegion.EeHardware]:   'EE HW regs',
+    [MemoryRegion.IopRam]:       'IOP RAM',
+    [MemoryRegion.Vu0Code]:      'VU0 micro',
+    [MemoryRegion.Vu0Data]:      'VU0 data',
+    [MemoryRegion.Vu1Code]:      'VU1 micro',
+    [MemoryRegion.Vu1Data]:      'VU1 data',
+};
+
+/**
  * Structure for disassembled instruction row
  */
 interface DisassembledRow {
@@ -189,18 +207,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     // region-tagged panel exists yet. Without this, an IOP address numerically
     // matched the EE RAM panel (both start at 0) and goto landed in the wrong
     // view.
-    let target = this._livePanelInfo.find(p =>
-        p.memoryRegion === info.region &&
-        displayAddr >= p.physBaseAddress &&
-        displayAddr < p.physBaseAddress + p.totalBytes,
-    );
-
-    if (!target) {
-        target = this._livePanelInfo.find(p =>
-            displayAddr >= p.physBaseAddress &&
-            displayAddr < p.physBaseAddress + p.totalBytes,
-        );
-    }
+    const target = this._findPanelForAddress(info.region, displayAddr);
 
     if (target) {
         target.panel.reveal(undefined, false);
@@ -208,7 +215,44 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         // Record this routed navigation in the server-side history using the
         // caller's source so user jumps and Follow AI jumps stay distinct.
         this._recordNav(displayAddr, source);
+        return;
     }
+
+    // No panel open for the target region — open one on demand, then dispatch
+    // the goto once the panel has been registered. Without this, a goto to e.g.
+    // an IOP address before the user has opened the IOP RAM panel did nothing.
+    const panelLabel = REGION_TO_PANEL_LABEL[info.region];
+    if (panelLabel && this.onOpenMemoryView) {
+        this.onOpenMemoryView(panelLabel)
+            .then(() => {
+                const opened = this._findPanelForAddress(info.region, displayAddr);
+                if (!opened) return; // open failed silently — leave the user where they are.
+                opened.panel.reveal(undefined, false);
+                opened.panel.webview.postMessage({ type: 'gotoAddress', address: displayAddr });
+                this._recordNav(displayAddr, source);
+            })
+            .catch(err => getOutputChannel().warn(`[navigateToAddress] open failed: ${err}`));
+    }
+  }
+
+  /**
+   * Finds the live panel that should render <paramref name="addr"/> for the
+   * given <paramref name="region"/>. Prefers a panel whose region tag matches;
+   * falls back to numeric-range matching only when no region-tagged panel
+   * covers the address. Returns undefined if nothing matches.
+   */
+  private _findPanelForAddress(region: MemoryRegion, addr: number) {
+    return (
+      this._livePanelInfo.find(p =>
+        p.memoryRegion === region &&
+        addr >= p.physBaseAddress &&
+        addr <  p.physBaseAddress + p.totalBytes,
+      ) ??
+      this._livePanelInfo.find(p =>
+        addr >= p.physBaseAddress &&
+        addr <  p.physBaseAddress + p.totalBytes,
+      )
+    );
   }
 
   private _recordNav(address: unknown, source: 'user' | 'mcp' = 'user'): void {

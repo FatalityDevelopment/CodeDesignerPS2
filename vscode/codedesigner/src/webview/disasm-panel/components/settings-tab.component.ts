@@ -558,6 +558,36 @@ const NET_POLL_MS = 4000;
                 <span class="mvb-label">Scratchpad</span>
                 <span class="mvb-badge">16 KB</span>
               </button>
+              <button class="mem-view-btn" (click)="openMemoryViewClick.emit('EE HW regs')"
+                      title="Open EE hardware-register window (0x10000000)">
+                <app-icon class="mvb-icon" name="memorystick" [size]="14" />
+                <span class="mvb-label">EE HW regs</span>
+                <span class="mvb-badge">64 KB</span>
+              </button>
+              <button class="mem-view-btn" (click)="openMemoryViewClick.emit('VU0 micro')"
+                      title="Open VU0 micro-memory (0x11000000, 4 KB code)">
+                <app-icon class="mvb-icon" name="memorystick" [size]="14" />
+                <span class="mvb-label">VU0 micro</span>
+                <span class="mvb-badge">4 KB</span>
+              </button>
+              <button class="mem-view-btn" (click)="openMemoryViewClick.emit('VU0 data')"
+                      title="Open VU0 data memory (0x11004000, 4 KB data)">
+                <app-icon class="mvb-icon" name="memorystick" [size]="14" />
+                <span class="mvb-label">VU0 data</span>
+                <span class="mvb-badge">4 KB</span>
+              </button>
+              <button class="mem-view-btn" (click)="openMemoryViewClick.emit('VU1 micro')"
+                      title="Open VU1 micro-memory (0x11008000, 16 KB code)">
+                <app-icon class="mvb-icon" name="memorystick" [size]="14" />
+                <span class="mvb-label">VU1 micro</span>
+                <span class="mvb-badge">16 KB</span>
+              </button>
+              <button class="mem-view-btn" (click)="openMemoryViewClick.emit('VU1 data')"
+                      title="Open VU1 data memory (0x1100C000, 16 KB data)">
+                <app-icon class="mvb-icon" name="memorystick" [size]="14" />
+                <span class="mvb-label">VU1 data</span>
+                <span class="mvb-badge">16 KB</span>
+              </button>
             </div>
           </div>
         }

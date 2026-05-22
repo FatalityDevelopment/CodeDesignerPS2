@@ -13,6 +13,7 @@ import { McpProgressReportEditorProvider } from '../mcpProgressReportEditor/mcpP
 import { PacketViewerProvider, loadMediusPorts } from '../packetViewer/packetViewerProvider';
 import { SnapshotManagerProvider, SnapshotDataDelegate } from '../snapshotManager/snapshotManagerProvider';
 import { DiffViewerProvider } from '../diffViewer/diffViewerProvider';
+import { MemoryRegion } from '../../shared/memoryRegions';
 import { JokerMakerProvider } from '../jokerMaker/jokerMakerProvider';
 import { CompatBrowserProvider } from '../compatBrowser/compatBrowserProvider';
 import { ArchiveCheat } from '../../webview/disasm-panel/types';
@@ -47,41 +48,94 @@ interface SnapshotInfoFile {
 }
 
 /**
- * Memory regions that are always opened as live views on emulator connect.
- * Rarely-used regions (IOP RAM, BIOS ROM, Scratchpad) are kept in a separate
- * list so they can be opened on-demand via the sidebar menu without adding
- * constant socket traffic and causing flickering in the primary EE view.
+ * Single source of truth for every memory region the disassembler / hex viewer
+ * can open. Each entry pairs:
+ *
+ *   - `memoryRegion`: the canonical {@link MemoryRegion} enum (shared with
+ *     the Bridge); used by region-aware navigation to find the matching panel
+ *     and to auto-open it when none exists yet.
+ *   - `region`:       the legacy `'ee' | 'iop'` tag passed through to
+ *     `HandleReadMem` so the backend knows which address space to read.
+ *   - `address`:      the base address rendered by the panel (uses physical /
+ *     mirror form so rows align with the documented memory map).
+ *   - `size`:         span covered by the panel.
+ *   - `label`:        unique human label, also the key for
+ *     {@link openOptionalMemoryView} and the panel reuse lookup.
+ *   - `defaultOpen`:  true for regions auto-opened on emulator connect.
+ *
+ * Adding a new region (e.g. VU0 micro) requires only an entry here — the
+ * sidebar menu and the auto-open path both pull from this table.
  */
-const LIVE_REGIONS_DEFAULT = [
-    // EE RAM: shown at the physical base (0x00000000–0x01FFFFFF, 32 MB).
-    // Using physical addresses keeps rows consistent with the memory map table
-    // regardless of which virtual alias the CPU uses (KSEG0 0x80000000, uncached
-    // 0x20100000, or uncached+accelerated 0x30100000).  HandleReadMem accepts
-    // physical addresses for the EE region directly.
-    { region: 'ee',  address: 0x00000000, size: 32 * 1024 * 1024, label: 'EE RAM'  },
+export interface LiveRegionDef {
+    memoryRegion: MemoryRegion;
+    region:       'ee' | 'iop';
+    address:      number;
+    size:         number;
+    label:        string;
+    defaultOpen:  boolean;
+}
+
+const LIVE_REGIONS_ALL: LiveRegionDef[] = [
+    // ── EE side ─────────────────────────────────────────────────────────
+    {
+        // EE RAM at physical base 0x00000000-0x01FFFFFF. Rows render at the
+        // physical address regardless of which virtual alias the CPU uses
+        // (KSEG0 0x80000000, uncached 0x20100000, accelerated 0x30100000) —
+        // HandleReadMem accepts the physical form directly.
+        memoryRegion: MemoryRegion.EeRam,        region: 'ee',
+        address: 0x00000000, size: 32 * 1024 * 1024, label: 'EE RAM',        defaultOpen: true,
+    },
+    {
+        // BIOS ROM at physical 0x1FC00000. Both KSEG0 0x9FC... and KSEG1
+        // 0xBFC... aliases strip to the same physical address via toPhysAddr.
+        memoryRegion: MemoryRegion.EeBiosRom,    region: 'ee',
+        address: 0x1FC00000, size:  4 * 1024 * 1024, label: 'BIOS ROM',      defaultOpen: false,
+    },
+    {
+        memoryRegion: MemoryRegion.EeScratchpad, region: 'ee',
+        address: 0x70000000, size:       16 * 1024,  label: 'Scratchpad',    defaultOpen: false,
+    },
+    {
+        // EE hardware-register window (timers, DMAC, GIF, VIF, IPU, GS priv).
+        // PINE/Read32 can read individual register addresses inside this span;
+        // showing the lower 64 KB keeps the page count manageable.
+        memoryRegion: MemoryRegion.EeHardware,   region: 'ee',
+        address: 0x10000000, size:       64 * 1024,  label: 'EE HW regs',    defaultOpen: false,
+    },
+
+    // ── IOP side (mirrored into EE VTLB at 0x1C000000+) ─────────────────
+    {
+        memoryRegion: MemoryRegion.IopRam,       region: 'iop',
+        address: 0x1C000000, size:  4 * 1024 * 1024, label: 'IOP RAM',       defaultOpen: false,
+    },
+
+    // ── Vector Units (EE coprocessors; accessed through EE address space) ─
+    {
+        memoryRegion: MemoryRegion.Vu0Code,      region: 'ee',
+        address: 0x11000000, size:        4 * 1024,  label: 'VU0 micro',     defaultOpen: false,
+    },
+    {
+        memoryRegion: MemoryRegion.Vu0Data,      region: 'ee',
+        address: 0x11004000, size:        4 * 1024,  label: 'VU0 data',      defaultOpen: false,
+    },
+    {
+        memoryRegion: MemoryRegion.Vu1Code,      region: 'ee',
+        address: 0x11008000, size:       16 * 1024,  label: 'VU1 micro',     defaultOpen: false,
+    },
+    {
+        memoryRegion: MemoryRegion.Vu1Data,      region: 'ee',
+        address: 0x1100C000, size:       16 * 1024,  label: 'VU1 data',      defaultOpen: false,
+    },
 ];
 
-/** Rarely-used memory regions available on-demand via the sidebar menu. */
-const LIVE_REGIONS_OPTIONAL = [
-    { region: 'ee', address: 0x00000000, size: 32 * 1024 * 1024, label: 'EE RAM' },
-    // IOP RAM: shown at the EE physical base (0x1C000000–0x1DFFFFFF, 4 MB).
-    // Per the PS2 memory map, IOP RAM is mirrored into EE address space at
-    // 0xBC000000 (logical) → 0x1C000000 (physical).  Using the physical base
-    // keeps row addresses consistent with the documented memory map table.
-    // HandleReadMem translates 0x1C000000+ addresses to IOP RAM offsets via the
-    // EeIopMirrorBase subtraction path.
-    { region: 'iop', address: 0x1C000000, size:  4 * 1024 * 1024, label: 'IOP RAM'       },
-    // BIOS ROM: shown at the physical base (0x1FC00000–0x1FFFFFFF, 4 MB).
-    // Both the cached alias (0x9FC00000) and the uncached alias (0xBFC00000) strip
-    // to the same physical address via toPhysAddr, so the PC indicator and
-    // breakpoints work for whichever alias the CPU uses.  HandleReadMem accepts
-    // the physical base directly.
-    { region: 'ee',  address: 0x1FC00000, size:  4 * 1024 * 1024, label: 'BIOS ROM'      },
-    { region: 'ee',  address: 0x70000000, size:       16 * 1024,  label: 'Scratchpad'    },
-];
+/** Subset that auto-opens on emulator connect — keeps boot UX uncluttered. */
+const LIVE_REGIONS_DEFAULT = LIVE_REGIONS_ALL.filter(r => r.defaultOpen);
+
+/** Everything else — surfaced through the sidebar Memory Region menu. */
+const LIVE_REGIONS_OPTIONAL = LIVE_REGIONS_ALL;
 
 /** All memory regions combined — used when the user explicitly opens all views (restart, etc.). */
-const LIVE_REGIONS = [...LIVE_REGIONS_DEFAULT, ...LIVE_REGIONS_OPTIONAL];
+const LIVE_REGIONS = LIVE_REGIONS_ALL;
 
 /** URL and branch for the cheat code archive repository. */
 const ARCHIVE_REPO_URL    = 'https://github.com/TylerDev888/CheatCodeArchive.git';
