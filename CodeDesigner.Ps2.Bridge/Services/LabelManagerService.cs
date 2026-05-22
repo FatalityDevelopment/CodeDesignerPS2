@@ -12,6 +12,17 @@ namespace CodeDesigner.Ps2.Bridge.Services
     internal sealed class LabelManagerService : ICommandService
     {
         private readonly IBridgeContext _ctx;
+
+        /// <summary>
+        /// Tracks which gameIds have already had a synchronous IOP-labelizer warmup
+        /// during this Bridge session. The first GETLABELSETS for a game blocks
+        /// until the labelizer finishes so the dropdown picks up new IOP sets on
+        /// first render; subsequent calls just fire a background refresh.
+        /// </summary>
+        private static readonly HashSet<string> _iopRefreshedGames =
+            new(StringComparer.OrdinalIgnoreCase);
+        private static readonly object _iopRefreshLock = new();
+
         public LabelManagerService(IBridgeContext ctx) => _ctx = ctx;
 
         public void Register(CommandRegistry reg)
@@ -109,6 +120,57 @@ namespace CodeDesigner.Ps2.Bridge.Services
 
             try
             {
+                // If PCSX2 is connected, ensure the "IOP: <modname>" system sets are
+                // populated before returning the list. Two-tier strategy:
+                //   1. First time we see this game in this session — run synchronously
+                //      so the dropdown reflects the new sets on first render (otherwise
+                //      the user would have to hit refresh twice).
+                //   2. Subsequent calls — fire-and-forget so GETLABELSETS stays cheap;
+                //      ProcessStateService's GETMODULES delta hook keeps things current,
+                //      and the labelizer itself is idempotent.
+                if (_ctx.PineClient is not null)
+                {
+                    var refreshGameId = gameId;
+                    bool firstRun;
+                    lock (_iopRefreshLock)
+                    {
+                        firstRun = _iopRefreshedGames.Add(refreshGameId);
+                    }
+
+                    if (firstRun)
+                    {
+                        try
+                        {
+                            var labelizer = new IopModuleLabelizer(_ctx);
+                            var result = labelizer.RefreshAllAsync(refreshGameId).GetAwaiter().GetResult();
+                            _ctx.SyncLegacyDictsFromLabelManager();
+                            Console.WriteLine($"[IopLabelizer] initial refresh on GETLABELSETS ({refreshGameId}): {result.Modules} module(s), {result.Labels} label(s)");
+                        }
+                        catch (Exception ex)
+                        {
+                            // Re-arm so a later call can retry.
+                            lock (_iopRefreshLock) { _iopRefreshedGames.Remove(refreshGameId); }
+                            Console.WriteLine($"[IopLabelizer] initial refresh failed: {ex.Message}");
+                        }
+                    }
+                    else
+                    {
+                        _ = System.Threading.Tasks.Task.Run(async () =>
+                        {
+                            try
+                            {
+                                var labelizer = new IopModuleLabelizer(_ctx);
+                                await labelizer.RefreshAllAsync(refreshGameId);
+                                _ctx.SyncLegacyDictsFromLabelManager();
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"[IopLabelizer] background refresh failed: {ex.Message}");
+                            }
+                        });
+                    }
+                }
+
                 var summaries = _ctx.LabelRepo.GetSetSummariesAsync(gameId).GetAwaiter().GetResult();
 
                 // Always include the built-in set in the list (and as a system set so
