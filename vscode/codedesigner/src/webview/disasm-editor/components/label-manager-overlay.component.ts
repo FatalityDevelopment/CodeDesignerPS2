@@ -8,6 +8,7 @@ import {
   viewChild,
   ElementRef,
 } from '@angular/core';
+import { IconComponent } from '../../shared/icon.component';
 
 export type LabelType =
   | 'Address' | 'Function' | 'String' | 'Pointer' | 'Float' | 'Value' | 'Hex'
@@ -164,6 +165,7 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
+  imports: [IconComponent],
   template: `
 <div id="lm-overlay"
      [class.visible]="visible()"
@@ -173,8 +175,13 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
 
     <!-- Header -->
     <div id="lm-header">
-      <span id="lm-title">&#128211; Label Manager</span>
-      <button class="lm-close-btn" title="Close (Escape)" (click)="close()">&#xD7;</button>
+      <span id="lm-title">
+        <app-icon name="tag" [size]="14" />
+        Label Manager
+      </span>
+      <button class="lm-close-btn" title="Close (Escape)" (click)="close()">
+        <app-icon name="x" [size]="16" />
+      </button>
     </div>
 
     <!-- Toolbar row -->
@@ -188,7 +195,9 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
 
       <!-- Set management buttons -->
       @if (!showNewSetInput() && !showRenameSetInput()) {
-        <button class="lm-tool-btn" title="Create a new label set (JSON file) for the current game" (click)="onNewSet()">&#43; New</button>
+        <button class="lm-tool-btn" title="Create a new label set (JSON file) for the current game" (click)="onNewSet()">
+          <app-icon name="plus" [size]="12" /> New
+        </button>
       }
       <!-- Inline new-set input (replaces prompt()) -->
       @if (showNewSetInput()) {
@@ -198,8 +207,12 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
                (input)="newSetNameInput.set(asInput($event).value)"
                (keydown.enter)="onConfirmNewSet()"
                (keydown.escape)="onCancelNewSet()" />
-        <button class="lm-tool-btn" [disabled]="!newSetNameInput().trim()" (click)="onConfirmNewSet()" title="Create set">&#x2713;</button>
-        <button class="lm-tool-btn" (click)="onCancelNewSet()" title="Cancel">&#xD7;</button>
+        <button class="lm-tool-btn lm-icon-btn" [disabled]="!newSetNameInput().trim()" (click)="onConfirmNewSet()" title="Create set">
+          <app-icon name="circlecheck" [size]="14" />
+        </button>
+        <button class="lm-tool-btn lm-icon-btn" (click)="onCancelNewSet()" title="Cancel">
+          <app-icon name="x" [size]="14" />
+        </button>
       }
       <!-- Inline rename-set input -->
       @if (showRenameSetInput()) {
@@ -209,75 +222,48 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
                (input)="renameSetInput.set(asInput($event).value)"
                (keydown.enter)="onConfirmRenameSet()"
                (keydown.escape)="onCancelRenameSet()" />
-        <button class="lm-tool-btn" [disabled]="!renameSetInput().trim()" (click)="onConfirmRenameSet()" title="Rename set">&#x2713;</button>
-        <button class="lm-tool-btn" (click)="onCancelRenameSet()" title="Cancel">&#xD7;</button>
+        <button class="lm-tool-btn lm-icon-btn" [disabled]="!renameSetInput().trim()" (click)="onConfirmRenameSet()" title="Rename set">
+          <app-icon name="circlecheck" [size]="14" />
+        </button>
+        <button class="lm-tool-btn lm-icon-btn" (click)="onCancelRenameSet()" title="Cancel">
+          <app-icon name="x" [size]="14" />
+        </button>
       }
       @if (!showNewSetInput() && !showRenameSetInput()) {
         <button class="lm-tool-btn"
                 title="Rename this label set"
                 [disabled]="activeSetIsBuiltIn()"
                 (click)="onRenameSet()">
-          &#x270F; Rename
+          <app-icon name="edit" [size]="12" /> Rename
         </button>
       }
       <button class="lm-tool-btn lm-danger-btn"
               title="Delete this label set"
               [disabled]="activeSetIsBuiltIn()"
               (click)="onDeleteSet()">
-        <svg viewBox="0 0 10 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" class="lm-trash-icon" aria-hidden="true"><path d="M1 3h8M4 1.5h2M2 3l.7 7.5h4.6L8 3"/></svg>
-        Delete Set
+        <app-icon name="trash2" [size]="12" /> Delete Set
       </button>
 
       @if (!activeSetIsBuiltIn()) {
-        <button class="lm-tool-btn lm-add-btn" title="Add a new label entry" (click)="onAddLabel()">&#43; Add Label</button>
+        <button class="lm-tool-btn lm-add-btn" title="Add a new label entry" (click)="onAddLabel()">
+          <app-icon name="plus" [size]="12" /> Add Label
+        </button>
       }
 
       <span class="lm-spacer"></span>
 
-      <!-- Scanners -->
-      <span class="lm-scanner-group">
-        <span class="lm-scanner-label">Scan:</span>
-        <button class="lm-tool-btn" [class.lm-scan-active]="activeScannerKind() === 'functions'"
-                [disabled]="scannerStatus() === 'scanning'"
-                title="Scan memory for function entry points"
-                (click)="onRunScanner('functions')">
-          @if (scannerStatus() === 'scanning' && activeScannerKind() === 'functions') { ⏳ } @else { &#x2699; } FNC
-        </button>
-        <button class="lm-tool-btn" [class.lm-scan-active]="activeScannerKind() === 'pointers'"
-                [disabled]="scannerStatus() === 'scanning'"
-                title="Scan memory for pointer values"
-                (click)="onRunScanner('pointers')">
-          @if (scannerStatus() === 'scanning' && activeScannerKind() === 'pointers') { ⏳ } @else { &#x2699; } Ptr
-        </button>
-        <button class="lm-tool-btn" [class.lm-scan-active]="activeScannerKind() === 'strings'"
-                [disabled]="scannerStatus() === 'scanning'"
-                title="Scan memory for null-terminated strings"
-                (click)="onRunScanner('strings')">
-          @if (scannerStatus() === 'scanning' && activeScannerKind() === 'strings') { ⏳ } @else { <svg class="lm-search-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="6.5" cy="6.5" r="4.5"/><line x1="10" y1="10" x2="14" y2="14"/></svg> } Str
-        </button>
-        <button class="lm-tool-btn" [class.lm-scan-active]="activeScannerKind() === 'floats'"
-                [disabled]="scannerStatus() === 'scanning'"
-                title="Scan memory for IEEE-754 float values"
-                (click)="onRunScanner('floats')">
-          @if (scannerStatus() === 'scanning' && activeScannerKind() === 'floats') { ⏳ } @else { &#x2699; } Float
-        </button>
-        <button class="lm-tool-btn" [class.lm-scan-active]="activeScannerKind() === 'hexValues'"
-                [disabled]="scannerStatus() === 'scanning'"
-                title="Scan memory for non-zero hex values (integers)"
-                (click)="onRunScanner('hexValues')">
-          @if (scannerStatus() === 'scanning' && activeScannerKind() === 'hexValues') { ⏳ } @else { &#x2699; } Hex
-        </button>
-        @if (scanResultEntries().length > 0) {
-          <button class="lm-tool-btn lm-danger-btn" title="Clear scan results" (click)="onClearScanResults()">&#xD7;</button>
-        }
-      </span>
-
       <!-- Import / Export -->
-      <button class="lm-tool-btn" title="Import labels from a JSON file" (click)="triggerImport()">&#x2B06; Import</button>
-      <button class="lm-tool-btn" title="Export this set as JSON" [disabled]="activeSetIsBuiltIn()" (click)="onExport()">&#x2B07; Export</button>
+      <button class="lm-tool-btn lm-icon-btn" title="Import labels from a JSON file" (click)="triggerImport()">
+        <app-icon name="upload" [size]="13" />
+      </button>
+      <button class="lm-tool-btn lm-icon-btn" title="Export this set as JSON" [disabled]="activeSetIsBuiltIn()" (click)="onExport()">
+        <app-icon name="download" [size]="13" />
+      </button>
       <input #fileInput type="file" accept=".json" style="display:none" (change)="onFileSelected($event)" />
 
-      <button class="lm-tool-btn lm-refresh-btn" title="Refresh" (click)="action$.emit({ type: 'refresh', activeSetName: activeSetName() })">&#x21BB;</button>
+      <button class="lm-tool-btn lm-icon-btn" title="Refresh" (click)="action$.emit({ type: 'refresh', activeSetName: activeSetName() })">
+        <app-icon name="refreshcw" [size]="13" />
+      </button>
 
       <!-- Live polling toggle -->
       <label class="lm-live-toggle" title="Enable continuous live-value polling (500ms). When off, values are fetched once on open.">
@@ -286,6 +272,53 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
                (change)="setLivePolling(asInput($event).checked)" />
         Live
       </label>
+    </div>
+
+    <!-- Scanner row (own row so buttons don't cramp on narrow widths) -->
+    <div id="lm-scanner-row">
+      <span class="lm-scanner-label">Scan memory for</span>
+      <div class="lm-scanner-grid">
+        <button class="lm-scan-btn" [class.lm-scan-active]="activeScannerKind() === 'functions'"
+                [disabled]="scannerStatus() === 'scanning'"
+                title="Scan memory for function entry points"
+                (click)="onRunScanner('functions')">
+          <app-icon name="workflow" [size]="13" />
+          <span>Functions</span>
+        </button>
+        <button class="lm-scan-btn" [class.lm-scan-active]="activeScannerKind() === 'pointers'"
+                [disabled]="scannerStatus() === 'scanning'"
+                title="Scan memory for pointer values"
+                (click)="onRunScanner('pointers')">
+          <app-icon name="link" [size]="13" />
+          <span>Pointers</span>
+        </button>
+        <button class="lm-scan-btn" [class.lm-scan-active]="activeScannerKind() === 'strings'"
+                [disabled]="scannerStatus() === 'scanning'"
+                title="Scan memory for null-terminated strings"
+                (click)="onRunScanner('strings')">
+          <app-icon name="bookopen" [size]="13" />
+          <span>Strings</span>
+        </button>
+        <button class="lm-scan-btn" [class.lm-scan-active]="activeScannerKind() === 'floats'"
+                [disabled]="scannerStatus() === 'scanning'"
+                title="Scan memory for IEEE-754 float values"
+                (click)="onRunScanner('floats')">
+          <app-icon name="sparkles" [size]="13" />
+          <span>Floats</span>
+        </button>
+        <button class="lm-scan-btn" [class.lm-scan-active]="activeScannerKind() === 'hexValues'"
+                [disabled]="scannerStatus() === 'scanning'"
+                title="Scan memory for non-zero hex values (integers)"
+                (click)="onRunScanner('hexValues')">
+          <app-icon name="database" [size]="13" />
+          <span>Hex</span>
+        </button>
+      </div>
+      @if (scanResultEntries().length > 0) {
+        <button class="lm-tool-btn lm-danger-btn" title="Clear scan results" (click)="onClearScanResults()">
+          <app-icon name="x" [size]="12" /> Clear
+        </button>
+      }
     </div>
 
     <!-- Filter / type-filter row -->
@@ -297,7 +330,9 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
              [value]="filterText()"
              (input)="onFilterTextChange(asInput($event).value)" />
       @if (filterText()) {
-        <button class="lm-clear-filter" (click)="onFilterTextChange('')">&#xD7;</button>
+        <button class="lm-clear-filter" title="Clear filter" (click)="onFilterTextChange('')">
+          <app-icon name="x" [size]="13" />
+        </button>
       }
       <select id="lm-type-filter" [value]="typeFilter()" (change)="onTypeFilterChange(asSelect($event).value)">
         <option value="">All types</option>
@@ -311,14 +346,22 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
     <!-- Pagination controls -->
     @if (totalPages() > 1 || totalRootEntries() > pageSizeOptions[0]) {
       <div class="lm-pagination">
-        <button class="lm-page-btn" [disabled]="currentPage() === 0" title="First page" (click)="goToPage(0)">&#x23EE;</button>
-        <button class="lm-page-btn" [disabled]="currentPage() === 0" title="Previous page" (click)="goToPage(currentPage() - 1)">&#x25C0;</button>
+        <button class="lm-page-btn lm-icon-btn" [disabled]="currentPage() === 0" title="First page" (click)="goToPage(0)">
+          <app-icon name="chevronleft" [size]="12" /><app-icon name="chevronleft" [size]="12" />
+        </button>
+        <button class="lm-page-btn lm-icon-btn" [disabled]="currentPage() === 0" title="Previous page" (click)="goToPage(currentPage() - 1)">
+          <app-icon name="chevronleft" [size]="12" />
+        </button>
         <span class="lm-page-info">
           Page {{ currentPage() + 1 }} of {{ totalPages() }}
           <span class="lm-muted">({{ totalRootEntries() }} entries)</span>
         </span>
-        <button class="lm-page-btn" [disabled]="currentPage() >= totalPages() - 1" title="Next page" (click)="goToPage(currentPage() + 1)">&#x25B6;</button>
-        <button class="lm-page-btn" [disabled]="currentPage() >= totalPages() - 1" title="Last page" (click)="goToPage(totalPages() - 1)">&#x23ED;</button>
+        <button class="lm-page-btn lm-icon-btn" [disabled]="currentPage() >= totalPages() - 1" title="Next page" (click)="goToPage(currentPage() + 1)">
+          <app-icon name="chevronright" [size]="12" />
+        </button>
+        <button class="lm-page-btn lm-icon-btn" [disabled]="currentPage() >= totalPages() - 1" title="Last page" (click)="goToPage(totalPages() - 1)">
+          <app-icon name="chevronright" [size]="12" /><app-icon name="chevronright" [size]="12" />
+        </button>
         <select class="lm-page-size-select" [value]="pageSize()" (change)="onPageSizeChange(asSelect($event).value)" title="Entries per page">
           @for (opt of pageSizeOptions; track opt) {
             <option [value]="opt" [selected]="pageSize() === opt">{{ opt }} / page</option>
@@ -347,13 +390,7 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
                       [disabled]="activeSetIsBuiltIn() || filteredEntries().length === 0"
                       [title]="allVisible() ? 'Hide all' : 'Show all'"
                       (click)="onToggleAllVisibility()">
-                <svg class="lm-eye-icon" viewBox="0 0 20 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
-                  <path d="M1 7C3.5 3 6.5 1 10 1s6.5 2 9 6c-2.5 4-5.5 6-9 6S3.5 11 1 7z"/>
-                  <circle cx="10" cy="7" r="2.5"/>
-                  @if (!allVisible()) {
-                    <line x1="3" y1="1" x2="17" y2="13"/>
-                  }
-                </svg>
+                <app-icon [name]="allVisible() ? 'eye' : 'ban'" [size]="14" />
               </button>
               }
             </th>
@@ -400,20 +437,14 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
                           [title]="row.entry!.hidden ? 'Hidden — click to show' : 'Visible — click to hide'"
                           [disabled]="activeSetIsBuiltIn()"
                           (click)="onToggleVisibility(row.entry!)">
-                    <svg class="lm-eye-icon" viewBox="0 0 20 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
-                      <path d="M1 7C3.5 3 6.5 1 10 1s6.5 2 9 6c-2.5 4-5.5 6-9 6S3.5 11 1 7z"/>
-                      <circle cx="10" cy="7" r="2.5"/>
-                      @if (row.entry!.hidden) {
-                        <line x1="3" y1="1" x2="17" y2="13"/>
-                      }
-                    </svg>
+                    <app-icon [name]="row.entry!.hidden ? 'ban' : 'eye'" [size]="13" />
                   </button>
                   }
                 </td>
                 <td class="lm-col-expand">
                   @if (row.expandable) {
                     <button class="lm-expand-btn" [title]="isExpanded(row.path) ? 'Collapse' : 'Expand members'" (click)="toggleExpand(row.path)">
-                      {{ isExpanded(row.path) ? '▼' : '▶' }}
+                      <app-icon [name]="isExpanded(row.path) ? 'chevrondown' : 'chevronright'" [size]="12" />
                     </button>
                   }
                 </td>
@@ -421,7 +452,9 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
                   <span class="lm-type-badge" [class]="typeBadgeClass(row.entry!)">{{ typeBadge(row.entry!) }}</span>
                 </td>
                 <td class="lm-col-addr lm-mono">
-                  <button class="lm-row-btn lm-goto-btn" title="Go to address" (click)="onGotoLabel(row.entry!)">&#x2192;</button>
+                  <button class="lm-row-btn lm-goto-btn" title="Go to address" (click)="onGotoLabel(row.entry!)">
+                    <app-icon name="arrowright" [size]="12" />
+                  </button>
                   {{ row.entry!.address }}@if (entryDetails(row.entry!) !== '—') { <span class="lm-addr-details lm-muted">({{ entryDetails(row.entry!) }})</span> }
                 </td>
                 <td class="lm-col-live">
@@ -442,16 +475,14 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
                           [class.lm-is-dynamic]="row.entry!.dynamic"
                           [title]="row.entry!.dynamic ? 'Pause live polling' : 'Start live polling'"
                           (click)="onToggleDynamic(row.entry!)">
-                    @if (row.entry!.dynamic) {
-                      <svg viewBox="0 0 8 10" fill="currentColor" class="lm-play-icon" aria-hidden="true"><rect x="0" y="0" width="2.5" height="10"/><rect x="5.5" y="0" width="2.5" height="10"/></svg>
-                    } @else {
-                      <svg viewBox="0 0 8 10" fill="currentColor" class="lm-play-icon" aria-hidden="true"><path d="M0 0l8 5-8 5z"/></svg>
-                    }
+                    <app-icon [name]="row.entry!.dynamic ? 'pause' : 'play'" [size]="11" />
                   </button>
                   @if (!activeSetIsBuiltIn()) {
-                    <button class="lm-row-btn" title="Edit" (click)="onEdit(row.entry!)">&#x270E;</button>
+                    <button class="lm-row-btn" title="Edit" (click)="onEdit(row.entry!)">
+                      <app-icon name="edit" [size]="12" />
+                    </button>
                     <button class="lm-row-btn lm-danger-btn" title="Delete" (click)="onDeleteEntry(row.entry!)">
-                      <svg viewBox="0 0 10 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" class="lm-trash-icon" aria-hidden="true"><path d="M1 3h8M4 1.5h2M2 3l.7 7.5h4.6L8 3"/></svg>
+                      <app-icon name="trash2" [size]="12" />
                     </button>
                   }
                 </td>
@@ -466,13 +497,7 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
                           [title]="row.entry.hidden ? 'Hidden — click to show' : 'Visible — click to hide'"
                           [disabled]="activeSetIsBuiltIn()"
                           (click)="onToggleChildVisibility(row.entry)">
-                    <svg class="lm-eye-icon" viewBox="0 0 20 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
-                      <path d="M1 7C3.5 3 6.5 1 10 1s6.5 2 9 6c-2.5 4-5.5 6-9 6S3.5 11 1 7z"/>
-                      <circle cx="10" cy="7" r="2.5"/>
-                      @if (row.entry.hidden) {
-                        <line x1="3" y1="1" x2="17" y2="13"/>
-                      }
-                    </svg>
+                    <app-icon [name]="row.entry.hidden ? 'ban' : 'eye'" [size]="13" />
                   </button>
                   }
                 </td>
@@ -483,7 +508,7 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
                   @if (row.expandable) {
                     <span class="lm-tree-connector">{{ row.isLastChild ? '└' : '├' }}</span>
                     <button class="lm-expand-btn" [title]="isExpanded(row.path) ? 'Collapse' : 'Expand'" (click)="toggleExpand(row.path)">
-                      {{ isExpanded(row.path) ? '▼' : '▶' }}
+                      <app-icon [name]="isExpanded(row.path) ? 'chevrondown' : 'chevronright'" [size]="12" />
                     </button>
                   } @else {
                     <span class="lm-tree-leaf">{{ row.isLastChild ? '└─' : '├─' }}</span>
@@ -516,23 +541,25 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
                           [class.lm-is-dynamic]="row.entry.dynamic"
                           [title]="row.entry.dynamic ? 'Pause live polling' : 'Start live polling'"
                           (click)="onToggleChildDynamic(row.entry)">
-                    @if (row.entry.dynamic) {
-                      <svg viewBox="0 0 8 10" fill="currentColor" class="lm-play-icon" aria-hidden="true"><rect x="0" y="0" width="2.5" height="10"/><rect x="5.5" y="0" width="2.5" height="10"/></svg>
-                    } @else {
-                      <svg viewBox="0 0 8 10" fill="currentColor" class="lm-play-icon" aria-hidden="true"><path d="M0 0l8 5-8 5z"/></svg>
-                    }
+                    <app-icon [name]="row.entry.dynamic ? 'pause' : 'play'" [size]="11" />
                   </button>
                   @if (!activeSetIsBuiltIn()) {
                     @if (row.entry.parentAddress != null) {
-                      <button class="lm-row-btn lm-goto-btn" title="Navigate to resolved address" (click)="onGotoChild(row.entry)">&#x2192;</button>
+                      <button class="lm-row-btn lm-goto-btn" title="Navigate to resolved address" (click)="onGotoChild(row.entry)">
+                        <app-icon name="arrowright" [size]="12" />
+                      </button>
                     }
-                    <button class="lm-row-btn" title="Edit" aria-label="Edit sub-label" (click)="onEdit(row.entry)">&#x270E;</button>
+                    <button class="lm-row-btn" title="Edit" aria-label="Edit sub-label" (click)="onEdit(row.entry)">
+                      <app-icon name="edit" [size]="12" />
+                    </button>
                     <button class="lm-row-btn lm-danger-btn" title="Delete" (click)="onDeleteEntry(row.entry)">
-                      <svg viewBox="0 0 10 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" class="lm-trash-icon" aria-hidden="true"><path d="M1 3h8M4 1.5h2M2 3l.7 7.5h4.6L8 3"/></svg>
+                      <app-icon name="trash2" [size]="12" />
                     </button>
                   } @else {
                     @if (row.entry.parentAddress != null) {
-                      <button class="lm-row-btn lm-goto-btn" title="Navigate to resolved address" (click)="onGotoChild(row.entry)">&#x2192;</button>
+                      <button class="lm-row-btn lm-goto-btn" title="Navigate to resolved address" (click)="onGotoChild(row.entry)">
+                        <app-icon name="arrowright" [size]="12" />
+                      </button>
                     }
                   }
                 </td>
@@ -558,7 +585,18 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
 
     <!-- Add/Edit form -->
     @if (!activeSetIsBuiltIn()) {
-      <div id="lm-edit-form">
+      <div id="lm-edit-form-section" class="lm-acc-section">
+        <button type="button" class="lm-acc-header" [class.lm-acc-open]="editFormOpen()" (click)="toggleEditForm()">
+          <app-icon class="lm-acc-chevron" [name]="editFormOpen() ? 'chevrondown' : 'chevronright'" [size]="13" />
+          <span class="lm-acc-title">{{ editingAddress() ? 'Edit Label' : 'Label Editor' }}</span>
+          @if (editingAddress()) {
+            <span class="lm-acc-subtitle lm-mono">{{ editingAddress() }}</span>
+          } @else {
+            <span class="lm-acc-subtitle lm-muted">click to add a new label</span>
+          }
+        </button>
+        @if (editFormOpen()) {
+        <div id="lm-edit-form" class="lm-acc-body">
         <!-- Type selector -->
         <div class="lm-form-row">
           <label class="lm-form-label">Type</label>
@@ -640,10 +678,14 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
                          placeholder="comment…"
                          [value]="m.comment ?? ''"
                          (input)="updateMemberComment($index, asInput($event).value)" />
-                  <button class="lm-member-del" (click)="removeMember($index)">&#xD7;</button>
+                  <button class="lm-member-del" title="Remove child" (click)="removeMember($index)">
+                    <app-icon name="x" [size]="12" />
+                  </button>
                 </div>
               }
-              <button class="lm-tool-btn" (click)="addMember()">&#43; Child</button>
+              <button class="lm-tool-btn" (click)="addMember()">
+                <app-icon name="plus" [size]="12" /> Child
+              </button>
             </div>
           </div>
         }
@@ -705,13 +747,18 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
         }
 
         <div class="lm-form-row lm-form-actions">
-          <button class="lm-tool-btn" [disabled]="!canSave()" (click)="onSave()">
+          <button class="lm-tool-btn lm-add-btn" [disabled]="!canSave()" (click)="onSave()">
+            <app-icon name="save" [size]="12" />
             {{ editingAddress() ? 'Update' : 'Add Label' }}
           </button>
           @if (editingAddress()) {
-            <button class="lm-tool-btn" (click)="clearForm()">Cancel</button>
+            <button class="lm-tool-btn" (click)="clearForm()">
+              <app-icon name="x" [size]="12" /> Cancel
+            </button>
           }
         </div>
+        </div>
+        }
       </div>
     }
 
@@ -724,7 +771,9 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
     @if (pendingDeleteEntry()) {
       <div class="lm-confirm-backdrop" (click)="cancelDeleteEntry()">
         <div class="lm-confirm-dialog" (click)="$event.stopPropagation()">
-          <p class="lm-confirm-title">&#x26A0; Delete label?</p>
+          <p class="lm-confirm-title">
+            <app-icon name="trash2" [size]="14" /> Delete label?
+          </p>
           <p class="lm-confirm-body">
             <strong>{{ pendingDeleteEntry()!.name }}</strong>
             @if (pendingDeleteEntry()!.parentAddress) {
@@ -746,7 +795,9 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
     @if (pendingDeleteSet()) {
       <div class="lm-confirm-backdrop" (click)="cancelDeleteSet()">
         <div class="lm-confirm-dialog" (click)="$event.stopPropagation()">
-          <p class="lm-confirm-title">&#x26A0; Delete label set?</p>
+          <p class="lm-confirm-title">
+            <app-icon name="trash2" [size]="14" /> Delete label set?
+          </p>
           <p class="lm-confirm-body">Set: <strong>{{ activeSetName() }}</strong></p>
           <p class="lm-confirm-note lm-muted">All labels in this set will be permanently deleted.</p>
           <div class="lm-confirm-actions">
@@ -809,6 +860,12 @@ export class LabelManagerOverlayComponent {
   readonly editNodeSize       = signal('');
   /** When editing an existing entry, this holds its original address. */
   readonly editingAddress = signal('');
+  /**
+   * Collapses the bottom edit form so the table has more vertical room.
+   * Auto-opens when the user clicks "Add Label" or the per-row Edit button;
+   * the user can also toggle it via the section header chevron.
+   */
+  readonly editFormOpen = signal(false);
   /** When editing a child entry, this preserves its parent address so the relationship is not lost on save. */
   readonly editParentAddress = signal<string | undefined>(undefined);
   /** When editing a child entry, this preserves its byte offset from the parent pointer. */
@@ -1254,12 +1311,18 @@ export class LabelManagerOverlayComponent {
 
   onAddLabel(): void {
     this.clearForm();
+    this.editFormOpen.set(true);
     requestAnimationFrame(() => {
       const form = document.getElementById('lm-edit-form');
       form?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       const firstInput = form?.querySelector('input') as HTMLInputElement | null;
       firstInput?.focus();
     });
+  }
+
+  /** Toggle the bottom edit form open/closed (called by the section header). */
+  toggleEditForm(): void {
+    this.editFormOpen.update(v => !v);
   }
 
   onToggleVisibility(entry: LabelManagerEntry): void {
@@ -1363,6 +1426,7 @@ export class LabelManagerOverlayComponent {
   }
 
   onEdit(entry: LabelManagerEntry): void {
+    this.editFormOpen.set(true);
     this.editAddress.set(entry.address);
     this.editName.set(entry.name);
     this.editComment.set(entry.comment ?? '');
