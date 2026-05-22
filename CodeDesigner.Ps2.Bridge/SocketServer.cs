@@ -338,6 +338,14 @@ namespace CodeDesigner.Ps2.Bridge
                 new Services.DataFormatService(ctx),
                 new Services.GsStreamService(ctx, _gsStreamForwarder),
             });
+
+            // Seed the legacy _labels / _structs dicts from the Built-in label set up
+            // front so the disassembler shows system labels (EE_BIOS_ENTRY, T0_COUNT, …)
+            // from the moment a debug session begins — without this, the dicts stay
+            // empty until the user explicitly touches the Label Manager or calls
+            // GETLABELS, which leaves disasm rows with no symbol annotations.
+            try { SyncLegacyDictsFromLabelManager(); }
+            catch (Exception ex) { Console.WriteLine($"[Bridge] initial label sync failed: {ex.Message}"); }
         }
 
         private readonly Services.MemoryService         _memoryService;
@@ -380,6 +388,34 @@ namespace CodeDesigner.Ps2.Bridge
             _structs.Clear();
 
             var allEntries = LabelMgr.GetMergedLabels().ToList();
+
+            // Also merge in every DB-resident system set for the current game (e.g.
+            // runtime IOP module sets produced by IopModuleLabelizer). These aren't
+            // the user's "active" set so GetMergedLabels won't include them on its
+            // own, but they should still surface on disasm rows. Best-effort: any
+            // failure here just leaves disasm using the built-in + active labels.
+            var gameId = LabelMgr.GameId;
+            if (!string.IsNullOrWhiteSpace(gameId))
+            {
+                try
+                {
+                    var summaries = LabelRepo.GetSetSummariesAsync(gameId).GetAwaiter().GetResult();
+                    foreach (var s in summaries)
+                    {
+                        if (!s.IsSystem) continue;
+                        // Skip the active user set — GetMergedLabels already included it.
+                        if (string.Equals(s.SetName, LabelMgr.ActiveSetName, StringComparison.OrdinalIgnoreCase))
+                            continue;
+                        var set = LabelRepo.LoadSetAsync(gameId, s.SetName).GetAwaiter().GetResult();
+                        if (set is not null)
+                            allEntries.AddRange(set.Entries);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[Bridge] sync: system-set merge failed: {ex.Message}");
+                }
+            }
 
             // Build a lookup: parentAddress → list of child entries (not hidden).
             var childrenByParent = new Dictionary<string, List<CodeDesigner.Ps2.LabelManager.Models.LabelEntry>>(StringComparer.OrdinalIgnoreCase);
