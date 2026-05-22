@@ -65,14 +65,23 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 byte[] text;
                 try
                 {
-                    text = _ctx.PineClient.ReadBytes(m.TextAddr, (int)Math.Min(m.TextSize, 0x200000));
+                    // PINE Read32 reads EE-virtual memory; IOP RAM is exposed at the
+                    // EE VTLB mirror starting at 0xBC000000 (KSEG1). Translate the
+                    // raw IOP TextAddr so the scan reads the actual IRX bytes
+                    // instead of stray EE memory at the same numeric offset.
+                    uint readAddr = AddressTranslator.ToClientAddress(m.TextAddr, useIop: true);
+                    text = _ctx.PineClient.ReadBytes(readAddr, (int)Math.Min(m.TextSize, 0x200000));
                 }
-                catch
+                catch (Exception ex)
                 {
+                    Console.WriteLine($"[IopLabelizer] skipping {m.Name} @ 0x{m.TextAddr:X8}: {ex.Message}");
                     continue; // module unmapped or partially loaded — skip.
                 }
 
+                int before = bySet.Values.Sum(l => l.Count);
                 ScanModule(m, text, bySet);
+                int produced = bySet.Values.Sum(l => l.Count) - before;
+                Console.WriteLine($"[IopLabelizer]   {m.Name} (text=0x{m.TextAddr:X8}, {m.TextSize} bytes): produced {produced} label(s)");
                 touched++;
             }
 
@@ -117,8 +126,16 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 if (m.TextSize == 0 || m.TextAddr == 0) continue;
 
                 byte[] text;
-                try { text = _ctx.PineClient.ReadBytes(m.TextAddr, (int)Math.Min(m.TextSize, 0x200000)); }
-                catch { continue; }
+                try
+                {
+                    uint readAddr = AddressTranslator.ToClientAddress(m.TextAddr, useIop: true);
+                    text = _ctx.PineClient.ReadBytes(readAddr, (int)Math.Min(m.TextSize, 0x200000));
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[IopLabelizer] skipping {m.Name} @ 0x{m.TextAddr:X8}: {ex.Message}");
+                    continue;
+                }
 
                 ScanModule(m, text, bySet);
             }
