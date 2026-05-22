@@ -213,13 +213,34 @@ namespace CodeDesigner.Ps2.Bridge.Services
         /// <summary>
         /// Diff the current module list against the last snapshot and, for any newly
         /// loaded IRX, fire a background refresh against the IOP labelizer so the
-        /// "IOP: &lt;modname&gt;" label sets stay current. Skips when no game context is
-        /// available (the labelizer needs a gameId to scope its DB writes).
+        /// "IOP: &lt;modname&gt;" label sets stay current. Falls back to PCSX2's reported
+        /// game serial when the user hasn't opened a label set yet (which is when
+        /// <see cref="Ps2LabelManager.GameId"/> first gets populated).
         /// </summary>
         private void MaybeRefreshIopLabels(IReadOnlyList<PineClient.IopModule> modules)
         {
             string? gameId = _ctx.LabelMgr.GameId;
-            if (string.IsNullOrWhiteSpace(gameId)) { CaptureSnapshot(modules); return; }
+
+            // Fall back to PCSX2's serial when the LabelMgr context hasn't been seeded
+            // yet (user opened PCSX2 but hasn't touched the Label Manager). Without
+            // this fallback the labelizer would silently never run on a fresh boot.
+            if (string.IsNullOrWhiteSpace(gameId) && _ctx.PineClient is not null)
+            {
+                try
+                {
+                    var serial = _ctx.PineClient.GetGameID();
+                    if (!string.IsNullOrWhiteSpace(serial))
+                        gameId = serial.Trim();
+                }
+                catch { /* PINE serial unavailable — fall through and skip this tick */ }
+            }
+
+            if (string.IsNullOrWhiteSpace(gameId))
+            {
+                CaptureSnapshot(modules);
+                Console.WriteLine($"[IopLabelizer] skipping refresh — no game serial available yet (modules={modules.Count})");
+                return;
+            }
 
             var current = modules.ToDictionary(m => m.Name, m => m.TextAddr, StringComparer.OrdinalIgnoreCase);
 
@@ -227,6 +248,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
             if (_lastModuleSnapshot is null)
             {
                 _lastModuleSnapshot = current;
+                Console.WriteLine($"[IopLabelizer] initial refresh for gameId='{gameId}' — {modules.Count} module(s)");
                 FireAndForgetRefresh(gameId, moduleName: null);
                 return;
             }
@@ -238,6 +260,9 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 .ToList();
 
             _lastModuleSnapshot = current;
+
+            if (newOrMoved.Count > 0)
+                Console.WriteLine($"[IopLabelizer] delta refresh for gameId='{gameId}': {string.Join(", ", newOrMoved)}");
 
             foreach (var name in newOrMoved)
                 FireAndForgetRefresh(gameId, name);
@@ -255,15 +280,15 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 try
                 {
                     var labelizer = new IopModuleLabelizer(_ctx);
-                    if (moduleName is null)
-                        await labelizer.RefreshAllAsync(gameId);
-                    else
-                        await labelizer.RefreshModuleAsync(gameId, moduleName);
+                    (int Modules, int Labels) result = moduleName is null
+                        ? await labelizer.RefreshAllAsync(gameId)
+                        : await labelizer.RefreshModuleAsync(gameId, moduleName);
                     _ctx.SyncLegacyDictsFromLabelManager();
+                    Console.WriteLine($"[IopLabelizer] {(moduleName ?? "all")}: scanned {result.Modules} module(s), wrote {result.Labels} label(s)");
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[IopLabelizer] background refresh failed: {ex.Message}");
+                    Console.WriteLine($"[IopLabelizer] background refresh failed: {ex}");
                 }
             });
         }

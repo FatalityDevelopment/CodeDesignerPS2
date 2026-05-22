@@ -695,11 +695,22 @@ namespace CodeDesigner.Ps2.Bridge.Services
         /// </summary>
         private string HandleIopLabelsRefresh(string? gameId, string? moduleName)
         {
-            gameId = RequireParam(gameId, "GameId", out var e);
-            if (gameId is null) return Responses.Error(e!);
-
             if (_ctx.PineClient is null)
                 return Responses.Error("IOPLABELSREFRESH requires PCSX2 (PINE) mode.");
+
+            // Fall back to PCSX2's reported serial when the caller didn't pass one and
+            // the LabelMgr context hasn't been seeded yet, so the user can just run
+            // `iop_labels_refresh ""` (or the autodriver from GETMODULES) without
+            // having to know the serial manually.
+            if (string.IsNullOrWhiteSpace(gameId))
+                gameId = _ctx.LabelMgr.GameId;
+            if (string.IsNullOrWhiteSpace(gameId))
+            {
+                try { gameId = _ctx.PineClient.GetGameID()?.Trim(); }
+                catch { /* fall through to the explicit error below */ }
+            }
+            if (string.IsNullOrWhiteSpace(gameId))
+                return Responses.Error("IOPLABELSREFRESH: no game serial available — pass GameId explicitly or load a game in PCSX2 first.");
 
             try
             {
@@ -713,7 +724,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 _ctx.SyncLegacyDictsFromLabelManager();
 
                 return Responses.Success(
-                    $"IOP label refresh: {result.modules} module(s), {result.labels} label(s).");
+                    $"IOP label refresh ({gameId}): {result.modules} module(s), {result.labels} label(s).");
             }
             catch (Exception ex)
             {
