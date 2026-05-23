@@ -12,4 +12,8 @@
     <Folder Include="VectorUnits\VU1\" />
   </ItemGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\EeSyscalls.json" />
+  </ItemGroup>
+
 </Project>

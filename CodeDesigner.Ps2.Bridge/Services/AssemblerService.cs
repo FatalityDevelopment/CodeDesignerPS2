@@ -1103,6 +1103,14 @@ namespace CodeDesigner.Ps2.Bridge.Services
                     }
                 }
 
+                // Static syscall annotation: when a `syscall` with code=0 is
+                // preceded by an instruction that loads an immediate into $v1
+                // (reg 3) — addiu/ori/li/lui+ori — resolve the syscall name
+                // from PCSX2's EE BIOS table without needing the live register
+                // file. This gives game code the same "syscall (FlushCache)"
+                // annotation that paused-PC analysis already produces.
+                AnnotateSyscallsFromPriorV1Load(results);
+
                 var response = new CommandResponse
                 {
                     Success = true,
@@ -1391,6 +1399,142 @@ namespace CodeDesigner.Ps2.Bridge.Services
         {
             return (address >= 0x00100000u && address <  0x02000000u)
                 || (address >= 0x80100000u && address <  0x82000000u);
+        }
+
+        // ──────────────────────────────────────────────────────────────────────
+        // syscall annotation — static $v1-load detection
+        // ──────────────────────────────────────────────────────────────────────
+
+        // MIPS R5900 instruction layout (encoded in Hex like "0x00000000C"):
+        //   syscall:                        opcode=000000, funct=001100  →  word & 0x3F == 0x0C with opcode=0
+        //   addiu rt, rs, imm  (opcode 9):  bits 31:26 = 001001
+        //   ori   rt, rs, imm  (opcode 13): bits 31:26 = 001101
+        //   lui   rt, imm      (opcode 15): bits 31:26 = 001111
+        //   addi  rt, rs, imm  (opcode 8):  bits 31:26 = 001000 (rarely used in PS2 code)
+        //
+        // The destination reg (rt) is bits 20:16. We're looking for rt == 3 ($v1).
+
+        private const int RegV1 = 3;
+
+        /// <summary>
+        /// Walk <paramref name="results"/> looking for <c>syscall</c> rows whose
+        /// embedded code field is zero (the common PS2 calling convention loads
+        /// the call number into <c>$v1</c> via an addiu/ori immediately before
+        /// the syscall). When the preceding non-delay instruction matches that
+        /// pattern, resolve the immediate against the EE BIOS table and append
+        /// the syscall name to the row's comment.
+        /// </summary>
+        private static void AnnotateSyscallsFromPriorV1Load(List<InstructionResult> results)
+        {
+            for (int i = 1; i < results.Count; i++)
+            {
+                var row = results[i];
+                if (!row.Success) continue;
+                if (row.ByteLength is not null and not 4) continue;       // skip data rows
+                if (!TryParseHex(row.Hex, out uint instr)) continue;
+                if (!IsSyscallInstruction(instr)) continue;
+
+                // Use the embedded code field first when non-zero.
+                uint embeddedCode = (instr >> 6) & 0xFFFFF;
+                if (embeddedCode != 0)
+                {
+                    string? embeddedName = CodeDesigner.Ps2.Common.Disassembler.EeSyscallTable
+                        .Resolve((int)embeddedCode);
+                    if (embeddedName is not null && !ContainsName(row.Comment, embeddedName))
+                        row.Comment = AppendSyscallName(row.Comment, embeddedCode, embeddedName);
+                    continue;
+                }
+
+                // code == 0: look back for the most recent instr writing $v1.
+                // Skip the branch-delay slot (typical pattern is `li $v1, N; syscall`,
+                // so the immediate write is the row directly above).
+                int? immediate = FindV1ImmediateBefore(results, i);
+                if (immediate is null) continue;
+
+                int num = immediate.Value;
+                // Negative-call convention: PS2 kernel-mode entry uses -N.
+                int callNum = num < 0 ? -num : num;
+                string? name = CodeDesigner.Ps2.Common.Disassembler.EeSyscallTable.Resolve(callNum);
+                if (name is null) continue;
+
+                if (!ContainsName(row.Comment, name))
+                    row.Comment = AppendSyscallName(row.Comment, (uint)callNum, name);
+            }
+        }
+
+        private static bool IsSyscallInstruction(uint instr)
+        {
+            return (instr >> 26) == 0u && (instr & 0x3Fu) == 0x0Cu;
+        }
+
+        /// <summary>
+        /// Walks backward from <paramref name="syscallIndex"/> through
+        /// <paramref name="results"/> looking for the nearest preceding
+        /// instruction that writes a known immediate to <c>$v1</c>. Returns the
+        /// loaded immediate (sign-extended for addi/addiu, zero-extended for
+        /// ori), or null when no such write is found within a short window.
+        /// </summary>
+        private static int? FindV1ImmediateBefore(List<InstructionResult> results, int syscallIndex)
+        {
+            const int LookbackWindow = 4; // li / addiu / ori is almost always the row above
+            int luiHi = 0;
+            bool sawLuiV1 = false;
+            for (int k = syscallIndex - 1; k >= 0 && k >= syscallIndex - LookbackWindow; k--)
+            {
+                var r = results[k];
+                if (!r.Success) continue;
+                if (r.ByteLength is not null and not 4) continue;
+                if (!TryParseHex(r.Hex, out uint instr)) continue;
+
+                uint op = instr >> 26;
+                int  rt = (int)((instr >> 16) & 0x1F);
+                short imm16 = unchecked((short)(instr & 0xFFFF));
+
+                if (rt != RegV1) continue;
+
+                // addi (8) / addiu (9): sign-extended 16-bit immediate
+                if (op == 0x08 || op == 0x09)
+                {
+                    if (sawLuiV1) return (luiHi << 16) | (ushort)imm16; // lui+addi pair
+                    return (int)(short)imm16;
+                }
+                // ori (13): zero-extended immediate; combine with prior lui $v1 if present
+                if (op == 0x0D)
+                {
+                    ushort imm = (ushort)imm16;
+                    if (sawLuiV1) return (luiHi << 16) | imm;
+                    return imm;
+                }
+                // lui (15): remember the high half for a potential ori/addiu pair
+                if (op == 0x0F)
+                {
+                    luiHi = (ushort)imm16;
+                    sawLuiV1 = true;
+                    continue;
+                }
+                // Any other instruction writing $v1 (e.g. add $v1, ...) makes the
+                // immediate analysis unreliable — bail.
+                return null;
+            }
+            return null;
+        }
+
+        private static bool TryParseHex(string? hex, out uint value)
+        {
+            value = 0;
+            if (string.IsNullOrEmpty(hex)) return false;
+            var trimmed = hex.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+                ? hex.AsSpan(2) : hex.AsSpan();
+            return uint.TryParse(trimmed, System.Globalization.NumberStyles.HexNumber, null, out value);
+        }
+
+        private static bool ContainsName(string? comment, string name) =>
+            comment is not null && comment.Contains(name, StringComparison.Ordinal);
+
+        private static string AppendSyscallName(string? existing, uint num, string name)
+        {
+            string addition = $"syscall #{num} ({name})";
+            return string.IsNullOrEmpty(existing) ? addition : $"{existing}  {addition}";
         }
     }
 }
