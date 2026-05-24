@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { SocketClient, ZipperOperationResult } from '../../socketClient';
-import { getOutputChannel } from '../../extension';
+import { getOutputChannel, getZdbChannel } from '../../extension';
 import { getNonce, getWebviewErrorHandlerScript } from '../../utils/nonce';
 
 export class ZipperWorkbenchProvider {
@@ -109,6 +109,25 @@ export class ZipperWorkbenchProvider {
                     msg['entryName'] as string | undefined,
                 );
                 break;
+            case 'inspectMps':
+                await this._inspectMps(webview, msg['path'] as string | undefined);
+                break;
+            case 'loadZdbPackage':
+                // Mirrors the HTML reference behaviour: when a .zdb is opened,
+                // fetch every top-level entry's bytes in one shot so the webview
+                // can decode textures / palettes / GEO across the whole package
+                // without round-tripping per entry.
+                await this._loadZdbPackage(webview, msg['path'] as string | undefined);
+                break;
+            case 'zipperLog': {
+                // Stream the webview's log line into the dedicated output channel
+                // so the user has the same kind of running diagnostic feed the
+                // HTML reference viewers print on-page.
+                const text = (msg['text'] as string) ?? '';
+                if (text) { getZdbChannel().appendLine(text); }
+                if (msg['reveal']) { getZdbChannel().show(true); }
+                break;
+            }
             case 'bootstrapError':
                 getOutputChannel().error('[ZipperWorkbench] Bootstrap error: ' + msg['error']);
                 break;
@@ -189,6 +208,35 @@ export class ZipperWorkbenchProvider {
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
             webview.postMessage({ type: 'rdrError', entryName, message });
+        }
+    }
+
+    // AIMAPS.MPS inspection. The .mps file isn't inside a container so we
+    // ship it straight from the file system to the parser.
+    private async _inspectMps(webview: vscode.Webview, filePath: string | undefined): Promise<void> {
+        if (!filePath) { return; }
+        if (!this._ensureConnected(webview)) { return; }
+        try {
+            const result = await this._socketClient.zipperInspectMps(filePath);
+            webview.postMessage({ type: 'mpsData', result });
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            webview.postMessage({ type: 'mpsError', message });
+        }
+    }
+
+    private async _loadZdbPackage(webview: vscode.Webview, filePath: string | undefined): Promise<void> {
+        if (!filePath) { return; }
+        if (!this._ensureConnected(webview)) { return; }
+        try {
+            // zipperReadAllNodes handles ZDB / ZAR / ZED on the backend and
+            // returns base64 bytes per entry. For ZDB this gives us every
+            // sibling ZED (TXR/PAL/GEO/MDL) in one round trip.
+            const nodes = await this._socketClient.zipperReadAllNodes(filePath);
+            webview.postMessage({ type: 'zdbPackage', path: filePath, nodes });
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            webview.postMessage({ type: 'zdbPackageError', path: filePath, message });
         }
     }
 

@@ -659,6 +659,216 @@ input {
   border-bottom: 1px solid var(--vscode-tree-tableColumnsBorder, #2d2d30);
 }
 
+/* Package-load progress bar. Same animation pattern as the disasm-editor
+   label-manager scanner. Sits below the toolbar while we fetch every entry
+   of a ZDB so the user knows the prefetch is in flight. */
+.zip-scanning-bar {
+  position: relative;
+  height: 22px;
+  margin: 0;
+  background: var(--vscode-editor-background, #1e1e1e);
+  border-top: 1px solid var(--vscode-panel-border, #3e3e42);
+  border-bottom: 1px solid var(--vscode-panel-border, #3e3e42);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.zip-scanning-bar-inner {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  width: 30%;
+  background: linear-gradient(90deg, transparent, #264f78, #3794ff, #264f78, transparent);
+  animation: zip-scan-slide 1.5s ease-in-out infinite;
+}
+@keyframes zip-scan-slide {
+  0%   { left: -30%; }
+  100% { left: 100%; }
+}
+.zip-scanning-text {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: #9cdcfe;
+  text-shadow: 0 0 4px #000;
+}
+
+/* Sidebar texture quick-grid (under the search input). Lists every decoded
+   .tif from the loaded package so the user has the same at-a-glance
+   inventory the HTML reference viewers display. */
+.zip-sidebar-texgrid-section {
+  margin-top: 12px;
+}
+.zip-sidebar-texgrid-title {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground, #94a3b8);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 6px;
+}
+.zip-sidebar-texgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(60px, 1fr));
+  gap: 6px;
+  max-height: 320px;
+  overflow: auto;
+  padding-right: 2px;
+}
+.zip-sidebar-tex {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid var(--vscode-panel-border, #3e3e42);
+  border-radius: 5px;
+  padding: 3px;
+  display: flex;
+  flex-direction: column;
+  cursor: pointer;
+  overflow: hidden;
+}
+.zip-sidebar-tex:hover {
+  border-color: var(--vscode-focusBorder, #3794ff);
+}
+.zip-sidebar-tex.active {
+  border-color: #6ee7b7;
+  box-shadow: 0 0 0 1px rgba(110, 231, 183, 0.35);
+}
+.zip-sidebar-tex img {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  image-rendering: pixelated;
+  border-radius: 3px;
+  background: repeating-conic-gradient(#222 0 25%, #111 0 50%) 50% / 10px 10px;
+}
+.zip-sidebar-tex .zip-tex-label {
+  font-size: 9px;
+  margin-top: 3px;
+  color: var(--vscode-descriptionForeground, #94a3b8);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Map-viewer style controls inside the model preview info pane. Two-column
+   compact grid of label+select. */
+.zip-map-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 10px;
+}
+.zip-map-controls .zip-map-ctrl {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground, #94a3b8);
+}
+.zip-map-controls select,
+.zip-map-controls input {
+  background: var(--vscode-input-background, #1e1e1e);
+  color: var(--vscode-input-foreground, #d4d4d4);
+  border: 1px solid var(--vscode-panel-border, #3e3e42);
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-size: 11px;
+}
+
+/* Dump-report button bank. Sits below the map controls and feeds the
+   Code Designer ZDB output channel. */
+.zip-dump-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.zip-dump-buttons .zip-btn {
+  font-size: 11px;
+  padding: 4px 8px;
+}
+
+/* Collapsible RDR tree view. Replaces the raw JSON pre block. */
+.zip-rdr-tree {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 12px;
+  color: var(--vscode-editor-foreground, #d4d4d4);
+  padding: 6px 0;
+}
+.zip-rdr-tree-row {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 1px 6px;
+  cursor: default;
+  white-space: nowrap;
+}
+.zip-rdr-tree-row.expandable {
+  cursor: pointer;
+}
+.zip-rdr-tree-row:hover {
+  background: rgba(55, 148, 255, 0.07);
+}
+.zip-rdr-caret {
+  display: inline-block;
+  width: 12px;
+  color: var(--vscode-descriptionForeground, #94a3b8);
+}
+.zip-rdr-name {
+  color: #9cdcfe;
+}
+.zip-rdr-type {
+  color: var(--vscode-descriptionForeground, #94a3b8);
+  font-size: 10px;
+}
+.zip-rdr-value {
+  color: #ce9178;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.zip-rdr-fallback-section {
+  margin-top: 10px;
+}
+.zip-rdr-fallback-section h4 {
+  margin: 6px 0 4px 0;
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--vscode-descriptionForeground, #94a3b8);
+}
+.zip-rdr-fallback-section ul {
+  margin: 0;
+  padding-left: 16px;
+  font-size: 11px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  max-height: 200px;
+  overflow: auto;
+}
+
+/* MPS / AI map table. Compact 5-column data grid. */
+.zip-mps-table {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  color: var(--vscode-editor-foreground, #d4d4d4);
+  padding: 8px;
+  overflow: auto;
+}
+.zip-mps-table table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.zip-mps-table th,
+.zip-mps-table td {
+  text-align: left;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--vscode-panel-border, #3e3e42);
+}
+.zip-mps-table th {
+  color: var(--vscode-descriptionForeground, #94a3b8);
+  font-weight: normal;
+  text-transform: uppercase;
+  font-size: 10px;
+}
+
 @media (max-width: 900px) {
   .zip-main {
     grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);

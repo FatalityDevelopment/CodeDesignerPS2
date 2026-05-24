@@ -3134,6 +3134,8 @@ export class SocketClient {
         stringPoolSize: number;
         atomCount: number;
         root: unknown;
+        fallback?: boolean;
+        parseError?: string;
     }> {
         const response = await this.sendCommand(
             { Command: 'ZIPPER_INSPECT_RDR', InputPath: inputPath, ZipperSection: entrySection },
@@ -3141,6 +3143,33 @@ export class SocketClient {
         );
         if (!response.Success) {
             throw new Error(response.Error || 'ZIPPER_INSPECT_RDR failed');
+        }
+        return JSON.parse(response.Data ?? '{}');
+    }
+
+    // AIMAPS.MPS — returns the parsed AI map manifest. Mirrors the HTML map
+    // viewer's parseAiMaps. Displayed as a table by the zipper workbench.
+    public async zipperInspectMps(inputPath: string): Promise<{
+        sourcePath: string;
+        declaredCount: number;
+        foundCount: number;
+        fileSize: number;
+        maps: Array<{
+            offset: number;
+            name: string;
+            width: number;
+            height: number;
+            minX: number; minY: number; minZ: number;
+            maxX: number; maxY: number; maxZ: number;
+            scaleX: number; scaleZ: number;
+        }>;
+    }> {
+        const response = await this.sendCommand(
+            { Command: 'ZIPPER_INSPECT_MPS', InputPath: inputPath },
+            60_000,
+        );
+        if (!response.Success) {
+            throw new Error(response.Error || 'ZIPPER_INSPECT_MPS failed');
         }
         return JSON.parse(response.Data ?? '{}');
     }

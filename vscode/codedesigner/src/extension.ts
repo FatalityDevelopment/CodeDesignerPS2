@@ -18,6 +18,7 @@ let socketClient: SocketClient | null = null;
 let outputChannel: vscode.LogOutputChannel;
 let debugOutputChannel: vscode.LogOutputChannel;
 let padStateChannel: vscode.OutputChannel;
+let zdbChannel: vscode.OutputChannel;
 
 /**
  * Get the socket client instance
@@ -48,6 +49,15 @@ export function getPadStateChannel(): vscode.OutputChannel {
     return padStateChannel;
 }
 
+/**
+ * Get the ZDB channel - receives debug logs from the zipper workbench webview
+ * (file loaded, decoded N textures, material reports, RDR / MPS dumps, etc.).
+ * Mirrors the on-page log pane the HTML reference viewers print to.
+ */
+export function getZdbChannel(): vscode.OutputChannel {
+    return zdbChannel;
+}
+
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
@@ -65,6 +75,12 @@ export function activate(context: vscode.ExtensionContext) {
 	// don't drown out the main extension log.
 	padStateChannel = vscode.window.createOutputChannel('Code Designer PadState');
 	context.subscriptions.push(padStateChannel);
+
+	// Zipper workbench debug stream — file-loaded summaries, decode warnings,
+	// material / GEO / RDR dump reports. Mirrors the on-page log pane in the
+	// HTML reference viewers so users can correlate webview state with logs.
+	zdbChannel = vscode.window.createOutputChannel('Code Designer ZDB');
+	context.subscriptions.push(zdbChannel);
 
 	// Initialize socket client
 	socketClient = new SocketClient('localhost', 8765);

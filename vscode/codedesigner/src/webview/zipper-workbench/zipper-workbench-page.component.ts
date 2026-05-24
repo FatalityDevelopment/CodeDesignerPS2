@@ -96,7 +96,7 @@ interface ZipperOperationResult {
   generatedNewKey?: boolean;
 }
 
-type PreviewMode = 'none' | 'texture' | 'model' | 'rdr';
+type PreviewMode = 'none' | 'texture' | 'model' | 'rdr' | 'mps';
 
 interface RdrResult {
   sourcePath: string;
@@ -105,6 +105,37 @@ interface RdrResult {
   stringPoolSize: number;
   atomCount: number;
   root: unknown;
+  fallback?: boolean;
+  parseError?: string;
+}
+
+interface MpsMap {
+  offset: number;
+  name: string;
+  width: number;
+  height: number;
+  minX: number; minY: number; minZ: number;
+  maxX: number; maxY: number; maxZ: number;
+  scaleX: number; scaleZ: number;
+}
+
+interface MpsResult {
+  sourcePath: string;
+  declaredCount: number;
+  foundCount: number;
+  fileSize: number;
+  maps: MpsMap[];
+}
+
+// One node in the collapsible RDR tree. `path` is a unique key (uses dotted
+// breadcrumb + index) so expand/collapse state can be tracked across re-renders.
+interface RdrTreeNode {
+  path: string;
+  name: string;
+  kind: 'string' | 'int' | 'float' | 'array' | 'object' | 'leaf';
+  value?: string | number;
+  children?: RdrTreeNode[];
+  depth: number;
 }
 
 @Component({
@@ -160,6 +191,17 @@ interface RdrResult {
         </button>
       }
 
+      <!-- Long-running ZDB package prefetch indicator. Does NOT gate the
+           rest of the UI — entries are still browsable while the bytes
+           stream in; the bar simply signals that more context is being
+           loaded so the model viewer's first preview shows textures. -->
+      @if (packageLoading()) {
+        <div class="zip-scanning-bar">
+          <div class="zip-scanning-bar-inner"></div>
+          <span class="zip-scanning-text">{{ packageMessage() || 'Loading package…' }}</span>
+        </div>
+      }
+
       <div class="zip-main">
         <aside class="zip-sidebar">
           <div class="zip-path" [title]="result()?.path || ''">
@@ -194,6 +236,35 @@ interface RdrResult {
                 [value]="search()"
                 (input)="onSearch($event)" />
             </label>
+          }
+
+          <!-- Sidebar texture quick-grid. Mirrors the HTML map viewer's
+               left-column thumbnail strip. Populated by sidebarTextures()
+               from the loaded TXR companion. Click jumps to that tif entry. -->
+          @if (sidebarTextures().length > 0) {
+            <div class="zip-sidebar-texgrid-section">
+              <div class="zip-sidebar-texgrid-title">Textures ({{ sidebarTextures().length }})</div>
+              <input
+                class="zip-search-input"
+                type="text"
+                placeholder="Filter textures…"
+                [value]="mapTextureFilter()"
+                (input)="onMapTextureFilterInput($event)"
+                style="width:100%;margin-bottom:6px;background:var(--vscode-input-background,#1e1e1e);color:var(--vscode-input-foreground,#d4d4d4);border:1px solid var(--vscode-panel-border,#3e3e42);border-radius:4px;padding:4px 6px;font-size:11px" />
+              <div class="zip-sidebar-texgrid">
+                @for (tex of sidebarTextures(); track tex.name) {
+                  <button
+                    type="button"
+                    class="zip-sidebar-tex"
+                    [class.active]="activeTextureName() === tex.name.toLowerCase()"
+                    [title]="tex.name"
+                    (click)="onSidebarTextureClick(tex.name)">
+                    <img [src]="tex.dataUrl" [alt]="tex.name" />
+                    <div class="zip-tex-label">{{ tex.name }}</div>
+                  </button>
+                }
+              </div>
+            </div>
           }
 
           @if (isApache()) {
@@ -264,18 +335,125 @@ interface RdrResult {
             @if (previewMode() === 'rdr') {
               <div class="zip-preview">
                 <div class="zip-preview-stage" style="display:block;overflow:auto;padding:8px;background:var(--vscode-editorWidget-background, #1a1a1a)">
-                  <pre style="margin:0;font-family:var(--vscode-editor-font-family, monospace);font-size:12px;color:var(--vscode-editor-foreground, #d4d4d4);white-space:pre-wrap;word-break:break-word">{{ rdrJson() }}</pre>
+                  @if (rdr(); as r) {
+                    @if (r.fallback) {
+                      @if (rdrFallbackLists(); as f) {
+                        <div class="zip-rdr-fallback-section">
+                          <h4>Texture refs ({{ f.textureRefs.length }})</h4>
+                          <ul>
+                            @for (s of f.textureRefs; track s) { <li>{{ s }}</li> }
+                          </ul>
+                        </div>
+                        <div class="zip-rdr-fallback-section">
+                          <h4>File refs ({{ f.fileRefs.length }})</h4>
+                          <ul>
+                            @for (s of f.fileRefs; track s) { <li>{{ s }}</li> }
+                          </ul>
+                        </div>
+                        <div class="zip-rdr-fallback-section">
+                          <h4>Model refs ({{ f.modelRefs.length }})</h4>
+                          <ul>
+                            @for (s of f.modelRefs; track s) { <li>{{ s }}</li> }
+                          </ul>
+                        </div>
+                      }
+                    } @else {
+                      <div class="zip-rdr-tree">
+                        @for (row of rdrVisibleRows(); track row.path) {
+                          <div
+                            class="zip-rdr-tree-row"
+                            [class.expandable]="rdrIsExpandable(row)"
+                            [style.padding-left.px]="6 + row.depth * 14"
+                            (click)="rdrIsExpandable(row) && toggleRdrNode(row.path)">
+                            <span class="zip-rdr-caret">
+                              @if (rdrIsExpandable(row)) {
+                                {{ isRdrExpanded(row.path) ? '▾' : '▸' }}
+                              }
+                            </span>
+                            <span class="zip-rdr-name">{{ row.name }}</span>
+                            <span class="zip-rdr-type">:{{ row.kind }}</span>
+                            @if (row.kind !== 'object' && row.kind !== 'array') {
+                              <span class="zip-rdr-value">{{ row.value }}</span>
+                            } @else {
+                              <span class="zip-rdr-type">({{ row.value }})</span>
+                            }
+                          </div>
+                        }
+                      </div>
+                    }
+                  } @else {
+                    <div style="padding:8px;color:var(--vscode-descriptionForeground)">{{ previewMessage() || 'Loading…' }}</div>
+                  }
                 </div>
                 <div class="zip-preview-info">
                   @if (rdr(); as r) {
-                    <div><span>RDR version</span><strong>{{ r.version }}</strong></div>
-                    <div><span>Atoms</span><strong>{{ r.atomCount }}</strong></div>
-                    <div><span>String pool</span><strong>{{ r.stringPoolSize }} bytes</strong></div>
+                    @if (r.fallback) {
+                      <div><span>Mode</span><strong>fallback (string scan)</strong></div>
+                      @if (r.parseError) {
+                        <div><span>Parse error</span><strong>{{ r.parseError }}</strong></div>
+                      }
+                    } @else {
+                      <div><span>RDR version</span><strong>{{ r.version }}</strong></div>
+                      <div><span>Atoms</span><strong>{{ r.atomCount }}</strong></div>
+                      <div><span>String pool</span><strong>{{ r.stringPoolSize }} bytes</strong></div>
+                    }
                     @if (r.entry) {
                       <div><span>Entry</span><strong>{{ r.entry }}</strong></div>
                     }
+                    <div class="zip-dump-buttons">
+                      <button class="zip-btn" (click)="dumpRdrReport()">Dump RDR report</button>
+                    </div>
                   } @else {
                     <div><span>Status</span><strong>{{ previewMessage() || 'Loading...' }}</strong></div>
+                  }
+                </div>
+              </div>
+            }
+
+            <!-- AIMAPS.MPS preview — table of AI maps. -->
+            @if (previewMode() === 'mps') {
+              <div class="zip-preview">
+                <div class="zip-preview-stage zip-mps-table" style="display:block">
+                  @if (mps(); as m) {
+                    @if (m.maps.length === 0) {
+                      <div style="padding:8px;color:var(--vscode-descriptionForeground)">No AI maps found in this MPS file.</div>
+                    } @else {
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Name</th>
+                            <th>W × H</th>
+                            <th>Min XYZ</th>
+                            <th>Max XYZ</th>
+                            <th>Scale X / Z</th>
+                            <th>Offset</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          @for (map of m.maps; track map.offset) {
+                            <tr>
+                              <td>{{ map.name }}</td>
+                              <td>{{ map.width }} × {{ map.height }}</td>
+                              <td>{{ map.minX.toFixed(1) }}, {{ map.minY.toFixed(1) }}, {{ map.minZ.toFixed(1) }}</td>
+                              <td>{{ map.maxX.toFixed(1) }}, {{ map.maxY.toFixed(1) }}, {{ map.maxZ.toFixed(1) }}</td>
+                              <td>{{ map.scaleX.toFixed(3) }} / {{ map.scaleZ.toFixed(3) }}</td>
+                              <td>{{ hex(map.offset) }}</td>
+                            </tr>
+                          }
+                        </tbody>
+                      </table>
+                    }
+                  } @else {
+                    <div style="padding:8px;color:var(--vscode-descriptionForeground)">{{ previewMessage() || 'Loading…' }}</div>
+                  }
+                </div>
+                <div class="zip-preview-info">
+                  @if (mps(); as m) {
+                    <div><span>Declared count</span><strong>{{ m.declaredCount }}</strong></div>
+                    <div><span>Found count</span><strong>{{ m.foundCount }}</strong></div>
+                    <div><span>File size</span><strong>{{ formatBytes(m.fileSize) }}</strong></div>
+                  } @else {
+                    <div><span>Status</span><strong>{{ previewMessage() || 'Loading…' }}</strong></div>
                   }
                 </div>
               </div>
@@ -399,6 +577,66 @@ interface RdrResult {
                         <app-icon name="refreshcw" [size]="13" />
                         {{ flipY() ? 'Unflip Y' : 'Flip Y' }}
                       </button>
+                    </div>
+
+                    <!-- Map-viewer style controls. Ported from the HTML map
+                         viewer sidebar so world / mission models can be
+                         tuned the same way (render mode, triangle stride,
+                         material binding, V flip, UV interpretation). The
+                         settings persist across previews. -->
+                    <div class="zip-map-controls">
+                      <div class="zip-map-ctrl">
+                        <span>Render mode</span>
+                        <select [value]="mapRenderMode()" (change)="onMapRenderModeChange($event)">
+                          <option value="view3dTexturedLit">3D textured + fog/lighting</option>
+                          <option value="view3dTextured">3D textured solid</option>
+                          <option value="view3dSolid">3D material solid</option>
+                          <option value="topSolid">top-down material solid</option>
+                          <option value="topWire">top-down wire</option>
+                          <option value="view3dWire">3D wire</option>
+                        </select>
+                      </div>
+                      <div class="zip-map-ctrl">
+                        <span>Triangle stride</span>
+                        <select [value]="mapTriStride()" (change)="onMapTriStrideChange($event)">
+                          <option [value]="1">1 — full solid</option>
+                          <option [value]="2">2 — skip half</option>
+                          <option [value]="4">4 — debug overview</option>
+                          <option [value]="8">8 — wire overview</option>
+                        </select>
+                      </div>
+                      <div class="zip-map-ctrl">
+                        <span>Material binding</span>
+                        <select [value]="mapMaterialBinding()" (change)="onMapMaterialBindingChange($event)">
+                          <option value="smartWorld">smart world marker</option>
+                          <option value="sliceNearest">slice nearest marker</option>
+                          <option value="globalNearest">global nearest marker</option>
+                        </select>
+                      </div>
+                      <div class="zip-map-ctrl">
+                        <span>V orientation</span>
+                        <select [value]="mapTextureV()" (change)="onMapTextureVChange($event)">
+                          <option value="flipV">flip V</option>
+                          <option value="direct">direct</option>
+                        </select>
+                      </div>
+                      <div class="zip-map-ctrl">
+                        <span>UV interpretation</span>
+                        <select [value]="mapUvInterpretation()" (change)="onMapUvInterpretationChange($event)">
+                          <option value="autoWorld">auto world UV</option>
+                          <option value="norm4096">raw / 4096 normalized</option>
+                          <option value="pixel16">raw / 16 pixel tiled</option>
+                          <option value="pixel256">raw / 256 pixel tiled</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <!-- Dump-report buttons — pipe their output to the
+                         "Code Designer ZDB" output channel. -->
+                    <div class="zip-dump-buttons">
+                      <button class="zip-btn" (click)="dumpMissingTextures()">Dump missing textures</button>
+                      <button class="zip-btn" (click)="dumpMaterialReport()">Dump material report</button>
+                      <button class="zip-btn" (click)="dumpGeoReport()">Dump GEO report</button>
                     </div>
                   }
                 </div>
@@ -555,6 +793,71 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     const r = this.rdr();
     return r ? JSON.stringify(r.root, null, 2) : '';
   });
+  // Tracks which RDR tree paths are currently expanded in the UI. Reset on
+  // new RDR load. Use a signal so the template re-renders when toggled.
+  readonly rdrExpanded = signal<Set<string>>(new Set());
+  // Tree shape derived from the RDR result. Flattened to a depth-first list
+  // of nodes that pass the expand filter, ready to render as a row list.
+  readonly rdrTreeRoots = computed<RdrTreeNode[]>(() => {
+    const r = this.rdr();
+    if (!r || r.fallback) { return []; }
+    return this.buildRdrTreeRoots(r.root);
+  });
+  readonly rdrVisibleRows = computed<RdrTreeNode[]>(() => {
+    const roots = this.rdrTreeRoots();
+    const expanded = this.rdrExpanded();
+    const out: RdrTreeNode[] = [];
+    const walk = (nodes: RdrTreeNode[]) => {
+      for (const n of nodes) {
+        out.push(n);
+        if (n.children && expanded.has(n.path)) { walk(n.children); }
+      }
+    };
+    walk(roots);
+    return out;
+  });
+
+  // AIMAPS.MPS preview state.
+  readonly mps = signal<MpsResult | null>(null);
+
+  // Full ZDB-package state. After the user opens a .zdb, we fetch every
+  // top-level entry's bytes in one socket round trip and decode all
+  // textures / palettes / GEO across the whole package — mirrors the HTML
+  // reference viewers which pre-load all of RUN.zip. The cached entry
+  // bytes also let nested archive drill-ins skip the per-entry readNode.
+  readonly packageLoading = signal(false);
+  readonly packageMessage = signal('');
+  // Lowercased leaf name -> bytes, for the currently-loaded ZDB.
+  private packageEntryBytes = new Map<string, Uint8Array>();
+
+  // HTML map-viewer style controls. Drive the renderer config and the
+  // material-binding signal used in the model parser path.
+  readonly mapRenderMode = signal<'view3dTexturedLit' | 'view3dTextured' | 'view3dSolid' | 'topSolid' | 'topWire' | 'view3dWire'>('view3dTexturedLit');
+  readonly mapTriStride = signal<number>(1);
+  readonly mapMaterialBinding = signal<'smartWorld' | 'sliceNearest' | 'globalNearest'>('smartWorld');
+  readonly mapTextureV = signal<'flipV' | 'direct'>('flipV');
+  readonly mapUvInterpretation = signal<'autoWorld' | 'norm4096' | 'pixel16' | 'pixel256'>('autoWorld');
+  readonly mapTextureFilter = signal<string>('');
+
+  // Aggregated thumbnail list for the sidebar texture grid. Built from
+  // companionTextures (TXR sibling) plus the current archive's own TXR
+  // entries when applicable. Cached to avoid re-decoding on every render.
+  readonly sidebarTextures = computed<Array<{ name: string; dataUrl: string }>>(() => {
+    const sources = this.companionTextures();
+    if (!sources || sources.size === 0) { return []; }
+    const palettes = this.palettes();
+    const filter = this.mapTextureFilter().trim().toLowerCase();
+    const out: Array<{ name: string; dataUrl: string }> = [];
+    for (const [name, bytes] of sources) {
+      if (filter && !name.toLowerCase().includes(filter)) { continue; }
+      try {
+        const tex = parseTexture(bytes, palettes, name);
+        out.push({ name, dataUrl: textureToDataUrl(tex) });
+      } catch { /* skip undecodable */ }
+    }
+    out.sort((a, b) => a.name.localeCompare(b.name));
+    return out;
+  });
   // Optional manual palette override key (e.g. "texpal_44"). When set, the
   // model viewer uses this palette instead of whatever the rules / header guess.
   readonly paletteOverride = signal<string | null>(null);
@@ -699,10 +1002,28 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
         this.palettes.set(null);
         this.palettesRequested = false;
         this.archiveStack.set([]);
+        this.packageEntryBytes.clear();
+        this.companionTextures.set(null);
+        this.companionScene.set(null);
         this.resetPreview();
         this.setStatus(this.result()?.summary ?? 'File loaded.', false, false);
         this.requestPalettesIfNeeded();
+        // For ZDB packages, kick off the full-package preload so the model
+        // viewer never has to chase per-entry round-trips later.
+        this.requestZdbPackageIfNeeded();
         break;
+      case 'zdbPackage': {
+        const nodes = (data['nodes'] as Array<{ index: number; name: string; type: number; data: string }>) ?? [];
+        this.applyZdbPackage(nodes);
+        break;
+      }
+      case 'zdbPackageError': {
+        const message = (data['message'] as string) ?? 'unknown';
+        this.packageLoading.set(false);
+        this.packageMessage.set('Package load failed: ' + message);
+        this.log(`[package] ERROR: ${message}`);
+        break;
+      }
       case 'zipperOperation':
         this.lastOperation.set((data['result'] as ZipperOperationResult) ?? null);
         this.setStatus((data['message'] as string) ?? 'Operation complete.', false, false);
@@ -767,15 +1088,41 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       case 'rdrData': {
         const result = data['result'] as RdrResult | undefined;
         this.rdr.set(result ?? null);
+        // Reset expand state so the new tree opens fresh.
+        this.rdrExpanded.set(new Set());
         if (result) {
-          this.previewMessage.set(
-            `RDR v${result.version}: ${result.atomCount} atoms, ${result.stringPoolSize}B strings.`,
-          );
+          if (result.fallback) {
+            this.previewMessage.set(
+              `RDR strict parse failed (${result.parseError ?? 'unknown'}); showing printable-string fallback.`,
+            );
+            this.log(`[RDR] strict parse failed — fallback string scan. ${result.parseError ?? ''}`);
+          } else {
+            this.previewMessage.set(
+              `RDR v${result.version}: ${result.atomCount} atoms, ${result.stringPoolSize}B strings.`,
+            );
+            this.log(`[RDR] v${result.version}, atoms=${result.atomCount}, pool=${result.stringPoolSize}B`);
+          }
         }
         break;
       }
       case 'rdrError':
         this.previewMessage.set('RDR parse failed: ' + ((data['message'] as string) ?? 'unknown'));
+        this.log(`[RDR] ERROR: ${(data['message'] as string) ?? 'unknown'}`);
+        break;
+      case 'mpsData': {
+        const result = data['result'] as MpsResult | undefined;
+        this.mps.set(result ?? null);
+        if (result) {
+          this.previewMessage.set(
+            `MPS: ${result.foundCount} / ${result.declaredCount} AI maps found.`,
+          );
+          this.log(`[MPS] declared=${result.declaredCount} found=${result.foundCount} (${result.fileSize}B)`);
+        }
+        break;
+      }
+      case 'mpsError':
+        this.previewMessage.set('MPS parse failed: ' + ((data['message'] as string) ?? 'unknown'));
+        this.log(`[MPS] ERROR: ${(data['message'] as string) ?? 'unknown'}`);
         break;
       case 'companionFiles': {
         const companions = (data['companions'] as Record<string, { path: string; nodes: Array<{ index: number; name: string; type: number; data: string }> }>) ?? {};
@@ -1108,6 +1455,24 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       return;
     }
 
+    // When the loaded file is a ZDB, the full package was prefetched on
+    // open. Look the target entry up by leaf name and use those bytes
+    // instead of a per-entry readNode round trip — this is what makes the
+    // model viewer have the same package context as the HTML viewers.
+    if (this.archiveStack().length === 0) {
+      const entries = this.result()?.entries ?? [];
+      const target = entries.find(e => e.index === targetIndex);
+      if (target) {
+        const leaf = (target.name.split(/[\\/]/).pop() ?? target.name).toLowerCase();
+        const pkgBytes = this.packageEntryBytes.get(leaf);
+        if (pkgBytes) {
+          this.nodeCache.set(targetIndex, pkgBytes);
+          this.decodePayload(index, pkgBytes);
+          return;
+        }
+      }
+    }
+
     this.inflightNode = targetIndex;
     this.nodeAliasForFetch.set(targetIndex, index);
     this.vscode.postMessage({ type: 'readNode', path: filePath, entryIndex: targetIndex });
@@ -1378,7 +1743,33 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
         // The bridge can drill into ZAR/ZED/ZDB to extract the .rdr by leaf
         // name when we're inside a sub-archive.
         const leaf = entry.name.split(/[\\/]/).pop() ?? entry.name;
+        this.log(`[RDR] inspecting ${leaf} in ${filePath.split(/[\\/]/).pop()}…`);
         this.vscode.postMessage({ type: 'inspectRdr', path: filePath, entryName: leaf });
+      }
+      return;
+    }
+
+    // AIMAPS.MPS — parsed server-side via the new MPS handler. The .mps file
+    // is always at the package root (not nested), so we pass the full path
+    // through unchanged. Mirrors the HTML map viewer's parseAiMaps flow.
+    if (/\.mps$/i.test(entry.name)) {
+      this.previewMode.set('mps');
+      this.previewMessage.set('Parsing AI maps...');
+      this.mps.set(null);
+      const filePath = this.result()?.path;
+      const leaf = entry.name.split(/[\\/]/).pop() ?? entry.name;
+      if (filePath) {
+        this.log(`[MPS] inspecting ${leaf}…`);
+        // .mps only lives as a sibling on disk; if the loaded archive itself
+        // is the .mps, use its path. Otherwise the path is the parent ZDB
+        // and we can't currently extract a single .mps from it — fall back
+        // to displaying an error in the table.
+        if (/\.mps$/i.test(filePath)) {
+          this.vscode.postMessage({ type: 'inspectMps', path: filePath });
+        } else {
+          this.previewMessage.set(`MPS preview requires the .mps file as the loaded path (got ${filePath.split(/[\\/]/).pop()}).`);
+          this.log(`[MPS] skipped — outer archive is not .mps; open ${leaf} directly`);
+        }
       }
       return;
     }
@@ -1513,13 +1904,27 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       } catch { /* skip */ }
     }
 
+    // Map-viewer dropdowns flow through as part of the render options. The
+    // wireframe / topdown / lit toggles are derived from `mapRenderMode`;
+    // `wireframe()` and `flipY()` from the button bank still win when set so
+    // existing weapon previews aren't disturbed.
+    const renderMode = this.mapRenderMode();
+    const wireframeFromMode = renderMode === 'view3dWire' || renderMode === 'topWire';
+    const topDown = renderMode === 'topSolid' || renderMode === 'topWire';
+    const unlit = renderMode === 'view3dTextured' || renderMode === 'view3dSolid' || renderMode === 'topSolid';
+    const solidColor = renderMode === 'view3dSolid' || renderMode === 'topSolid';
+
     this.modelRenderer.setModel(mdl, {
-      wireframe: this.wireframe(),
+      wireframe: this.wireframe() || wireframeFromMode,
       flipY: this.flipY(),
       uvMode: this.uvMode(),
       chunkIndex: this.selectedChunk(),
       textures,
       defaultTexture: defaultTif,
+      triStride: this.mapTriStride(),
+      topDown,
+      unlit,
+      solidColor,
     });
   }
 
@@ -1630,6 +2035,308 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     // one round trip so the preview can wire textures and chunk names without
     // chasing the file system multiple times.
     this.vscode.postMessage({ type: 'readCompanionFiles', path: filePath });
+  }
+
+  // Kick off a full ZDB package fetch. Mirrors the HTML map viewer's
+  // RUN.zip preload: we get every top-level entry's bytes in one round
+  // trip so textures / palettes / GEO can be wired up before the user
+  // even drills into a sub-archive.
+  private requestZdbPackageIfNeeded(): void {
+    const filePath = this.result()?.path;
+    if (!filePath) { return; }
+    if (!/\.zdb$/i.test(filePath)) { return; }
+    // Skip apache/save ZDBs — they don't carry the sibling-ZED package layout.
+    const role = this.result()?.role ?? '';
+    if (role === 'apache-patch-archive' || role === 'game-save') { return; }
+    this.packageLoading.set(true);
+    this.packageMessage.set(`Loading ${filePath.split(/[\\/]/).pop()} package…`);
+    this.log(`[package] requesting full package contents for ${filePath.split(/[\\/]/).pop()}`);
+    this.vscode.postMessage({ type: 'loadZdbPackage', path: filePath });
+  }
+
+  // Decode every top-level node of the just-loaded ZDB. _TXR / _PAL / _GEO
+  // ZEDs are parsed inline so model previews resolve textures cross-archive
+  // (the gap that caused 64-missing-textures on M51). Other entries are
+  // cached by leaf name so drill-ins don't re-fetch them.
+  private applyZdbPackage(nodes: Array<{ index: number; name: string; data: string }>): void {
+    this.packageEntryBytes.clear();
+    const txrArchives: Array<{ name: string; archive: InspectedZedArchive }> = [];
+    const palArchives: Array<{ name: string; archive: InspectedZedArchive }> = [];
+    const geoArchives: Array<{ name: string; archive: InspectedZedArchive }> = [];
+
+    for (const node of nodes) {
+      if (!node.data) { continue; }
+      let bytes: Uint8Array;
+      try { bytes = base64ToBytes(node.data); }
+      catch { continue; }
+      const leaf = (node.name.split(/[\\/]/).pop() ?? node.name).toLowerCase();
+      this.packageEntryBytes.set(leaf, bytes);
+
+      // Parse each sibling ZED inline. We tolerate parse errors (some
+      // entries may not actually be ZED containers — e.g. raw data files).
+      const tryParse = (): InspectedZedArchive | null => {
+        try { return parseZedArchive(bytes); } catch { return null; }
+      };
+      if (/_TXR(?:\([^)]+\))?\.zed$/i.test(leaf)) {
+        const ar = tryParse(); if (ar) { txrArchives.push({ name: leaf, archive: ar }); }
+      } else if (/_PAL(?:\([^)]+\))?\.zed$/i.test(leaf)) {
+        const ar = tryParse(); if (ar) { palArchives.push({ name: leaf, archive: ar }); }
+      } else if (/_GEO(?:\([^)]+\))?\.zed$/i.test(leaf)) {
+        const ar = tryParse(); if (ar) { geoArchives.push({ name: leaf, archive: ar }); }
+      }
+    }
+
+    // Build the .tif -> texdat map across every TXR archive in the package.
+    const tifMap = new Map<string, Uint8Array>();
+    for (const { archive } of txrArchives) {
+      const entries = archive.entries;
+      for (let i = 0; i < entries.length; i++) {
+        if (!/\.tif$/i.test(entries[i].name)) { continue; }
+        // texdat sibling is the next non-tif data entry within a few slots.
+        for (let j = i + 1; j < Math.min(i + 4, entries.length); j++) {
+          if (/^texdat$/i.test(entries[j].name)) {
+            const data = archive.entryData.get(entries[j].index);
+            if (data && data.length > 0) {
+              tifMap.set(entries[i].name.toLowerCase(), data);
+            }
+            break;
+          }
+          if (/\.tif$/i.test(entries[j].name)) { break; }
+        }
+      }
+    }
+    if (tifMap.size > 0) { this.companionTextures.set(tifMap); }
+
+    // Build palettes across every PAL/TXR pair we found. Match by leaf
+    // prefix (e.g. M51_TXR.ZED <-> M51_PAL.ZED) so multi-prefix packages
+    // alias correctly.
+    let mergedPalettes = new Map<string, ZedPalette>();
+    for (const pal of palArchives) {
+      const prefix = pal.name.replace(/_pal(?:\([^)]+\))?\.zed$/i, '');
+      const txrMatch = txrArchives.find(t => t.name.startsWith(prefix + '_txr'));
+      let p = parsePaletteEntries(
+        pal.archive.entries.map(e => ({ name: e.name })),
+        i => pal.archive.entryData.get(pal.archive.entries[i].index) ?? new Uint8Array(0),
+      );
+      if (txrMatch) {
+        p = aliasPalettesForTextureEntries(
+          p,
+          txrMatch.archive.entries.map(e => ({ name: e.name })),
+          i => txrMatch.archive.entryData.get(txrMatch.archive.entries[i].index) ?? new Uint8Array(0),
+        );
+      }
+      for (const [k, v] of p) { mergedPalettes.set(k, v); }
+    }
+    if (mergedPalettes.size > 0) { this.palettes.set(mergedPalettes); }
+
+    // Parse the first GEO archive into a scene tree (used by the chunk
+    // label / part-name lookups).
+    for (const geo of geoArchives) {
+      try {
+        const geoEntries: GeoEntry[] = geo.archive.entries.map(e => ({
+          index: e.index,
+          name: e.name,
+          type: e.type,
+          data: bytesToBase64(geo.archive.entryData.get(e.index) ?? new Uint8Array(0)),
+        }));
+        this.companionScene.set(parseGeoScene(geoEntries));
+        break;
+      } catch { /* try next */ }
+    }
+
+    this.packageLoading.set(false);
+    this.packageMessage.set(
+      `Package loaded: ${tifMap.size} texture(s), ${mergedPalettes.size} palette(s), ${geoArchives.length} GEO archive(s).`,
+    );
+    this.log(`[package] ${this.packageEntryBytes.size} entries; textures=${tifMap.size} palettes=${mergedPalettes.size} GEO=${geoArchives.length}`);
+
+    // Re-apply the current model if any so the freshly-loaded textures show
+    // up immediately instead of waiting for the next user interaction.
+    this.applyModelToRenderer();
+  }
+
+  // ------------------------------------------------------------------
+  // Logging — every diagnostic line the UI emits is mirrored to the
+  // "Code Designer ZDB" output channel via the extension provider, so the
+  // user has a persistent feed like the HTML viewers' on-page log pane.
+  // ------------------------------------------------------------------
+  log(text: string, reveal = false): void {
+    if (!text) { return; }
+    const fileTag = this.result()?.fileName ? `[${this.result()?.fileName}] ` : '';
+    this.vscode.postMessage({ type: 'zipperLog', text: fileTag + text, reveal });
+  }
+
+  // ------------------------------------------------------------------
+  // Sidebar texture grid — click a thumbnail to jump to the matching .tif
+  // entry in the current layer's table (which then loads the preview pane).
+  // ------------------------------------------------------------------
+  onSidebarTextureClick(name: string): void {
+    const lower = name.toLowerCase();
+    const target = this.currentEntries().find(
+      e => e.name.toLowerCase() === lower || e.path.toLowerCase().endsWith('/' + lower),
+    );
+    if (target) { this.selectedIndex.set(target.index); }
+  }
+  activeTextureName(): string {
+    const tex = this.texture();
+    const entry = this.selectedEntry();
+    return tex && entry && /\.tif$/i.test(entry.name) ? entry.name.toLowerCase() : '';
+  }
+  onMapTextureFilterInput(event: Event): void {
+    this.mapTextureFilter.set((event.target as HTMLInputElement).value);
+  }
+
+  // ------------------------------------------------------------------
+  // Map-viewer dropdowns — set the corresponding signal and ping the
+  // renderer config so any in-flight model preview re-draws with the new
+  // setting. Defaults match the prior behaviour, so weapon previews don't
+  // shift unless the user actively changes a setting.
+  // ------------------------------------------------------------------
+  onMapRenderModeChange(event: Event): void {
+    this.mapRenderMode.set((event.target as HTMLSelectElement).value as ReturnType<typeof this.mapRenderMode>);
+    this.applyModelToRenderer();
+  }
+  onMapTriStrideChange(event: Event): void {
+    const n = Number((event.target as HTMLSelectElement).value);
+    this.mapTriStride.set(Number.isFinite(n) && n > 0 ? n : 1);
+    this.applyModelToRenderer();
+  }
+  onMapMaterialBindingChange(event: Event): void {
+    this.mapMaterialBinding.set((event.target as HTMLSelectElement).value as ReturnType<typeof this.mapMaterialBinding>);
+    this.applyModelToRenderer();
+  }
+  onMapTextureVChange(event: Event): void {
+    this.mapTextureV.set((event.target as HTMLSelectElement).value as ReturnType<typeof this.mapTextureV>);
+    this.applyModelToRenderer();
+  }
+  onMapUvInterpretationChange(event: Event): void {
+    this.mapUvInterpretation.set((event.target as HTMLSelectElement).value as ReturnType<typeof this.mapUvInterpretation>);
+    this.applyModelToRenderer();
+  }
+
+  // ------------------------------------------------------------------
+  // RDR tree — turns the shaped JSON-like root into a flat list of nodes
+  // with stable paths so we can collapse/expand by path. We render only
+  // the visible-under-expand subset via rdrVisibleRows().
+  // ------------------------------------------------------------------
+  private buildRdrTreeRoots(root: unknown): RdrTreeNode[] {
+    return this.shapeToTree(root, '$', 0, null);
+  }
+  private shapeToTree(value: unknown, path: string, depth: number, name: string | null): RdrTreeNode[] {
+    const nameLabel = name ?? (depth === 0 ? 'root' : '');
+    if (value === null || value === undefined) {
+      return [{ path, name: nameLabel, kind: 'leaf', value: 'null', depth }];
+    }
+    if (typeof value === 'string') {
+      return [{ path, name: nameLabel, kind: 'string', value, depth }];
+    }
+    if (typeof value === 'number') {
+      const kind: RdrTreeNode['kind'] = Number.isInteger(value) ? 'int' : 'float';
+      return [{ path, name: nameLabel, kind, value, depth }];
+    }
+    if (Array.isArray(value)) {
+      const children: RdrTreeNode[] = [];
+      for (let i = 0; i < value.length; i++) {
+        children.push(...this.shapeToTree(value[i], `${path}.${i}`, depth + 1, `[${i}]`));
+      }
+      return [{ path, name: nameLabel, kind: 'array', value: `${value.length}`, children, depth }];
+    }
+    if (typeof value === 'object') {
+      const obj = value as Record<string, unknown>;
+      const children: RdrTreeNode[] = [];
+      for (const [k, v] of Object.entries(obj)) {
+        children.push(...this.shapeToTree(v, `${path}.${k}`, depth + 1, k));
+      }
+      return [{ path, name: nameLabel, kind: 'object', value: `${children.length}`, children, depth }];
+    }
+    return [{ path, name: nameLabel, kind: 'leaf', value: String(value), depth }];
+  }
+  toggleRdrNode(path: string): void {
+    const next = new Set(this.rdrExpanded());
+    if (next.has(path)) { next.delete(path); } else { next.add(path); }
+    this.rdrExpanded.set(next);
+  }
+  isRdrExpanded(path: string): boolean { return this.rdrExpanded().has(path); }
+  rdrIsExpandable(node: RdrTreeNode): boolean { return !!(node.children && node.children.length > 0); }
+
+  // Lists rendered when RDR fell back to printable-string scan. The backend
+  // shapes `root` as { strings, textureRefs, fileRefs, modelRefs }.
+  rdrFallbackLists(): { strings: string[]; textureRefs: string[]; fileRefs: string[]; modelRefs: string[] } | null {
+    const r = this.rdr();
+    if (!r || !r.fallback) { return null; }
+    const root = r.root as Record<string, unknown> | null;
+    if (!root) { return null; }
+    const grab = (k: string): string[] => Array.isArray(root[k]) ? (root[k] as string[]) : [];
+    return {
+      strings: grab('strings'),
+      textureRefs: grab('textureRefs'),
+      fileRefs: grab('fileRefs'),
+      modelRefs: grab('modelRefs'),
+    };
+  }
+
+  // ------------------------------------------------------------------
+  // Dump-report buttons — replicate the HTML map viewer's "Dump *"
+  // buttons. Output streams to the Code Designer ZDB output channel via
+  // log(reveal=true).
+  // ------------------------------------------------------------------
+  dumpMissingTextures(): void {
+    const mdl = this.model();
+    if (!mdl) { this.log('[DUMP missing] no model selected', true); return; }
+    const textureSources = this.companionTextures();
+    const have = textureSources ? new Set([...textureSources.keys()].map(k => k.toLowerCase())) : new Set<string>();
+    const missing: string[] = [];
+    for (const ref of mdl.textureRefs ?? []) {
+      if (!have.has(ref.toLowerCase())) { missing.push(ref); }
+    }
+    this.log('--- Missing textures ---', true);
+    this.log(`Total refs: ${mdl.textureRefs.length}, missing: ${missing.length}`);
+    if (missing.length === 0) { this.log('(none)'); }
+    for (const r of missing) { this.log(`  ${r}`); }
+  }
+  dumpMaterialReport(): void {
+    const mdl = this.model();
+    if (!mdl) { this.log('[DUMP material] no model selected', true); return; }
+    this.log('--- Material report ---', true);
+    this.log(`Chunks: ${mdl.chunks.length}, vertices: ${mdl.vertices.length}, triangles: ${mdl.indices.length / 3}`);
+    this.log(`Binding mode: ${this.mapMaterialBinding()}, UV interpretation: ${this.mapUvInterpretation()}, V mode: ${this.mapTextureV()}`);
+    for (let i = 0; i < mdl.chunks.length; i++) {
+      const c = mdl.chunks[i];
+      this.log(`  chunk[${i}] tex=${c.textureName ?? '(none)'}  v=${c.vertexCount} t=${c.decodedTriangleCount}/${c.triangleCount} scale=${c.scale.toFixed(4)}`);
+    }
+  }
+  dumpGeoReport(): void {
+    const scene = this.companionScene();
+    if (!scene) { this.log('[DUMP geo] no GEO scene loaded', true); return; }
+    this.log('--- GEO report ---', true);
+    const entry = this.selectedEntry();
+    if (entry) {
+      const node = findSceneNode(scene, entry.name);
+      const parts = collectVisualPartNames(node);
+      this.log(`Selected entry ${entry.name}: ${parts.length} visual part(s)`);
+      for (let i = 0; i < parts.length; i++) { this.log(`  part[${i}] = ${parts[i]}`); }
+    } else {
+      this.log('(no entry selected)');
+    }
+  }
+  dumpRdrReport(): void {
+    const r = this.rdr();
+    if (!r) { this.log('[DUMP rdr] no RDR loaded', true); return; }
+    this.log('--- RDR report ---', true);
+    this.log(`Source: ${r.sourcePath}${r.entry ? ` / ${r.entry}` : ''}`);
+    if (r.fallback) {
+      this.log(`(fallback) ${r.parseError ?? ''}`);
+      const lists = this.rdrFallbackLists();
+      if (lists) {
+        this.log(`Strings: ${lists.strings.length}, textureRefs: ${lists.textureRefs.length}, fileRefs: ${lists.fileRefs.length}, modelRefs: ${lists.modelRefs.length}`);
+        if (lists.textureRefs.length) { this.log('Texture refs:'); for (const s of lists.textureRefs) { this.log('  ' + s); } }
+        if (lists.fileRefs.length) { this.log('File refs:'); for (const s of lists.fileRefs) { this.log('  ' + s); } }
+        if (lists.modelRefs.length) { this.log('Model refs:'); for (const s of lists.modelRefs.slice(0, 80)) { this.log('  ' + s); } }
+      }
+    } else {
+      this.log(`Version ${r.version}, atoms ${r.atomCount}, pool ${r.stringPoolSize}B`);
+      try { this.log(JSON.stringify(r.root, null, 2)); } catch { this.log('(unable to stringify root)'); }
+    }
   }
 }
 

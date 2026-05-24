@@ -3,11 +3,13 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using CodeDesigner.Ps2.Compression;
 using CodeDesigner.Ps2.FileFormats.Zipper.Apache;
 using CodeDesigner.Ps2.FileFormats.Zipper.ZAR;
 using CodeDesigner.Ps2.FileFormats.Zipper.ZDB;
+using CodeDesigner.Ps2.FileFormats.Zipper.MPS;
 using CodeDesigner.Ps2.FileFormats.Zipper.RDR;
 using CodeDesigner.Ps2.FileFormats.Zipper.ZED;
 using CodeDesigner.Ps2.Save;
@@ -30,6 +32,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
             reg.Add(c => HandleReadNode(c.InputPath, c.ZipperEntryIndex), "ZIPPER_READ_NODE");
             reg.Add(c => HandleReadAllNodes(c.InputPath), "ZIPPER_READ_ALL_NODES");
             reg.Add(c => HandleInspectRdr(c.InputPath, c.ZipperSection), "ZIPPER_INSPECT_RDR");
+            reg.Add(c => HandleInspectMps(c.InputPath), "ZIPPER_INSPECT_MPS");
             reg.Add(c => HandleSaveExportDecrypted(c.InputPath, c.OutputPath), "ZIPPER_SAVE_EXPORT_DECRYPTED");
             reg.Add(c => HandleSaveCraft(c.InputPath, c.OutputDirectory, c.SaveMode, c.SaveTitle, c.SaveTitleLength), "ZIPPER_SAVE_CRAFT");
             reg.Add(c => HandleApacheDecryptSection(c.InputPath, c.OutputDirectory, c.ZipperSection), "APACHE_DECRYPT_SECTION");
@@ -214,9 +217,24 @@ namespace CodeDesigner.Ps2.Bridge.Services
             string? pathError = ValidateInputFile(inputPath, out string filePath);
             if (pathError != null) return Responses.Error(pathError);
 
+            byte[] rdrBytes;
             try
             {
-                byte[] rdrBytes = ResolveRdrBytes(filePath, entryName);
+                rdrBytes = ResolveRdrBytes(filePath, entryName);
+            }
+            catch (Exception ex)
+            {
+                return Responses.Error($"ZIPPER_INSPECT_RDR error: {ex.Message}");
+            }
+
+            // Try the strict typed-table parse first. RDR files in the wild
+            // occasionally trip the parser; rather than bubbling the exception
+            // (which leaves the webview with nothing to show), fall back to the
+            // HTML reference's printable-string scan and categorise the hits
+            // into texture / file / model refs. Mirrors zed_map_viewer_solution
+            // .html extractReaderStrings + dumpReaderReport.
+            try
+            {
                 var rdr = RdrFile.Parse(rdrBytes);
                 var tree = rdr.BuildTree();
                 var shaped = RdrShape.Shape(tree);
@@ -229,6 +247,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
                     stringPoolSize = rdr.StringPool.Length,
                     atomCount = rdr.Atoms.Length,
                     root = shaped,
+                    fallback = false,
                 };
                 return Responses.Json(new CommandResponse
                 {
@@ -237,9 +256,135 @@ namespace CodeDesigner.Ps2.Bridge.Services
                     Data = JsonSerializer.Serialize(result, JsonOptions),
                 });
             }
+            catch (Exception parseEx)
+            {
+                var strings = ExtractRdrStrings(rdrBytes);
+                var textureRefs = new List<string>();
+                var fileRefs = new List<string>();
+                var modelRefs = new List<string>();
+                foreach (var s in strings)
+                {
+                    string lower = s.ToLowerInvariant();
+                    if (lower.EndsWith(".tif")) textureRefs.Add(s);
+                    else if (lower.EndsWith(".zed") || lower.EndsWith(".zar") || lower.EndsWith(".mps") || lower.EndsWith(".rdr")) fileRefs.Add(s);
+                    else if (!lower.Contains('.') && s.Length >= 3) modelRefs.Add(s);
+                }
+
+                var fallbackResult = new
+                {
+                    sourcePath = Path.GetFullPath(filePath),
+                    entry = entryName,
+                    version = 0u,
+                    stringPoolSize = rdrBytes.Length,
+                    atomCount = 0,
+                    fallback = true,
+                    parseError = parseEx.Message,
+                    root = new
+                    {
+                        strings,
+                        textureRefs,
+                        fileRefs,
+                        modelRefs,
+                    },
+                };
+                return Responses.Json(new CommandResponse
+                {
+                    Success = true,
+                    Command = "ZIPPER_INSPECT_RDR",
+                    Data = JsonSerializer.Serialize(fallbackResult, JsonOptions),
+                });
+            }
+        }
+
+        // Mirrors zed_map_viewer_solution.html extractReaderStrings(): emit
+        // every printable-ASCII run >= 3 chars that contains at least one
+        // letter or underscore. Deduplicated + case-insensitive sorted.
+        private static List<string> ExtractRdrStrings(byte[] data)
+        {
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var sb = new StringBuilder();
+            void Flush()
+            {
+                if (sb.Length >= 3)
+                {
+                    string s = sb.ToString().Trim();
+                    if (s.Length >= 3)
+                    {
+                        bool hasLetterOrUnderscore = false;
+                        foreach (char c in s)
+                        {
+                            if (char.IsLetter(c) || c == '_') { hasLetterOrUnderscore = true; break; }
+                        }
+                        if (hasLetterOrUnderscore) seen.Add(s);
+                    }
+                }
+                sb.Clear();
+            }
+            for (int i = 0; i < data.Length; i++)
+            {
+                byte b = data[i];
+                if (b >= 0x20 && b < 0x7f) sb.Append((char)b);
+                else Flush();
+            }
+            Flush();
+            var list = seen.ToList();
+            list.Sort(StringComparer.OrdinalIgnoreCase);
+            return list;
+        }
+
+        /// <summary>
+        /// Parse a Zipper '.mps' AI map file. Mirrors the HTML map viewer's
+        /// parseAiMaps and returns a JSON-shaped manifest the webview renders
+        /// as a table (name, dimensions, bounds, scale per map).
+        /// </summary>
+        private string HandleInspectMps(string? inputPath)
+        {
+            string? pathError = ValidateInputFile(inputPath, out string filePath);
+            if (pathError != null) return Responses.Error(pathError);
+
+            try
+            {
+                byte[] bytes = File.ReadAllBytes(filePath);
+                MpsFile mps = MpsFile.Parse(bytes);
+
+                var maps = new List<object>(mps.Maps.Count);
+                foreach (var m in mps.Maps)
+                {
+                    maps.Add(new
+                    {
+                        offset = m.Offset,
+                        name = m.Name,
+                        width = m.Width,
+                        height = m.Height,
+                        minX = m.MinX,
+                        minY = m.MinY,
+                        minZ = m.MinZ,
+                        maxX = m.MaxX,
+                        maxY = m.MaxY,
+                        maxZ = m.MaxZ,
+                        scaleX = m.ScaleX,
+                        scaleZ = m.ScaleZ,
+                    });
+                }
+
+                var result = new
+                {
+                    sourcePath = Path.GetFullPath(filePath),
+                    declaredCount = mps.MapCount,
+                    foundCount = mps.Maps.Count,
+                    fileSize = bytes.Length,
+                    maps,
+                };
+                return Responses.Json(new CommandResponse
+                {
+                    Success = true,
+                    Command = "ZIPPER_INSPECT_MPS",
+                    Data = JsonSerializer.Serialize(result, JsonOptions),
+                });
+            }
             catch (Exception ex)
             {
-                return Responses.Error($"ZIPPER_INSPECT_RDR error: {ex.Message}");
+                return Responses.Error($"ZIPPER_INSPECT_MPS error: {ex.Message}");
             }
         }
 

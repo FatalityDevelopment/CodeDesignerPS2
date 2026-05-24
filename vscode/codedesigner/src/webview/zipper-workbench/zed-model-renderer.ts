@@ -34,6 +34,12 @@ export interface ModelRendererOptions {
   defaultTexture?: string | null;
   // Fallback single texture (used if chunk has no specific texture).
   textureRgba?: { width: number; height: number; rgba: Uint8Array } | null;
+  // Map-viewer style controls (HTML reference). Defaults preserve current
+  // weapon-preview behaviour, so untouched options leave the renderer alone.
+  triStride?: number;        // 1 = full, N = every Nth triangle.
+  topDown?: boolean;         // orthographic top-down camera.
+  unlit?: boolean;           // ignore directional light (ambient only).
+  solidColor?: boolean;      // skip texture sampling, render flat material.
 }
 
 export class ZedModelRenderer {
@@ -99,21 +105,46 @@ export class ZedModelRenderer {
 
     this.wireframe = !!options.wireframe;
     const textures = options.textures ?? {};
+    // `solidColor` map-viewer mode skips texture sampling entirely so the
+    // chunks render as flat material — useful for inspecting topology.
+    const solidColorMode = !!options.solidColor;
+    // `unlit` removes the directional light contribution; everything is lit
+    // by the ambient only. We approximate by using MeshBasicMaterial instead
+    // of MeshStandardMaterial for textured chunks.
+    const unlit = !!options.unlit;
+    // Subsamples the triangle list: 1 = full, 2 = every other, etc. Mirrors
+    // the HTML map viewer's triStep dropdown.
+    const triStride = Math.max(1, options.triStride ?? 1);
 
     // Build the per-material texture cache. Each unique .tif becomes one
-    // DataTexture + MeshStandardMaterial. Chunks with no matching .tif fall
+    // DataTexture + Mesh material. Chunks with no matching .tif fall
     // back to a plain grey material.
+    const makeMaterial = (color: number, map?: THREE.DataTexture): THREE.Material => {
+      if (unlit) {
+        return new THREE.MeshBasicMaterial({
+          color,
+          map,
+          side: THREE.DoubleSide,
+          wireframe: this.wireframe,
+        });
+      }
+      return new THREE.MeshStandardMaterial({
+        color,
+        map,
+        metalness: 0,
+        roughness: 0.85,
+        side: THREE.DoubleSide,
+        wireframe: this.wireframe,
+      });
+    };
     const materialIndexByTif = new Map<string, number>();
-    const fallbackMaterial = new THREE.MeshStandardMaterial({
-      color: 0xb8b8b8,
-      metalness: 0,
-      roughness: 0.85,
-      side: THREE.DoubleSide,
-      wireframe: this.wireframe,
-    });
+    const fallbackMaterial = makeMaterial(0xb8b8b8);
     this.materials = [fallbackMaterial];
 
     const materialFor = (tifName: string | null): number => {
+      // solidColor mode short-circuits to the flat fallback material so
+      // there's no per-chunk texture lookup at all.
+      if (solidColorMode) { return 0; }
       // Fall back to the model-wide atlas texture if this chunk doesn't
       // carry its own .tif reference.
       const effective = tifName ?? options.defaultTexture ?? null;
@@ -138,14 +169,7 @@ export class ZedModelRenderer {
       dt.wrapT = THREE.RepeatWrapping;
       dt.needsUpdate = true;
       this.textures.push(dt);
-      const mat = new THREE.MeshStandardMaterial({
-        color: 0xffffff,
-        map: dt,
-        metalness: 0,
-        roughness: 0.85,
-        side: THREE.DoubleSide,
-        wireframe: this.wireframe,
-      });
+      const mat = makeMaterial(0xffffff, dt);
       this.materials.push(mat);
       const idx = this.materials.length - 1;
       materialIndexByTif.set(key, idx);
@@ -178,12 +202,22 @@ export class ZedModelRenderer {
         const [tu, tv] = transformUv(v.u, v.v);
         allUvs.push(tu, tv);
       }
-      for (const idx of chunk.indices) {
-        allIndices.push(vBase + idx);
+      // Apply the triangle stride here so the stride applies per-chunk.
+      // Each chunk.indices is laid out as flat triples (a, b, c, a, b, c…).
+      let kept = 0;
+      for (let t = 0; t < chunk.indices.length; t += 3) {
+        const triIndex = t / 3;
+        if (triStride > 1 && triIndex % triStride !== 0) { continue; }
+        allIndices.push(
+          vBase + chunk.indices[t + 0],
+          vBase + chunk.indices[t + 1],
+          vBase + chunk.indices[t + 2],
+        );
+        kept += 3;
       }
-      groups.push({ start: iBase, count: chunk.indices.length, material: materialFor(chunk.textureName) });
+      groups.push({ start: iBase, count: kept, material: materialFor(chunk.textureName) });
       vBase += chunk.vertices.length;
-      iBase += chunk.indices.length;
+      iBase += kept;
     }
 
     if (allIndices.length === 0) { return; }
@@ -218,6 +252,18 @@ export class ZedModelRenderer {
       this.mesh.rotation.x = Math.PI;
     }
     this.root.add(this.mesh);
+
+    // Top-down map view: orient the root so we look down the Y axis. The
+    // mouse-drag handlers still work but feel like pan/orbit-around-Y; for
+    // a debug view that's good enough.
+    if (options.topDown) {
+      this.pitch = -Math.PI / 2 + 0.001;
+      this.yaw = 0;
+    } else {
+      // Reset to the orbit default the user expects for 3D weapon previews.
+      this.pitch = -0.3;
+      this.yaw = 0.6;
+    }
   }
 
   setFlipY(value: boolean): void {
