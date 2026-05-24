@@ -1,0 +1,483 @@
+{
+  "setName": "IOP: cdvdman",
+  "gameId": "SCUS-97275",
+  "isBuiltIn": false,
+  "isSystem": true,
+  "entries": [
+    {
+      "address": "0x0003D330",
+      "name": "imp_sceCdInit",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::sceCdInit (#4)"
+    },
+    {
+      "address": "0x0003D338",
+      "name": "imp_sceCdStandby",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::sceCdStandby (#5)"
+    },
+    {
+      "address": "0x0003D340",
+      "name": "imp_sceCdSeek",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::sceCdSeek (#7)"
+    },
+    {
+      "address": "0x0003D348",
+      "name": "imp_sceCdGetError",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::sceCdGetError (#8)"
+    },
+    {
+      "address": "0x0003D350",
+      "name": "imp_sceCdGetToc",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::sceCdGetToc (#9)"
+    },
+    {
+      "address": "0x0003D358",
+      "name": "imp_sceCdSearchFile",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::sceCdSearchFile (#10)"
+    },
+    {
+      "address": "0x0003D360",
+      "name": "imp_sceCdSync",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::sceCdSync (#11)"
+    },
+    {
+      "address": "0x0003D368",
+      "name": "imp_sceCdGetDiskType",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::sceCdGetDiskType (#12)"
+    },
+    {
+      "address": "0x0003D370",
+      "name": "imp_sceCdTrayReq",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::sceCdTrayReq (#14)"
+    },
+    {
+      "address": "0x0003D378",
+      "name": "imp_sceCdStop",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::sceCdStop (#15)"
+    },
+    {
+      "address": "0x0003D380",
+      "name": "imp_sceCdPosToInt",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::sceCdPosToInt (#16)"
+    },
+    {
+      "address": "0x0003D388",
+      "name": "imp__sceCdRI",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::_sceCdRI (#22)"
+    },
+    {
+      "address": "0x0003D390",
+      "name": "imp_sceCdReadClock",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::sceCdReadClock (#24)"
+    },
+    {
+      "address": "0x0003D398",
+      "name": "imp_sceCdStatus",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::sceCdStatus (#28)"
+    },
+    {
+      "address": "0x0003D3A0",
+      "name": "imp_sceCdApplySCmd",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::sceCdApplySCmd (#29)"
+    },
+    {
+      "address": "0x0003D3A8",
+      "name": "imp_sceCdPause",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::sceCdPause (#38)"
+    },
+    {
+      "address": "0x0003D3B0",
+      "name": "imp_sceCdBreak",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::sceCdBreak (#39)"
+    },
+    {
+      "address": "0x0003D3B8",
+      "name": "imp_sceCdGetReadPos",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::sceCdGetReadPos (#44)"
+    },
+    {
+      "address": "0x0003D3C0",
+      "name": "imp__sceGetFsvRbuf",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::_sceGetFsvRbuf (#47)"
+    },
+    {
+      "address": "0x0003D3C8",
+      "name": "imp__sceCdSC",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::_sceCdSC (#50)"
+    },
+    {
+      "address": "0x0003D3D0",
+      "name": "imp_sceCdApplyNCmd",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::sceCdApplyNCmd (#54)"
+    },
+    {
+      "address": "0x0003D3D8",
+      "name": "imp_sceCdRead0",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::sceCdRead0 (#62)"
+    },
+    {
+      "address": "0x0003D3E0",
+      "name": "imp__sceCdRV",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::_sceCdRV (#63)"
+    },
+    {
+      "address": "0x0003D3E8",
+      "name": "imp__sceCdRM",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::_sceCdRM (#64)"
+    },
+    {
+      "address": "0x0003D3F0",
+      "name": "imp_sceCdPowerOff",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::sceCdPowerOff (#74)"
+    },
+    {
+      "address": "0x0003D3F8",
+      "name": "imp_sceCdMmode",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::sceCdMmode (#75)"
+    },
+    {
+      "address": "0x0003D400",
+      "name": "imp_unk_79",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::unk_79 (#79)"
+    },
+    {
+      "address": "0x0003D408",
+      "name": "imp_unk_80",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::unk_80 (#80)"
+    },
+    {
+      "address": "0x0003D410",
+      "name": "imp__sceCdSetTimeout",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::_sceCdSetTimeout (#81)"
+    },
+    {
+      "address": "0x0003D418",
+      "name": "imp_unk_82",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::unk_82 (#82)"
+    },
+    {
+      "address": "0x0003D420",
+      "name": "imp_sceCdReadDvdDualInfo",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::sceCdReadDvdDualInfo (#83)"
+    },
+    {
+      "address": "0x0003D428",
+      "name": "imp_sceCdLayerSearchFile",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::sceCdLayerSearchFile (#84)"
+    },
+    {
+      "address": "0x0003D430",
+      "name": "imp__sceCdRE",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::_sceCdRE (#114)"
+    },
+    {
+      "address": "0x0004592C",
+      "name": "imp_sceCdApplySCmd",
+      "comment": "secrman_for_cex \u2192 cdvdman::sceCdApplySCmd (#29)"
+    },
+    {
+      "address": "0x0004A5D0",
+      "name": "imp_sceCdSync",
+      "comment": "cdvd_st_driver \u2192 cdvdman::sceCdSync (#11)"
+    },
+    {
+      "address": "0x0004A5D8",
+      "name": "imp_sceCdGetDiskType",
+      "comment": "cdvd_st_driver \u2192 cdvdman::sceCdGetDiskType (#12)"
+    },
+    {
+      "address": "0x0004A5E0",
+      "name": "imp_sceCdBreak",
+      "comment": "cdvd_st_driver \u2192 cdvdman::sceCdBreak (#39)"
+    },
+    {
+      "address": "0x0004A5E8",
+      "name": "imp_sceCdNop",
+      "comment": "cdvd_st_driver \u2192 cdvdman::sceCdNop (#46)"
+    },
+    {
+      "address": "0x0004A5F0",
+      "name": "imp__sceCdstm0Cb",
+      "comment": "cdvd_st_driver \u2192 cdvdman::_sceCdstm0Cb (#48)"
+    },
+    {
+      "address": "0x0004A5F8",
+      "name": "imp__sceCdstm1Cb",
+      "comment": "cdvd_st_driver \u2192 cdvdman::_sceCdstm1Cb (#49)"
+    },
+    {
+      "address": "0x0004A600",
+      "name": "imp__sceCdSC",
+      "comment": "cdvd_st_driver \u2192 cdvdman::_sceCdSC (#50)"
+    },
+    {
+      "address": "0x0004A608",
+      "name": "imp_sceCdStStop",
+      "comment": "cdvd_st_driver \u2192 cdvdman::sceCdStStop (#61)"
+    },
+    {
+      "address": "0x0004A610",
+      "name": "imp__sceCdRE",
+      "comment": "cdvd_st_driver \u2192 cdvdman::_sceCdRE (#114)"
+    },
+    {
+      "address": "0x0006877C",
+      "name": "imp_sceCdReadClock",
+      "comment": "mcman \u2192 cdvdman::sceCdReadClock (#24)"
+    },
+    {
+      "address": "0x1C03D330",
+      "name": "imp_sceCdInit",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::sceCdInit (#4, iop 0x0003D330)"
+    },
+    {
+      "address": "0x1C03D338",
+      "name": "imp_sceCdStandby",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::sceCdStandby (#5, iop 0x0003D338)"
+    },
+    {
+      "address": "0x1C03D340",
+      "name": "imp_sceCdSeek",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::sceCdSeek (#7, iop 0x0003D340)"
+    },
+    {
+      "address": "0x1C03D348",
+      "name": "imp_sceCdGetError",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::sceCdGetError (#8, iop 0x0003D348)"
+    },
+    {
+      "address": "0x1C03D350",
+      "name": "imp_sceCdGetToc",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::sceCdGetToc (#9, iop 0x0003D350)"
+    },
+    {
+      "address": "0x1C03D358",
+      "name": "imp_sceCdSearchFile",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::sceCdSearchFile (#10, iop 0x0003D358)"
+    },
+    {
+      "address": "0x1C03D360",
+      "name": "imp_sceCdSync",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::sceCdSync (#11, iop 0x0003D360)"
+    },
+    {
+      "address": "0x1C03D368",
+      "name": "imp_sceCdGetDiskType",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::sceCdGetDiskType (#12, iop 0x0003D368)"
+    },
+    {
+      "address": "0x1C03D370",
+      "name": "imp_sceCdTrayReq",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::sceCdTrayReq (#14, iop 0x0003D370)"
+    },
+    {
+      "address": "0x1C03D378",
+      "name": "imp_sceCdStop",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::sceCdStop (#15, iop 0x0003D378)"
+    },
+    {
+      "address": "0x1C03D380",
+      "name": "imp_sceCdPosToInt",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::sceCdPosToInt (#16, iop 0x0003D380)"
+    },
+    {
+      "address": "0x1C03D388",
+      "name": "imp__sceCdRI",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::_sceCdRI (#22, iop 0x0003D388)"
+    },
+    {
+      "address": "0x1C03D390",
+      "name": "imp_sceCdReadClock",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::sceCdReadClock (#24, iop 0x0003D390)"
+    },
+    {
+      "address": "0x1C03D398",
+      "name": "imp_sceCdStatus",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::sceCdStatus (#28, iop 0x0003D398)"
+    },
+    {
+      "address": "0x1C03D3A0",
+      "name": "imp_sceCdApplySCmd",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::sceCdApplySCmd (#29, iop 0x0003D3A0)"
+    },
+    {
+      "address": "0x1C03D3A8",
+      "name": "imp_sceCdPause",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::sceCdPause (#38, iop 0x0003D3A8)"
+    },
+    {
+      "address": "0x1C03D3B0",
+      "name": "imp_sceCdBreak",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::sceCdBreak (#39, iop 0x0003D3B0)"
+    },
+    {
+      "address": "0x1C03D3B8",
+      "name": "imp_sceCdGetReadPos",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::sceCdGetReadPos (#44, iop 0x0003D3B8)"
+    },
+    {
+      "address": "0x1C03D3C0",
+      "name": "imp__sceGetFsvRbuf",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::_sceGetFsvRbuf (#47, iop 0x0003D3C0)"
+    },
+    {
+      "address": "0x1C03D3C8",
+      "name": "imp__sceCdSC",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::_sceCdSC (#50, iop 0x0003D3C8)"
+    },
+    {
+      "address": "0x1C03D3D0",
+      "name": "imp_sceCdApplyNCmd",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::sceCdApplyNCmd (#54, iop 0x0003D3D0)"
+    },
+    {
+      "address": "0x1C03D3D8",
+      "name": "imp_sceCdRead0",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::sceCdRead0 (#62, iop 0x0003D3D8)"
+    },
+    {
+      "address": "0x1C03D3E0",
+      "name": "imp__sceCdRV",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::_sceCdRV (#63, iop 0x0003D3E0)"
+    },
+    {
+      "address": "0x1C03D3E8",
+      "name": "imp__sceCdRM",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::_sceCdRM (#64, iop 0x0003D3E8)"
+    },
+    {
+      "address": "0x1C03D3F0",
+      "name": "imp_sceCdPowerOff",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::sceCdPowerOff (#74, iop 0x0003D3F0)"
+    },
+    {
+      "address": "0x1C03D3F8",
+      "name": "imp_sceCdMmode",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::sceCdMmode (#75, iop 0x0003D3F8)"
+    },
+    {
+      "address": "0x1C03D400",
+      "name": "imp_unk_79",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::unk_79 (#79, iop 0x0003D400)"
+    },
+    {
+      "address": "0x1C03D408",
+      "name": "imp_unk_80",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::unk_80 (#80, iop 0x0003D408)"
+    },
+    {
+      "address": "0x1C03D410",
+      "name": "imp__sceCdSetTimeout",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::_sceCdSetTimeout (#81, iop 0x0003D410)"
+    },
+    {
+      "address": "0x1C03D418",
+      "name": "imp_unk_82",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::unk_82 (#82, iop 0x0003D418)"
+    },
+    {
+      "address": "0x1C03D420",
+      "name": "imp_sceCdReadDvdDualInfo",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::sceCdReadDvdDualInfo (#83, iop 0x0003D420)"
+    },
+    {
+      "address": "0x1C03D428",
+      "name": "imp_sceCdLayerSearchFile",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::sceCdLayerSearchFile (#84, iop 0x0003D428)"
+    },
+    {
+      "address": "0x1C03D430",
+      "name": "imp__sceCdRE",
+      "comment": "cdvd_ee_driver \u2192 cdvdman::_sceCdRE (#114, iop 0x0003D430)"
+    },
+    {
+      "address": "0x1C04592C",
+      "name": "imp_sceCdApplySCmd",
+      "comment": "secrman_for_cex \u2192 cdvdman::sceCdApplySCmd (#29, iop 0x0004592C)"
+    },
+    {
+      "address": "0x1C04A5D0",
+      "name": "imp_sceCdSync",
+      "comment": "cdvd_st_driver \u2192 cdvdman::sceCdSync (#11, iop 0x0004A5D0)"
+    },
+    {
+      "address": "0x1C04A5D8",
+      "name": "imp_sceCdGetDiskType",
+      "comment": "cdvd_st_driver \u2192 cdvdman::sceCdGetDiskType (#12, iop 0x0004A5D8)"
+    },
+    {
+      "address": "0x1C04A5E0",
+      "name": "imp_sceCdBreak",
+      "comment": "cdvd_st_driver \u2192 cdvdman::sceCdBreak (#39, iop 0x0004A5E0)"
+    },
+    {
+      "address": "0x1C04A5E8",
+      "name": "imp_sceCdNop",
+      "comment": "cdvd_st_driver \u2192 cdvdman::sceCdNop (#46, iop 0x0004A5E8)"
+    },
+    {
+      "address": "0x1C04A5F0",
+      "name": "imp__sceCdstm0Cb",
+      "comment": "cdvd_st_driver \u2192 cdvdman::_sceCdstm0Cb (#48, iop 0x0004A5F0)"
+    },
+    {
+      "address": "0x1C04A5F8",
+      "name": "imp__sceCdstm1Cb",
+      "comment": "cdvd_st_driver \u2192 cdvdman::_sceCdstm1Cb (#49, iop 0x0004A5F8)"
+    },
+    {
+      "address": "0x1C04A600",
+      "name": "imp__sceCdSC",
+      "comment": "cdvd_st_driver \u2192 cdvdman::_sceCdSC (#50, iop 0x0004A600)"
+    },
+    {
+      "address": "0x1C04A608",
+      "name": "imp_sceCdStStop",
+      "comment": "cdvd_st_driver \u2192 cdvdman::sceCdStStop (#61, iop 0x0004A608)"
+    },
+    {
+      "address": "0x1C04A610",
+      "name": "imp__sceCdRE",
+      "comment": "cdvd_st_driver \u2192 cdvdman::_sceCdRE (#114, iop 0x0004A610)"
+    },
+    {
+      "address": "0x1C06877C",
+      "name": "imp_sceCdReadClock",
+      "comment": "mcman \u2192 cdvdman::sceCdReadClock (#24, iop 0x0006877C)"
+    },
+    {
+      "address": "0x1C0B3A88",
+      "name": "imp_sceCdRead",
+      "comment": "989snd_Library \u2192 cdvdman::sceCdRead (#6, iop 0x000B3A88)"
+    },
+    {
+      "address": "0x1C0B3A90",
+      "name": "imp_sceCdGetError",
+      "comment": "989snd_Library \u2192 cdvdman::sceCdGetError (#8, iop 0x000B3A90)"
+    },
+    {
+      "address": "0x1C0B3A98",
+      "name": "imp_sceCdSync",
+      "comment": "989snd_Library \u2192 cdvdman::sceCdSync (#11, iop 0x000B3A98)"
+    },
+    {
+      "address": "0x1C0B3AA0",
+      "name": "imp_sceCdStop",
+      "comment": "989snd_Library \u2192 cdvdman::sceCdStop (#15, iop 0x000B3AA0)"
+    },
+    {
+      "address": "0x1C0B3AA8",
+      "name": "imp_sceCdStatus",
+      "comment": "989snd_Library \u2192 cdvdman::sceCdStatus (#28, iop 0x000B3AA8)"
+    },
+    {
+      "address": "0x1C0B3AB0",
+      "name": "imp_sceCdCallback",
+      "comment": "989snd_Library \u2192 cdvdman::sceCdCallback (#37, iop 0x000B3AB0)"
+    },
+    {
+      "address": "0x1C0B3AB8",
+      "name": "imp_sceCdBreak",
+      "comment": "989snd_Library \u2192 cdvdman::sceCdBreak (#39, iop 0x000B3AB8)"
+    }
+  ]
+}

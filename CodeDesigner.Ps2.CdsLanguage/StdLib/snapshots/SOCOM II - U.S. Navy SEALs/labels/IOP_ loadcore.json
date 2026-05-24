@@ -1,0 +1,663 @@
+{
+  "setName": "IOP: loadcore",
+  "gameId": "SCUS-97275",
+  "isBuiltIn": false,
+  "isSystem": true,
+  "entries": [
+    {
+      "address": "0x00003EE8",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "Exception_Manager \u2192 loadcore::RegisterLibraryEntries (#6)"
+    },
+    {
+      "address": "0x00005664",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "Interrupt_Manager \u2192 loadcore::RegisterLibraryEntries (#6)"
+    },
+    {
+      "address": "0x00006314",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "ssbus_service \u2192 loadcore::RegisterLibraryEntries (#6)"
+    },
+    {
+      "address": "0x000079B8",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "dmacman \u2192 loadcore::RegisterLibraryEntries (#6)"
+    },
+    {
+      "address": "0x00008F84",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "Timer_Manager \u2192 loadcore::RegisterLibraryEntries (#6)"
+    },
+    {
+      "address": "0x0000AA54",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "System_C_lib \u2192 loadcore::RegisterLibraryEntries (#6)"
+    },
+    {
+      "address": "0x0000B698",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "Heap_lib \u2192 loadcore::RegisterLibraryEntries (#6)"
+    },
+    {
+      "address": "0x000123B4",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "Multi_Thread_Manager \u2192 loadcore::RegisterLibraryEntries (#6)"
+    },
+    {
+      "address": "0x000123BC",
+      "name": "imp_RegisterNonAutoLinkEntries",
+      "comment": "Multi_Thread_Manager \u2192 loadcore::RegisterNonAutoLinkEntries (#10)"
+    },
+    {
+      "address": "0x000123C4",
+      "name": "imp_QueryBootMode",
+      "comment": "Multi_Thread_Manager \u2192 loadcore::QueryBootMode (#12)"
+    },
+    {
+      "address": "0x000123CC",
+      "name": "imp_registerFunc",
+      "comment": "Multi_Thread_Manager \u2192 loadcore::registerFunc (#20)"
+    },
+    {
+      "address": "0x000123D4",
+      "name": "imp_findImageInfo",
+      "comment": "Multi_Thread_Manager \u2192 loadcore::findImageInfo (#24)"
+    },
+    {
+      "address": "0x00013C24",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "Vblank_service \u2192 loadcore::RegisterLibraryEntries (#6)"
+    },
+    {
+      "address": "0x00015CB8",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "IO/File_Manager \u2192 loadcore::RegisterLibraryEntries (#6)"
+    },
+    {
+      "address": "0x00015CC0",
+      "name": "imp_QueryBootMode",
+      "comment": "IO/File_Manager \u2192 loadcore::QueryBootMode (#12)"
+    },
+    {
+      "address": "0x00015CC8",
+      "name": "imp_SetRebootTimeLibraryHandlingMode",
+      "comment": "IO/File_Manager \u2192 loadcore::SetRebootTimeLibraryHandlingMode (#27)"
+    },
+    {
+      "address": "0x00019480",
+      "name": "imp_return_LibraryEntryTable",
+      "comment": "Moldule_File_loader \u2192 loadcore::return_LibraryEntryTable (#3)"
+    },
+    {
+      "address": "0x00019488",
+      "name": "imp_FlushIcache",
+      "comment": "Moldule_File_loader \u2192 loadcore::FlushIcache (#4)"
+    },
+    {
+      "address": "0x00019490",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "Moldule_File_loader \u2192 loadcore::RegisterLibraryEntries (#6)"
+    },
+    {
+      "address": "0x00019498",
+      "name": "imp_findFixImports",
+      "comment": "Moldule_File_loader \u2192 loadcore::findFixImports (#8)"
+    },
+    {
+      "address": "0x000194A0",
+      "name": "imp_restoreImports",
+      "comment": "Moldule_File_loader \u2192 loadcore::restoreImports (#9)"
+    },
+    {
+      "address": "0x000194A8",
+      "name": "imp_QueryBootMode",
+      "comment": "Moldule_File_loader \u2192 loadcore::QueryBootMode (#12)"
+    },
+    {
+      "address": "0x000194B0",
+      "name": "imp_linkModule",
+      "comment": "Moldule_File_loader \u2192 loadcore::linkModule (#16)"
+    },
+    {
+      "address": "0x000194B8",
+      "name": "imp_unlinkModule",
+      "comment": "Moldule_File_loader \u2192 loadcore::unlinkModule (#17)"
+    },
+    {
+      "address": "0x000194C0",
+      "name": "imp_registerFunc",
+      "comment": "Moldule_File_loader \u2192 loadcore::registerFunc (#20)"
+    },
+    {
+      "address": "0x000194C8",
+      "name": "imp_unk_21",
+      "comment": "Moldule_File_loader \u2192 loadcore::unk_21 (#21)"
+    },
+    {
+      "address": "0x000194D0",
+      "name": "imp_read_header",
+      "comment": "Moldule_File_loader \u2192 loadcore::read_header (#22)"
+    },
+    {
+      "address": "0x000194D8",
+      "name": "imp_load_module",
+      "comment": "Moldule_File_loader \u2192 loadcore::load_module (#23)"
+    },
+    {
+      "address": "0x000194E0",
+      "name": "imp_findImageInfo",
+      "comment": "Moldule_File_loader \u2192 loadcore::findImageInfo (#24)"
+    },
+    {
+      "address": "0x000194E8",
+      "name": "imp_unk_25",
+      "comment": "Moldule_File_loader \u2192 loadcore::unk_25 (#25)"
+    },
+    {
+      "address": "0x000194F0",
+      "name": "imp_unk_26",
+      "comment": "Moldule_File_loader \u2192 loadcore::unk_26 (#26)"
+    },
+    {
+      "address": "0x0001A2E4",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "ROM_file_driver \u2192 loadcore::RegisterLibraryEntries (#6)"
+    },
+    {
+      "address": "0x0001ACF4",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "Stdio \u2192 loadcore::RegisterLibraryEntries (#6)"
+    },
+    {
+      "address": "0x0001BE14",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "IOP_SIF_manager \u2192 loadcore::RegisterLibraryEntries (#6)"
+    },
+    {
+      "address": "0x0001E0D4",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "IOP_SIF_rpc_interface \u2192 loadcore::RegisterLibraryEntries (#6)"
+    },
+    {
+      "address": "0x0001E0DC",
+      "name": "imp_QueryBootMode",
+      "comment": "IOP_SIF_rpc_interface \u2192 loadcore::QueryBootMode (#12)"
+    },
+    {
+      "address": "0x00020034",
+      "name": "imp_FlushDcache",
+      "comment": "RebootByEE \u2192 loadcore::FlushDcache (#5)"
+    },
+    {
+      "address": "0x0002003C",
+      "name": "imp_QueryBootMode",
+      "comment": "RebootByEE \u2192 loadcore::QueryBootMode (#12)"
+    },
+    {
+      "address": "0x00021E50",
+      "name": "imp_FlushDcache",
+      "comment": "LoadModuleByEE \u2192 loadcore::FlushDcache (#5)"
+    },
+    {
+      "address": "0x00021E58",
+      "name": "imp_QueryBootMode",
+      "comment": "LoadModuleByEE \u2192 loadcore::QueryBootMode (#12)"
+    },
+    {
+      "address": "0x0002E2F8",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "cdvd_driver \u2192 loadcore::RegisterLibraryEntries (#6)"
+    },
+    {
+      "address": "0x0002E300",
+      "name": "imp_QueryBootMode",
+      "comment": "cdvd_driver \u2192 loadcore::QueryBootMode (#12)"
+    },
+    {
+      "address": "0x0002E308",
+      "name": "imp_SetRebootTimeLibraryHandlingMode",
+      "comment": "cdvd_driver \u2192 loadcore::SetRebootTimeLibraryHandlingMode (#27)"
+    },
+    {
+      "address": "0x0003D0D8",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "cdvd_ee_driver \u2192 loadcore::RegisterLibraryEntries (#6)"
+    },
+    {
+      "address": "0x0003D0E0",
+      "name": "imp_ReleaseLibraryEntries",
+      "comment": "cdvd_ee_driver \u2192 loadcore::ReleaseLibraryEntries (#7)"
+    },
+    {
+      "address": "0x0003D0E8",
+      "name": "imp_QueryLibraryEntryTable",
+      "comment": "cdvd_ee_driver \u2192 loadcore::QueryLibraryEntryTable (#11)"
+    },
+    {
+      "address": "0x0003D0F0",
+      "name": "imp_QueryBootMode",
+      "comment": "cdvd_ee_driver \u2192 loadcore::QueryBootMode (#12)"
+    },
+    {
+      "address": "0x00041520",
+      "name": "imp_QueryBootMode",
+      "comment": "FILEIO_service \u2192 loadcore::QueryBootMode (#12)"
+    },
+    {
+      "address": "0x000458E4",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "secrman_for_cex \u2192 loadcore::RegisterLibraryEntries (#6)"
+    },
+    {
+      "address": "0x00046238",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "SyncEE \u2192 loadcore::RegisterLibraryEntries (#6)"
+    },
+    {
+      "address": "0x00046240",
+      "name": "imp_QueryBootMode",
+      "comment": "SyncEE \u2192 loadcore::QueryBootMode (#12)"
+    },
+    {
+      "address": "0x00046248",
+      "name": "imp_registerFunc",
+      "comment": "SyncEE \u2192 loadcore::registerFunc (#20)"
+    },
+    {
+      "address": "0x000471C4",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "sio2man \u2192 loadcore::RegisterLibraryEntries (#6)"
+    },
+    {
+      "address": "0x0004A438",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "cdvd_st_driver \u2192 loadcore::RegisterLibraryEntries (#6)"
+    },
+    {
+      "address": "0x0004A440",
+      "name": "imp_ReleaseLibraryEntries",
+      "comment": "cdvd_st_driver \u2192 loadcore::ReleaseLibraryEntries (#7)"
+    },
+    {
+      "address": "0x0004C874",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "sio2d \u2192 loadcore::RegisterLibraryEntries (#6)"
+    },
+    {
+      "address": "0x0004FF14",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "Dbc_Manager \u2192 loadcore::RegisterLibraryEntries (#6)"
+    },
+    {
+      "address": "0x00068564",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "mcman \u2192 loadcore::RegisterLibraryEntries (#6)"
+    },
+    {
+      "address": "0x0006856C",
+      "name": "imp_ReleaseLibraryEntries",
+      "comment": "mcman \u2192 loadcore::ReleaseLibraryEntries (#7)"
+    },
+    {
+      "address": "0x0007EEF4",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "mcserv \u2192 loadcore::RegisterLibraryEntries (#6)"
+    },
+    {
+      "address": "0x0007EEFC",
+      "name": "imp_ReleaseLibraryEntries",
+      "comment": "mcserv \u2192 loadcore::ReleaseLibraryEntries (#7)"
+    },
+    {
+      "address": "0x1C003EE8",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "Exception_Manager \u2192 loadcore::RegisterLibraryEntries (#6, iop 0x00003EE8)"
+    },
+    {
+      "address": "0x1C005664",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "Interrupt_Manager \u2192 loadcore::RegisterLibraryEntries (#6, iop 0x00005664)"
+    },
+    {
+      "address": "0x1C006314",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "ssbus_service \u2192 loadcore::RegisterLibraryEntries (#6, iop 0x00006314)"
+    },
+    {
+      "address": "0x1C0079B8",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "dmacman \u2192 loadcore::RegisterLibraryEntries (#6, iop 0x000079B8)"
+    },
+    {
+      "address": "0x1C008F84",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "Timer_Manager \u2192 loadcore::RegisterLibraryEntries (#6, iop 0x00008F84)"
+    },
+    {
+      "address": "0x1C00AA54",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "System_C_lib \u2192 loadcore::RegisterLibraryEntries (#6, iop 0x0000AA54)"
+    },
+    {
+      "address": "0x1C00B698",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "Heap_lib \u2192 loadcore::RegisterLibraryEntries (#6, iop 0x0000B698)"
+    },
+    {
+      "address": "0x1C0123B4",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "Multi_Thread_Manager \u2192 loadcore::RegisterLibraryEntries (#6, iop 0x000123B4)"
+    },
+    {
+      "address": "0x1C0123BC",
+      "name": "imp_RegisterNonAutoLinkEntries",
+      "comment": "Multi_Thread_Manager \u2192 loadcore::RegisterNonAutoLinkEntries (#10, iop 0x000123BC)"
+    },
+    {
+      "address": "0x1C0123C4",
+      "name": "imp_QueryBootMode",
+      "comment": "Multi_Thread_Manager \u2192 loadcore::QueryBootMode (#12, iop 0x000123C4)"
+    },
+    {
+      "address": "0x1C0123CC",
+      "name": "imp_registerFunc",
+      "comment": "Multi_Thread_Manager \u2192 loadcore::registerFunc (#20, iop 0x000123CC)"
+    },
+    {
+      "address": "0x1C0123D4",
+      "name": "imp_findImageInfo",
+      "comment": "Multi_Thread_Manager \u2192 loadcore::findImageInfo (#24, iop 0x000123D4)"
+    },
+    {
+      "address": "0x1C013C24",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "Vblank_service \u2192 loadcore::RegisterLibraryEntries (#6, iop 0x00013C24)"
+    },
+    {
+      "address": "0x1C015CB8",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "IO/File_Manager \u2192 loadcore::RegisterLibraryEntries (#6, iop 0x00015CB8)"
+    },
+    {
+      "address": "0x1C015CC0",
+      "name": "imp_QueryBootMode",
+      "comment": "IO/File_Manager \u2192 loadcore::QueryBootMode (#12, iop 0x00015CC0)"
+    },
+    {
+      "address": "0x1C015CC8",
+      "name": "imp_SetRebootTimeLibraryHandlingMode",
+      "comment": "IO/File_Manager \u2192 loadcore::SetRebootTimeLibraryHandlingMode (#27, iop 0x00015CC8)"
+    },
+    {
+      "address": "0x1C019480",
+      "name": "imp_return_LibraryEntryTable",
+      "comment": "Moldule_File_loader \u2192 loadcore::return_LibraryEntryTable (#3, iop 0x00019480)"
+    },
+    {
+      "address": "0x1C019488",
+      "name": "imp_FlushIcache",
+      "comment": "Moldule_File_loader \u2192 loadcore::FlushIcache (#4, iop 0x00019488)"
+    },
+    {
+      "address": "0x1C019490",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "Moldule_File_loader \u2192 loadcore::RegisterLibraryEntries (#6, iop 0x00019490)"
+    },
+    {
+      "address": "0x1C019498",
+      "name": "imp_findFixImports",
+      "comment": "Moldule_File_loader \u2192 loadcore::findFixImports (#8, iop 0x00019498)"
+    },
+    {
+      "address": "0x1C0194A0",
+      "name": "imp_restoreImports",
+      "comment": "Moldule_File_loader \u2192 loadcore::restoreImports (#9, iop 0x000194A0)"
+    },
+    {
+      "address": "0x1C0194A8",
+      "name": "imp_QueryBootMode",
+      "comment": "Moldule_File_loader \u2192 loadcore::QueryBootMode (#12, iop 0x000194A8)"
+    },
+    {
+      "address": "0x1C0194B0",
+      "name": "imp_linkModule",
+      "comment": "Moldule_File_loader \u2192 loadcore::linkModule (#16, iop 0x000194B0)"
+    },
+    {
+      "address": "0x1C0194B8",
+      "name": "imp_unlinkModule",
+      "comment": "Moldule_File_loader \u2192 loadcore::unlinkModule (#17, iop 0x000194B8)"
+    },
+    {
+      "address": "0x1C0194C0",
+      "name": "imp_registerFunc",
+      "comment": "Moldule_File_loader \u2192 loadcore::registerFunc (#20, iop 0x000194C0)"
+    },
+    {
+      "address": "0x1C0194C8",
+      "name": "imp_unk_21",
+      "comment": "Moldule_File_loader \u2192 loadcore::unk_21 (#21, iop 0x000194C8)"
+    },
+    {
+      "address": "0x1C0194D0",
+      "name": "imp_read_header",
+      "comment": "Moldule_File_loader \u2192 loadcore::read_header (#22, iop 0x000194D0)"
+    },
+    {
+      "address": "0x1C0194D8",
+      "name": "imp_load_module",
+      "comment": "Moldule_File_loader \u2192 loadcore::load_module (#23, iop 0x000194D8)"
+    },
+    {
+      "address": "0x1C0194E0",
+      "name": "imp_findImageInfo",
+      "comment": "Moldule_File_loader \u2192 loadcore::findImageInfo (#24, iop 0x000194E0)"
+    },
+    {
+      "address": "0x1C0194E8",
+      "name": "imp_unk_25",
+      "comment": "Moldule_File_loader \u2192 loadcore::unk_25 (#25, iop 0x000194E8)"
+    },
+    {
+      "address": "0x1C0194F0",
+      "name": "imp_unk_26",
+      "comment": "Moldule_File_loader \u2192 loadcore::unk_26 (#26, iop 0x000194F0)"
+    },
+    {
+      "address": "0x1C01A2E4",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "ROM_file_driver \u2192 loadcore::RegisterLibraryEntries (#6, iop 0x0001A2E4)"
+    },
+    {
+      "address": "0x1C01ACF4",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "Stdio \u2192 loadcore::RegisterLibraryEntries (#6, iop 0x0001ACF4)"
+    },
+    {
+      "address": "0x1C01BE14",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "IOP_SIF_manager \u2192 loadcore::RegisterLibraryEntries (#6, iop 0x0001BE14)"
+    },
+    {
+      "address": "0x1C01E0D4",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "IOP_SIF_rpc_interface \u2192 loadcore::RegisterLibraryEntries (#6, iop 0x0001E0D4)"
+    },
+    {
+      "address": "0x1C01E0DC",
+      "name": "imp_QueryBootMode",
+      "comment": "IOP_SIF_rpc_interface \u2192 loadcore::QueryBootMode (#12, iop 0x0001E0DC)"
+    },
+    {
+      "address": "0x1C020034",
+      "name": "imp_FlushDcache",
+      "comment": "RebootByEE \u2192 loadcore::FlushDcache (#5, iop 0x00020034)"
+    },
+    {
+      "address": "0x1C02003C",
+      "name": "imp_QueryBootMode",
+      "comment": "RebootByEE \u2192 loadcore::QueryBootMode (#12, iop 0x0002003C)"
+    },
+    {
+      "address": "0x1C021E50",
+      "name": "imp_FlushDcache",
+      "comment": "LoadModuleByEE \u2192 loadcore::FlushDcache (#5, iop 0x00021E50)"
+    },
+    {
+      "address": "0x1C021E58",
+      "name": "imp_QueryBootMode",
+      "comment": "LoadModuleByEE \u2192 loadcore::QueryBootMode (#12, iop 0x00021E58)"
+    },
+    {
+      "address": "0x1C02E2F8",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "cdvd_driver \u2192 loadcore::RegisterLibraryEntries (#6, iop 0x0002E2F8)"
+    },
+    {
+      "address": "0x1C02E300",
+      "name": "imp_QueryBootMode",
+      "comment": "cdvd_driver \u2192 loadcore::QueryBootMode (#12, iop 0x0002E300)"
+    },
+    {
+      "address": "0x1C02E308",
+      "name": "imp_SetRebootTimeLibraryHandlingMode",
+      "comment": "cdvd_driver \u2192 loadcore::SetRebootTimeLibraryHandlingMode (#27, iop 0x0002E308)"
+    },
+    {
+      "address": "0x1C03D0D8",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "cdvd_ee_driver \u2192 loadcore::RegisterLibraryEntries (#6, iop 0x0003D0D8)"
+    },
+    {
+      "address": "0x1C03D0E0",
+      "name": "imp_ReleaseLibraryEntries",
+      "comment": "cdvd_ee_driver \u2192 loadcore::ReleaseLibraryEntries (#7, iop 0x0003D0E0)"
+    },
+    {
+      "address": "0x1C03D0E8",
+      "name": "imp_QueryLibraryEntryTable",
+      "comment": "cdvd_ee_driver \u2192 loadcore::QueryLibraryEntryTable (#11, iop 0x0003D0E8)"
+    },
+    {
+      "address": "0x1C03D0F0",
+      "name": "imp_QueryBootMode",
+      "comment": "cdvd_ee_driver \u2192 loadcore::QueryBootMode (#12, iop 0x0003D0F0)"
+    },
+    {
+      "address": "0x1C041520",
+      "name": "imp_QueryBootMode",
+      "comment": "FILEIO_service \u2192 loadcore::QueryBootMode (#12, iop 0x00041520)"
+    },
+    {
+      "address": "0x1C0458E4",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "secrman_for_cex \u2192 loadcore::RegisterLibraryEntries (#6, iop 0x000458E4)"
+    },
+    {
+      "address": "0x1C046238",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "SyncEE \u2192 loadcore::RegisterLibraryEntries (#6, iop 0x00046238)"
+    },
+    {
+      "address": "0x1C046240",
+      "name": "imp_QueryBootMode",
+      "comment": "SyncEE \u2192 loadcore::QueryBootMode (#12, iop 0x00046240)"
+    },
+    {
+      "address": "0x1C046248",
+      "name": "imp_registerFunc",
+      "comment": "SyncEE \u2192 loadcore::registerFunc (#20, iop 0x00046248)"
+    },
+    {
+      "address": "0x1C0471C4",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "sio2man \u2192 loadcore::RegisterLibraryEntries (#6, iop 0x000471C4)"
+    },
+    {
+      "address": "0x1C04A438",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "cdvd_st_driver \u2192 loadcore::RegisterLibraryEntries (#6, iop 0x0004A438)"
+    },
+    {
+      "address": "0x1C04A440",
+      "name": "imp_ReleaseLibraryEntries",
+      "comment": "cdvd_st_driver \u2192 loadcore::ReleaseLibraryEntries (#7, iop 0x0004A440)"
+    },
+    {
+      "address": "0x1C04C874",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "sio2d \u2192 loadcore::RegisterLibraryEntries (#6, iop 0x0004C874)"
+    },
+    {
+      "address": "0x1C04FF14",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "Dbc_Manager \u2192 loadcore::RegisterLibraryEntries (#6, iop 0x0004FF14)"
+    },
+    {
+      "address": "0x1C068564",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "mcman \u2192 loadcore::RegisterLibraryEntries (#6, iop 0x00068564)"
+    },
+    {
+      "address": "0x1C06856C",
+      "name": "imp_ReleaseLibraryEntries",
+      "comment": "mcman \u2192 loadcore::ReleaseLibraryEntries (#7, iop 0x0006856C)"
+    },
+    {
+      "address": "0x1C07EEF4",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "mcserv \u2192 loadcore::RegisterLibraryEntries (#6, iop 0x0007EEF4)"
+    },
+    {
+      "address": "0x1C07EEFC",
+      "name": "imp_ReleaseLibraryEntries",
+      "comment": "mcserv \u2192 loadcore::ReleaseLibraryEntries (#7, iop 0x0007EEFC)"
+    },
+    {
+      "address": "0x1C087880",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "USB_driver \u2192 loadcore::RegisterLibraryEntries (#6, iop 0x00087880)"
+    },
+    {
+      "address": "0x1C087888",
+      "name": "imp_ReleaseLibraryEntries",
+      "comment": "USB_driver \u2192 loadcore::ReleaseLibraryEntries (#7, iop 0x00087888)"
+    },
+    {
+      "address": "0x1C093398",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "dev9 \u2192 loadcore::RegisterLibraryEntries (#6, iop 0x00093398)"
+    },
+    {
+      "address": "0x1C0933A0",
+      "name": "imp_QueryBootMode",
+      "comment": "dev9 \u2192 loadcore::QueryBootMode (#12, iop 0x000933A0)"
+    },
+    {
+      "address": "0x1C0980C8",
+      "name": "imp_FlushDcache",
+      "comment": "Sound_Device_Library \u2192 loadcore::FlushDcache (#5, iop 0x000980C8)"
+    },
+    {
+      "address": "0x1C0980D0",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "Sound_Device_Library \u2192 loadcore::RegisterLibraryEntries (#6, iop 0x000980D0)"
+    },
+    {
+      "address": "0x1C0B37DC",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "989snd_Library \u2192 loadcore::RegisterLibraryEntries (#6, iop 0x000B37DC)"
+    },
+    {
+      "address": "0x1C0C8210",
+      "name": "imp_RegisterLibraryEntries",
+      "comment": "lgAud \u2192 loadcore::RegisterLibraryEntries (#6, iop 0x000C8210)"
+    },
+    {
+      "address": "0x1C0C8218",
+      "name": "imp_ReleaseLibraryEntries",
+      "comment": "lgAud \u2192 loadcore::ReleaseLibraryEntries (#7, iop 0x000C8218)"
+    }
+  ]
+}

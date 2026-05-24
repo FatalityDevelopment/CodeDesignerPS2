@@ -1,0 +1,638 @@
+{
+  "setName": "IOP: ioman",
+  "gameId": "SCUS-97275",
+  "isBuiltIn": false,
+  "isSystem": true,
+  "entries": [
+    {
+      "address": "0x0001958C",
+      "name": "imp_open",
+      "comment": "Moldule_File_loader \u2192 ioman::open (#4)"
+    },
+    {
+      "address": "0x00019594",
+      "name": "imp_close",
+      "comment": "Moldule_File_loader \u2192 ioman::close (#5)"
+    },
+    {
+      "address": "0x0001959C",
+      "name": "imp_read",
+      "comment": "Moldule_File_loader \u2192 ioman::read (#6)"
+    },
+    {
+      "address": "0x000195A4",
+      "name": "imp_lseek",
+      "comment": "Moldule_File_loader \u2192 ioman::lseek (#8)"
+    },
+    {
+      "address": "0x0001A360",
+      "name": "imp_AddDrv",
+      "comment": "ROM_file_driver \u2192 ioman::AddDrv (#20)"
+    },
+    {
+      "address": "0x0001A368",
+      "name": "imp_DelDrv",
+      "comment": "ROM_file_driver \u2192 ioman::DelDrv (#21)"
+    },
+    {
+      "address": "0x0001AD44",
+      "name": "imp_read",
+      "comment": "Stdio \u2192 ioman::read (#6)"
+    },
+    {
+      "address": "0x0001AD4C",
+      "name": "imp_write",
+      "comment": "Stdio \u2192 ioman::write (#7)"
+    },
+    {
+      "address": "0x0001AD54",
+      "name": "imp_unk_22",
+      "comment": "Stdio \u2192 ioman::unk_22 (#22)"
+    },
+    {
+      "address": "0x00021F00",
+      "name": "imp_open",
+      "comment": "LoadModuleByEE \u2192 ioman::open (#4)"
+    },
+    {
+      "address": "0x00021F08",
+      "name": "imp_close",
+      "comment": "LoadModuleByEE \u2192 ioman::close (#5)"
+    },
+    {
+      "address": "0x00021F10",
+      "name": "imp_read",
+      "comment": "LoadModuleByEE \u2192 ioman::read (#6)"
+    },
+    {
+      "address": "0x00021F18",
+      "name": "imp_lseek",
+      "comment": "LoadModuleByEE \u2192 ioman::lseek (#8)"
+    },
+    {
+      "address": "0x0002E550",
+      "name": "imp_open",
+      "comment": "cdvd_driver \u2192 ioman::open (#4)"
+    },
+    {
+      "address": "0x0002E558",
+      "name": "imp_close",
+      "comment": "cdvd_driver \u2192 ioman::close (#5)"
+    },
+    {
+      "address": "0x0002E560",
+      "name": "imp_read",
+      "comment": "cdvd_driver \u2192 ioman::read (#6)"
+    },
+    {
+      "address": "0x0002E568",
+      "name": "imp_write",
+      "comment": "cdvd_driver \u2192 ioman::write (#7)"
+    },
+    {
+      "address": "0x0002E570",
+      "name": "imp_lseek",
+      "comment": "cdvd_driver \u2192 ioman::lseek (#8)"
+    },
+    {
+      "address": "0x0002E578",
+      "name": "imp_remove",
+      "comment": "cdvd_driver \u2192 ioman::remove (#10)"
+    },
+    {
+      "address": "0x0002E580",
+      "name": "imp_AddDrv",
+      "comment": "cdvd_driver \u2192 ioman::AddDrv (#20)"
+    },
+    {
+      "address": "0x0002E588",
+      "name": "imp_DelDrv",
+      "comment": "cdvd_driver \u2192 ioman::DelDrv (#21)"
+    },
+    {
+      "address": "0x0002E590",
+      "name": "imp_devctl",
+      "comment": "cdvd_driver \u2192 ioman::devctl (#31)"
+    },
+    {
+      "address": "0x0002E598",
+      "name": "imp_ioctl2",
+      "comment": "cdvd_driver \u2192 ioman::ioctl2 (#34)"
+    },
+    {
+      "address": "0x0003D30C",
+      "name": "imp_devctl",
+      "comment": "cdvd_ee_driver \u2192 ioman::devctl (#31)"
+    },
+    {
+      "address": "0x0004172C",
+      "name": "imp_open",
+      "comment": "FILEIO_service \u2192 ioman::open (#4)"
+    },
+    {
+      "address": "0x00041734",
+      "name": "imp_close",
+      "comment": "FILEIO_service \u2192 ioman::close (#5)"
+    },
+    {
+      "address": "0x0004173C",
+      "name": "imp_read",
+      "comment": "FILEIO_service \u2192 ioman::read (#6)"
+    },
+    {
+      "address": "0x00041744",
+      "name": "imp_write",
+      "comment": "FILEIO_service \u2192 ioman::write (#7)"
+    },
+    {
+      "address": "0x0004174C",
+      "name": "imp_lseek",
+      "comment": "FILEIO_service \u2192 ioman::lseek (#8)"
+    },
+    {
+      "address": "0x00041754",
+      "name": "imp_ioctl",
+      "comment": "FILEIO_service \u2192 ioman::ioctl (#9)"
+    },
+    {
+      "address": "0x0004175C",
+      "name": "imp_remove",
+      "comment": "FILEIO_service \u2192 ioman::remove (#10)"
+    },
+    {
+      "address": "0x00041764",
+      "name": "imp_mkdir",
+      "comment": "FILEIO_service \u2192 ioman::mkdir (#11)"
+    },
+    {
+      "address": "0x0004176C",
+      "name": "imp_rmdir",
+      "comment": "FILEIO_service \u2192 ioman::rmdir (#12)"
+    },
+    {
+      "address": "0x00041774",
+      "name": "imp_dopen",
+      "comment": "FILEIO_service \u2192 ioman::dopen (#13)"
+    },
+    {
+      "address": "0x0004177C",
+      "name": "imp_dclose",
+      "comment": "FILEIO_service \u2192 ioman::dclose (#14)"
+    },
+    {
+      "address": "0x00041784",
+      "name": "imp_dread",
+      "comment": "FILEIO_service \u2192 ioman::dread (#15)"
+    },
+    {
+      "address": "0x0004178C",
+      "name": "imp_getstat",
+      "comment": "FILEIO_service \u2192 ioman::getstat (#16)"
+    },
+    {
+      "address": "0x00041794",
+      "name": "imp_chstat",
+      "comment": "FILEIO_service \u2192 ioman::chstat (#17)"
+    },
+    {
+      "address": "0x0004179C",
+      "name": "imp_format",
+      "comment": "FILEIO_service \u2192 ioman::format (#18)"
+    },
+    {
+      "address": "0x000417A4",
+      "name": "imp_AddDrv",
+      "comment": "FILEIO_service \u2192 ioman::AddDrv (#20)"
+    },
+    {
+      "address": "0x000417AC",
+      "name": "imp_DelDrv",
+      "comment": "FILEIO_service \u2192 ioman::DelDrv (#21)"
+    },
+    {
+      "address": "0x000417B4",
+      "name": "imp_rename",
+      "comment": "FILEIO_service \u2192 ioman::rename (#25)"
+    },
+    {
+      "address": "0x000417BC",
+      "name": "imp_chdir",
+      "comment": "FILEIO_service \u2192 ioman::chdir (#26)"
+    },
+    {
+      "address": "0x000417C4",
+      "name": "imp_sync",
+      "comment": "FILEIO_service \u2192 ioman::sync (#27)"
+    },
+    {
+      "address": "0x000417CC",
+      "name": "imp_mount",
+      "comment": "FILEIO_service \u2192 ioman::mount (#28)"
+    },
+    {
+      "address": "0x000417D4",
+      "name": "imp_umount",
+      "comment": "FILEIO_service \u2192 ioman::umount (#29)"
+    },
+    {
+      "address": "0x000417DC",
+      "name": "imp_lseek64",
+      "comment": "FILEIO_service \u2192 ioman::lseek64 (#30)"
+    },
+    {
+      "address": "0x000417E4",
+      "name": "imp_devctl",
+      "comment": "FILEIO_service \u2192 ioman::devctl (#31)"
+    },
+    {
+      "address": "0x000417EC",
+      "name": "imp_symlink",
+      "comment": "FILEIO_service \u2192 ioman::symlink (#32)"
+    },
+    {
+      "address": "0x000417F4",
+      "name": "imp_readlink",
+      "comment": "FILEIO_service \u2192 ioman::readlink (#33)"
+    },
+    {
+      "address": "0x000417FC",
+      "name": "imp_ioctl2",
+      "comment": "FILEIO_service \u2192 ioman::ioctl2 (#34)"
+    },
+    {
+      "address": "0x00045950",
+      "name": "imp_read",
+      "comment": "secrman_for_cex \u2192 ioman::read (#6)"
+    },
+    {
+      "address": "0x00045958",
+      "name": "imp_lseek",
+      "comment": "secrman_for_cex \u2192 ioman::lseek (#8)"
+    },
+    {
+      "address": "0x0004626C",
+      "name": "imp_open",
+      "comment": "SyncEE \u2192 ioman::open (#4)"
+    },
+    {
+      "address": "0x00046274",
+      "name": "imp_close",
+      "comment": "SyncEE \u2192 ioman::close (#5)"
+    },
+    {
+      "address": "0x0004627C",
+      "name": "imp_lseek",
+      "comment": "SyncEE \u2192 ioman::lseek (#8)"
+    },
+    {
+      "address": "0x0004A5A4",
+      "name": "imp_AddDrv",
+      "comment": "cdvd_st_driver \u2192 ioman::AddDrv (#20)"
+    },
+    {
+      "address": "0x0004A5AC",
+      "name": "imp_DelDrv",
+      "comment": "cdvd_st_driver \u2192 ioman::DelDrv (#21)"
+    },
+    {
+      "address": "0x0006871C",
+      "name": "imp_AddDrv",
+      "comment": "mcman \u2192 ioman::AddDrv (#20)"
+    },
+    {
+      "address": "0x00068724",
+      "name": "imp_DelDrv",
+      "comment": "mcman \u2192 ioman::DelDrv (#21)"
+    },
+    {
+      "address": "0x1C01958C",
+      "name": "imp_open",
+      "comment": "Moldule_File_loader \u2192 ioman::open (#4, iop 0x0001958C)"
+    },
+    {
+      "address": "0x1C019594",
+      "name": "imp_close",
+      "comment": "Moldule_File_loader \u2192 ioman::close (#5, iop 0x00019594)"
+    },
+    {
+      "address": "0x1C01959C",
+      "name": "imp_read",
+      "comment": "Moldule_File_loader \u2192 ioman::read (#6, iop 0x0001959C)"
+    },
+    {
+      "address": "0x1C0195A4",
+      "name": "imp_lseek",
+      "comment": "Moldule_File_loader \u2192 ioman::lseek (#8, iop 0x000195A4)"
+    },
+    {
+      "address": "0x1C01A360",
+      "name": "imp_AddDrv",
+      "comment": "ROM_file_driver \u2192 ioman::AddDrv (#20, iop 0x0001A360)"
+    },
+    {
+      "address": "0x1C01A368",
+      "name": "imp_DelDrv",
+      "comment": "ROM_file_driver \u2192 ioman::DelDrv (#21, iop 0x0001A368)"
+    },
+    {
+      "address": "0x1C01AD44",
+      "name": "imp_read",
+      "comment": "Stdio \u2192 ioman::read (#6, iop 0x0001AD44)"
+    },
+    {
+      "address": "0x1C01AD4C",
+      "name": "imp_write",
+      "comment": "Stdio \u2192 ioman::write (#7, iop 0x0001AD4C)"
+    },
+    {
+      "address": "0x1C01AD54",
+      "name": "imp_unk_22",
+      "comment": "Stdio \u2192 ioman::unk_22 (#22, iop 0x0001AD54)"
+    },
+    {
+      "address": "0x1C021F00",
+      "name": "imp_open",
+      "comment": "LoadModuleByEE \u2192 ioman::open (#4, iop 0x00021F00)"
+    },
+    {
+      "address": "0x1C021F08",
+      "name": "imp_close",
+      "comment": "LoadModuleByEE \u2192 ioman::close (#5, iop 0x00021F08)"
+    },
+    {
+      "address": "0x1C021F10",
+      "name": "imp_read",
+      "comment": "LoadModuleByEE \u2192 ioman::read (#6, iop 0x00021F10)"
+    },
+    {
+      "address": "0x1C021F18",
+      "name": "imp_lseek",
+      "comment": "LoadModuleByEE \u2192 ioman::lseek (#8, iop 0x00021F18)"
+    },
+    {
+      "address": "0x1C02E550",
+      "name": "imp_open",
+      "comment": "cdvd_driver \u2192 ioman::open (#4, iop 0x0002E550)"
+    },
+    {
+      "address": "0x1C02E558",
+      "name": "imp_close",
+      "comment": "cdvd_driver \u2192 ioman::close (#5, iop 0x0002E558)"
+    },
+    {
+      "address": "0x1C02E560",
+      "name": "imp_read",
+      "comment": "cdvd_driver \u2192 ioman::read (#6, iop 0x0002E560)"
+    },
+    {
+      "address": "0x1C02E568",
+      "name": "imp_write",
+      "comment": "cdvd_driver \u2192 ioman::write (#7, iop 0x0002E568)"
+    },
+    {
+      "address": "0x1C02E570",
+      "name": "imp_lseek",
+      "comment": "cdvd_driver \u2192 ioman::lseek (#8, iop 0x0002E570)"
+    },
+    {
+      "address": "0x1C02E578",
+      "name": "imp_remove",
+      "comment": "cdvd_driver \u2192 ioman::remove (#10, iop 0x0002E578)"
+    },
+    {
+      "address": "0x1C02E580",
+      "name": "imp_AddDrv",
+      "comment": "cdvd_driver \u2192 ioman::AddDrv (#20, iop 0x0002E580)"
+    },
+    {
+      "address": "0x1C02E588",
+      "name": "imp_DelDrv",
+      "comment": "cdvd_driver \u2192 ioman::DelDrv (#21, iop 0x0002E588)"
+    },
+    {
+      "address": "0x1C02E590",
+      "name": "imp_devctl",
+      "comment": "cdvd_driver \u2192 ioman::devctl (#31, iop 0x0002E590)"
+    },
+    {
+      "address": "0x1C02E598",
+      "name": "imp_ioctl2",
+      "comment": "cdvd_driver \u2192 ioman::ioctl2 (#34, iop 0x0002E598)"
+    },
+    {
+      "address": "0x1C03D30C",
+      "name": "imp_devctl",
+      "comment": "cdvd_ee_driver \u2192 ioman::devctl (#31, iop 0x0003D30C)"
+    },
+    {
+      "address": "0x1C04172C",
+      "name": "imp_open",
+      "comment": "FILEIO_service \u2192 ioman::open (#4, iop 0x0004172C)"
+    },
+    {
+      "address": "0x1C041734",
+      "name": "imp_close",
+      "comment": "FILEIO_service \u2192 ioman::close (#5, iop 0x00041734)"
+    },
+    {
+      "address": "0x1C04173C",
+      "name": "imp_read",
+      "comment": "FILEIO_service \u2192 ioman::read (#6, iop 0x0004173C)"
+    },
+    {
+      "address": "0x1C041744",
+      "name": "imp_write",
+      "comment": "FILEIO_service \u2192 ioman::write (#7, iop 0x00041744)"
+    },
+    {
+      "address": "0x1C04174C",
+      "name": "imp_lseek",
+      "comment": "FILEIO_service \u2192 ioman::lseek (#8, iop 0x0004174C)"
+    },
+    {
+      "address": "0x1C041754",
+      "name": "imp_ioctl",
+      "comment": "FILEIO_service \u2192 ioman::ioctl (#9, iop 0x00041754)"
+    },
+    {
+      "address": "0x1C04175C",
+      "name": "imp_remove",
+      "comment": "FILEIO_service \u2192 ioman::remove (#10, iop 0x0004175C)"
+    },
+    {
+      "address": "0x1C041764",
+      "name": "imp_mkdir",
+      "comment": "FILEIO_service \u2192 ioman::mkdir (#11, iop 0x00041764)"
+    },
+    {
+      "address": "0x1C04176C",
+      "name": "imp_rmdir",
+      "comment": "FILEIO_service \u2192 ioman::rmdir (#12, iop 0x0004176C)"
+    },
+    {
+      "address": "0x1C041774",
+      "name": "imp_dopen",
+      "comment": "FILEIO_service \u2192 ioman::dopen (#13, iop 0x00041774)"
+    },
+    {
+      "address": "0x1C04177C",
+      "name": "imp_dclose",
+      "comment": "FILEIO_service \u2192 ioman::dclose (#14, iop 0x0004177C)"
+    },
+    {
+      "address": "0x1C041784",
+      "name": "imp_dread",
+      "comment": "FILEIO_service \u2192 ioman::dread (#15, iop 0x00041784)"
+    },
+    {
+      "address": "0x1C04178C",
+      "name": "imp_getstat",
+      "comment": "FILEIO_service \u2192 ioman::getstat (#16, iop 0x0004178C)"
+    },
+    {
+      "address": "0x1C041794",
+      "name": "imp_chstat",
+      "comment": "FILEIO_service \u2192 ioman::chstat (#17, iop 0x00041794)"
+    },
+    {
+      "address": "0x1C04179C",
+      "name": "imp_format",
+      "comment": "FILEIO_service \u2192 ioman::format (#18, iop 0x0004179C)"
+    },
+    {
+      "address": "0x1C0417A4",
+      "name": "imp_AddDrv",
+      "comment": "FILEIO_service \u2192 ioman::AddDrv (#20, iop 0x000417A4)"
+    },
+    {
+      "address": "0x1C0417AC",
+      "name": "imp_DelDrv",
+      "comment": "FILEIO_service \u2192 ioman::DelDrv (#21, iop 0x000417AC)"
+    },
+    {
+      "address": "0x1C0417B4",
+      "name": "imp_rename",
+      "comment": "FILEIO_service \u2192 ioman::rename (#25, iop 0x000417B4)"
+    },
+    {
+      "address": "0x1C0417BC",
+      "name": "imp_chdir",
+      "comment": "FILEIO_service \u2192 ioman::chdir (#26, iop 0x000417BC)"
+    },
+    {
+      "address": "0x1C0417C4",
+      "name": "imp_sync",
+      "comment": "FILEIO_service \u2192 ioman::sync (#27, iop 0x000417C4)"
+    },
+    {
+      "address": "0x1C0417CC",
+      "name": "imp_mount",
+      "comment": "FILEIO_service \u2192 ioman::mount (#28, iop 0x000417CC)"
+    },
+    {
+      "address": "0x1C0417D4",
+      "name": "imp_umount",
+      "comment": "FILEIO_service \u2192 ioman::umount (#29, iop 0x000417D4)"
+    },
+    {
+      "address": "0x1C0417DC",
+      "name": "imp_lseek64",
+      "comment": "FILEIO_service \u2192 ioman::lseek64 (#30, iop 0x000417DC)"
+    },
+    {
+      "address": "0x1C0417E4",
+      "name": "imp_devctl",
+      "comment": "FILEIO_service \u2192 ioman::devctl (#31, iop 0x000417E4)"
+    },
+    {
+      "address": "0x1C0417EC",
+      "name": "imp_symlink",
+      "comment": "FILEIO_service \u2192 ioman::symlink (#32, iop 0x000417EC)"
+    },
+    {
+      "address": "0x1C0417F4",
+      "name": "imp_readlink",
+      "comment": "FILEIO_service \u2192 ioman::readlink (#33, iop 0x000417F4)"
+    },
+    {
+      "address": "0x1C0417FC",
+      "name": "imp_ioctl2",
+      "comment": "FILEIO_service \u2192 ioman::ioctl2 (#34, iop 0x000417FC)"
+    },
+    {
+      "address": "0x1C045950",
+      "name": "imp_read",
+      "comment": "secrman_for_cex \u2192 ioman::read (#6, iop 0x00045950)"
+    },
+    {
+      "address": "0x1C045958",
+      "name": "imp_lseek",
+      "comment": "secrman_for_cex \u2192 ioman::lseek (#8, iop 0x00045958)"
+    },
+    {
+      "address": "0x1C04626C",
+      "name": "imp_open",
+      "comment": "SyncEE \u2192 ioman::open (#4, iop 0x0004626C)"
+    },
+    {
+      "address": "0x1C046274",
+      "name": "imp_close",
+      "comment": "SyncEE \u2192 ioman::close (#5, iop 0x00046274)"
+    },
+    {
+      "address": "0x1C04627C",
+      "name": "imp_lseek",
+      "comment": "SyncEE \u2192 ioman::lseek (#8, iop 0x0004627C)"
+    },
+    {
+      "address": "0x1C04A5A4",
+      "name": "imp_AddDrv",
+      "comment": "cdvd_st_driver \u2192 ioman::AddDrv (#20, iop 0x0004A5A4)"
+    },
+    {
+      "address": "0x1C04A5AC",
+      "name": "imp_DelDrv",
+      "comment": "cdvd_st_driver \u2192 ioman::DelDrv (#21, iop 0x0004A5AC)"
+    },
+    {
+      "address": "0x1C06871C",
+      "name": "imp_AddDrv",
+      "comment": "mcman \u2192 ioman::AddDrv (#20, iop 0x0006871C)"
+    },
+    {
+      "address": "0x1C068724",
+      "name": "imp_DelDrv",
+      "comment": "mcman \u2192 ioman::DelDrv (#21, iop 0x00068724)"
+    },
+    {
+      "address": "0x1C09341C",
+      "name": "imp_AddDrv",
+      "comment": "dev9 \u2192 ioman::AddDrv (#20, iop 0x0009341C)"
+    },
+    {
+      "address": "0x1C093424",
+      "name": "imp_DelDrv",
+      "comment": "dev9 \u2192 ioman::DelDrv (#21, iop 0x00093424)"
+    },
+    {
+      "address": "0x1C0B37A0",
+      "name": "imp_open",
+      "comment": "989snd_Library \u2192 ioman::open (#4, iop 0x000B37A0)"
+    },
+    {
+      "address": "0x1C0B37A8",
+      "name": "imp_close",
+      "comment": "989snd_Library \u2192 ioman::close (#5, iop 0x000B37A8)"
+    },
+    {
+      "address": "0x1C0B37B0",
+      "name": "imp_read",
+      "comment": "989snd_Library \u2192 ioman::read (#6, iop 0x000B37B0)"
+    },
+    {
+      "address": "0x1C0B37B8",
+      "name": "imp_lseek",
+      "comment": "989snd_Library \u2192 ioman::lseek (#8, iop 0x000B37B8)"
+    }
+  ]
+}

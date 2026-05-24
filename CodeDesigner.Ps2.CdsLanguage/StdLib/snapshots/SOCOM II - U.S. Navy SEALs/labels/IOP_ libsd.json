@@ -1,0 +1,88 @@
+{
+  "setName": "IOP: libsd",
+  "gameId": "SCUS-97275",
+  "isBuiltIn": false,
+  "isSystem": true,
+  "entries": [
+    {
+      "address": "0x1C0B39EC",
+      "name": "imp_sceSdInit",
+      "comment": "989snd_Library \u2192 libsd::sceSdInit (#4, iop 0x000B39EC)"
+    },
+    {
+      "address": "0x1C0B39F4",
+      "name": "imp_sceSdSetParam",
+      "comment": "989snd_Library \u2192 libsd::sceSdSetParam (#5, iop 0x000B39F4)"
+    },
+    {
+      "address": "0x1C0B39FC",
+      "name": "imp_sceSdGetParam",
+      "comment": "989snd_Library \u2192 libsd::sceSdGetParam (#6, iop 0x000B39FC)"
+    },
+    {
+      "address": "0x1C0B3A04",
+      "name": "imp_sceSdSetSwitch",
+      "comment": "989snd_Library \u2192 libsd::sceSdSetSwitch (#7, iop 0x000B3A04)"
+    },
+    {
+      "address": "0x1C0B3A0C",
+      "name": "imp_sceSdGetSwitch",
+      "comment": "989snd_Library \u2192 libsd::sceSdGetSwitch (#8, iop 0x000B3A0C)"
+    },
+    {
+      "address": "0x1C0B3A14",
+      "name": "imp_sceSdSetAddr",
+      "comment": "989snd_Library \u2192 libsd::sceSdSetAddr (#9, iop 0x000B3A14)"
+    },
+    {
+      "address": "0x1C0B3A1C",
+      "name": "imp_sceSdGetAddr",
+      "comment": "989snd_Library \u2192 libsd::sceSdGetAddr (#10, iop 0x000B3A1C)"
+    },
+    {
+      "address": "0x1C0B3A24",
+      "name": "imp_sceSdSetCoreAttr",
+      "comment": "989snd_Library \u2192 libsd::sceSdSetCoreAttr (#11, iop 0x000B3A24)"
+    },
+    {
+      "address": "0x1C0B3A2C",
+      "name": "imp_sceSdNote2Pitch",
+      "comment": "989snd_Library \u2192 libsd::sceSdNote2Pitch (#13, iop 0x000B3A2C)"
+    },
+    {
+      "address": "0x1C0B3A34",
+      "name": "imp_sceSdVoiceTrans",
+      "comment": "989snd_Library \u2192 libsd::sceSdVoiceTrans (#17, iop 0x000B3A34)"
+    },
+    {
+      "address": "0x1C0B3A3C",
+      "name": "imp_sceSdBlockTrans",
+      "comment": "989snd_Library \u2192 libsd::sceSdBlockTrans (#18, iop 0x000B3A3C)"
+    },
+    {
+      "address": "0x1C0B3A44",
+      "name": "imp_sceSdVoiceTransStatus",
+      "comment": "989snd_Library \u2192 libsd::sceSdVoiceTransStatus (#19, iop 0x000B3A44)"
+    },
+    {
+      "address": "0x1C0B3A4C",
+      "name": "imp_sceSdBlockTransStatus",
+      "comment": "989snd_Library \u2192 libsd::sceSdBlockTransStatus (#20, iop 0x000B3A4C)"
+    },
+    {
+      "address": "0x1C0B3A54",
+      "name": "imp_sceSdSetEffectAttr",
+      "comment": "989snd_Library \u2192 libsd::sceSdSetEffectAttr (#23, iop 0x000B3A54)"
+    },
+    {
+      "address": "0x1C0B3A5C",
+      "name": "imp_sceSdClearEffectWorkArea",
+      "comment": "989snd_Library \u2192 libsd::sceSdClearEffectWorkArea (#25, iop 0x000B3A5C)"
+    },
+    {
+      "address": "0x1C0B3A64",
+      "name": "imp_sceSdSetTransIntrHandler",
+      "comment": "989snd_Library \u2192 libsd::sceSdSetTransIntrHandler (#26, iop 0x000B3A64)"
+    }
+  ]
+}

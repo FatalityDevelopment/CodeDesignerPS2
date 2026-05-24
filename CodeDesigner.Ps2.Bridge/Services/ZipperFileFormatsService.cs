@@ -8,6 +8,7 @@ using CodeDesigner.Ps2.Compression;
 using CodeDesigner.Ps2.FileFormats.Zipper.Apache;
 using CodeDesigner.Ps2.FileFormats.Zipper.ZAR;
 using CodeDesigner.Ps2.FileFormats.Zipper.ZDB;
+using CodeDesigner.Ps2.FileFormats.Zipper.RDR;
 using CodeDesigner.Ps2.FileFormats.Zipper.ZED;
 using CodeDesigner.Ps2.Save;
 
@@ -26,6 +27,9 @@ namespace CodeDesigner.Ps2.Bridge.Services
             reg.Add(c => HandleInspect(c.InputPath), "ZIPPER_INSPECT", "FILEFORMATS_INSPECT");
             reg.Add(c => HandleExtractAll(c.InputPath, c.OutputDirectory), "ZIPPER_EXTRACT_ALL");
             reg.Add(c => HandleExtractEntry(c.InputPath, c.ZipperEntryIndex, c.OutputPath), "ZIPPER_EXTRACT_ENTRY");
+            reg.Add(c => HandleReadNode(c.InputPath, c.ZipperEntryIndex), "ZIPPER_READ_NODE");
+            reg.Add(c => HandleReadAllNodes(c.InputPath), "ZIPPER_READ_ALL_NODES");
+            reg.Add(c => HandleInspectRdr(c.InputPath, c.ZipperSection), "ZIPPER_INSPECT_RDR");
             reg.Add(c => HandleSaveExportDecrypted(c.InputPath, c.OutputPath), "ZIPPER_SAVE_EXPORT_DECRYPTED");
             reg.Add(c => HandleSaveCraft(c.InputPath, c.OutputDirectory, c.SaveMode, c.SaveTitle, c.SaveTitleLength), "ZIPPER_SAVE_CRAFT");
             reg.Add(c => HandleApacheDecryptSection(c.InputPath, c.OutputDirectory, c.ZipperSection), "APACHE_DECRYPT_SECTION");
@@ -134,6 +138,221 @@ namespace CodeDesigner.Ps2.Bridge.Services
             catch (Exception ex)
             {
                 return Responses.Error($"ZIPPER_EXTRACT_ENTRY error: {ex.Message}");
+            }
+        }
+
+        private string HandleReadNode(string? inputPath, int? entryIndex)
+        {
+            string? pathError = ValidateInputFile(inputPath, out string filePath);
+            if (pathError != null) return Responses.Error(pathError);
+            if (entryIndex is null || entryIndex < 0) return Responses.Error("ZipperEntryIndex is required");
+
+            try
+            {
+                byte[] payload = ReadNodeBytes(filePath, entryIndex.Value);
+                return Responses.Json(new CommandResponse
+                {
+                    Success = true,
+                    Command = "ZIPPER_READ_NODE",
+                    Data = Convert.ToBase64String(payload),
+                });
+            }
+            catch (Exception ex)
+            {
+                return Responses.Error($"ZIPPER_READ_NODE error: {ex.Message}");
+            }
+        }
+
+        private string HandleReadAllNodes(string? inputPath)
+        {
+            string? pathError = ValidateInputFile(inputPath, out string filePath);
+            if (pathError != null) return Responses.Error(pathError);
+
+            try
+            {
+                var nodes = ReadAllNodes(filePath);
+                return Responses.Json(new CommandResponse
+                {
+                    Success = true,
+                    Command = "ZIPPER_READ_ALL_NODES",
+                    Data = JsonSerializer.Serialize(nodes, JsonOptions),
+                });
+            }
+            catch (Exception ex)
+            {
+                return Responses.Error($"ZIPPER_READ_ALL_NODES error: {ex.Message}");
+            }
+        }
+
+        private static byte[] ReadNodeBytes(string filePath, int index)
+        {
+            string ext = Path.GetExtension(filePath).ToLowerInvariant();
+            switch (ext)
+            {
+                case ".zdb":
+                    using (ZdbArchive archive = ZdbArchive.Open(filePath))
+                        return (byte[])archive.GetEntry(index).Data.Clone();
+                case ".zar":
+                    using (ZarArchive archive = ZarArchive.Open(filePath))
+                        return (byte[])archive.GetEntry(index).Data.Clone();
+                case ".zed":
+                    using (ZedStructure structure = ZedStructure.Open(filePath))
+                        return (byte[])structure.GetNode(index).Data.Clone();
+                default:
+                    throw new InvalidOperationException("This file type does not expose node reads.");
+            }
+        }
+
+        /// <summary>
+        /// Parse a Zipper *.rdr typed-table file. Accepts either a standalone
+        /// .rdr path, or a path to a ZAR / ZED / ZDB containing the .rdr as an
+        /// entry. When the container has multiple .rdr entries, an explicit
+        /// entry name can be supplied via ZipperSection.
+        /// </summary>
+        private string HandleInspectRdr(string? inputPath, string? entryName)
+        {
+            string? pathError = ValidateInputFile(inputPath, out string filePath);
+            if (pathError != null) return Responses.Error(pathError);
+
+            try
+            {
+                byte[] rdrBytes = ResolveRdrBytes(filePath, entryName);
+                var rdr = RdrFile.Parse(rdrBytes);
+                var tree = rdr.BuildTree();
+                var shaped = RdrShape.Shape(tree);
+
+                var result = new
+                {
+                    sourcePath = Path.GetFullPath(filePath),
+                    entry = entryName,
+                    version = rdr.Version,
+                    stringPoolSize = rdr.StringPool.Length,
+                    atomCount = rdr.Atoms.Length,
+                    root = shaped,
+                };
+                return Responses.Json(new CommandResponse
+                {
+                    Success = true,
+                    Command = "ZIPPER_INSPECT_RDR",
+                    Data = JsonSerializer.Serialize(result, JsonOptions),
+                });
+            }
+            catch (Exception ex)
+            {
+                return Responses.Error($"ZIPPER_INSPECT_RDR error: {ex.Message}");
+            }
+        }
+
+        private static byte[] ResolveRdrBytes(string filePath, string? entryName)
+        {
+            string ext = Path.GetExtension(filePath).ToLowerInvariant();
+            switch (ext)
+            {
+                case ".rdr":
+                    return File.ReadAllBytes(filePath);
+
+                case ".zar":
+                {
+                    using var archive = ZarArchive.Open(filePath);
+                    ZedNode? match = SelectRdrNode(archive.Entries, entryName);
+                    if (match == null) throw new InvalidDataException("No .rdr entry found in ZAR.");
+                    return match.Data;
+                }
+
+                case ".zed":
+                {
+                    using var structure = ZedStructure.Open(filePath);
+                    ZedNode? match = SelectRdrNode(structure.Nodes, entryName);
+                    if (match == null) throw new InvalidDataException("No .rdr entry found in ZED.");
+                    return match.Data;
+                }
+
+                case ".zdb":
+                {
+                    using var archive = ZdbArchive.Open(filePath);
+                    // Allow either an explicit entry name, or auto-pick the first
+                    // entry that ends with .rdr. ZDB entries can also be ZAR
+                    // archives containing .rdr - drill into those too.
+                    var directMatch = SelectFirstZdbEntry(archive.Entries, e =>
+                        e.Name.EndsWith(".rdr", StringComparison.OrdinalIgnoreCase) &&
+                        (entryName == null || e.Name.Equals(entryName, StringComparison.OrdinalIgnoreCase)
+                            || EndsWithLeaf(e.Name, entryName)));
+                    if (directMatch != null) return (byte[])directMatch.Data.Clone();
+
+                    var zarMatch = SelectFirstZdbEntry(archive.Entries, e =>
+                        e.Name.EndsWith(".zar", StringComparison.OrdinalIgnoreCase) &&
+                        (entryName == null || ContainsTokenIgnoreCase(e.Name, entryName ?? "")));
+                    if (zarMatch != null)
+                    {
+                        using var zar = ZarArchive.FromBytes(zarMatch.Data);
+                        var innerMatch = SelectRdrNode(zar.Entries, entryName);
+                        if (innerMatch != null) return innerMatch.Data;
+                    }
+                    throw new InvalidDataException("No .rdr entry resolvable inside ZDB.");
+                }
+
+                default:
+                    throw new InvalidOperationException($"Unsupported container extension '{ext}' for RDR inspection.");
+            }
+        }
+
+        private static ZedNode? SelectRdrNode(IReadOnlyList<ZedNode> nodes, string? entryName)
+        {
+            if (!string.IsNullOrWhiteSpace(entryName))
+            {
+                foreach (var n in nodes)
+                {
+                    if (n.Name.Equals(entryName, StringComparison.OrdinalIgnoreCase)) return n;
+                    if (EndsWithLeaf(n.Name, entryName)) return n;
+                }
+            }
+            foreach (var n in nodes)
+            {
+                if (n.Name.EndsWith(".rdr", StringComparison.OrdinalIgnoreCase) && n.Data.Length > 0)
+                    return n;
+            }
+            return null;
+        }
+
+        private static ZdbEntry? SelectFirstZdbEntry(IReadOnlyList<ZdbEntry> entries, Func<ZdbEntry, bool> match)
+        {
+            foreach (var e in entries) { if (match(e)) return e; }
+            return null;
+        }
+
+        private static bool EndsWithLeaf(string path, string leaf)
+        {
+            string[] parts = path.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries);
+            return parts.Length > 0 && parts[^1].Equals(leaf, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool ContainsTokenIgnoreCase(string s, string token)
+        {
+            return s.IndexOf(token, StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static IReadOnlyList<object> ReadAllNodes(string filePath)
+        {
+            string ext = Path.GetExtension(filePath).ToLowerInvariant();
+            switch (ext)
+            {
+                case ".zar":
+                    using (ZarArchive archive = ZarArchive.Open(filePath))
+                        return archive.Entries
+                            .Select((e, i) => (object)new { index = i, name = e.Name, type = e.Type, data = Convert.ToBase64String(e.Data) })
+                            .ToList();
+                case ".zed":
+                    using (ZedStructure structure = ZedStructure.Open(filePath))
+                        return structure.Nodes
+                            .Select((n, i) => (object)new { index = i, name = n.Name, type = n.Type, data = Convert.ToBase64String(n.Data) })
+                            .ToList();
+                case ".zdb":
+                    using (ZdbArchive archive = ZdbArchive.Open(filePath))
+                        return archive.Entries
+                            .Select((e, i) => (object)new { index = i, name = e.Name, type = 0u, data = Convert.ToBase64String(e.Data) })
+                            .ToList();
+                default:
+                    throw new InvalidOperationException("This file type does not expose bulk node reads.");
             }
         }
 

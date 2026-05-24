@@ -1,0 +1,438 @@
+{
+  "setName": "IOP: thsemap",
+  "gameId": "SCUS-97275",
+  "isBuiltIn": false,
+  "isSystem": true,
+  "entries": [
+    {
+      "address": "0x0001968C",
+      "name": "imp_CreateSema",
+      "comment": "Moldule_File_loader \u2192 thsemap::CreateSema (#4)"
+    },
+    {
+      "address": "0x00019694",
+      "name": "imp_SignalSema",
+      "comment": "Moldule_File_loader \u2192 thsemap::SignalSema (#6)"
+    },
+    {
+      "address": "0x0001969C",
+      "name": "imp_WaitSema",
+      "comment": "Moldule_File_loader \u2192 thsemap::WaitSema (#8)"
+    },
+    {
+      "address": "0x0002E4B8",
+      "name": "imp_SignalSema",
+      "comment": "cdvd_driver \u2192 thsemap::SignalSema (#6)"
+    },
+    {
+      "address": "0x0002E4C0",
+      "name": "imp_iSignalSema",
+      "comment": "cdvd_driver \u2192 thsemap::iSignalSema (#7)"
+    },
+    {
+      "address": "0x00041644",
+      "name": "imp_CreateSema",
+      "comment": "FILEIO_service \u2192 thsemap::CreateSema (#4)"
+    },
+    {
+      "address": "0x0004164C",
+      "name": "imp_SignalSema",
+      "comment": "FILEIO_service \u2192 thsemap::SignalSema (#6)"
+    },
+    {
+      "address": "0x00041654",
+      "name": "imp_WaitSema",
+      "comment": "FILEIO_service \u2192 thsemap::WaitSema (#8)"
+    },
+    {
+      "address": "0x00047314",
+      "name": "imp_CreateSema",
+      "comment": "sio2man \u2192 thsemap::CreateSema (#4)"
+    },
+    {
+      "address": "0x0004731C",
+      "name": "imp_SignalSema",
+      "comment": "sio2man \u2192 thsemap::SignalSema (#6)"
+    },
+    {
+      "address": "0x00047324",
+      "name": "imp_WaitSema",
+      "comment": "sio2man \u2192 thsemap::WaitSema (#8)"
+    },
+    {
+      "address": "0x0004732C",
+      "name": "imp_ReferSemaStatus",
+      "comment": "sio2man \u2192 thsemap::ReferSemaStatus (#11)"
+    },
+    {
+      "address": "0x0004A53C",
+      "name": "imp_CreateSema",
+      "comment": "cdvd_st_driver \u2192 thsemap::CreateSema (#4)"
+    },
+    {
+      "address": "0x0004A544",
+      "name": "imp_DeleteSema",
+      "comment": "cdvd_st_driver \u2192 thsemap::DeleteSema (#5)"
+    },
+    {
+      "address": "0x0004A54C",
+      "name": "imp_SignalSema",
+      "comment": "cdvd_st_driver \u2192 thsemap::SignalSema (#6)"
+    },
+    {
+      "address": "0x0004A554",
+      "name": "imp_WaitSema",
+      "comment": "cdvd_st_driver \u2192 thsemap::WaitSema (#8)"
+    },
+    {
+      "address": "0x0004C90C",
+      "name": "imp_CreateSema",
+      "comment": "sio2d \u2192 thsemap::CreateSema (#4)"
+    },
+    {
+      "address": "0x0004C914",
+      "name": "imp_SignalSema",
+      "comment": "sio2d \u2192 thsemap::SignalSema (#6)"
+    },
+    {
+      "address": "0x0004C91C",
+      "name": "imp_WaitSema",
+      "comment": "sio2d \u2192 thsemap::WaitSema (#8)"
+    },
+    {
+      "address": "0x00050018",
+      "name": "imp_CreateSema",
+      "comment": "Dbc_Manager \u2192 thsemap::CreateSema (#4)"
+    },
+    {
+      "address": "0x00050020",
+      "name": "imp_SignalSema",
+      "comment": "Dbc_Manager \u2192 thsemap::SignalSema (#6)"
+    },
+    {
+      "address": "0x00050028",
+      "name": "imp_iSignalSema",
+      "comment": "Dbc_Manager \u2192 thsemap::iSignalSema (#7)"
+    },
+    {
+      "address": "0x00050030",
+      "name": "imp_WaitSema",
+      "comment": "Dbc_Manager \u2192 thsemap::WaitSema (#8)"
+    },
+    {
+      "address": "0x000686B4",
+      "name": "imp_CreateSema",
+      "comment": "mcman \u2192 thsemap::CreateSema (#4)"
+    },
+    {
+      "address": "0x000686BC",
+      "name": "imp_DeleteSema",
+      "comment": "mcman \u2192 thsemap::DeleteSema (#5)"
+    },
+    {
+      "address": "0x000686C4",
+      "name": "imp_SignalSema",
+      "comment": "mcman \u2192 thsemap::SignalSema (#6)"
+    },
+    {
+      "address": "0x000686CC",
+      "name": "imp_iSignalSema",
+      "comment": "mcman \u2192 thsemap::iSignalSema (#7)"
+    },
+    {
+      "address": "0x000686D4",
+      "name": "imp_WaitSema",
+      "comment": "mcman \u2192 thsemap::WaitSema (#8)"
+    },
+    {
+      "address": "0x0007F098",
+      "name": "imp_SignalSema",
+      "comment": "mcserv \u2192 thsemap::SignalSema (#6)"
+    },
+    {
+      "address": "0x0007F0A0",
+      "name": "imp_WaitSema",
+      "comment": "mcserv \u2192 thsemap::WaitSema (#8)"
+    },
+    {
+      "address": "0x1C01968C",
+      "name": "imp_CreateSema",
+      "comment": "Moldule_File_loader \u2192 thsemap::CreateSema (#4, iop 0x0001968C)"
+    },
+    {
+      "address": "0x1C019694",
+      "name": "imp_SignalSema",
+      "comment": "Moldule_File_loader \u2192 thsemap::SignalSema (#6, iop 0x00019694)"
+    },
+    {
+      "address": "0x1C01969C",
+      "name": "imp_WaitSema",
+      "comment": "Moldule_File_loader \u2192 thsemap::WaitSema (#8, iop 0x0001969C)"
+    },
+    {
+      "address": "0x1C02E4B8",
+      "name": "imp_SignalSema",
+      "comment": "cdvd_driver \u2192 thsemap::SignalSema (#6, iop 0x0002E4B8)"
+    },
+    {
+      "address": "0x1C02E4C0",
+      "name": "imp_iSignalSema",
+      "comment": "cdvd_driver \u2192 thsemap::iSignalSema (#7, iop 0x0002E4C0)"
+    },
+    {
+      "address": "0x1C041644",
+      "name": "imp_CreateSema",
+      "comment": "FILEIO_service \u2192 thsemap::CreateSema (#4, iop 0x00041644)"
+    },
+    {
+      "address": "0x1C04164C",
+      "name": "imp_SignalSema",
+      "comment": "FILEIO_service \u2192 thsemap::SignalSema (#6, iop 0x0004164C)"
+    },
+    {
+      "address": "0x1C041654",
+      "name": "imp_WaitSema",
+      "comment": "FILEIO_service \u2192 thsemap::WaitSema (#8, iop 0x00041654)"
+    },
+    {
+      "address": "0x1C047314",
+      "name": "imp_CreateSema",
+      "comment": "sio2man \u2192 thsemap::CreateSema (#4, iop 0x00047314)"
+    },
+    {
+      "address": "0x1C04731C",
+      "name": "imp_SignalSema",
+      "comment": "sio2man \u2192 thsemap::SignalSema (#6, iop 0x0004731C)"
+    },
+    {
+      "address": "0x1C047324",
+      "name": "imp_WaitSema",
+      "comment": "sio2man \u2192 thsemap::WaitSema (#8, iop 0x00047324)"
+    },
+    {
+      "address": "0x1C04732C",
+      "name": "imp_ReferSemaStatus",
+      "comment": "sio2man \u2192 thsemap::ReferSemaStatus (#11, iop 0x0004732C)"
+    },
+    {
+      "address": "0x1C04A53C",
+      "name": "imp_CreateSema",
+      "comment": "cdvd_st_driver \u2192 thsemap::CreateSema (#4, iop 0x0004A53C)"
+    },
+    {
+      "address": "0x1C04A544",
+      "name": "imp_DeleteSema",
+      "comment": "cdvd_st_driver \u2192 thsemap::DeleteSema (#5, iop 0x0004A544)"
+    },
+    {
+      "address": "0x1C04A54C",
+      "name": "imp_SignalSema",
+      "comment": "cdvd_st_driver \u2192 thsemap::SignalSema (#6, iop 0x0004A54C)"
+    },
+    {
+      "address": "0x1C04A554",
+      "name": "imp_WaitSema",
+      "comment": "cdvd_st_driver \u2192 thsemap::WaitSema (#8, iop 0x0004A554)"
+    },
+    {
+      "address": "0x1C04C90C",
+      "name": "imp_CreateSema",
+      "comment": "sio2d \u2192 thsemap::CreateSema (#4, iop 0x0004C90C)"
+    },
+    {
+      "address": "0x1C04C914",
+      "name": "imp_SignalSema",
+      "comment": "sio2d \u2192 thsemap::SignalSema (#6, iop 0x0004C914)"
+    },
+    {
+      "address": "0x1C04C91C",
+      "name": "imp_WaitSema",
+      "comment": "sio2d \u2192 thsemap::WaitSema (#8, iop 0x0004C91C)"
+    },
+    {
+      "address": "0x1C050018",
+      "name": "imp_CreateSema",
+      "comment": "Dbc_Manager \u2192 thsemap::CreateSema (#4, iop 0x00050018)"
+    },
+    {
+      "address": "0x1C050020",
+      "name": "imp_SignalSema",
+      "comment": "Dbc_Manager \u2192 thsemap::SignalSema (#6, iop 0x00050020)"
+    },
+    {
+      "address": "0x1C050028",
+      "name": "imp_iSignalSema",
+      "comment": "Dbc_Manager \u2192 thsemap::iSignalSema (#7, iop 0x00050028)"
+    },
+    {
+      "address": "0x1C050030",
+      "name": "imp_WaitSema",
+      "comment": "Dbc_Manager \u2192 thsemap::WaitSema (#8, iop 0x00050030)"
+    },
+    {
+      "address": "0x1C0686B4",
+      "name": "imp_CreateSema",
+      "comment": "mcman \u2192 thsemap::CreateSema (#4, iop 0x000686B4)"
+    },
+    {
+      "address": "0x1C0686BC",
+      "name": "imp_DeleteSema",
+      "comment": "mcman \u2192 thsemap::DeleteSema (#5, iop 0x000686BC)"
+    },
+    {
+      "address": "0x1C0686C4",
+      "name": "imp_SignalSema",
+      "comment": "mcman \u2192 thsemap::SignalSema (#6, iop 0x000686C4)"
+    },
+    {
+      "address": "0x1C0686CC",
+      "name": "imp_iSignalSema",
+      "comment": "mcman \u2192 thsemap::iSignalSema (#7, iop 0x000686CC)"
+    },
+    {
+      "address": "0x1C0686D4",
+      "name": "imp_WaitSema",
+      "comment": "mcman \u2192 thsemap::WaitSema (#8, iop 0x000686D4)"
+    },
+    {
+      "address": "0x1C07F098",
+      "name": "imp_SignalSema",
+      "comment": "mcserv \u2192 thsemap::SignalSema (#6, iop 0x0007F098)"
+    },
+    {
+      "address": "0x1C07F0A0",
+      "name": "imp_WaitSema",
+      "comment": "mcserv \u2192 thsemap::WaitSema (#8, iop 0x0007F0A0)"
+    },
+    {
+      "address": "0x1C0879AC",
+      "name": "imp_CreateSema",
+      "comment": "USB_driver \u2192 thsemap::CreateSema (#4, iop 0x000879AC)"
+    },
+    {
+      "address": "0x1C0879B4",
+      "name": "imp_DeleteSema",
+      "comment": "USB_driver \u2192 thsemap::DeleteSema (#5, iop 0x000879B4)"
+    },
+    {
+      "address": "0x1C0879BC",
+      "name": "imp_SignalSema",
+      "comment": "USB_driver \u2192 thsemap::SignalSema (#6, iop 0x000879BC)"
+    },
+    {
+      "address": "0x1C0879C4",
+      "name": "imp_WaitSema",
+      "comment": "USB_driver \u2192 thsemap::WaitSema (#8, iop 0x000879C4)"
+    },
+    {
+      "address": "0x1C0933E8",
+      "name": "imp_CreateSema",
+      "comment": "dev9 \u2192 thsemap::CreateSema (#4, iop 0x000933E8)"
+    },
+    {
+      "address": "0x1C0933F0",
+      "name": "imp_SignalSema",
+      "comment": "dev9 \u2192 thsemap::SignalSema (#6, iop 0x000933F0)"
+    },
+    {
+      "address": "0x1C0933F8",
+      "name": "imp_WaitSema",
+      "comment": "dev9 \u2192 thsemap::WaitSema (#8, iop 0x000933F8)"
+    },
+    {
+      "address": "0x1C0B3954",
+      "name": "imp_CreateSema",
+      "comment": "989snd_Library \u2192 thsemap::CreateSema (#4, iop 0x000B3954)"
+    },
+    {
+      "address": "0x1C0B395C",
+      "name": "imp_DeleteSema",
+      "comment": "989snd_Library \u2192 thsemap::DeleteSema (#5, iop 0x000B395C)"
+    },
+    {
+      "address": "0x1C0B3964",
+      "name": "imp_SignalSema",
+      "comment": "989snd_Library \u2192 thsemap::SignalSema (#6, iop 0x000B3964)"
+    },
+    {
+      "address": "0x1C0B396C",
+      "name": "imp_iSignalSema",
+      "comment": "989snd_Library \u2192 thsemap::iSignalSema (#7, iop 0x000B396C)"
+    },
+    {
+      "address": "0x1C0B3974",
+      "name": "imp_WaitSema",
+      "comment": "989snd_Library \u2192 thsemap::WaitSema (#8, iop 0x000B3974)"
+    },
+    {
+      "address": "0x1C0B397C",
+      "name": "imp_PollSema",
+      "comment": "989snd_Library \u2192 thsemap::PollSema (#9, iop 0x000B397C)"
+    },
+    {
+      "address": "0x1C0BFABC",
+      "name": "imp_CreateSema",
+      "comment": "989_DATA_STREAMER \u2192 thsemap::CreateSema (#4, iop 0x000BFABC)"
+    },
+    {
+      "address": "0x1C0BFAC4",
+      "name": "imp_SignalSema",
+      "comment": "989_DATA_STREAMER \u2192 thsemap::SignalSema (#6, iop 0x000BFAC4)"
+    },
+    {
+      "address": "0x1C0BFACC",
+      "name": "imp_iSignalSema",
+      "comment": "989_DATA_STREAMER \u2192 thsemap::iSignalSema (#7, iop 0x000BFACC)"
+    },
+    {
+      "address": "0x1C0BFAD4",
+      "name": "imp_WaitSema",
+      "comment": "989_DATA_STREAMER \u2192 thsemap::WaitSema (#8, iop 0x000BFAD4)"
+    },
+    {
+      "address": "0x1C0C8340",
+      "name": "imp_CreateSema",
+      "comment": "lgAud \u2192 thsemap::CreateSema (#4, iop 0x000C8340)"
+    },
+    {
+      "address": "0x1C0C8348",
+      "name": "imp_DeleteSema",
+      "comment": "lgAud \u2192 thsemap::DeleteSema (#5, iop 0x000C8348)"
+    },
+    {
+      "address": "0x1C0C8350",
+      "name": "imp_SignalSema",
+      "comment": "lgAud \u2192 thsemap::SignalSema (#6, iop 0x000C8350)"
+    },
+    {
+      "address": "0x1C0C8358",
+      "name": "imp_WaitSema",
+      "comment": "lgAud \u2192 thsemap::WaitSema (#8, iop 0x000C8358)"
+    },
+    {
+      "address": "0x1C0DB9F8",
+      "name": "imp_CreateSema",
+      "comment": "headset_streamer \u2192 thsemap::CreateSema (#4, iop 0x000DB9F8)"
+    },
+    {
+      "address": "0x1C0DBA00",
+      "name": "imp_DeleteSema",
+      "comment": "headset_streamer \u2192 thsemap::DeleteSema (#5, iop 0x000DBA00)"
+    },
+    {
+      "address": "0x1C0DBA08",
+      "name": "imp_SignalSema",
+      "comment": "headset_streamer \u2192 thsemap::SignalSema (#6, iop 0x000DBA08)"
+    },
+    {
+      "address": "0x1C0DBA10",
+      "name": "imp_iSignalSema",
+      "comment": "headset_streamer \u2192 thsemap::iSignalSema (#7, iop 0x000DBA10)"
+    },
+    {
+      "address": "0x1C0DBA18",
+      "name": "imp_WaitSema",
+      "comment": "headset_streamer \u2192 thsemap::WaitSema (#8, iop 0x000DBA18)"
+    }
+  ]
+}

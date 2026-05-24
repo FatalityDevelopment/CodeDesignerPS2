@@ -1,0 +1,48 @@
+{
+  "setName": "IOP: thmsgbx",
+  "gameId": "SCUS-97275",
+  "isBuiltIn": false,
+  "isSystem": true,
+  "entries": [
+    {
+      "address": "0x00041678",
+      "name": "imp_CreateMbx",
+      "comment": "FILEIO_service \u2192 thmsgbx::CreateMbx (#4)"
+    },
+    {
+      "address": "0x00041680",
+      "name": "imp_DeleteMbx",
+      "comment": "FILEIO_service \u2192 thmsgbx::DeleteMbx (#5)"
+    },
+    {
+      "address": "0x00041688",
+      "name": "imp_SendMbx",
+      "comment": "FILEIO_service \u2192 thmsgbx::SendMbx (#6)"
+    },
+    {
+      "address": "0x00041690",
+      "name": "imp_ReceiveMbx",
+      "comment": "FILEIO_service \u2192 thmsgbx::ReceiveMbx (#8)"
+    },
+    {
+      "address": "0x1C041678",
+      "name": "imp_CreateMbx",
+      "comment": "FILEIO_service \u2192 thmsgbx::CreateMbx (#4, iop 0x00041678)"
+    },
+    {
+      "address": "0x1C041680",
+      "name": "imp_DeleteMbx",
+      "comment": "FILEIO_service \u2192 thmsgbx::DeleteMbx (#5, iop 0x00041680)"
+    },
+    {
+      "address": "0x1C041688",
+      "name": "imp_SendMbx",
+      "comment": "FILEIO_service \u2192 thmsgbx::SendMbx (#6, iop 0x00041688)"
+    },
+    {
+      "address": "0x1C041690",
+      "name": "imp_ReceiveMbx",
+      "comment": "FILEIO_service \u2192 thmsgbx::ReceiveMbx (#8, iop 0x00041690)"
+    }
+  ]
+}

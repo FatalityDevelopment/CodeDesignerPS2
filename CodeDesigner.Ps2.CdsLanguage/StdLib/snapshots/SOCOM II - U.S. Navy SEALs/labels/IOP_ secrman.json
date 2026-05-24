@@ -1,0 +1,48 @@
+{
+  "setName": "IOP: secrman",
+  "gameId": "SCUS-97275",
+  "isBuiltIn": false,
+  "isSystem": true,
+  "entries": [
+    {
+      "address": "0x0004C9A0",
+      "name": "imp_SecrAuthCard",
+      "comment": "sio2d \u2192 secrman::SecrAuthCard (#6)"
+    },
+    {
+      "address": "0x00068748",
+      "name": "imp_SecrSetMcCommandHandler",
+      "comment": "mcman \u2192 secrman::SecrSetMcCommandHandler (#4)"
+    },
+    {
+      "address": "0x00068750",
+      "name": "imp_SecrSetMcDevIDHandler",
+      "comment": "mcman \u2192 secrman::SecrSetMcDevIDHandler (#5)"
+    },
+    {
+      "address": "0x00068758",
+      "name": "imp_SecrAuthCard",
+      "comment": "mcman \u2192 secrman::SecrAuthCard (#6)"
+    },
+    {
+      "address": "0x1C04C9A0",
+      "name": "imp_SecrAuthCard",
+      "comment": "sio2d \u2192 secrman::SecrAuthCard (#6, iop 0x0004C9A0)"
+    },
+    {
+      "address": "0x1C068748",
+      "name": "imp_SecrSetMcCommandHandler",
+      "comment": "mcman \u2192 secrman::SecrSetMcCommandHandler (#4, iop 0x00068748)"
+    },
+    {
+      "address": "0x1C068750",
+      "name": "imp_SecrSetMcDevIDHandler",
+      "comment": "mcman \u2192 secrman::SecrSetMcDevIDHandler (#5, iop 0x00068750)"
+    },
+    {
+      "address": "0x1C068758",
+      "name": "imp_SecrAuthCard",
+      "comment": "mcman \u2192 secrman::SecrAuthCard (#6, iop 0x00068758)"
+    }
+  ]
+}

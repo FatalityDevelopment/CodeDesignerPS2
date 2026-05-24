@@ -1,0 +1,528 @@
+{
+  "setName": "IOP: thevent",
+  "gameId": "SCUS-97275",
+  "isBuiltIn": false,
+  "isSystem": true,
+  "entries": [
+    {
+      "address": "0x00013CD4",
+      "name": "imp_CreateEventFlag",
+      "comment": "Vblank_service \u2192 thevent::CreateEventFlag (#4)"
+    },
+    {
+      "address": "0x00013CDC",
+      "name": "imp_iSetEventFlag",
+      "comment": "Vblank_service \u2192 thevent::iSetEventFlag (#7)"
+    },
+    {
+      "address": "0x00013CE4",
+      "name": "imp_iClearEventFlag",
+      "comment": "Vblank_service \u2192 thevent::iClearEventFlag (#9)"
+    },
+    {
+      "address": "0x00013CEC",
+      "name": "imp_WaitEventFlag",
+      "comment": "Vblank_service \u2192 thevent::WaitEventFlag (#10)"
+    },
+    {
+      "address": "0x00019658",
+      "name": "imp_CreateEventFlag",
+      "comment": "Moldule_File_loader \u2192 thevent::CreateEventFlag (#4)"
+    },
+    {
+      "address": "0x00019660",
+      "name": "imp_SetEventFlag",
+      "comment": "Moldule_File_loader \u2192 thevent::SetEventFlag (#6)"
+    },
+    {
+      "address": "0x00019668",
+      "name": "imp_WaitEventFlag",
+      "comment": "Moldule_File_loader \u2192 thevent::WaitEventFlag (#10)"
+    },
+    {
+      "address": "0x0001E210",
+      "name": "imp_CreateEventFlag",
+      "comment": "IOP_SIF_rpc_interface \u2192 thevent::CreateEventFlag (#4)"
+    },
+    {
+      "address": "0x0001E218",
+      "name": "imp_iSetEventFlag",
+      "comment": "IOP_SIF_rpc_interface \u2192 thevent::iSetEventFlag (#7)"
+    },
+    {
+      "address": "0x0001E220",
+      "name": "imp_ClearEventFlag",
+      "comment": "IOP_SIF_rpc_interface \u2192 thevent::ClearEventFlag (#8)"
+    },
+    {
+      "address": "0x0001E228",
+      "name": "imp_WaitEventFlag",
+      "comment": "IOP_SIF_rpc_interface \u2192 thevent::WaitEventFlag (#10)"
+    },
+    {
+      "address": "0x00020160",
+      "name": "imp_iSetEventFlag",
+      "comment": "RebootByEE \u2192 thevent::iSetEventFlag (#7)"
+    },
+    {
+      "address": "0x00020168",
+      "name": "imp_WaitEventFlag",
+      "comment": "RebootByEE \u2192 thevent::WaitEventFlag (#10)"
+    },
+    {
+      "address": "0x0002E44C",
+      "name": "imp_CreateEventFlag",
+      "comment": "cdvd_driver \u2192 thevent::CreateEventFlag (#4)"
+    },
+    {
+      "address": "0x0002E454",
+      "name": "imp_DeleteEventFlag",
+      "comment": "cdvd_driver \u2192 thevent::DeleteEventFlag (#5)"
+    },
+    {
+      "address": "0x0002E45C",
+      "name": "imp_SetEventFlag",
+      "comment": "cdvd_driver \u2192 thevent::SetEventFlag (#6)"
+    },
+    {
+      "address": "0x0002E464",
+      "name": "imp_iSetEventFlag",
+      "comment": "cdvd_driver \u2192 thevent::iSetEventFlag (#7)"
+    },
+    {
+      "address": "0x0002E46C",
+      "name": "imp_ClearEventFlag",
+      "comment": "cdvd_driver \u2192 thevent::ClearEventFlag (#8)"
+    },
+    {
+      "address": "0x0002E474",
+      "name": "imp_iClearEventFlag",
+      "comment": "cdvd_driver \u2192 thevent::iClearEventFlag (#9)"
+    },
+    {
+      "address": "0x0002E47C",
+      "name": "imp_WaitEventFlag",
+      "comment": "cdvd_driver \u2192 thevent::WaitEventFlag (#10)"
+    },
+    {
+      "address": "0x0002E484",
+      "name": "imp_PollEventFlag",
+      "comment": "cdvd_driver \u2192 thevent::PollEventFlag (#11)"
+    },
+    {
+      "address": "0x0002E48C",
+      "name": "imp_ReferEventFlagStatus",
+      "comment": "cdvd_driver \u2192 thevent::ReferEventFlagStatus (#13)"
+    },
+    {
+      "address": "0x0002E494",
+      "name": "imp_iReferEventFlagStatus",
+      "comment": "cdvd_driver \u2192 thevent::iReferEventFlagStatus (#14)"
+    },
+    {
+      "address": "0x0003D21C",
+      "name": "imp_iSetEventFlag",
+      "comment": "cdvd_ee_driver \u2192 thevent::iSetEventFlag (#7)"
+    },
+    {
+      "address": "0x0003D224",
+      "name": "imp_ClearEventFlag",
+      "comment": "cdvd_ee_driver \u2192 thevent::ClearEventFlag (#8)"
+    },
+    {
+      "address": "0x0003D22C",
+      "name": "imp_WaitEventFlag",
+      "comment": "cdvd_ee_driver \u2192 thevent::WaitEventFlag (#10)"
+    },
+    {
+      "address": "0x00041608",
+      "name": "imp_CreateEventFlag",
+      "comment": "FILEIO_service \u2192 thevent::CreateEventFlag (#4)"
+    },
+    {
+      "address": "0x00041610",
+      "name": "imp_SetEventFlag",
+      "comment": "FILEIO_service \u2192 thevent::SetEventFlag (#6)"
+    },
+    {
+      "address": "0x00041618",
+      "name": "imp_ClearEventFlag",
+      "comment": "FILEIO_service \u2192 thevent::ClearEventFlag (#8)"
+    },
+    {
+      "address": "0x00041620",
+      "name": "imp_WaitEventFlag",
+      "comment": "FILEIO_service \u2192 thevent::WaitEventFlag (#10)"
+    },
+    {
+      "address": "0x000472D0",
+      "name": "imp_CreateEventFlag",
+      "comment": "sio2man \u2192 thevent::CreateEventFlag (#4)"
+    },
+    {
+      "address": "0x000472D8",
+      "name": "imp_SetEventFlag",
+      "comment": "sio2man \u2192 thevent::SetEventFlag (#6)"
+    },
+    {
+      "address": "0x000472E0",
+      "name": "imp_iSetEventFlag",
+      "comment": "sio2man \u2192 thevent::iSetEventFlag (#7)"
+    },
+    {
+      "address": "0x000472E8",
+      "name": "imp_ClearEventFlag",
+      "comment": "sio2man \u2192 thevent::ClearEventFlag (#8)"
+    },
+    {
+      "address": "0x000472F0",
+      "name": "imp_WaitEventFlag",
+      "comment": "sio2man \u2192 thevent::WaitEventFlag (#10)"
+    },
+    {
+      "address": "0x0004A4F8",
+      "name": "imp_SetEventFlag",
+      "comment": "cdvd_st_driver \u2192 thevent::SetEventFlag (#6)"
+    },
+    {
+      "address": "0x0004A500",
+      "name": "imp_iSetEventFlag",
+      "comment": "cdvd_st_driver \u2192 thevent::iSetEventFlag (#7)"
+    },
+    {
+      "address": "0x0004A508",
+      "name": "imp_ClearEventFlag",
+      "comment": "cdvd_st_driver \u2192 thevent::ClearEventFlag (#8)"
+    },
+    {
+      "address": "0x0004A510",
+      "name": "imp_iClearEventFlag",
+      "comment": "cdvd_st_driver \u2192 thevent::iClearEventFlag (#9)"
+    },
+    {
+      "address": "0x0004A518",
+      "name": "imp_WaitEventFlag",
+      "comment": "cdvd_st_driver \u2192 thevent::WaitEventFlag (#10)"
+    },
+    {
+      "address": "0x00056700",
+      "name": "imp_CreateEventFlag",
+      "comment": "ds2u_s1 \u2192 thevent::CreateEventFlag (#4)"
+    },
+    {
+      "address": "0x00056708",
+      "name": "imp_DeleteEventFlag",
+      "comment": "ds2u_s1 \u2192 thevent::DeleteEventFlag (#5)"
+    },
+    {
+      "address": "0x00056710",
+      "name": "imp_SetEventFlag",
+      "comment": "ds2u_s1 \u2192 thevent::SetEventFlag (#6)"
+    },
+    {
+      "address": "0x00056718",
+      "name": "imp_ClearEventFlag",
+      "comment": "ds2u_s1 \u2192 thevent::ClearEventFlag (#8)"
+    },
+    {
+      "address": "0x00056720",
+      "name": "imp_WaitEventFlag",
+      "comment": "ds2u_s1 \u2192 thevent::WaitEventFlag (#10)"
+    },
+    {
+      "address": "0x00056728",
+      "name": "imp_ReferEventFlagStatus",
+      "comment": "ds2u_s1 \u2192 thevent::ReferEventFlagStatus (#13)"
+    },
+    {
+      "address": "0x1C013CD4",
+      "name": "imp_CreateEventFlag",
+      "comment": "Vblank_service \u2192 thevent::CreateEventFlag (#4, iop 0x00013CD4)"
+    },
+    {
+      "address": "0x1C013CDC",
+      "name": "imp_iSetEventFlag",
+      "comment": "Vblank_service \u2192 thevent::iSetEventFlag (#7, iop 0x00013CDC)"
+    },
+    {
+      "address": "0x1C013CE4",
+      "name": "imp_iClearEventFlag",
+      "comment": "Vblank_service \u2192 thevent::iClearEventFlag (#9, iop 0x00013CE4)"
+    },
+    {
+      "address": "0x1C013CEC",
+      "name": "imp_WaitEventFlag",
+      "comment": "Vblank_service \u2192 thevent::WaitEventFlag (#10, iop 0x00013CEC)"
+    },
+    {
+      "address": "0x1C019658",
+      "name": "imp_CreateEventFlag",
+      "comment": "Moldule_File_loader \u2192 thevent::CreateEventFlag (#4, iop 0x00019658)"
+    },
+    {
+      "address": "0x1C019660",
+      "name": "imp_SetEventFlag",
+      "comment": "Moldule_File_loader \u2192 thevent::SetEventFlag (#6, iop 0x00019660)"
+    },
+    {
+      "address": "0x1C019668",
+      "name": "imp_WaitEventFlag",
+      "comment": "Moldule_File_loader \u2192 thevent::WaitEventFlag (#10, iop 0x00019668)"
+    },
+    {
+      "address": "0x1C01E210",
+      "name": "imp_CreateEventFlag",
+      "comment": "IOP_SIF_rpc_interface \u2192 thevent::CreateEventFlag (#4, iop 0x0001E210)"
+    },
+    {
+      "address": "0x1C01E218",
+      "name": "imp_iSetEventFlag",
+      "comment": "IOP_SIF_rpc_interface \u2192 thevent::iSetEventFlag (#7, iop 0x0001E218)"
+    },
+    {
+      "address": "0x1C01E220",
+      "name": "imp_ClearEventFlag",
+      "comment": "IOP_SIF_rpc_interface \u2192 thevent::ClearEventFlag (#8, iop 0x0001E220)"
+    },
+    {
+      "address": "0x1C01E228",
+      "name": "imp_WaitEventFlag",
+      "comment": "IOP_SIF_rpc_interface \u2192 thevent::WaitEventFlag (#10, iop 0x0001E228)"
+    },
+    {
+      "address": "0x1C020160",
+      "name": "imp_iSetEventFlag",
+      "comment": "RebootByEE \u2192 thevent::iSetEventFlag (#7, iop 0x00020160)"
+    },
+    {
+      "address": "0x1C020168",
+      "name": "imp_WaitEventFlag",
+      "comment": "RebootByEE \u2192 thevent::WaitEventFlag (#10, iop 0x00020168)"
+    },
+    {
+      "address": "0x1C02E44C",
+      "name": "imp_CreateEventFlag",
+      "comment": "cdvd_driver \u2192 thevent::CreateEventFlag (#4, iop 0x0002E44C)"
+    },
+    {
+      "address": "0x1C02E454",
+      "name": "imp_DeleteEventFlag",
+      "comment": "cdvd_driver \u2192 thevent::DeleteEventFlag (#5, iop 0x0002E454)"
+    },
+    {
+      "address": "0x1C02E45C",
+      "name": "imp_SetEventFlag",
+      "comment": "cdvd_driver \u2192 thevent::SetEventFlag (#6, iop 0x0002E45C)"
+    },
+    {
+      "address": "0x1C02E464",
+      "name": "imp_iSetEventFlag",
+      "comment": "cdvd_driver \u2192 thevent::iSetEventFlag (#7, iop 0x0002E464)"
+    },
+    {
+      "address": "0x1C02E46C",
+      "name": "imp_ClearEventFlag",
+      "comment": "cdvd_driver \u2192 thevent::ClearEventFlag (#8, iop 0x0002E46C)"
+    },
+    {
+      "address": "0x1C02E474",
+      "name": "imp_iClearEventFlag",
+      "comment": "cdvd_driver \u2192 thevent::iClearEventFlag (#9, iop 0x0002E474)"
+    },
+    {
+      "address": "0x1C02E47C",
+      "name": "imp_WaitEventFlag",
+      "comment": "cdvd_driver \u2192 thevent::WaitEventFlag (#10, iop 0x0002E47C)"
+    },
+    {
+      "address": "0x1C02E484",
+      "name": "imp_PollEventFlag",
+      "comment": "cdvd_driver \u2192 thevent::PollEventFlag (#11, iop 0x0002E484)"
+    },
+    {
+      "address": "0x1C02E48C",
+      "name": "imp_ReferEventFlagStatus",
+      "comment": "cdvd_driver \u2192 thevent::ReferEventFlagStatus (#13, iop 0x0002E48C)"
+    },
+    {
+      "address": "0x1C02E494",
+      "name": "imp_iReferEventFlagStatus",
+      "comment": "cdvd_driver \u2192 thevent::iReferEventFlagStatus (#14, iop 0x0002E494)"
+    },
+    {
+      "address": "0x1C03D21C",
+      "name": "imp_iSetEventFlag",
+      "comment": "cdvd_ee_driver \u2192 thevent::iSetEventFlag (#7, iop 0x0003D21C)"
+    },
+    {
+      "address": "0x1C03D224",
+      "name": "imp_ClearEventFlag",
+      "comment": "cdvd_ee_driver \u2192 thevent::ClearEventFlag (#8, iop 0x0003D224)"
+    },
+    {
+      "address": "0x1C03D22C",
+      "name": "imp_WaitEventFlag",
+      "comment": "cdvd_ee_driver \u2192 thevent::WaitEventFlag (#10, iop 0x0003D22C)"
+    },
+    {
+      "address": "0x1C041608",
+      "name": "imp_CreateEventFlag",
+      "comment": "FILEIO_service \u2192 thevent::CreateEventFlag (#4, iop 0x00041608)"
+    },
+    {
+      "address": "0x1C041610",
+      "name": "imp_SetEventFlag",
+      "comment": "FILEIO_service \u2192 thevent::SetEventFlag (#6, iop 0x00041610)"
+    },
+    {
+      "address": "0x1C041618",
+      "name": "imp_ClearEventFlag",
+      "comment": "FILEIO_service \u2192 thevent::ClearEventFlag (#8, iop 0x00041618)"
+    },
+    {
+      "address": "0x1C041620",
+      "name": "imp_WaitEventFlag",
+      "comment": "FILEIO_service \u2192 thevent::WaitEventFlag (#10, iop 0x00041620)"
+    },
+    {
+      "address": "0x1C0472D0",
+      "name": "imp_CreateEventFlag",
+      "comment": "sio2man \u2192 thevent::CreateEventFlag (#4, iop 0x000472D0)"
+    },
+    {
+      "address": "0x1C0472D8",
+      "name": "imp_SetEventFlag",
+      "comment": "sio2man \u2192 thevent::SetEventFlag (#6, iop 0x000472D8)"
+    },
+    {
+      "address": "0x1C0472E0",
+      "name": "imp_iSetEventFlag",
+      "comment": "sio2man \u2192 thevent::iSetEventFlag (#7, iop 0x000472E0)"
+    },
+    {
+      "address": "0x1C0472E8",
+      "name": "imp_ClearEventFlag",
+      "comment": "sio2man \u2192 thevent::ClearEventFlag (#8, iop 0x000472E8)"
+    },
+    {
+      "address": "0x1C0472F0",
+      "name": "imp_WaitEventFlag",
+      "comment": "sio2man \u2192 thevent::WaitEventFlag (#10, iop 0x000472F0)"
+    },
+    {
+      "address": "0x1C04A4F8",
+      "name": "imp_SetEventFlag",
+      "comment": "cdvd_st_driver \u2192 thevent::SetEventFlag (#6, iop 0x0004A4F8)"
+    },
+    {
+      "address": "0x1C04A500",
+      "name": "imp_iSetEventFlag",
+      "comment": "cdvd_st_driver \u2192 thevent::iSetEventFlag (#7, iop 0x0004A500)"
+    },
+    {
+      "address": "0x1C04A508",
+      "name": "imp_ClearEventFlag",
+      "comment": "cdvd_st_driver \u2192 thevent::ClearEventFlag (#8, iop 0x0004A508)"
+    },
+    {
+      "address": "0x1C04A510",
+      "name": "imp_iClearEventFlag",
+      "comment": "cdvd_st_driver \u2192 thevent::iClearEventFlag (#9, iop 0x0004A510)"
+    },
+    {
+      "address": "0x1C04A518",
+      "name": "imp_WaitEventFlag",
+      "comment": "cdvd_st_driver \u2192 thevent::WaitEventFlag (#10, iop 0x0004A518)"
+    },
+    {
+      "address": "0x1C056700",
+      "name": "imp_CreateEventFlag",
+      "comment": "ds2u_s1 \u2192 thevent::CreateEventFlag (#4, iop 0x00056700)"
+    },
+    {
+      "address": "0x1C056708",
+      "name": "imp_DeleteEventFlag",
+      "comment": "ds2u_s1 \u2192 thevent::DeleteEventFlag (#5, iop 0x00056708)"
+    },
+    {
+      "address": "0x1C056710",
+      "name": "imp_SetEventFlag",
+      "comment": "ds2u_s1 \u2192 thevent::SetEventFlag (#6, iop 0x00056710)"
+    },
+    {
+      "address": "0x1C056718",
+      "name": "imp_ClearEventFlag",
+      "comment": "ds2u_s1 \u2192 thevent::ClearEventFlag (#8, iop 0x00056718)"
+    },
+    {
+      "address": "0x1C056720",
+      "name": "imp_WaitEventFlag",
+      "comment": "ds2u_s1 \u2192 thevent::WaitEventFlag (#10, iop 0x00056720)"
+    },
+    {
+      "address": "0x1C056728",
+      "name": "imp_ReferEventFlagStatus",
+      "comment": "ds2u_s1 \u2192 thevent::ReferEventFlagStatus (#13, iop 0x00056728)"
+    },
+    {
+      "address": "0x1C087968",
+      "name": "imp_CreateEventFlag",
+      "comment": "USB_driver \u2192 thevent::CreateEventFlag (#4, iop 0x00087968)"
+    },
+    {
+      "address": "0x1C087970",
+      "name": "imp_DeleteEventFlag",
+      "comment": "USB_driver \u2192 thevent::DeleteEventFlag (#5, iop 0x00087970)"
+    },
+    {
+      "address": "0x1C087978",
+      "name": "imp_SetEventFlag",
+      "comment": "USB_driver \u2192 thevent::SetEventFlag (#6, iop 0x00087978)"
+    },
+    {
+      "address": "0x1C087980",
+      "name": "imp_iSetEventFlag",
+      "comment": "USB_driver \u2192 thevent::iSetEventFlag (#7, iop 0x00087980)"
+    },
+    {
+      "address": "0x1C087988",
+      "name": "imp_WaitEventFlag",
+      "comment": "USB_driver \u2192 thevent::WaitEventFlag (#10, iop 0x00087988)"
+    },
+    {
+      "address": "0x1C098144",
+      "name": "imp_CreateEventFlag",
+      "comment": "Sound_Device_Library \u2192 thevent::CreateEventFlag (#4, iop 0x00098144)"
+    },
+    {
+      "address": "0x1C09814C",
+      "name": "imp_DeleteEventFlag",
+      "comment": "Sound_Device_Library \u2192 thevent::DeleteEventFlag (#5, iop 0x0009814C)"
+    },
+    {
+      "address": "0x1C098154",
+      "name": "imp_SetEventFlag",
+      "comment": "Sound_Device_Library \u2192 thevent::SetEventFlag (#6, iop 0x00098154)"
+    },
+    {
+      "address": "0x1C09815C",
+      "name": "imp_iSetEventFlag",
+      "comment": "Sound_Device_Library \u2192 thevent::iSetEventFlag (#7, iop 0x0009815C)"
+    },
+    {
+      "address": "0x1C098164",
+      "name": "imp_ClearEventFlag",
+      "comment": "Sound_Device_Library \u2192 thevent::ClearEventFlag (#8, iop 0x00098164)"
+    },
+    {
+      "address": "0x1C09816C",
+      "name": "imp_iClearEventFlag",
+      "comment": "Sound_Device_Library \u2192 thevent::iClearEventFlag (#9, iop 0x0009816C)"
+    },
+    {
+      "address": "0x1C098174",
+      "name": "imp_WaitEventFlag",
+      "comment": "Sound_Device_Library \u2192 thevent::WaitEventFlag (#10, iop 0x00098174)"
+    }
+  ]
+}

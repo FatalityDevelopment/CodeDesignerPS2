@@ -1,0 +1,458 @@
+{
+  "setName": "IOP: sysmem",
+  "gameId": "SCUS-97275",
+  "isBuiltIn": false,
+  "isSystem": true,
+  "entries": [
+    {
+      "address": "0x00003714",
+      "name": "imp_AllocSysMemory",
+      "comment": "Module_Manager \u2192 sysmem::AllocSysMemory (#4)"
+    },
+    {
+      "address": "0x0000371C",
+      "name": "imp_FreeSysMemory",
+      "comment": "Module_Manager \u2192 sysmem::FreeSysMemory (#5)"
+    },
+    {
+      "address": "0x00003724",
+      "name": "imp_QueryMemSize",
+      "comment": "Module_Manager \u2192 sysmem::QueryMemSize (#6)"
+    },
+    {
+      "address": "0x0000372C",
+      "name": "imp_QueryBlockTopAddress",
+      "comment": "Module_Manager \u2192 sysmem::QueryBlockTopAddress (#9)"
+    },
+    {
+      "address": "0x00003734",
+      "name": "imp_QueryBlockSize",
+      "comment": "Module_Manager \u2192 sysmem::QueryBlockSize (#10)"
+    },
+    {
+      "address": "0x00003EC4",
+      "name": "imp_AllocSysMemory",
+      "comment": "Exception_Manager \u2192 sysmem::AllocSysMemory (#4)"
+    },
+    {
+      "address": "0x00007994",
+      "name": "imp_Kprintf",
+      "comment": "dmacman \u2192 sysmem::Kprintf (#14)"
+    },
+    {
+      "address": "0x0000B664",
+      "name": "imp_AllocSysMemory",
+      "comment": "Heap_lib \u2192 sysmem::AllocSysMemory (#4)"
+    },
+    {
+      "address": "0x0000B66C",
+      "name": "imp_FreeSysMemory",
+      "comment": "Heap_lib \u2192 sysmem::FreeSysMemory (#5)"
+    },
+    {
+      "address": "0x0000B674",
+      "name": "imp_QueryBlockSize",
+      "comment": "Heap_lib \u2192 sysmem::QueryBlockSize (#10)"
+    },
+    {
+      "address": "0x00012214",
+      "name": "imp_AllocSysMemory",
+      "comment": "Multi_Thread_Manager \u2192 sysmem::AllocSysMemory (#4)"
+    },
+    {
+      "address": "0x0001221C",
+      "name": "imp_FreeSysMemory",
+      "comment": "Multi_Thread_Manager \u2192 sysmem::FreeSysMemory (#5)"
+    },
+    {
+      "address": "0x00012224",
+      "name": "imp_QueryBlockTopAddress",
+      "comment": "Multi_Thread_Manager \u2192 sysmem::QueryBlockTopAddress (#9)"
+    },
+    {
+      "address": "0x0001222C",
+      "name": "imp_QueryBlockSize",
+      "comment": "Multi_Thread_Manager \u2192 sysmem::QueryBlockSize (#10)"
+    },
+    {
+      "address": "0x00012234",
+      "name": "imp_Kprintf",
+      "comment": "Multi_Thread_Manager \u2192 sysmem::Kprintf (#14)"
+    },
+    {
+      "address": "0x00015C94",
+      "name": "imp_Kprintf",
+      "comment": "IO/File_Manager \u2192 sysmem::Kprintf (#14)"
+    },
+    {
+      "address": "0x00019434",
+      "name": "imp_return_addr_of_memsize",
+      "comment": "Moldule_File_loader \u2192 sysmem::return_addr_of_memsize (#3)"
+    },
+    {
+      "address": "0x0001943C",
+      "name": "imp_AllocSysMemory",
+      "comment": "Moldule_File_loader \u2192 sysmem::AllocSysMemory (#4)"
+    },
+    {
+      "address": "0x00019444",
+      "name": "imp_FreeSysMemory",
+      "comment": "Moldule_File_loader \u2192 sysmem::FreeSysMemory (#5)"
+    },
+    {
+      "address": "0x0001944C",
+      "name": "imp_QueryMemSize",
+      "comment": "Moldule_File_loader \u2192 sysmem::QueryMemSize (#6)"
+    },
+    {
+      "address": "0x00019454",
+      "name": "imp_QueryBlockTopAddress",
+      "comment": "Moldule_File_loader \u2192 sysmem::QueryBlockTopAddress (#9)"
+    },
+    {
+      "address": "0x0001945C",
+      "name": "imp_Kprintf",
+      "comment": "Moldule_File_loader \u2192 sysmem::Kprintf (#14)"
+    },
+    {
+      "address": "0x00021E24",
+      "name": "imp_AllocSysMemory",
+      "comment": "LoadModuleByEE \u2192 sysmem::AllocSysMemory (#4)"
+    },
+    {
+      "address": "0x00021E2C",
+      "name": "imp_FreeSysMemory",
+      "comment": "LoadModuleByEE \u2192 sysmem::FreeSysMemory (#5)"
+    },
+    {
+      "address": "0x0002E2C4",
+      "name": "imp_AllocSysMemory",
+      "comment": "cdvd_driver \u2192 sysmem::AllocSysMemory (#4)"
+    },
+    {
+      "address": "0x0002E2CC",
+      "name": "imp_FreeSysMemory",
+      "comment": "cdvd_driver \u2192 sysmem::FreeSysMemory (#5)"
+    },
+    {
+      "address": "0x0002E2D4",
+      "name": "imp_Kprintf",
+      "comment": "cdvd_driver \u2192 sysmem::Kprintf (#14)"
+    },
+    {
+      "address": "0x0003D0B4",
+      "name": "imp_Kprintf",
+      "comment": "cdvd_ee_driver \u2192 sysmem::Kprintf (#14)"
+    },
+    {
+      "address": "0x000414C4",
+      "name": "imp_AllocSysMemory",
+      "comment": "FILEIO_service \u2192 sysmem::AllocSysMemory (#4)"
+    },
+    {
+      "address": "0x000414CC",
+      "name": "imp_FreeSysMemory",
+      "comment": "FILEIO_service \u2192 sysmem::FreeSysMemory (#5)"
+    },
+    {
+      "address": "0x000414D4",
+      "name": "imp_QueryMemSize",
+      "comment": "FILEIO_service \u2192 sysmem::QueryMemSize (#6)"
+    },
+    {
+      "address": "0x000414DC",
+      "name": "imp_QueryMaxFreeMemSize",
+      "comment": "FILEIO_service \u2192 sysmem::QueryMaxFreeMemSize (#7)"
+    },
+    {
+      "address": "0x000414E4",
+      "name": "imp_QueryTotalFreeMemSize",
+      "comment": "FILEIO_service \u2192 sysmem::QueryTotalFreeMemSize (#8)"
+    },
+    {
+      "address": "0x000414EC",
+      "name": "imp_QueryBlockTopAddress",
+      "comment": "FILEIO_service \u2192 sysmem::QueryBlockTopAddress (#9)"
+    },
+    {
+      "address": "0x000414F4",
+      "name": "imp_QueryBlockSize",
+      "comment": "FILEIO_service \u2192 sysmem::QueryBlockSize (#10)"
+    },
+    {
+      "address": "0x000414FC",
+      "name": "imp_Kprintf",
+      "comment": "FILEIO_service \u2192 sysmem::Kprintf (#14)"
+    },
+    {
+      "address": "0x000462A0",
+      "name": "imp_AllocSysMemory",
+      "comment": "SyncEE \u2192 sysmem::AllocSysMemory (#4)"
+    },
+    {
+      "address": "0x0004A414",
+      "name": "imp_Kprintf",
+      "comment": "cdvd_st_driver \u2192 sysmem::Kprintf (#14)"
+    },
+    {
+      "address": "0x0004FEC4",
+      "name": "imp_Kprintf",
+      "comment": "Dbc_Manager \u2192 sysmem::Kprintf (#14)"
+    },
+    {
+      "address": "0x1C003714",
+      "name": "imp_AllocSysMemory",
+      "comment": "Module_Manager \u2192 sysmem::AllocSysMemory (#4, iop 0x00003714)"
+    },
+    {
+      "address": "0x1C00371C",
+      "name": "imp_FreeSysMemory",
+      "comment": "Module_Manager \u2192 sysmem::FreeSysMemory (#5, iop 0x0000371C)"
+    },
+    {
+      "address": "0x1C003724",
+      "name": "imp_QueryMemSize",
+      "comment": "Module_Manager \u2192 sysmem::QueryMemSize (#6, iop 0x00003724)"
+    },
+    {
+      "address": "0x1C00372C",
+      "name": "imp_QueryBlockTopAddress",
+      "comment": "Module_Manager \u2192 sysmem::QueryBlockTopAddress (#9, iop 0x0000372C)"
+    },
+    {
+      "address": "0x1C003734",
+      "name": "imp_QueryBlockSize",
+      "comment": "Module_Manager \u2192 sysmem::QueryBlockSize (#10, iop 0x00003734)"
+    },
+    {
+      "address": "0x1C003EC4",
+      "name": "imp_AllocSysMemory",
+      "comment": "Exception_Manager \u2192 sysmem::AllocSysMemory (#4, iop 0x00003EC4)"
+    },
+    {
+      "address": "0x1C007994",
+      "name": "imp_Kprintf",
+      "comment": "dmacman \u2192 sysmem::Kprintf (#14, iop 0x00007994)"
+    },
+    {
+      "address": "0x1C00B664",
+      "name": "imp_AllocSysMemory",
+      "comment": "Heap_lib \u2192 sysmem::AllocSysMemory (#4, iop 0x0000B664)"
+    },
+    {
+      "address": "0x1C00B66C",
+      "name": "imp_FreeSysMemory",
+      "comment": "Heap_lib \u2192 sysmem::FreeSysMemory (#5, iop 0x0000B66C)"
+    },
+    {
+      "address": "0x1C00B674",
+      "name": "imp_QueryBlockSize",
+      "comment": "Heap_lib \u2192 sysmem::QueryBlockSize (#10, iop 0x0000B674)"
+    },
+    {
+      "address": "0x1C012214",
+      "name": "imp_AllocSysMemory",
+      "comment": "Multi_Thread_Manager \u2192 sysmem::AllocSysMemory (#4, iop 0x00012214)"
+    },
+    {
+      "address": "0x1C01221C",
+      "name": "imp_FreeSysMemory",
+      "comment": "Multi_Thread_Manager \u2192 sysmem::FreeSysMemory (#5, iop 0x0001221C)"
+    },
+    {
+      "address": "0x1C012224",
+      "name": "imp_QueryBlockTopAddress",
+      "comment": "Multi_Thread_Manager \u2192 sysmem::QueryBlockTopAddress (#9, iop 0x00012224)"
+    },
+    {
+      "address": "0x1C01222C",
+      "name": "imp_QueryBlockSize",
+      "comment": "Multi_Thread_Manager \u2192 sysmem::QueryBlockSize (#10, iop 0x0001222C)"
+    },
+    {
+      "address": "0x1C012234",
+      "name": "imp_Kprintf",
+      "comment": "Multi_Thread_Manager \u2192 sysmem::Kprintf (#14, iop 0x00012234)"
+    },
+    {
+      "address": "0x1C015C94",
+      "name": "imp_Kprintf",
+      "comment": "IO/File_Manager \u2192 sysmem::Kprintf (#14, iop 0x00015C94)"
+    },
+    {
+      "address": "0x1C019434",
+      "name": "imp_return_addr_of_memsize",
+      "comment": "Moldule_File_loader \u2192 sysmem::return_addr_of_memsize (#3, iop 0x00019434)"
+    },
+    {
+      "address": "0x1C01943C",
+      "name": "imp_AllocSysMemory",
+      "comment": "Moldule_File_loader \u2192 sysmem::AllocSysMemory (#4, iop 0x0001943C)"
+    },
+    {
+      "address": "0x1C019444",
+      "name": "imp_FreeSysMemory",
+      "comment": "Moldule_File_loader \u2192 sysmem::FreeSysMemory (#5, iop 0x00019444)"
+    },
+    {
+      "address": "0x1C01944C",
+      "name": "imp_QueryMemSize",
+      "comment": "Moldule_File_loader \u2192 sysmem::QueryMemSize (#6, iop 0x0001944C)"
+    },
+    {
+      "address": "0x1C019454",
+      "name": "imp_QueryBlockTopAddress",
+      "comment": "Moldule_File_loader \u2192 sysmem::QueryBlockTopAddress (#9, iop 0x00019454)"
+    },
+    {
+      "address": "0x1C01945C",
+      "name": "imp_Kprintf",
+      "comment": "Moldule_File_loader \u2192 sysmem::Kprintf (#14, iop 0x0001945C)"
+    },
+    {
+      "address": "0x1C021E24",
+      "name": "imp_AllocSysMemory",
+      "comment": "LoadModuleByEE \u2192 sysmem::AllocSysMemory (#4, iop 0x00021E24)"
+    },
+    {
+      "address": "0x1C021E2C",
+      "name": "imp_FreeSysMemory",
+      "comment": "LoadModuleByEE \u2192 sysmem::FreeSysMemory (#5, iop 0x00021E2C)"
+    },
+    {
+      "address": "0x1C02E2C4",
+      "name": "imp_AllocSysMemory",
+      "comment": "cdvd_driver \u2192 sysmem::AllocSysMemory (#4, iop 0x0002E2C4)"
+    },
+    {
+      "address": "0x1C02E2CC",
+      "name": "imp_FreeSysMemory",
+      "comment": "cdvd_driver \u2192 sysmem::FreeSysMemory (#5, iop 0x0002E2CC)"
+    },
+    {
+      "address": "0x1C02E2D4",
+      "name": "imp_Kprintf",
+      "comment": "cdvd_driver \u2192 sysmem::Kprintf (#14, iop 0x0002E2D4)"
+    },
+    {
+      "address": "0x1C03D0B4",
+      "name": "imp_Kprintf",
+      "comment": "cdvd_ee_driver \u2192 sysmem::Kprintf (#14, iop 0x0003D0B4)"
+    },
+    {
+      "address": "0x1C0414C4",
+      "name": "imp_AllocSysMemory",
+      "comment": "FILEIO_service \u2192 sysmem::AllocSysMemory (#4, iop 0x000414C4)"
+    },
+    {
+      "address": "0x1C0414CC",
+      "name": "imp_FreeSysMemory",
+      "comment": "FILEIO_service \u2192 sysmem::FreeSysMemory (#5, iop 0x000414CC)"
+    },
+    {
+      "address": "0x1C0414D4",
+      "name": "imp_QueryMemSize",
+      "comment": "FILEIO_service \u2192 sysmem::QueryMemSize (#6, iop 0x000414D4)"
+    },
+    {
+      "address": "0x1C0414DC",
+      "name": "imp_QueryMaxFreeMemSize",
+      "comment": "FILEIO_service \u2192 sysmem::QueryMaxFreeMemSize (#7, iop 0x000414DC)"
+    },
+    {
+      "address": "0x1C0414E4",
+      "name": "imp_QueryTotalFreeMemSize",
+      "comment": "FILEIO_service \u2192 sysmem::QueryTotalFreeMemSize (#8, iop 0x000414E4)"
+    },
+    {
+      "address": "0x1C0414EC",
+      "name": "imp_QueryBlockTopAddress",
+      "comment": "FILEIO_service \u2192 sysmem::QueryBlockTopAddress (#9, iop 0x000414EC)"
+    },
+    {
+      "address": "0x1C0414F4",
+      "name": "imp_QueryBlockSize",
+      "comment": "FILEIO_service \u2192 sysmem::QueryBlockSize (#10, iop 0x000414F4)"
+    },
+    {
+      "address": "0x1C0414FC",
+      "name": "imp_Kprintf",
+      "comment": "FILEIO_service \u2192 sysmem::Kprintf (#14, iop 0x000414FC)"
+    },
+    {
+      "address": "0x1C0462A0",
+      "name": "imp_AllocSysMemory",
+      "comment": "SyncEE \u2192 sysmem::AllocSysMemory (#4, iop 0x000462A0)"
+    },
+    {
+      "address": "0x1C04A414",
+      "name": "imp_Kprintf",
+      "comment": "cdvd_st_driver \u2192 sysmem::Kprintf (#14, iop 0x0004A414)"
+    },
+    {
+      "address": "0x1C04FEC4",
+      "name": "imp_Kprintf",
+      "comment": "Dbc_Manager \u2192 sysmem::Kprintf (#14, iop 0x0004FEC4)"
+    },
+    {
+      "address": "0x1C087854",
+      "name": "imp_AllocSysMemory",
+      "comment": "USB_driver \u2192 sysmem::AllocSysMemory (#4, iop 0x00087854)"
+    },
+    {
+      "address": "0x1C08785C",
+      "name": "imp_FreeSysMemory",
+      "comment": "USB_driver \u2192 sysmem::FreeSysMemory (#5, iop 0x0008785C)"
+    },
+    {
+      "address": "0x1C090858",
+      "name": "imp_AllocSysMemory",
+      "comment": "USB_Keyboard_Driver \u2192 sysmem::AllocSysMemory (#4, iop 0x00090858)"
+    },
+    {
+      "address": "0x1C090860",
+      "name": "imp_FreeSysMemory",
+      "comment": "USB_Keyboard_Driver \u2192 sysmem::FreeSysMemory (#5, iop 0x00090860)"
+    },
+    {
+      "address": "0x1C0B3740",
+      "name": "imp_AllocSysMemory",
+      "comment": "989snd_Library \u2192 sysmem::AllocSysMemory (#4, iop 0x000B3740)"
+    },
+    {
+      "address": "0x1C0B3748",
+      "name": "imp_FreeSysMemory",
+      "comment": "989snd_Library \u2192 sysmem::FreeSysMemory (#5, iop 0x000B3748)"
+    },
+    {
+      "address": "0x1C0B3750",
+      "name": "imp_QueryMaxFreeMemSize",
+      "comment": "989snd_Library \u2192 sysmem::QueryMaxFreeMemSize (#7, iop 0x000B3750)"
+    },
+    {
+      "address": "0x1C0BF9D8",
+      "name": "imp_AllocSysMemory",
+      "comment": "989_DATA_STREAMER \u2192 sysmem::AllocSysMemory (#4, iop 0x000BF9D8)"
+    },
+    {
+      "address": "0x1C0C81B8",
+      "name": "imp_AllocSysMemory",
+      "comment": "lgAud \u2192 sysmem::AllocSysMemory (#4, iop 0x000C81B8)"
+    },
+    {
+      "address": "0x1C0C81C0",
+      "name": "imp_FreeSysMemory",
+      "comment": "lgAud \u2192 sysmem::FreeSysMemory (#5, iop 0x000C81C0)"
+    },
+    {
+      "address": "0x1C0DB894",
+      "name": "imp_AllocSysMemory",
+      "comment": "headset_streamer \u2192 sysmem::AllocSysMemory (#4, iop 0x000DB894)"
+    },
+    {
+      "address": "0x1C0DB89C",
+      "name": "imp_FreeSysMemory",
+      "comment": "headset_streamer \u2192 sysmem::FreeSysMemory (#5, iop 0x000DB89C)"
+    }
+  ]
+}

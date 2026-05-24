@@ -1,0 +1,933 @@
+{
+  "setName": "IOP: thbase",
+  "gameId": "SCUS-97275",
+  "isBuiltIn": false,
+  "isSystem": true,
+  "entries": [
+    {
+      "address": "0x00013CB0",
+      "name": "imp_GetSystemStatusFlag",
+      "comment": "Vblank_service \u2192 thbase::GetSystemStatusFlag (#41)"
+    },
+    {
+      "address": "0x00015D6C",
+      "name": "imp_ChangeThreadPriority",
+      "comment": "IO/File_Manager \u2192 thbase::ChangeThreadPriority (#14)"
+    },
+    {
+      "address": "0x00015D74",
+      "name": "imp_ReferThreadStatus",
+      "comment": "IO/File_Manager \u2192 thbase::ReferThreadStatus (#22)"
+    },
+    {
+      "address": "0x000195FC",
+      "name": "imp_CreateThread",
+      "comment": "Moldule_File_loader \u2192 thbase::CreateThread (#4)"
+    },
+    {
+      "address": "0x00019604",
+      "name": "imp_DeleteThread",
+      "comment": "Moldule_File_loader \u2192 thbase::DeleteThread (#5)"
+    },
+    {
+      "address": "0x0001960C",
+      "name": "imp_StartThread",
+      "comment": "Moldule_File_loader \u2192 thbase::StartThread (#6)"
+    },
+    {
+      "address": "0x00019614",
+      "name": "imp_TerminateThread",
+      "comment": "Moldule_File_loader \u2192 thbase::TerminateThread (#10)"
+    },
+    {
+      "address": "0x0001961C",
+      "name": "imp_ChangeThreadPriority",
+      "comment": "Moldule_File_loader \u2192 thbase::ChangeThreadPriority (#14)"
+    },
+    {
+      "address": "0x00019624",
+      "name": "imp_GetThreadId",
+      "comment": "Moldule_File_loader \u2192 thbase::GetThreadId (#20)"
+    },
+    {
+      "address": "0x0001962C",
+      "name": "imp_CheckThreadStack",
+      "comment": "Moldule_File_loader \u2192 thbase::CheckThreadStack (#21)"
+    },
+    {
+      "address": "0x00019634",
+      "name": "imp_SleepThread",
+      "comment": "Moldule_File_loader \u2192 thbase::SleepThread (#24)"
+    },
+    {
+      "address": "0x0001E1D4",
+      "name": "imp_SleepThread",
+      "comment": "IOP_SIF_rpc_interface \u2192 thbase::SleepThread (#24)"
+    },
+    {
+      "address": "0x0001E1DC",
+      "name": "imp_iWakeupThread",
+      "comment": "IOP_SIF_rpc_interface \u2192 thbase::iWakeupThread (#26)"
+    },
+    {
+      "address": "0x0001E1E4",
+      "name": "imp_iSetAlarm",
+      "comment": "IOP_SIF_rpc_interface \u2192 thbase::iSetAlarm (#36)"
+    },
+    {
+      "address": "0x0001E1EC",
+      "name": "imp_GetSystemStatusFlag",
+      "comment": "IOP_SIF_rpc_interface \u2192 thbase::GetSystemStatusFlag (#41)"
+    },
+    {
+      "address": "0x0002012C",
+      "name": "imp_CreateThread",
+      "comment": "RebootByEE \u2192 thbase::CreateThread (#4)"
+    },
+    {
+      "address": "0x00020134",
+      "name": "imp_StartThread",
+      "comment": "RebootByEE \u2192 thbase::StartThread (#6)"
+    },
+    {
+      "address": "0x0002013C",
+      "name": "imp_GetSystemStatusFlag",
+      "comment": "RebootByEE \u2192 thbase::GetSystemStatusFlag (#41)"
+    },
+    {
+      "address": "0x00022010",
+      "name": "imp_CreateThread",
+      "comment": "LoadModuleByEE \u2192 thbase::CreateThread (#4)"
+    },
+    {
+      "address": "0x00022018",
+      "name": "imp_StartThread",
+      "comment": "LoadModuleByEE \u2192 thbase::StartThread (#6)"
+    },
+    {
+      "address": "0x00022020",
+      "name": "imp_GetThreadId",
+      "comment": "LoadModuleByEE \u2192 thbase::GetThreadId (#20)"
+    },
+    {
+      "address": "0x0002E3F8",
+      "name": "imp_GetThreadId",
+      "comment": "cdvd_driver \u2192 thbase::GetThreadId (#20)"
+    },
+    {
+      "address": "0x0002E400",
+      "name": "imp_DelayThread",
+      "comment": "cdvd_driver \u2192 thbase::DelayThread (#33)"
+    },
+    {
+      "address": "0x0002E408",
+      "name": "imp_GetSystemTime",
+      "comment": "cdvd_driver \u2192 thbase::GetSystemTime (#34)"
+    },
+    {
+      "address": "0x0002E410",
+      "name": "imp_SetAlarm",
+      "comment": "cdvd_driver \u2192 thbase::SetAlarm (#35)"
+    },
+    {
+      "address": "0x0002E418",
+      "name": "imp_iSetAlarm",
+      "comment": "cdvd_driver \u2192 thbase::iSetAlarm (#36)"
+    },
+    {
+      "address": "0x0002E420",
+      "name": "imp_CancelAlarm",
+      "comment": "cdvd_driver \u2192 thbase::CancelAlarm (#37)"
+    },
+    {
+      "address": "0x0002E428",
+      "name": "imp_iCancelAlarm",
+      "comment": "cdvd_driver \u2192 thbase::iCancelAlarm (#38)"
+    },
+    {
+      "address": "0x0003D1A8",
+      "name": "imp_CreateThread",
+      "comment": "cdvd_ee_driver \u2192 thbase::CreateThread (#4)"
+    },
+    {
+      "address": "0x0003D1B0",
+      "name": "imp_DeleteThread",
+      "comment": "cdvd_ee_driver \u2192 thbase::DeleteThread (#5)"
+    },
+    {
+      "address": "0x0003D1B8",
+      "name": "imp_StartThread",
+      "comment": "cdvd_ee_driver \u2192 thbase::StartThread (#6)"
+    },
+    {
+      "address": "0x0003D1C0",
+      "name": "imp_ExitDeleteThread",
+      "comment": "cdvd_ee_driver \u2192 thbase::ExitDeleteThread (#9)"
+    },
+    {
+      "address": "0x0003D1C8",
+      "name": "imp_TerminateThread",
+      "comment": "cdvd_ee_driver \u2192 thbase::TerminateThread (#10)"
+    },
+    {
+      "address": "0x0003D1D0",
+      "name": "imp_ChangeThreadPriority",
+      "comment": "cdvd_ee_driver \u2192 thbase::ChangeThreadPriority (#14)"
+    },
+    {
+      "address": "0x0003D1D8",
+      "name": "imp_GetThreadId",
+      "comment": "cdvd_ee_driver \u2192 thbase::GetThreadId (#20)"
+    },
+    {
+      "address": "0x0003D1E0",
+      "name": "imp_ReferThreadStatus",
+      "comment": "cdvd_ee_driver \u2192 thbase::ReferThreadStatus (#22)"
+    },
+    {
+      "address": "0x0003D1E8",
+      "name": "imp_DelayThread",
+      "comment": "cdvd_ee_driver \u2192 thbase::DelayThread (#33)"
+    },
+    {
+      "address": "0x0003D1F0",
+      "name": "imp_SetAlarm",
+      "comment": "cdvd_ee_driver \u2192 thbase::SetAlarm (#35)"
+    },
+    {
+      "address": "0x0003D1F8",
+      "name": "imp_CancelAlarm",
+      "comment": "cdvd_ee_driver \u2192 thbase::CancelAlarm (#37)"
+    },
+    {
+      "address": "0x000415B4",
+      "name": "imp_CreateThread",
+      "comment": "FILEIO_service \u2192 thbase::CreateThread (#4)"
+    },
+    {
+      "address": "0x000415BC",
+      "name": "imp_DeleteThread",
+      "comment": "FILEIO_service \u2192 thbase::DeleteThread (#5)"
+    },
+    {
+      "address": "0x000415C4",
+      "name": "imp_StartThread",
+      "comment": "FILEIO_service \u2192 thbase::StartThread (#6)"
+    },
+    {
+      "address": "0x000415CC",
+      "name": "imp_ExitThread",
+      "comment": "FILEIO_service \u2192 thbase::ExitThread (#8)"
+    },
+    {
+      "address": "0x000415D4",
+      "name": "imp_GetThreadId",
+      "comment": "FILEIO_service \u2192 thbase::GetThreadId (#20)"
+    },
+    {
+      "address": "0x000415DC",
+      "name": "imp_ReferThreadStatus",
+      "comment": "FILEIO_service \u2192 thbase::ReferThreadStatus (#22)"
+    },
+    {
+      "address": "0x000415E4",
+      "name": "imp_DelayThread",
+      "comment": "FILEIO_service \u2192 thbase::DelayThread (#33)"
+    },
+    {
+      "address": "0x0004729C",
+      "name": "imp_CreateThread",
+      "comment": "sio2man \u2192 thbase::CreateThread (#4)"
+    },
+    {
+      "address": "0x000472A4",
+      "name": "imp_StartThread",
+      "comment": "sio2man \u2192 thbase::StartThread (#6)"
+    },
+    {
+      "address": "0x000472AC",
+      "name": "imp_GetThreadId",
+      "comment": "sio2man \u2192 thbase::GetThreadId (#20)"
+    },
+    {
+      "address": "0x0004A4BC",
+      "name": "imp_DelayThread",
+      "comment": "cdvd_st_driver \u2192 thbase::DelayThread (#33)"
+    },
+    {
+      "address": "0x0004A4C4",
+      "name": "imp_iSetAlarm",
+      "comment": "cdvd_st_driver \u2192 thbase::iSetAlarm (#36)"
+    },
+    {
+      "address": "0x0004A4CC",
+      "name": "imp_CancelAlarm",
+      "comment": "cdvd_st_driver \u2192 thbase::CancelAlarm (#37)"
+    },
+    {
+      "address": "0x0004A4D4",
+      "name": "imp_iCancelAlarm",
+      "comment": "cdvd_st_driver \u2192 thbase::iCancelAlarm (#38)"
+    },
+    {
+      "address": "0x0004C8E0",
+      "name": "imp_CreateThread",
+      "comment": "sio2d \u2192 thbase::CreateThread (#4)"
+    },
+    {
+      "address": "0x0004C8E8",
+      "name": "imp_StartThread",
+      "comment": "sio2d \u2192 thbase::StartThread (#6)"
+    },
+    {
+      "address": "0x0004FFDC",
+      "name": "imp_CreateThread",
+      "comment": "Dbc_Manager \u2192 thbase::CreateThread (#4)"
+    },
+    {
+      "address": "0x0004FFE4",
+      "name": "imp_StartThread",
+      "comment": "Dbc_Manager \u2192 thbase::StartThread (#6)"
+    },
+    {
+      "address": "0x0004FFEC",
+      "name": "imp_GetThreadId",
+      "comment": "Dbc_Manager \u2192 thbase::GetThreadId (#20)"
+    },
+    {
+      "address": "0x0004FFF4",
+      "name": "imp_DelayThread",
+      "comment": "Dbc_Manager \u2192 thbase::DelayThread (#33)"
+    },
+    {
+      "address": "0x000566C4",
+      "name": "imp_CreateThread",
+      "comment": "ds2u_s1 \u2192 thbase::CreateThread (#4)"
+    },
+    {
+      "address": "0x000566CC",
+      "name": "imp_DeleteThread",
+      "comment": "ds2u_s1 \u2192 thbase::DeleteThread (#5)"
+    },
+    {
+      "address": "0x000566D4",
+      "name": "imp_StartThread",
+      "comment": "ds2u_s1 \u2192 thbase::StartThread (#6)"
+    },
+    {
+      "address": "0x000566DC",
+      "name": "imp_ExitThread",
+      "comment": "ds2u_s1 \u2192 thbase::ExitThread (#8)"
+    },
+    {
+      "address": "0x00068680",
+      "name": "imp_DelayThread",
+      "comment": "mcman \u2192 thbase::DelayThread (#33)"
+    },
+    {
+      "address": "0x00068688",
+      "name": "imp_SetAlarm",
+      "comment": "mcman \u2192 thbase::SetAlarm (#35)"
+    },
+    {
+      "address": "0x00068690",
+      "name": "imp_USec2SysClock",
+      "comment": "mcman \u2192 thbase::USec2SysClock (#39)"
+    },
+    {
+      "address": "0x0007F03C",
+      "name": "imp_CreateThread",
+      "comment": "mcserv \u2192 thbase::CreateThread (#4)"
+    },
+    {
+      "address": "0x0007F044",
+      "name": "imp_DeleteThread",
+      "comment": "mcserv \u2192 thbase::DeleteThread (#5)"
+    },
+    {
+      "address": "0x0007F04C",
+      "name": "imp_StartThread",
+      "comment": "mcserv \u2192 thbase::StartThread (#6)"
+    },
+    {
+      "address": "0x0007F054",
+      "name": "imp_TerminateThread",
+      "comment": "mcserv \u2192 thbase::TerminateThread (#10)"
+    },
+    {
+      "address": "0x0007F05C",
+      "name": "imp_ChangeThreadPriority",
+      "comment": "mcserv \u2192 thbase::ChangeThreadPriority (#14)"
+    },
+    {
+      "address": "0x0007F064",
+      "name": "imp_GetThreadId",
+      "comment": "mcserv \u2192 thbase::GetThreadId (#20)"
+    },
+    {
+      "address": "0x0007F06C",
+      "name": "imp_ReferThreadStatus",
+      "comment": "mcserv \u2192 thbase::ReferThreadStatus (#22)"
+    },
+    {
+      "address": "0x0007F074",
+      "name": "imp_DelayThread",
+      "comment": "mcserv \u2192 thbase::DelayThread (#33)"
+    },
+    {
+      "address": "0x1C013CB0",
+      "name": "imp_GetSystemStatusFlag",
+      "comment": "Vblank_service \u2192 thbase::GetSystemStatusFlag (#41, iop 0x00013CB0)"
+    },
+    {
+      "address": "0x1C015D6C",
+      "name": "imp_ChangeThreadPriority",
+      "comment": "IO/File_Manager \u2192 thbase::ChangeThreadPriority (#14, iop 0x00015D6C)"
+    },
+    {
+      "address": "0x1C015D74",
+      "name": "imp_ReferThreadStatus",
+      "comment": "IO/File_Manager \u2192 thbase::ReferThreadStatus (#22, iop 0x00015D74)"
+    },
+    {
+      "address": "0x1C0195FC",
+      "name": "imp_CreateThread",
+      "comment": "Moldule_File_loader \u2192 thbase::CreateThread (#4, iop 0x000195FC)"
+    },
+    {
+      "address": "0x1C019604",
+      "name": "imp_DeleteThread",
+      "comment": "Moldule_File_loader \u2192 thbase::DeleteThread (#5, iop 0x00019604)"
+    },
+    {
+      "address": "0x1C01960C",
+      "name": "imp_StartThread",
+      "comment": "Moldule_File_loader \u2192 thbase::StartThread (#6, iop 0x0001960C)"
+    },
+    {
+      "address": "0x1C019614",
+      "name": "imp_TerminateThread",
+      "comment": "Moldule_File_loader \u2192 thbase::TerminateThread (#10, iop 0x00019614)"
+    },
+    {
+      "address": "0x1C01961C",
+      "name": "imp_ChangeThreadPriority",
+      "comment": "Moldule_File_loader \u2192 thbase::ChangeThreadPriority (#14, iop 0x0001961C)"
+    },
+    {
+      "address": "0x1C019624",
+      "name": "imp_GetThreadId",
+      "comment": "Moldule_File_loader \u2192 thbase::GetThreadId (#20, iop 0x00019624)"
+    },
+    {
+      "address": "0x1C01962C",
+      "name": "imp_CheckThreadStack",
+      "comment": "Moldule_File_loader \u2192 thbase::CheckThreadStack (#21, iop 0x0001962C)"
+    },
+    {
+      "address": "0x1C019634",
+      "name": "imp_SleepThread",
+      "comment": "Moldule_File_loader \u2192 thbase::SleepThread (#24, iop 0x00019634)"
+    },
+    {
+      "address": "0x1C01E1D4",
+      "name": "imp_SleepThread",
+      "comment": "IOP_SIF_rpc_interface \u2192 thbase::SleepThread (#24, iop 0x0001E1D4)"
+    },
+    {
+      "address": "0x1C01E1DC",
+      "name": "imp_iWakeupThread",
+      "comment": "IOP_SIF_rpc_interface \u2192 thbase::iWakeupThread (#26, iop 0x0001E1DC)"
+    },
+    {
+      "address": "0x1C01E1E4",
+      "name": "imp_iSetAlarm",
+      "comment": "IOP_SIF_rpc_interface \u2192 thbase::iSetAlarm (#36, iop 0x0001E1E4)"
+    },
+    {
+      "address": "0x1C01E1EC",
+      "name": "imp_GetSystemStatusFlag",
+      "comment": "IOP_SIF_rpc_interface \u2192 thbase::GetSystemStatusFlag (#41, iop 0x0001E1EC)"
+    },
+    {
+      "address": "0x1C02012C",
+      "name": "imp_CreateThread",
+      "comment": "RebootByEE \u2192 thbase::CreateThread (#4, iop 0x0002012C)"
+    },
+    {
+      "address": "0x1C020134",
+      "name": "imp_StartThread",
+      "comment": "RebootByEE \u2192 thbase::StartThread (#6, iop 0x00020134)"
+    },
+    {
+      "address": "0x1C02013C",
+      "name": "imp_GetSystemStatusFlag",
+      "comment": "RebootByEE \u2192 thbase::GetSystemStatusFlag (#41, iop 0x0002013C)"
+    },
+    {
+      "address": "0x1C022010",
+      "name": "imp_CreateThread",
+      "comment": "LoadModuleByEE \u2192 thbase::CreateThread (#4, iop 0x00022010)"
+    },
+    {
+      "address": "0x1C022018",
+      "name": "imp_StartThread",
+      "comment": "LoadModuleByEE \u2192 thbase::StartThread (#6, iop 0x00022018)"
+    },
+    {
+      "address": "0x1C022020",
+      "name": "imp_GetThreadId",
+      "comment": "LoadModuleByEE \u2192 thbase::GetThreadId (#20, iop 0x00022020)"
+    },
+    {
+      "address": "0x1C02E3F8",
+      "name": "imp_GetThreadId",
+      "comment": "cdvd_driver \u2192 thbase::GetThreadId (#20, iop 0x0002E3F8)"
+    },
+    {
+      "address": "0x1C02E400",
+      "name": "imp_DelayThread",
+      "comment": "cdvd_driver \u2192 thbase::DelayThread (#33, iop 0x0002E400)"
+    },
+    {
+      "address": "0x1C02E408",
+      "name": "imp_GetSystemTime",
+      "comment": "cdvd_driver \u2192 thbase::GetSystemTime (#34, iop 0x0002E408)"
+    },
+    {
+      "address": "0x1C02E410",
+      "name": "imp_SetAlarm",
+      "comment": "cdvd_driver \u2192 thbase::SetAlarm (#35, iop 0x0002E410)"
+    },
+    {
+      "address": "0x1C02E418",
+      "name": "imp_iSetAlarm",
+      "comment": "cdvd_driver \u2192 thbase::iSetAlarm (#36, iop 0x0002E418)"
+    },
+    {
+      "address": "0x1C02E420",
+      "name": "imp_CancelAlarm",
+      "comment": "cdvd_driver \u2192 thbase::CancelAlarm (#37, iop 0x0002E420)"
+    },
+    {
+      "address": "0x1C02E428",
+      "name": "imp_iCancelAlarm",
+      "comment": "cdvd_driver \u2192 thbase::iCancelAlarm (#38, iop 0x0002E428)"
+    },
+    {
+      "address": "0x1C03D1A8",
+      "name": "imp_CreateThread",
+      "comment": "cdvd_ee_driver \u2192 thbase::CreateThread (#4, iop 0x0003D1A8)"
+    },
+    {
+      "address": "0x1C03D1B0",
+      "name": "imp_DeleteThread",
+      "comment": "cdvd_ee_driver \u2192 thbase::DeleteThread (#5, iop 0x0003D1B0)"
+    },
+    {
+      "address": "0x1C03D1B8",
+      "name": "imp_StartThread",
+      "comment": "cdvd_ee_driver \u2192 thbase::StartThread (#6, iop 0x0003D1B8)"
+    },
+    {
+      "address": "0x1C03D1C0",
+      "name": "imp_ExitDeleteThread",
+      "comment": "cdvd_ee_driver \u2192 thbase::ExitDeleteThread (#9, iop 0x0003D1C0)"
+    },
+    {
+      "address": "0x1C03D1C8",
+      "name": "imp_TerminateThread",
+      "comment": "cdvd_ee_driver \u2192 thbase::TerminateThread (#10, iop 0x0003D1C8)"
+    },
+    {
+      "address": "0x1C03D1D0",
+      "name": "imp_ChangeThreadPriority",
+      "comment": "cdvd_ee_driver \u2192 thbase::ChangeThreadPriority (#14, iop 0x0003D1D0)"
+    },
+    {
+      "address": "0x1C03D1D8",
+      "name": "imp_GetThreadId",
+      "comment": "cdvd_ee_driver \u2192 thbase::GetThreadId (#20, iop 0x0003D1D8)"
+    },
+    {
+      "address": "0x1C03D1E0",
+      "name": "imp_ReferThreadStatus",
+      "comment": "cdvd_ee_driver \u2192 thbase::ReferThreadStatus (#22, iop 0x0003D1E0)"
+    },
+    {
+      "address": "0x1C03D1E8",
+      "name": "imp_DelayThread",
+      "comment": "cdvd_ee_driver \u2192 thbase::DelayThread (#33, iop 0x0003D1E8)"
+    },
+    {
+      "address": "0x1C03D1F0",
+      "name": "imp_SetAlarm",
+      "comment": "cdvd_ee_driver \u2192 thbase::SetAlarm (#35, iop 0x0003D1F0)"
+    },
+    {
+      "address": "0x1C03D1F8",
+      "name": "imp_CancelAlarm",
+      "comment": "cdvd_ee_driver \u2192 thbase::CancelAlarm (#37, iop 0x0003D1F8)"
+    },
+    {
+      "address": "0x1C0415B4",
+      "name": "imp_CreateThread",
+      "comment": "FILEIO_service \u2192 thbase::CreateThread (#4, iop 0x000415B4)"
+    },
+    {
+      "address": "0x1C0415BC",
+      "name": "imp_DeleteThread",
+      "comment": "FILEIO_service \u2192 thbase::DeleteThread (#5, iop 0x000415BC)"
+    },
+    {
+      "address": "0x1C0415C4",
+      "name": "imp_StartThread",
+      "comment": "FILEIO_service \u2192 thbase::StartThread (#6, iop 0x000415C4)"
+    },
+    {
+      "address": "0x1C0415CC",
+      "name": "imp_ExitThread",
+      "comment": "FILEIO_service \u2192 thbase::ExitThread (#8, iop 0x000415CC)"
+    },
+    {
+      "address": "0x1C0415D4",
+      "name": "imp_GetThreadId",
+      "comment": "FILEIO_service \u2192 thbase::GetThreadId (#20, iop 0x000415D4)"
+    },
+    {
+      "address": "0x1C0415DC",
+      "name": "imp_ReferThreadStatus",
+      "comment": "FILEIO_service \u2192 thbase::ReferThreadStatus (#22, iop 0x000415DC)"
+    },
+    {
+      "address": "0x1C0415E4",
+      "name": "imp_DelayThread",
+      "comment": "FILEIO_service \u2192 thbase::DelayThread (#33, iop 0x000415E4)"
+    },
+    {
+      "address": "0x1C04729C",
+      "name": "imp_CreateThread",
+      "comment": "sio2man \u2192 thbase::CreateThread (#4, iop 0x0004729C)"
+    },
+    {
+      "address": "0x1C0472A4",
+      "name": "imp_StartThread",
+      "comment": "sio2man \u2192 thbase::StartThread (#6, iop 0x000472A4)"
+    },
+    {
+      "address": "0x1C0472AC",
+      "name": "imp_GetThreadId",
+      "comment": "sio2man \u2192 thbase::GetThreadId (#20, iop 0x000472AC)"
+    },
+    {
+      "address": "0x1C04A4BC",
+      "name": "imp_DelayThread",
+      "comment": "cdvd_st_driver \u2192 thbase::DelayThread (#33, iop 0x0004A4BC)"
+    },
+    {
+      "address": "0x1C04A4C4",
+      "name": "imp_iSetAlarm",
+      "comment": "cdvd_st_driver \u2192 thbase::iSetAlarm (#36, iop 0x0004A4C4)"
+    },
+    {
+      "address": "0x1C04A4CC",
+      "name": "imp_CancelAlarm",
+      "comment": "cdvd_st_driver \u2192 thbase::CancelAlarm (#37, iop 0x0004A4CC)"
+    },
+    {
+      "address": "0x1C04A4D4",
+      "name": "imp_iCancelAlarm",
+      "comment": "cdvd_st_driver \u2192 thbase::iCancelAlarm (#38, iop 0x0004A4D4)"
+    },
+    {
+      "address": "0x1C04C8E0",
+      "name": "imp_CreateThread",
+      "comment": "sio2d \u2192 thbase::CreateThread (#4, iop 0x0004C8E0)"
+    },
+    {
+      "address": "0x1C04C8E8",
+      "name": "imp_StartThread",
+      "comment": "sio2d \u2192 thbase::StartThread (#6, iop 0x0004C8E8)"
+    },
+    {
+      "address": "0x1C04FFDC",
+      "name": "imp_CreateThread",
+      "comment": "Dbc_Manager \u2192 thbase::CreateThread (#4, iop 0x0004FFDC)"
+    },
+    {
+      "address": "0x1C04FFE4",
+      "name": "imp_StartThread",
+      "comment": "Dbc_Manager \u2192 thbase::StartThread (#6, iop 0x0004FFE4)"
+    },
+    {
+      "address": "0x1C04FFEC",
+      "name": "imp_GetThreadId",
+      "comment": "Dbc_Manager \u2192 thbase::GetThreadId (#20, iop 0x0004FFEC)"
+    },
+    {
+      "address": "0x1C04FFF4",
+      "name": "imp_DelayThread",
+      "comment": "Dbc_Manager \u2192 thbase::DelayThread (#33, iop 0x0004FFF4)"
+    },
+    {
+      "address": "0x1C0566C4",
+      "name": "imp_CreateThread",
+      "comment": "ds2u_s1 \u2192 thbase::CreateThread (#4, iop 0x000566C4)"
+    },
+    {
+      "address": "0x1C0566CC",
+      "name": "imp_DeleteThread",
+      "comment": "ds2u_s1 \u2192 thbase::DeleteThread (#5, iop 0x000566CC)"
+    },
+    {
+      "address": "0x1C0566D4",
+      "name": "imp_StartThread",
+      "comment": "ds2u_s1 \u2192 thbase::StartThread (#6, iop 0x000566D4)"
+    },
+    {
+      "address": "0x1C0566DC",
+      "name": "imp_ExitThread",
+      "comment": "ds2u_s1 \u2192 thbase::ExitThread (#8, iop 0x000566DC)"
+    },
+    {
+      "address": "0x1C068680",
+      "name": "imp_DelayThread",
+      "comment": "mcman \u2192 thbase::DelayThread (#33, iop 0x00068680)"
+    },
+    {
+      "address": "0x1C068688",
+      "name": "imp_SetAlarm",
+      "comment": "mcman \u2192 thbase::SetAlarm (#35, iop 0x00068688)"
+    },
+    {
+      "address": "0x1C068690",
+      "name": "imp_USec2SysClock",
+      "comment": "mcman \u2192 thbase::USec2SysClock (#39, iop 0x00068690)"
+    },
+    {
+      "address": "0x1C07F03C",
+      "name": "imp_CreateThread",
+      "comment": "mcserv \u2192 thbase::CreateThread (#4, iop 0x0007F03C)"
+    },
+    {
+      "address": "0x1C07F044",
+      "name": "imp_DeleteThread",
+      "comment": "mcserv \u2192 thbase::DeleteThread (#5, iop 0x0007F044)"
+    },
+    {
+      "address": "0x1C07F04C",
+      "name": "imp_StartThread",
+      "comment": "mcserv \u2192 thbase::StartThread (#6, iop 0x0007F04C)"
+    },
+    {
+      "address": "0x1C07F054",
+      "name": "imp_TerminateThread",
+      "comment": "mcserv \u2192 thbase::TerminateThread (#10, iop 0x0007F054)"
+    },
+    {
+      "address": "0x1C07F05C",
+      "name": "imp_ChangeThreadPriority",
+      "comment": "mcserv \u2192 thbase::ChangeThreadPriority (#14, iop 0x0007F05C)"
+    },
+    {
+      "address": "0x1C07F064",
+      "name": "imp_GetThreadId",
+      "comment": "mcserv \u2192 thbase::GetThreadId (#20, iop 0x0007F064)"
+    },
+    {
+      "address": "0x1C07F06C",
+      "name": "imp_ReferThreadStatus",
+      "comment": "mcserv \u2192 thbase::ReferThreadStatus (#22, iop 0x0007F06C)"
+    },
+    {
+      "address": "0x1C07F074",
+      "name": "imp_DelayThread",
+      "comment": "mcserv \u2192 thbase::DelayThread (#33, iop 0x0007F074)"
+    },
+    {
+      "address": "0x1C08791C",
+      "name": "imp_CreateThread",
+      "comment": "USB_driver \u2192 thbase::CreateThread (#4, iop 0x0008791C)"
+    },
+    {
+      "address": "0x1C087924",
+      "name": "imp_DeleteThread",
+      "comment": "USB_driver \u2192 thbase::DeleteThread (#5, iop 0x00087924)"
+    },
+    {
+      "address": "0x1C08792C",
+      "name": "imp_StartThread",
+      "comment": "USB_driver \u2192 thbase::StartThread (#6, iop 0x0008792C)"
+    },
+    {
+      "address": "0x1C087934",
+      "name": "imp_TerminateThread",
+      "comment": "USB_driver \u2192 thbase::TerminateThread (#10, iop 0x00087934)"
+    },
+    {
+      "address": "0x1C08793C",
+      "name": "imp_ChangeThreadPriority",
+      "comment": "USB_driver \u2192 thbase::ChangeThreadPriority (#14, iop 0x0008793C)"
+    },
+    {
+      "address": "0x1C087944",
+      "name": "imp_DelayThread",
+      "comment": "USB_driver \u2192 thbase::DelayThread (#33, iop 0x00087944)"
+    },
+    {
+      "address": "0x1C09094C",
+      "name": "imp_CreateThread",
+      "comment": "USB_Keyboard_Driver \u2192 thbase::CreateThread (#4, iop 0x0009094C)"
+    },
+    {
+      "address": "0x1C090954",
+      "name": "imp_DeleteThread",
+      "comment": "USB_Keyboard_Driver \u2192 thbase::DeleteThread (#5, iop 0x00090954)"
+    },
+    {
+      "address": "0x1C09095C",
+      "name": "imp_StartThread",
+      "comment": "USB_Keyboard_Driver \u2192 thbase::StartThread (#6, iop 0x0009095C)"
+    },
+    {
+      "address": "0x1C090964",
+      "name": "imp_TerminateThread",
+      "comment": "USB_Keyboard_Driver \u2192 thbase::TerminateThread (#10, iop 0x00090964)"
+    },
+    {
+      "address": "0x1C09096C",
+      "name": "imp_GetThreadId",
+      "comment": "USB_Keyboard_Driver \u2192 thbase::GetThreadId (#20, iop 0x0009096C)"
+    },
+    {
+      "address": "0x1C0933C4",
+      "name": "imp_DelayThread",
+      "comment": "dev9 \u2192 thbase::DelayThread (#33, iop 0x000933C4)"
+    },
+    {
+      "address": "0x1C0B38E8",
+      "name": "imp_CreateThread",
+      "comment": "989snd_Library \u2192 thbase::CreateThread (#4, iop 0x000B38E8)"
+    },
+    {
+      "address": "0x1C0B38F0",
+      "name": "imp_DeleteThread",
+      "comment": "989snd_Library \u2192 thbase::DeleteThread (#5, iop 0x000B38F0)"
+    },
+    {
+      "address": "0x1C0B38F8",
+      "name": "imp_StartThread",
+      "comment": "989snd_Library \u2192 thbase::StartThread (#6, iop 0x000B38F8)"
+    },
+    {
+      "address": "0x1C0B3900",
+      "name": "imp_TerminateThread",
+      "comment": "989snd_Library \u2192 thbase::TerminateThread (#10, iop 0x000B3900)"
+    },
+    {
+      "address": "0x1C0B3908",
+      "name": "imp_GetThreadId",
+      "comment": "989snd_Library \u2192 thbase::GetThreadId (#20, iop 0x000B3908)"
+    },
+    {
+      "address": "0x1C0B3910",
+      "name": "imp_SleepThread",
+      "comment": "989snd_Library \u2192 thbase::SleepThread (#24, iop 0x000B3910)"
+    },
+    {
+      "address": "0x1C0B3918",
+      "name": "imp_WakeupThread",
+      "comment": "989snd_Library \u2192 thbase::WakeupThread (#25, iop 0x000B3918)"
+    },
+    {
+      "address": "0x1C0B3920",
+      "name": "imp_iWakeupThread",
+      "comment": "989snd_Library \u2192 thbase::iWakeupThread (#26, iop 0x000B3920)"
+    },
+    {
+      "address": "0x1C0B3928",
+      "name": "imp_DelayThread",
+      "comment": "989snd_Library \u2192 thbase::DelayThread (#33, iop 0x000B3928)"
+    },
+    {
+      "address": "0x1C0B3930",
+      "name": "imp_USec2SysClock",
+      "comment": "989snd_Library \u2192 thbase::USec2SysClock (#39, iop 0x000B3930)"
+    },
+    {
+      "address": "0x1C0BFA88",
+      "name": "imp_CreateThread",
+      "comment": "989_DATA_STREAMER \u2192 thbase::CreateThread (#4, iop 0x000BFA88)"
+    },
+    {
+      "address": "0x1C0BFA90",
+      "name": "imp_StartThread",
+      "comment": "989_DATA_STREAMER \u2192 thbase::StartThread (#6, iop 0x000BFA90)"
+    },
+    {
+      "address": "0x1C0BFA98",
+      "name": "imp_ReferThreadStatus",
+      "comment": "989_DATA_STREAMER \u2192 thbase::ReferThreadStatus (#22, iop 0x000BFA98)"
+    },
+    {
+      "address": "0x1C0C8304",
+      "name": "imp_CreateThread",
+      "comment": "lgAud \u2192 thbase::CreateThread (#4, iop 0x000C8304)"
+    },
+    {
+      "address": "0x1C0C830C",
+      "name": "imp_StartThread",
+      "comment": "lgAud \u2192 thbase::StartThread (#6, iop 0x000C830C)"
+    },
+    {
+      "address": "0x1C0C8314",
+      "name": "imp_ExitDeleteThread",
+      "comment": "lgAud \u2192 thbase::ExitDeleteThread (#9, iop 0x000C8314)"
+    },
+    {
+      "address": "0x1C0C831C",
+      "name": "imp_GetThreadId",
+      "comment": "lgAud \u2192 thbase::GetThreadId (#20, iop 0x000C831C)"
+    },
+    {
+      "address": "0x1C0DB99C",
+      "name": "imp_CreateThread",
+      "comment": "headset_streamer \u2192 thbase::CreateThread (#4, iop 0x000DB99C)"
+    },
+    {
+      "address": "0x1C0DB9A4",
+      "name": "imp_DeleteThread",
+      "comment": "headset_streamer \u2192 thbase::DeleteThread (#5, iop 0x000DB9A4)"
+    },
+    {
+      "address": "0x1C0DB9AC",
+      "name": "imp_StartThread",
+      "comment": "headset_streamer \u2192 thbase::StartThread (#6, iop 0x000DB9AC)"
+    },
+    {
+      "address": "0x1C0DB9B4",
+      "name": "imp_TerminateThread",
+      "comment": "headset_streamer \u2192 thbase::TerminateThread (#10, iop 0x000DB9B4)"
+    },
+    {
+      "address": "0x1C0DB9BC",
+      "name": "imp_ReferThreadStatus",
+      "comment": "headset_streamer \u2192 thbase::ReferThreadStatus (#22, iop 0x000DB9BC)"
+    },
+    {
+      "address": "0x1C0DB9C4",
+      "name": "imp_WakeupThread",
+      "comment": "headset_streamer \u2192 thbase::WakeupThread (#25, iop 0x000DB9C4)"
+    },
+    {
+      "address": "0x1C0DB9CC",
+      "name": "imp_DelayThread",
+      "comment": "headset_streamer \u2192 thbase::DelayThread (#33, iop 0x000DB9CC)"
+    },
+    {
+      "address": "0x1C0DB9D4",
+      "name": "imp_USec2SysClock",
+      "comment": "headset_streamer \u2192 thbase::USec2SysClock (#39, iop 0x000DB9D4)"
+    }
+  ]
+}

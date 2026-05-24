@@ -1,0 +1,398 @@
+{
+  "setName": "IOP: sifcmd",
+  "gameId": "SCUS-97275",
+  "isBuiltIn": false,
+  "isSystem": true,
+  "entries": [
+    {
+      "address": "0x000200DC",
+      "name": "imp_sceSifInitCmd",
+      "comment": "RebootByEE \u2192 sifcmd::sceSifInitCmd (#4)"
+    },
+    {
+      "address": "0x000200E4",
+      "name": "imp_sceSifAddCmdHandler",
+      "comment": "RebootByEE \u2192 sifcmd::sceSifAddCmdHandler (#10)"
+    },
+    {
+      "address": "0x00021F68",
+      "name": "imp_sceSifInitRpc",
+      "comment": "LoadModuleByEE \u2192 sifcmd::sceSifInitRpc (#14)"
+    },
+    {
+      "address": "0x00021F70",
+      "name": "imp_sceSifRegisterRpc",
+      "comment": "LoadModuleByEE \u2192 sifcmd::sceSifRegisterRpc (#17)"
+    },
+    {
+      "address": "0x00021F78",
+      "name": "imp_sceSifSetRpcQueue",
+      "comment": "LoadModuleByEE \u2192 sifcmd::sceSifSetRpcQueue (#19)"
+    },
+    {
+      "address": "0x00021F80",
+      "name": "imp_sceSifRpcLoop",
+      "comment": "LoadModuleByEE \u2192 sifcmd::sceSifRpcLoop (#22)"
+    },
+    {
+      "address": "0x0003D250",
+      "name": "imp_sceSifSendCmd",
+      "comment": "cdvd_ee_driver \u2192 sifcmd::sceSifSendCmd (#12)"
+    },
+    {
+      "address": "0x0003D258",
+      "name": "imp_sceSifInitRpc",
+      "comment": "cdvd_ee_driver \u2192 sifcmd::sceSifInitRpc (#14)"
+    },
+    {
+      "address": "0x0003D260",
+      "name": "imp_sceSifRegisterRpc",
+      "comment": "cdvd_ee_driver \u2192 sifcmd::sceSifRegisterRpc (#17)"
+    },
+    {
+      "address": "0x0003D268",
+      "name": "imp_sceSifSetRpcQueue",
+      "comment": "cdvd_ee_driver \u2192 sifcmd::sceSifSetRpcQueue (#19)"
+    },
+    {
+      "address": "0x0003D270",
+      "name": "imp_sceSifRpcLoop",
+      "comment": "cdvd_ee_driver \u2192 sifcmd::sceSifRpcLoop (#22)"
+    },
+    {
+      "address": "0x0003D278",
+      "name": "imp_sceSifRemoveRpc",
+      "comment": "cdvd_ee_driver \u2192 sifcmd::sceSifRemoveRpc (#24)"
+    },
+    {
+      "address": "0x0003D280",
+      "name": "imp_sceSifRemoveRpcQueue",
+      "comment": "cdvd_ee_driver \u2192 sifcmd::sceSifRemoveRpcQueue (#25)"
+    },
+    {
+      "address": "0x000416B4",
+      "name": "imp_sceSifSendCmd",
+      "comment": "FILEIO_service \u2192 sifcmd::sceSifSendCmd (#12)"
+    },
+    {
+      "address": "0x000416BC",
+      "name": "imp_isceSifSendCmd",
+      "comment": "FILEIO_service \u2192 sifcmd::isceSifSendCmd (#13)"
+    },
+    {
+      "address": "0x000416C4",
+      "name": "imp_sceSifInitRpc",
+      "comment": "FILEIO_service \u2192 sifcmd::sceSifInitRpc (#14)"
+    },
+    {
+      "address": "0x000416CC",
+      "name": "imp_sceSifRegisterRpc",
+      "comment": "FILEIO_service \u2192 sifcmd::sceSifRegisterRpc (#17)"
+    },
+    {
+      "address": "0x000416D4",
+      "name": "imp_sceSifSetRpcQueue",
+      "comment": "FILEIO_service \u2192 sifcmd::sceSifSetRpcQueue (#19)"
+    },
+    {
+      "address": "0x000416DC",
+      "name": "imp_sceSifRpcLoop",
+      "comment": "FILEIO_service \u2192 sifcmd::sceSifRpcLoop (#22)"
+    },
+    {
+      "address": "0x000416E4",
+      "name": "imp_sceSifGetOtherData",
+      "comment": "FILEIO_service \u2192 sifcmd::sceSifGetOtherData (#23)"
+    },
+    {
+      "address": "0x0004FF38",
+      "name": "imp_sceSifInitRpc",
+      "comment": "Dbc_Manager \u2192 sifcmd::sceSifInitRpc (#14)"
+    },
+    {
+      "address": "0x0004FF40",
+      "name": "imp_sceSifRegisterRpc",
+      "comment": "Dbc_Manager \u2192 sifcmd::sceSifRegisterRpc (#17)"
+    },
+    {
+      "address": "0x0004FF48",
+      "name": "imp_sceSifSetRpcQueue",
+      "comment": "Dbc_Manager \u2192 sifcmd::sceSifSetRpcQueue (#19)"
+    },
+    {
+      "address": "0x0004FF50",
+      "name": "imp_sceSifRpcLoop",
+      "comment": "Dbc_Manager \u2192 sifcmd::sceSifRpcLoop (#22)"
+    },
+    {
+      "address": "0x0007EFE8",
+      "name": "imp_sceSifInitRpc",
+      "comment": "mcserv \u2192 sifcmd::sceSifInitRpc (#14)"
+    },
+    {
+      "address": "0x0007EFF0",
+      "name": "imp_sceSifRegisterRpc",
+      "comment": "mcserv \u2192 sifcmd::sceSifRegisterRpc (#17)"
+    },
+    {
+      "address": "0x0007EFF8",
+      "name": "imp_sceSifSetRpcQueue",
+      "comment": "mcserv \u2192 sifcmd::sceSifSetRpcQueue (#19)"
+    },
+    {
+      "address": "0x0007F000",
+      "name": "imp_sceSifRpcLoop",
+      "comment": "mcserv \u2192 sifcmd::sceSifRpcLoop (#22)"
+    },
+    {
+      "address": "0x0007F008",
+      "name": "imp_sceSifGetOtherData",
+      "comment": "mcserv \u2192 sifcmd::sceSifGetOtherData (#23)"
+    },
+    {
+      "address": "0x0007F010",
+      "name": "imp_sceSifRemoveRpc",
+      "comment": "mcserv \u2192 sifcmd::sceSifRemoveRpc (#24)"
+    },
+    {
+      "address": "0x0007F018",
+      "name": "imp_sceSifRemoveRpcQueue",
+      "comment": "mcserv \u2192 sifcmd::sceSifRemoveRpcQueue (#25)"
+    },
+    {
+      "address": "0x1C0200DC",
+      "name": "imp_sceSifInitCmd",
+      "comment": "RebootByEE \u2192 sifcmd::sceSifInitCmd (#4, iop 0x000200DC)"
+    },
+    {
+      "address": "0x1C0200E4",
+      "name": "imp_sceSifAddCmdHandler",
+      "comment": "RebootByEE \u2192 sifcmd::sceSifAddCmdHandler (#10, iop 0x000200E4)"
+    },
+    {
+      "address": "0x1C021F68",
+      "name": "imp_sceSifInitRpc",
+      "comment": "LoadModuleByEE \u2192 sifcmd::sceSifInitRpc (#14, iop 0x00021F68)"
+    },
+    {
+      "address": "0x1C021F70",
+      "name": "imp_sceSifRegisterRpc",
+      "comment": "LoadModuleByEE \u2192 sifcmd::sceSifRegisterRpc (#17, iop 0x00021F70)"
+    },
+    {
+      "address": "0x1C021F78",
+      "name": "imp_sceSifSetRpcQueue",
+      "comment": "LoadModuleByEE \u2192 sifcmd::sceSifSetRpcQueue (#19, iop 0x00021F78)"
+    },
+    {
+      "address": "0x1C021F80",
+      "name": "imp_sceSifRpcLoop",
+      "comment": "LoadModuleByEE \u2192 sifcmd::sceSifRpcLoop (#22, iop 0x00021F80)"
+    },
+    {
+      "address": "0x1C03D250",
+      "name": "imp_sceSifSendCmd",
+      "comment": "cdvd_ee_driver \u2192 sifcmd::sceSifSendCmd (#12, iop 0x0003D250)"
+    },
+    {
+      "address": "0x1C03D258",
+      "name": "imp_sceSifInitRpc",
+      "comment": "cdvd_ee_driver \u2192 sifcmd::sceSifInitRpc (#14, iop 0x0003D258)"
+    },
+    {
+      "address": "0x1C03D260",
+      "name": "imp_sceSifRegisterRpc",
+      "comment": "cdvd_ee_driver \u2192 sifcmd::sceSifRegisterRpc (#17, iop 0x0003D260)"
+    },
+    {
+      "address": "0x1C03D268",
+      "name": "imp_sceSifSetRpcQueue",
+      "comment": "cdvd_ee_driver \u2192 sifcmd::sceSifSetRpcQueue (#19, iop 0x0003D268)"
+    },
+    {
+      "address": "0x1C03D270",
+      "name": "imp_sceSifRpcLoop",
+      "comment": "cdvd_ee_driver \u2192 sifcmd::sceSifRpcLoop (#22, iop 0x0003D270)"
+    },
+    {
+      "address": "0x1C03D278",
+      "name": "imp_sceSifRemoveRpc",
+      "comment": "cdvd_ee_driver \u2192 sifcmd::sceSifRemoveRpc (#24, iop 0x0003D278)"
+    },
+    {
+      "address": "0x1C03D280",
+      "name": "imp_sceSifRemoveRpcQueue",
+      "comment": "cdvd_ee_driver \u2192 sifcmd::sceSifRemoveRpcQueue (#25, iop 0x0003D280)"
+    },
+    {
+      "address": "0x1C0416B4",
+      "name": "imp_sceSifSendCmd",
+      "comment": "FILEIO_service \u2192 sifcmd::sceSifSendCmd (#12, iop 0x000416B4)"
+    },
+    {
+      "address": "0x1C0416BC",
+      "name": "imp_isceSifSendCmd",
+      "comment": "FILEIO_service \u2192 sifcmd::isceSifSendCmd (#13, iop 0x000416BC)"
+    },
+    {
+      "address": "0x1C0416C4",
+      "name": "imp_sceSifInitRpc",
+      "comment": "FILEIO_service \u2192 sifcmd::sceSifInitRpc (#14, iop 0x000416C4)"
+    },
+    {
+      "address": "0x1C0416CC",
+      "name": "imp_sceSifRegisterRpc",
+      "comment": "FILEIO_service \u2192 sifcmd::sceSifRegisterRpc (#17, iop 0x000416CC)"
+    },
+    {
+      "address": "0x1C0416D4",
+      "name": "imp_sceSifSetRpcQueue",
+      "comment": "FILEIO_service \u2192 sifcmd::sceSifSetRpcQueue (#19, iop 0x000416D4)"
+    },
+    {
+      "address": "0x1C0416DC",
+      "name": "imp_sceSifRpcLoop",
+      "comment": "FILEIO_service \u2192 sifcmd::sceSifRpcLoop (#22, iop 0x000416DC)"
+    },
+    {
+      "address": "0x1C0416E4",
+      "name": "imp_sceSifGetOtherData",
+      "comment": "FILEIO_service \u2192 sifcmd::sceSifGetOtherData (#23, iop 0x000416E4)"
+    },
+    {
+      "address": "0x1C04FF38",
+      "name": "imp_sceSifInitRpc",
+      "comment": "Dbc_Manager \u2192 sifcmd::sceSifInitRpc (#14, iop 0x0004FF38)"
+    },
+    {
+      "address": "0x1C04FF40",
+      "name": "imp_sceSifRegisterRpc",
+      "comment": "Dbc_Manager \u2192 sifcmd::sceSifRegisterRpc (#17, iop 0x0004FF40)"
+    },
+    {
+      "address": "0x1C04FF48",
+      "name": "imp_sceSifSetRpcQueue",
+      "comment": "Dbc_Manager \u2192 sifcmd::sceSifSetRpcQueue (#19, iop 0x0004FF48)"
+    },
+    {
+      "address": "0x1C04FF50",
+      "name": "imp_sceSifRpcLoop",
+      "comment": "Dbc_Manager \u2192 sifcmd::sceSifRpcLoop (#22, iop 0x0004FF50)"
+    },
+    {
+      "address": "0x1C07EFE8",
+      "name": "imp_sceSifInitRpc",
+      "comment": "mcserv \u2192 sifcmd::sceSifInitRpc (#14, iop 0x0007EFE8)"
+    },
+    {
+      "address": "0x1C07EFF0",
+      "name": "imp_sceSifRegisterRpc",
+      "comment": "mcserv \u2192 sifcmd::sceSifRegisterRpc (#17, iop 0x0007EFF0)"
+    },
+    {
+      "address": "0x1C07EFF8",
+      "name": "imp_sceSifSetRpcQueue",
+      "comment": "mcserv \u2192 sifcmd::sceSifSetRpcQueue (#19, iop 0x0007EFF8)"
+    },
+    {
+      "address": "0x1C07F000",
+      "name": "imp_sceSifRpcLoop",
+      "comment": "mcserv \u2192 sifcmd::sceSifRpcLoop (#22, iop 0x0007F000)"
+    },
+    {
+      "address": "0x1C07F008",
+      "name": "imp_sceSifGetOtherData",
+      "comment": "mcserv \u2192 sifcmd::sceSifGetOtherData (#23, iop 0x0007F008)"
+    },
+    {
+      "address": "0x1C07F010",
+      "name": "imp_sceSifRemoveRpc",
+      "comment": "mcserv \u2192 sifcmd::sceSifRemoveRpc (#24, iop 0x0007F010)"
+    },
+    {
+      "address": "0x1C07F018",
+      "name": "imp_sceSifRemoveRpcQueue",
+      "comment": "mcserv \u2192 sifcmd::sceSifRemoveRpcQueue (#25, iop 0x0007F018)"
+    },
+    {
+      "address": "0x1C0908B0",
+      "name": "imp_sceSifInitRpc",
+      "comment": "USB_Keyboard_Driver \u2192 sifcmd::sceSifInitRpc (#14, iop 0x000908B0)"
+    },
+    {
+      "address": "0x1C0908B8",
+      "name": "imp_sceSifRegisterRpc",
+      "comment": "USB_Keyboard_Driver \u2192 sifcmd::sceSifRegisterRpc (#17, iop 0x000908B8)"
+    },
+    {
+      "address": "0x1C0908C0",
+      "name": "imp_sceSifSetRpcQueue",
+      "comment": "USB_Keyboard_Driver \u2192 sifcmd::sceSifSetRpcQueue (#19, iop 0x000908C0)"
+    },
+    {
+      "address": "0x1C0908C8",
+      "name": "imp_sceSifRpcLoop",
+      "comment": "USB_Keyboard_Driver \u2192 sifcmd::sceSifRpcLoop (#22, iop 0x000908C8)"
+    },
+    {
+      "address": "0x1C0908D0",
+      "name": "imp_sceSifRemoveRpc",
+      "comment": "USB_Keyboard_Driver \u2192 sifcmd::sceSifRemoveRpc (#24, iop 0x000908D0)"
+    },
+    {
+      "address": "0x1C0908D8",
+      "name": "imp_sceSifRemoveRpcQueue",
+      "comment": "USB_Keyboard_Driver \u2192 sifcmd::sceSifRemoveRpcQueue (#25, iop 0x000908D8)"
+    },
+    {
+      "address": "0x1C0B3800",
+      "name": "imp_sceSifInitRpc",
+      "comment": "989snd_Library \u2192 sifcmd::sceSifInitRpc (#14, iop 0x000B3800)"
+    },
+    {
+      "address": "0x1C0B3808",
+      "name": "imp_sceSifRegisterRpc",
+      "comment": "989snd_Library \u2192 sifcmd::sceSifRegisterRpc (#17, iop 0x000B3808)"
+    },
+    {
+      "address": "0x1C0B3810",
+      "name": "imp_sceSifSetRpcQueue",
+      "comment": "989snd_Library \u2192 sifcmd::sceSifSetRpcQueue (#19, iop 0x000B3810)"
+    },
+    {
+      "address": "0x1C0B3818",
+      "name": "imp_sceSifRpcLoop",
+      "comment": "989snd_Library \u2192 sifcmd::sceSifRpcLoop (#22, iop 0x000B3818)"
+    },
+    {
+      "address": "0x1C0B3820",
+      "name": "imp_sceSifGetOtherData",
+      "comment": "989snd_Library \u2192 sifcmd::sceSifGetOtherData (#23, iop 0x000B3820)"
+    },
+    {
+      "address": "0x1C0C8268",
+      "name": "imp_sceSifInitRpc",
+      "comment": "lgAud \u2192 sifcmd::sceSifInitRpc (#14, iop 0x000C8268)"
+    },
+    {
+      "address": "0x1C0C8270",
+      "name": "imp_sceSifRegisterRpc",
+      "comment": "lgAud \u2192 sifcmd::sceSifRegisterRpc (#17, iop 0x000C8270)"
+    },
+    {
+      "address": "0x1C0C8278",
+      "name": "imp_sceSifSetRpcQueue",
+      "comment": "lgAud \u2192 sifcmd::sceSifSetRpcQueue (#19, iop 0x000C8278)"
+    },
+    {
+      "address": "0x1C0C8280",
+      "name": "imp_sceSifRpcLoop",
+      "comment": "lgAud \u2192 sifcmd::sceSifRpcLoop (#22, iop 0x000C8280)"
+    },
+    {
+      "address": "0x1C0DB8EC",
+      "name": "imp_sceSifInitRpc",
+      "comment": "headset_streamer \u2192 sifcmd::sceSifInitRpc (#14, iop 0x000DB8EC)"
+    }
+  ]
+}

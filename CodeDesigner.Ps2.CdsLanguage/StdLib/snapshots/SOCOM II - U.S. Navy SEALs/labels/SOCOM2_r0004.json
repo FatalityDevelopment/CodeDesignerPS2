@@ -2,6 +2,7 @@
   "setName": "SOCOM2_r0004",
   "gameId": "SCUS-97275",
   "isBuiltIn": false,
+  "isSystem": false,
   "entries": [
     {
       "address": "0x0019EB18",
@@ -248,7 +249,6 @@
       "address": "0x0044D648",
       "name": "Seal Pointer",
       "comment": "Static ptr to CSealEx player entity. Deref to get dynamic\u2026",
-      "dynamic": true,
       "type": "Pointer"
     },
     {
@@ -268,7 +268,6 @@
     {
       "address": "0x004b8a54",
       "name": "Weapon List Start",
-      "dynamic": true,
       "type": "Pointer"
     },
     {

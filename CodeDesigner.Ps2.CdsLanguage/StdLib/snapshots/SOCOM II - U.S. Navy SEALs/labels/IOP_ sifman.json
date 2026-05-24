@@ -1,0 +1,418 @@
+{
+  "setName": "IOP: sifman",
+  "gameId": "SCUS-97275",
+  "isBuiltIn": false,
+  "isSystem": true,
+  "entries": [
+    {
+      "address": "0x0001E170",
+      "name": "imp_shutdown",
+      "comment": "IOP_SIF_rpc_interface \u2192 sifman::shutdown (#2)"
+    },
+    {
+      "address": "0x0001E178",
+      "name": "imp_sceSifInit",
+      "comment": "IOP_SIF_rpc_interface \u2192 sifman::sceSifInit (#5)"
+    },
+    {
+      "address": "0x0001E180",
+      "name": "imp_sceSifSetDChain",
+      "comment": "IOP_SIF_rpc_interface \u2192 sifman::sceSifSetDChain (#6)"
+    },
+    {
+      "address": "0x0001E188",
+      "name": "imp_sceSifSetDma",
+      "comment": "IOP_SIF_rpc_interface \u2192 sifman::sceSifSetDma (#7)"
+    },
+    {
+      "address": "0x0001E190",
+      "name": "imp_setEEIOPflags",
+      "comment": "IOP_SIF_rpc_interface \u2192 sifman::setEEIOPflags (#22)"
+    },
+    {
+      "address": "0x0001E198",
+      "name": "imp_setIOPEEflags",
+      "comment": "IOP_SIF_rpc_interface \u2192 sifman::setIOPEEflags (#24)"
+    },
+    {
+      "address": "0x0001E1A0",
+      "name": "imp_setIOPrcvaddr",
+      "comment": "IOP_SIF_rpc_interface \u2192 sifman::setIOPrcvaddr (#27)"
+    },
+    {
+      "address": "0x0001E1A8",
+      "name": "imp_sceSifCheckInit",
+      "comment": "IOP_SIF_rpc_interface \u2192 sifman::sceSifCheckInit (#29)"
+    },
+    {
+      "address": "0x0001E1B0",
+      "name": "imp_sceSifSetDmaIntr",
+      "comment": "IOP_SIF_rpc_interface \u2192 sifman::sceSifSetDmaIntr (#32)"
+    },
+    {
+      "address": "0x000200A8",
+      "name": "imp_sceSifInit",
+      "comment": "RebootByEE \u2192 sifman::sceSifInit (#5)"
+    },
+    {
+      "address": "0x000200B0",
+      "name": "imp_setEEIOPflags",
+      "comment": "RebootByEE \u2192 sifman::setEEIOPflags (#22)"
+    },
+    {
+      "address": "0x000200B8",
+      "name": "imp_sceSifCheckInit",
+      "comment": "RebootByEE \u2192 sifman::sceSifCheckInit (#29)"
+    },
+    {
+      "address": "0x00021F3C",
+      "name": "imp_sceSifSetDma",
+      "comment": "LoadModuleByEE \u2192 sifman::sceSifSetDma (#7)"
+    },
+    {
+      "address": "0x00021F44",
+      "name": "imp_sceSifDmaStat",
+      "comment": "LoadModuleByEE \u2192 sifman::sceSifDmaStat (#8)"
+    },
+    {
+      "address": "0x0003D2A4",
+      "name": "imp_sceSifInit",
+      "comment": "cdvd_ee_driver \u2192 sifman::sceSifInit (#5)"
+    },
+    {
+      "address": "0x0003D2AC",
+      "name": "imp_sceSifSetDma",
+      "comment": "cdvd_ee_driver \u2192 sifman::sceSifSetDma (#7)"
+    },
+    {
+      "address": "0x0003D2B4",
+      "name": "imp_sceSifDmaStat",
+      "comment": "cdvd_ee_driver \u2192 sifman::sceSifDmaStat (#8)"
+    },
+    {
+      "address": "0x0003D2BC",
+      "name": "imp_sceSifCheckInit",
+      "comment": "cdvd_ee_driver \u2192 sifman::sceSifCheckInit (#29)"
+    },
+    {
+      "address": "0x00041578",
+      "name": "imp_sceSifInit",
+      "comment": "FILEIO_service \u2192 sifman::sceSifInit (#5)"
+    },
+    {
+      "address": "0x00041580",
+      "name": "imp_sceSifSetDma",
+      "comment": "FILEIO_service \u2192 sifman::sceSifSetDma (#7)"
+    },
+    {
+      "address": "0x00041588",
+      "name": "imp_sceSifDmaStat",
+      "comment": "FILEIO_service \u2192 sifman::sceSifDmaStat (#8)"
+    },
+    {
+      "address": "0x00041590",
+      "name": "imp_sceSifCheckInit",
+      "comment": "FILEIO_service \u2192 sifman::sceSifCheckInit (#29)"
+    },
+    {
+      "address": "0x00046214",
+      "name": "imp_setIOPEEflags",
+      "comment": "SyncEE \u2192 sifman::setIOPEEflags (#24)"
+    },
+    {
+      "address": "0x0004A578",
+      "name": "imp_sceSifSetDma",
+      "comment": "cdvd_st_driver \u2192 sifman::sceSifSetDma (#7)"
+    },
+    {
+      "address": "0x0004A580",
+      "name": "imp_sceSifDmaStat",
+      "comment": "cdvd_st_driver \u2192 sifman::sceSifDmaStat (#8)"
+    },
+    {
+      "address": "0x0004FF74",
+      "name": "imp_sceSifInit",
+      "comment": "Dbc_Manager \u2192 sifman::sceSifInit (#5)"
+    },
+    {
+      "address": "0x0004FF7C",
+      "name": "imp_sceSifSetDma",
+      "comment": "Dbc_Manager \u2192 sifman::sceSifSetDma (#7)"
+    },
+    {
+      "address": "0x0004FF84",
+      "name": "imp_sceSifDmaStat",
+      "comment": "Dbc_Manager \u2192 sifman::sceSifDmaStat (#8)"
+    },
+    {
+      "address": "0x0004FF8C",
+      "name": "imp_sceSifCheckInit",
+      "comment": "Dbc_Manager \u2192 sifman::sceSifCheckInit (#29)"
+    },
+    {
+      "address": "0x0004FF94",
+      "name": "imp_sceSifSetDmaIntr",
+      "comment": "Dbc_Manager \u2192 sifman::sceSifSetDmaIntr (#32)"
+    },
+    {
+      "address": "0x0007EFAC",
+      "name": "imp_sceSifInit",
+      "comment": "mcserv \u2192 sifman::sceSifInit (#5)"
+    },
+    {
+      "address": "0x0007EFB4",
+      "name": "imp_sceSifSetDma",
+      "comment": "mcserv \u2192 sifman::sceSifSetDma (#7)"
+    },
+    {
+      "address": "0x0007EFBC",
+      "name": "imp_sceSifDmaStat",
+      "comment": "mcserv \u2192 sifman::sceSifDmaStat (#8)"
+    },
+    {
+      "address": "0x0007EFC4",
+      "name": "imp_sceSifCheckInit",
+      "comment": "mcserv \u2192 sifman::sceSifCheckInit (#29)"
+    },
+    {
+      "address": "0x1C01E170",
+      "name": "imp_shutdown",
+      "comment": "IOP_SIF_rpc_interface \u2192 sifman::shutdown (#2, iop 0x0001E170)"
+    },
+    {
+      "address": "0x1C01E178",
+      "name": "imp_sceSifInit",
+      "comment": "IOP_SIF_rpc_interface \u2192 sifman::sceSifInit (#5, iop 0x0001E178)"
+    },
+    {
+      "address": "0x1C01E180",
+      "name": "imp_sceSifSetDChain",
+      "comment": "IOP_SIF_rpc_interface \u2192 sifman::sceSifSetDChain (#6, iop 0x0001E180)"
+    },
+    {
+      "address": "0x1C01E188",
+      "name": "imp_sceSifSetDma",
+      "comment": "IOP_SIF_rpc_interface \u2192 sifman::sceSifSetDma (#7, iop 0x0001E188)"
+    },
+    {
+      "address": "0x1C01E190",
+      "name": "imp_setEEIOPflags",
+      "comment": "IOP_SIF_rpc_interface \u2192 sifman::setEEIOPflags (#22, iop 0x0001E190)"
+    },
+    {
+      "address": "0x1C01E198",
+      "name": "imp_setIOPEEflags",
+      "comment": "IOP_SIF_rpc_interface \u2192 sifman::setIOPEEflags (#24, iop 0x0001E198)"
+    },
+    {
+      "address": "0x1C01E1A0",
+      "name": "imp_setIOPrcvaddr",
+      "comment": "IOP_SIF_rpc_interface \u2192 sifman::setIOPrcvaddr (#27, iop 0x0001E1A0)"
+    },
+    {
+      "address": "0x1C01E1A8",
+      "name": "imp_sceSifCheckInit",
+      "comment": "IOP_SIF_rpc_interface \u2192 sifman::sceSifCheckInit (#29, iop 0x0001E1A8)"
+    },
+    {
+      "address": "0x1C01E1B0",
+      "name": "imp_sceSifSetDmaIntr",
+      "comment": "IOP_SIF_rpc_interface \u2192 sifman::sceSifSetDmaIntr (#32, iop 0x0001E1B0)"
+    },
+    {
+      "address": "0x1C0200A8",
+      "name": "imp_sceSifInit",
+      "comment": "RebootByEE \u2192 sifman::sceSifInit (#5, iop 0x000200A8)"
+    },
+    {
+      "address": "0x1C0200B0",
+      "name": "imp_setEEIOPflags",
+      "comment": "RebootByEE \u2192 sifman::setEEIOPflags (#22, iop 0x000200B0)"
+    },
+    {
+      "address": "0x1C0200B8",
+      "name": "imp_sceSifCheckInit",
+      "comment": "RebootByEE \u2192 sifman::sceSifCheckInit (#29, iop 0x000200B8)"
+    },
+    {
+      "address": "0x1C021F3C",
+      "name": "imp_sceSifSetDma",
+      "comment": "LoadModuleByEE \u2192 sifman::sceSifSetDma (#7, iop 0x00021F3C)"
+    },
+    {
+      "address": "0x1C021F44",
+      "name": "imp_sceSifDmaStat",
+      "comment": "LoadModuleByEE \u2192 sifman::sceSifDmaStat (#8, iop 0x00021F44)"
+    },
+    {
+      "address": "0x1C03D2A4",
+      "name": "imp_sceSifInit",
+      "comment": "cdvd_ee_driver \u2192 sifman::sceSifInit (#5, iop 0x0003D2A4)"
+    },
+    {
+      "address": "0x1C03D2AC",
+      "name": "imp_sceSifSetDma",
+      "comment": "cdvd_ee_driver \u2192 sifman::sceSifSetDma (#7, iop 0x0003D2AC)"
+    },
+    {
+      "address": "0x1C03D2B4",
+      "name": "imp_sceSifDmaStat",
+      "comment": "cdvd_ee_driver \u2192 sifman::sceSifDmaStat (#8, iop 0x0003D2B4)"
+    },
+    {
+      "address": "0x1C03D2BC",
+      "name": "imp_sceSifCheckInit",
+      "comment": "cdvd_ee_driver \u2192 sifman::sceSifCheckInit (#29, iop 0x0003D2BC)"
+    },
+    {
+      "address": "0x1C041578",
+      "name": "imp_sceSifInit",
+      "comment": "FILEIO_service \u2192 sifman::sceSifInit (#5, iop 0x00041578)"
+    },
+    {
+      "address": "0x1C041580",
+      "name": "imp_sceSifSetDma",
+      "comment": "FILEIO_service \u2192 sifman::sceSifSetDma (#7, iop 0x00041580)"
+    },
+    {
+      "address": "0x1C041588",
+      "name": "imp_sceSifDmaStat",
+      "comment": "FILEIO_service \u2192 sifman::sceSifDmaStat (#8, iop 0x00041588)"
+    },
+    {
+      "address": "0x1C041590",
+      "name": "imp_sceSifCheckInit",
+      "comment": "FILEIO_service \u2192 sifman::sceSifCheckInit (#29, iop 0x00041590)"
+    },
+    {
+      "address": "0x1C046214",
+      "name": "imp_setIOPEEflags",
+      "comment": "SyncEE \u2192 sifman::setIOPEEflags (#24, iop 0x00046214)"
+    },
+    {
+      "address": "0x1C04A578",
+      "name": "imp_sceSifSetDma",
+      "comment": "cdvd_st_driver \u2192 sifman::sceSifSetDma (#7, iop 0x0004A578)"
+    },
+    {
+      "address": "0x1C04A580",
+      "name": "imp_sceSifDmaStat",
+      "comment": "cdvd_st_driver \u2192 sifman::sceSifDmaStat (#8, iop 0x0004A580)"
+    },
+    {
+      "address": "0x1C04FF74",
+      "name": "imp_sceSifInit",
+      "comment": "Dbc_Manager \u2192 sifman::sceSifInit (#5, iop 0x0004FF74)"
+    },
+    {
+      "address": "0x1C04FF7C",
+      "name": "imp_sceSifSetDma",
+      "comment": "Dbc_Manager \u2192 sifman::sceSifSetDma (#7, iop 0x0004FF7C)"
+    },
+    {
+      "address": "0x1C04FF84",
+      "name": "imp_sceSifDmaStat",
+      "comment": "Dbc_Manager \u2192 sifman::sceSifDmaStat (#8, iop 0x0004FF84)"
+    },
+    {
+      "address": "0x1C04FF8C",
+      "name": "imp_sceSifCheckInit",
+      "comment": "Dbc_Manager \u2192 sifman::sceSifCheckInit (#29, iop 0x0004FF8C)"
+    },
+    {
+      "address": "0x1C04FF94",
+      "name": "imp_sceSifSetDmaIntr",
+      "comment": "Dbc_Manager \u2192 sifman::sceSifSetDmaIntr (#32, iop 0x0004FF94)"
+    },
+    {
+      "address": "0x1C07EFAC",
+      "name": "imp_sceSifInit",
+      "comment": "mcserv \u2192 sifman::sceSifInit (#5, iop 0x0007EFAC)"
+    },
+    {
+      "address": "0x1C07EFB4",
+      "name": "imp_sceSifSetDma",
+      "comment": "mcserv \u2192 sifman::sceSifSetDma (#7, iop 0x0007EFB4)"
+    },
+    {
+      "address": "0x1C07EFBC",
+      "name": "imp_sceSifDmaStat",
+      "comment": "mcserv \u2192 sifman::sceSifDmaStat (#8, iop 0x0007EFBC)"
+    },
+    {
+      "address": "0x1C07EFC4",
+      "name": "imp_sceSifCheckInit",
+      "comment": "mcserv \u2192 sifman::sceSifCheckInit (#29, iop 0x0007EFC4)"
+    },
+    {
+      "address": "0x1C0980F4",
+      "name": "imp_sceSifSetDma",
+      "comment": "Sound_Device_Library \u2192 sifman::sceSifSetDma (#7, iop 0x000980F4)"
+    },
+    {
+      "address": "0x1C0980FC",
+      "name": "imp_sceSifDmaStat",
+      "comment": "Sound_Device_Library \u2192 sifman::sceSifDmaStat (#8, iop 0x000980FC)"
+    },
+    {
+      "address": "0x1C0B3844",
+      "name": "imp_sceSifInit",
+      "comment": "989snd_Library \u2192 sifman::sceSifInit (#5, iop 0x000B3844)"
+    },
+    {
+      "address": "0x1C0B384C",
+      "name": "imp_sceSifDmaStat",
+      "comment": "989snd_Library \u2192 sifman::sceSifDmaStat (#8, iop 0x000B384C)"
+    },
+    {
+      "address": "0x1C0B3854",
+      "name": "imp_sceSifCheckInit",
+      "comment": "989snd_Library \u2192 sifman::sceSifCheckInit (#29, iop 0x000B3854)"
+    },
+    {
+      "address": "0x1C0B385C",
+      "name": "imp_sceSifSetDmaIntr",
+      "comment": "989snd_Library \u2192 sifman::sceSifSetDmaIntr (#32, iop 0x000B385C)"
+    },
+    {
+      "address": "0x1C0BFA28",
+      "name": "imp_sceSifInit",
+      "comment": "989_DATA_STREAMER \u2192 sifman::sceSifInit (#5, iop 0x000BFA28)"
+    },
+    {
+      "address": "0x1C0BFA30",
+      "name": "imp_sceSifDmaStat",
+      "comment": "989_DATA_STREAMER \u2192 sifman::sceSifDmaStat (#8, iop 0x000BFA30)"
+    },
+    {
+      "address": "0x1C0BFA38",
+      "name": "imp_sceSifCheckInit",
+      "comment": "989_DATA_STREAMER \u2192 sifman::sceSifCheckInit (#29, iop 0x000BFA38)"
+    },
+    {
+      "address": "0x1C0BFA40",
+      "name": "imp_sceSifSetDmaIntr",
+      "comment": "989_DATA_STREAMER \u2192 sifman::sceSifSetDmaIntr (#32, iop 0x000BFA40)"
+    },
+    {
+      "address": "0x1C0DB910",
+      "name": "imp_sceSifInit",
+      "comment": "headset_streamer \u2192 sifman::sceSifInit (#5, iop 0x000DB910)"
+    },
+    {
+      "address": "0x1C0DB918",
+      "name": "imp_sceSifSetDma",
+      "comment": "headset_streamer \u2192 sifman::sceSifSetDma (#7, iop 0x000DB918)"
+    },
+    {
+      "address": "0x1C0DB920",
+      "name": "imp_sceSifDmaStat",
+      "comment": "headset_streamer \u2192 sifman::sceSifDmaStat (#8, iop 0x000DB920)"
+    },
+    {
+      "address": "0x1C0DB928",
+      "name": "imp_sceSifCheckInit",
+      "comment": "headset_streamer \u2192 sifman::sceSifCheckInit (#29, iop 0x000DB928)"
+    }
+  ]
+}

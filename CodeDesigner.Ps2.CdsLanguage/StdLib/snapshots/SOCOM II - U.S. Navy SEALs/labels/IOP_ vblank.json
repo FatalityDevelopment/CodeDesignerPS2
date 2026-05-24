@@ -1,0 +1,28 @@
+{
+  "setName": "IOP: vblank",
+  "gameId": "SCUS-97275",
+  "isBuiltIn": false,
+  "isSystem": true,
+  "entries": [
+    {
+      "address": "0x0004C940",
+      "name": "imp_WaitVblankEnd",
+      "comment": "sio2d \u2192 vblank::WaitVblankEnd (#5)"
+    },
+    {
+      "address": "0x0005674C",
+      "name": "imp_WaitVblankStart",
+      "comment": "ds2u_s1 \u2192 vblank::WaitVblankStart (#4)"
+    },
+    {
+      "address": "0x1C04C940",
+      "name": "imp_WaitVblankEnd",
+      "comment": "sio2d \u2192 vblank::WaitVblankEnd (#5, iop 0x0004C940)"
+    },
+    {
+      "address": "0x1C05674C",
+      "name": "imp_WaitVblankStart",
+      "comment": "ds2u_s1 \u2192 vblank::WaitVblankStart (#4, iop 0x0005674C)"
+    }
+  ]
+}

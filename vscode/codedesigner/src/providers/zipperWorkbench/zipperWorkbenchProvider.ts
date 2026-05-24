@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as fs from 'fs';
 import { SocketClient, ZipperOperationResult } from '../../socketClient';
 import { getOutputChannel } from '../../extension';
 import { getNonce, getWebviewErrorHandlerScript } from '../../utils/nonce';
@@ -88,10 +89,163 @@ export class ZipperWorkbenchProvider {
             case 'revealPath':
                 await this._revealPath(msg['path'] as string | undefined);
                 break;
+            case 'readNode':
+                await this._readNode(
+                    webview,
+                    msg['path'] as string | undefined,
+                    msg['entryIndex'] as number | undefined,
+                );
+                break;
+            case 'readPaletteFile':
+                await this._readPaletteFile(webview, msg['path'] as string | undefined);
+                break;
+            case 'readCompanionFiles':
+                await this._readCompanionFiles(webview, msg['path'] as string | undefined);
+                break;
+            case 'inspectRdr':
+                await this._inspectRdr(
+                    webview,
+                    msg['path'] as string | undefined,
+                    msg['entryName'] as string | undefined,
+                );
+                break;
             case 'bootstrapError':
                 getOutputChannel().error('[ZipperWorkbench] Bootstrap error: ' + msg['error']);
                 break;
         }
+    }
+
+    private async _readNode(
+        webview: vscode.Webview,
+        filePath: string | undefined,
+        entryIndex: number | undefined,
+    ): Promise<void> {
+        if (!filePath || entryIndex === undefined) { return; }
+        if (!this._ensureConnected(webview)) { return; }
+        try {
+            const data = await this._socketClient.zipperReadNode(filePath, entryIndex);
+            webview.postMessage({ type: 'nodeData', entryIndex, data });
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            webview.postMessage({ type: 'nodeError', entryIndex, message });
+        }
+    }
+
+    private async _readPaletteFile(
+        webview: vscode.Webview,
+        currentPath: string | undefined,
+    ): Promise<void> {
+        if (!currentPath) { return; }
+        if (!this._ensureConnected(webview)) { return; }
+        try {
+            const palPath = this._findSiblingPaletteFile(currentPath);
+            if (!palPath) {
+                webview.postMessage({ type: 'paletteFile', found: false });
+                return;
+            }
+            const nodes = await this._socketClient.zipperReadAllNodes(palPath);
+            webview.postMessage({ type: 'paletteFile', found: true, path: palPath, nodes });
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            webview.postMessage({ type: 'paletteFile', found: false, message });
+        }
+    }
+
+    private async _readCompanionFiles(
+        webview: vscode.Webview,
+        currentPath: string | undefined,
+    ): Promise<void> {
+        if (!currentPath) { return; }
+        if (!this._ensureConnected(webview)) { return; }
+        try {
+            const companions = this._findCompanionFiles(currentPath);
+            const out: Record<string, { path: string; nodes: Array<{ index: number; name: string; type: number; data: string }> }> = {};
+            for (const [kind, p] of Object.entries(companions)) {
+                if (!p) { continue; }
+                try {
+                    const nodes = await this._socketClient.zipperReadAllNodes(p);
+                    out[kind] = { path: p, nodes };
+                } catch (err) {
+                    getOutputChannel().warn(`[ZipperWorkbench] companion ${kind} load failed: ${err instanceof Error ? err.message : err}`);
+                }
+            }
+            webview.postMessage({ type: 'companionFiles', companions: out });
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            webview.postMessage({ type: 'companionFiles', companions: {}, message });
+        }
+    }
+
+    private async _inspectRdr(
+        webview: vscode.Webview,
+        filePath: string | undefined,
+        entryName: string | undefined,
+    ): Promise<void> {
+        if (!filePath) { return; }
+        if (!this._ensureConnected(webview)) { return; }
+        try {
+            const result = await this._socketClient.zipperInspectRdr(filePath, entryName);
+            webview.postMessage({ type: 'rdrData', entryName, result });
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            webview.postMessage({ type: 'rdrError', entryName, message });
+        }
+    }
+
+    private _findCompanionFiles(currentPath: string): Partial<Record<'txr' | 'pal' | 'geo' | 'mdl', string>> {
+        const dir = path.dirname(currentPath);
+        const base = path.basename(currentPath);
+        const result: Partial<Record<'txr' | 'pal' | 'geo' | 'mdl', string>> = {};
+
+        // Match the prefix before _MDL / _TXR / _PAL / _GEO.
+        const familyMatch = base.match(/^(.+?)_(MDL|TXR|PAL|GEO)(\([^)]+\))?\.ZED$/i);
+        if (!familyMatch) { return result; }
+        const prefix = familyMatch[1];
+
+        const candidates: Record<'txr' | 'pal' | 'geo' | 'mdl', string[]> = {
+            txr: [`${prefix}_TXR.ZED`, `${prefix}_TXR(1).ZED`],
+            pal: [`${prefix}_PAL.ZED`, `${prefix}_PAL(1).ZED`],
+            geo: [`${prefix}_GEO.ZED`],
+            mdl: [`${prefix}_MDL.ZED`],
+        };
+
+        for (const [kind, names] of Object.entries(candidates) as Array<['txr' | 'pal' | 'geo' | 'mdl', string[]]>) {
+            for (const name of names) {
+                const full = path.join(dir, name);
+                if (fs.existsSync(full)) {
+                    result[kind] = full;
+                    break;
+                }
+            }
+        }
+        return result;
+    }
+
+    private _findSiblingPaletteFile(currentPath: string): string | undefined {
+        const dir = path.dirname(currentPath);
+        const base = path.basename(currentPath);
+        const candidates: string[] = [];
+
+        const txrMatch = base.match(/^(.*?)_TXR(?:\([^)]+\))?\.ZED$/i);
+        if (txrMatch) {
+            candidates.push(`${txrMatch[1]}_PAL.ZED`);
+            candidates.push(`${txrMatch[1]}_PAL(1).ZED`);
+        }
+        candidates.push(base.replace(/_TXR/i, '_PAL'));
+
+        for (const candidate of candidates) {
+            const full = path.join(dir, candidate);
+            if (fs.existsSync(full)) { return full; }
+        }
+
+        try {
+            for (const entry of fs.readdirSync(dir)) {
+                if (/_PAL(?:\([^)]+\))?\.ZED$/i.test(entry)) {
+                    return path.join(dir, entry);
+                }
+            }
+        } catch { /* ignore */ }
+        return undefined;
     }
 
     private async _openFile(webview: vscode.Webview): Promise<void> {

@@ -1,0 +1,178 @@
+{
+  "setName": "IOP: dmacman",
+  "gameId": "SCUS-97275",
+  "isBuiltIn": false,
+  "isSystem": true,
+  "entries": [
+    {
+      "address": "0x0002E3A4",
+      "name": "imp_SetD_MADR",
+      "comment": "cdvd_driver \u2192 dmacman::SetD_MADR (#4)"
+    },
+    {
+      "address": "0x0002E3AC",
+      "name": "imp_GetD_MADR",
+      "comment": "cdvd_driver \u2192 dmacman::GetD_MADR (#5)"
+    },
+    {
+      "address": "0x0002E3B4",
+      "name": "imp_SetD_BCR",
+      "comment": "cdvd_driver \u2192 dmacman::SetD_BCR (#6)"
+    },
+    {
+      "address": "0x0002E3BC",
+      "name": "imp_SetD_CHCR",
+      "comment": "cdvd_driver \u2192 dmacman::SetD_CHCR (#8)"
+    },
+    {
+      "address": "0x0002E3C4",
+      "name": "imp_GetD_CHCR",
+      "comment": "cdvd_driver \u2192 dmacman::GetD_CHCR (#9)"
+    },
+    {
+      "address": "0x0002E3CC",
+      "name": "imp_SetDPCR",
+      "comment": "cdvd_driver \u2192 dmacman::SetDPCR (#14)"
+    },
+    {
+      "address": "0x0002E3D4",
+      "name": "imp_GetDPCR",
+      "comment": "cdvd_driver \u2192 dmacman::GetDPCR (#15)"
+    },
+    {
+      "address": "0x0003D16C",
+      "name": "imp_SetD_MADR",
+      "comment": "cdvd_ee_driver \u2192 dmacman::SetD_MADR (#4)"
+    },
+    {
+      "address": "0x0003D174",
+      "name": "imp_SetD_BCR",
+      "comment": "cdvd_ee_driver \u2192 dmacman::SetD_BCR (#6)"
+    },
+    {
+      "address": "0x0003D17C",
+      "name": "imp_SetD_CHCR",
+      "comment": "cdvd_ee_driver \u2192 dmacman::SetD_CHCR (#8)"
+    },
+    {
+      "address": "0x0003D184",
+      "name": "imp_GetD_CHCR",
+      "comment": "cdvd_ee_driver \u2192 dmacman::GetD_CHCR (#9)"
+    },
+    {
+      "address": "0x00047258",
+      "name": "imp_SetDMA",
+      "comment": "sio2man \u2192 dmacman::SetDMA (#28)"
+    },
+    {
+      "address": "0x00047260",
+      "name": "imp_StartTransfer",
+      "comment": "sio2man \u2192 dmacman::StartTransfer (#32)"
+    },
+    {
+      "address": "0x00047268",
+      "name": "imp_SetVal",
+      "comment": "sio2man \u2192 dmacman::SetVal (#33)"
+    },
+    {
+      "address": "0x00047270",
+      "name": "imp_EnableDMAch",
+      "comment": "sio2man \u2192 dmacman::EnableDMAch (#34)"
+    },
+    {
+      "address": "0x00047278",
+      "name": "imp_DisableDMAch",
+      "comment": "sio2man \u2192 dmacman::DisableDMAch (#35)"
+    },
+    {
+      "address": "0x1C02E3A4",
+      "name": "imp_SetD_MADR",
+      "comment": "cdvd_driver \u2192 dmacman::SetD_MADR (#4, iop 0x0002E3A4)"
+    },
+    {
+      "address": "0x1C02E3AC",
+      "name": "imp_GetD_MADR",
+      "comment": "cdvd_driver \u2192 dmacman::GetD_MADR (#5, iop 0x0002E3AC)"
+    },
+    {
+      "address": "0x1C02E3B4",
+      "name": "imp_SetD_BCR",
+      "comment": "cdvd_driver \u2192 dmacman::SetD_BCR (#6, iop 0x0002E3B4)"
+    },
+    {
+      "address": "0x1C02E3BC",
+      "name": "imp_SetD_CHCR",
+      "comment": "cdvd_driver \u2192 dmacman::SetD_CHCR (#8, iop 0x0002E3BC)"
+    },
+    {
+      "address": "0x1C02E3C4",
+      "name": "imp_GetD_CHCR",
+      "comment": "cdvd_driver \u2192 dmacman::GetD_CHCR (#9, iop 0x0002E3C4)"
+    },
+    {
+      "address": "0x1C02E3CC",
+      "name": "imp_SetDPCR",
+      "comment": "cdvd_driver \u2192 dmacman::SetDPCR (#14, iop 0x0002E3CC)"
+    },
+    {
+      "address": "0x1C02E3D4",
+      "name": "imp_GetDPCR",
+      "comment": "cdvd_driver \u2192 dmacman::GetDPCR (#15, iop 0x0002E3D4)"
+    },
+    {
+      "address": "0x1C03D16C",
+      "name": "imp_SetD_MADR",
+      "comment": "cdvd_ee_driver \u2192 dmacman::SetD_MADR (#4, iop 0x0003D16C)"
+    },
+    {
+      "address": "0x1C03D174",
+      "name": "imp_SetD_BCR",
+      "comment": "cdvd_ee_driver \u2192 dmacman::SetD_BCR (#6, iop 0x0003D174)"
+    },
+    {
+      "address": "0x1C03D17C",
+      "name": "imp_SetD_CHCR",
+      "comment": "cdvd_ee_driver \u2192 dmacman::SetD_CHCR (#8, iop 0x0003D17C)"
+    },
+    {
+      "address": "0x1C03D184",
+      "name": "imp_GetD_CHCR",
+      "comment": "cdvd_ee_driver \u2192 dmacman::GetD_CHCR (#9, iop 0x0003D184)"
+    },
+    {
+      "address": "0x1C047258",
+      "name": "imp_SetDMA",
+      "comment": "sio2man \u2192 dmacman::SetDMA (#28, iop 0x00047258)"
+    },
+    {
+      "address": "0x1C047260",
+      "name": "imp_StartTransfer",
+      "comment": "sio2man \u2192 dmacman::StartTransfer (#32, iop 0x00047260)"
+    },
+    {
+      "address": "0x1C047268",
+      "name": "imp_SetVal",
+      "comment": "sio2man \u2192 dmacman::SetVal (#33, iop 0x00047268)"
+    },
+    {
+      "address": "0x1C047270",
+      "name": "imp_EnableDMAch",
+      "comment": "sio2man \u2192 dmacman::EnableDMAch (#34, iop 0x00047270)"
+    },
+    {
+      "address": "0x1C047278",
+      "name": "imp_DisableDMAch",
+      "comment": "sio2man \u2192 dmacman::DisableDMAch (#35, iop 0x00047278)"
+    },
+    {
+      "address": "0x1C093448",
+      "name": "imp_SetDPCR2",
+      "comment": "dev9 \u2192 dmacman::SetDPCR2 (#16, iop 0x00093448)"
+    },
+    {
+      "address": "0x1C093450",
+      "name": "imp_GetDPCR2",
+      "comment": "dev9 \u2192 dmacman::GetDPCR2 (#17, iop 0x00093450)"
+    }
+  ]
+}

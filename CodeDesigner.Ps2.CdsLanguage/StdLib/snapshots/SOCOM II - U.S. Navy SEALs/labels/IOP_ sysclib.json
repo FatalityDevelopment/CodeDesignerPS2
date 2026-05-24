@@ -1,0 +1,618 @@
+{
+  "setName": "IOP: sysclib",
+  "gameId": "SCUS-97275",
+  "isBuiltIn": false,
+  "isSystem": true,
+  "entries": [
+    {
+      "address": "0x000122E8",
+      "name": "imp_memcpy",
+      "comment": "Multi_Thread_Manager \u2192 sysclib::memcpy (#12)"
+    },
+    {
+      "address": "0x000122F0",
+      "name": "imp_memset",
+      "comment": "Multi_Thread_Manager \u2192 sysclib::memset (#14)"
+    },
+    {
+      "address": "0x00013C8C",
+      "name": "imp_memset",
+      "comment": "Vblank_service \u2192 sysclib::memset (#14)"
+    },
+    {
+      "address": "0x00015D18",
+      "name": "imp_look_ctype_table",
+      "comment": "IO/File_Manager \u2192 sysclib::look_ctype_table (#8)"
+    },
+    {
+      "address": "0x00015D20",
+      "name": "imp_bzero",
+      "comment": "IO/File_Manager \u2192 sysclib::bzero (#17)"
+    },
+    {
+      "address": "0x00015D28",
+      "name": "imp_strcmp",
+      "comment": "IO/File_Manager \u2192 sysclib::strcmp (#22)"
+    },
+    {
+      "address": "0x00015D30",
+      "name": "imp_index",
+      "comment": "IO/File_Manager \u2192 sysclib::index (#25)"
+    },
+    {
+      "address": "0x00015D38",
+      "name": "imp_strlen",
+      "comment": "IO/File_Manager \u2192 sysclib::strlen (#27)"
+    },
+    {
+      "address": "0x00015D40",
+      "name": "imp_strncpy",
+      "comment": "IO/File_Manager \u2192 sysclib::strncpy (#30)"
+    },
+    {
+      "address": "0x00015D48",
+      "name": "imp_strtol",
+      "comment": "IO/File_Manager \u2192 sysclib::strtol (#36)"
+    },
+    {
+      "address": "0x00019514",
+      "name": "imp_memcpy",
+      "comment": "Moldule_File_loader \u2192 sysclib::memcpy (#12)"
+    },
+    {
+      "address": "0x0001951C",
+      "name": "imp_memset",
+      "comment": "Moldule_File_loader \u2192 sysclib::memset (#14)"
+    },
+    {
+      "address": "0x00019524",
+      "name": "imp_strcmp",
+      "comment": "Moldule_File_loader \u2192 sysclib::strcmp (#22)"
+    },
+    {
+      "address": "0x0001952C",
+      "name": "imp_strcpy",
+      "comment": "Moldule_File_loader \u2192 sysclib::strcpy (#23)"
+    },
+    {
+      "address": "0x00019534",
+      "name": "imp_strlen",
+      "comment": "Moldule_File_loader \u2192 sysclib::strlen (#27)"
+    },
+    {
+      "address": "0x0001953C",
+      "name": "imp_strncpy",
+      "comment": "Moldule_File_loader \u2192 sysclib::strncpy (#30)"
+    },
+    {
+      "address": "0x00019544",
+      "name": "imp_wmemset",
+      "comment": "Moldule_File_loader \u2192 sysclib::wmemset (#41)"
+    },
+    {
+      "address": "0x0001A334",
+      "name": "imp_memcpy",
+      "comment": "ROM_file_driver \u2192 sysclib::memcpy (#12)"
+    },
+    {
+      "address": "0x0001A33C",
+      "name": "imp_memset",
+      "comment": "ROM_file_driver \u2192 sysclib::memset (#14)"
+    },
+    {
+      "address": "0x0001AD18",
+      "name": "imp_look_ctype_table",
+      "comment": "Stdio \u2192 sysclib::look_ctype_table (#8)"
+    },
+    {
+      "address": "0x0001AD20",
+      "name": "imp_prnt",
+      "comment": "Stdio \u2192 sysclib::prnt (#18)"
+    },
+    {
+      "address": "0x00021EB0",
+      "name": "imp_memcpy",
+      "comment": "LoadModuleByEE \u2192 sysclib::memcpy (#12)"
+    },
+    {
+      "address": "0x00021EB8",
+      "name": "imp_strcmp",
+      "comment": "LoadModuleByEE \u2192 sysclib::strcmp (#22)"
+    },
+    {
+      "address": "0x0002E4E4",
+      "name": "imp_memcpy",
+      "comment": "cdvd_driver \u2192 sysclib::memcpy (#12)"
+    },
+    {
+      "address": "0x0002E4EC",
+      "name": "imp_memset",
+      "comment": "cdvd_driver \u2192 sysclib::memset (#14)"
+    },
+    {
+      "address": "0x0002E4F4",
+      "name": "imp_sprintf",
+      "comment": "cdvd_driver \u2192 sysclib::sprintf (#19)"
+    },
+    {
+      "address": "0x0002E4FC",
+      "name": "imp_strcat",
+      "comment": "cdvd_driver \u2192 sysclib::strcat (#20)"
+    },
+    {
+      "address": "0x0002E504",
+      "name": "imp_strcmp",
+      "comment": "cdvd_driver \u2192 sysclib::strcmp (#22)"
+    },
+    {
+      "address": "0x0002E50C",
+      "name": "imp_strcpy",
+      "comment": "cdvd_driver \u2192 sysclib::strcpy (#23)"
+    },
+    {
+      "address": "0x0002E514",
+      "name": "imp_strlen",
+      "comment": "cdvd_driver \u2192 sysclib::strlen (#27)"
+    },
+    {
+      "address": "0x0002E51C",
+      "name": "imp_strncmp",
+      "comment": "cdvd_driver \u2192 sysclib::strncmp (#29)"
+    },
+    {
+      "address": "0x0002E524",
+      "name": "imp_strncpy",
+      "comment": "cdvd_driver \u2192 sysclib::strncpy (#30)"
+    },
+    {
+      "address": "0x0002E52C",
+      "name": "imp_strtol",
+      "comment": "cdvd_driver \u2192 sysclib::strtol (#36)"
+    },
+    {
+      "address": "0x0003D2E0",
+      "name": "imp_strncmp",
+      "comment": "cdvd_ee_driver \u2192 sysclib::strncmp (#29)"
+    },
+    {
+      "address": "0x0003D2E8",
+      "name": "imp_strtol",
+      "comment": "cdvd_ee_driver \u2192 sysclib::strtol (#36)"
+    },
+    {
+      "address": "0x00041820",
+      "name": "imp_memcpy",
+      "comment": "FILEIO_service \u2192 sysclib::memcpy (#12)"
+    },
+    {
+      "address": "0x00047350",
+      "name": "imp_look_ctype_table",
+      "comment": "sio2man \u2192 sysclib::look_ctype_table (#8)"
+    },
+    {
+      "address": "0x00047358",
+      "name": "imp_strncmp",
+      "comment": "sio2man \u2192 sysclib::strncmp (#29)"
+    },
+    {
+      "address": "0x00047360",
+      "name": "imp_strtol",
+      "comment": "sio2man \u2192 sysclib::strtol (#36)"
+    },
+    {
+      "address": "0x0004C8BC",
+      "name": "imp_memcpy",
+      "comment": "sio2d \u2192 sysclib::memcpy (#12)"
+    },
+    {
+      "address": "0x000566A0",
+      "name": "imp_memcpy",
+      "comment": "ds2u_s1 \u2192 sysclib::memcpy (#12)"
+    },
+    {
+      "address": "0x00068600",
+      "name": "imp_memcpy",
+      "comment": "mcman \u2192 sysclib::memcpy (#12)"
+    },
+    {
+      "address": "0x00068608",
+      "name": "imp_memset",
+      "comment": "mcman \u2192 sysclib::memset (#14)"
+    },
+    {
+      "address": "0x00068610",
+      "name": "imp_strcat",
+      "comment": "mcman \u2192 sysclib::strcat (#20)"
+    },
+    {
+      "address": "0x00068618",
+      "name": "imp_strcmp",
+      "comment": "mcman \u2192 sysclib::strcmp (#22)"
+    },
+    {
+      "address": "0x00068620",
+      "name": "imp_strcpy",
+      "comment": "mcman \u2192 sysclib::strcpy (#23)"
+    },
+    {
+      "address": "0x00068628",
+      "name": "imp_strlen",
+      "comment": "mcman \u2192 sysclib::strlen (#27)"
+    },
+    {
+      "address": "0x00068630",
+      "name": "imp_strncmp",
+      "comment": "mcman \u2192 sysclib::strncmp (#29)"
+    },
+    {
+      "address": "0x00068638",
+      "name": "imp_strncpy",
+      "comment": "mcman \u2192 sysclib::strncpy (#30)"
+    },
+    {
+      "address": "0x0007EF4C",
+      "name": "imp_memcpy",
+      "comment": "mcserv \u2192 sysclib::memcpy (#12)"
+    },
+    {
+      "address": "0x0007EF54",
+      "name": "imp_memset",
+      "comment": "mcserv \u2192 sysclib::memset (#14)"
+    },
+    {
+      "address": "0x0007EF5C",
+      "name": "imp_strncmp",
+      "comment": "mcserv \u2192 sysclib::strncmp (#29)"
+    },
+    {
+      "address": "0x0007EF64",
+      "name": "imp_strtol",
+      "comment": "mcserv \u2192 sysclib::strtol (#36)"
+    },
+    {
+      "address": "0x1C0122E8",
+      "name": "imp_memcpy",
+      "comment": "Multi_Thread_Manager \u2192 sysclib::memcpy (#12, iop 0x000122E8)"
+    },
+    {
+      "address": "0x1C0122F0",
+      "name": "imp_memset",
+      "comment": "Multi_Thread_Manager \u2192 sysclib::memset (#14, iop 0x000122F0)"
+    },
+    {
+      "address": "0x1C013C8C",
+      "name": "imp_memset",
+      "comment": "Vblank_service \u2192 sysclib::memset (#14, iop 0x00013C8C)"
+    },
+    {
+      "address": "0x1C015D18",
+      "name": "imp_look_ctype_table",
+      "comment": "IO/File_Manager \u2192 sysclib::look_ctype_table (#8, iop 0x00015D18)"
+    },
+    {
+      "address": "0x1C015D20",
+      "name": "imp_bzero",
+      "comment": "IO/File_Manager \u2192 sysclib::bzero (#17, iop 0x00015D20)"
+    },
+    {
+      "address": "0x1C015D28",
+      "name": "imp_strcmp",
+      "comment": "IO/File_Manager \u2192 sysclib::strcmp (#22, iop 0x00015D28)"
+    },
+    {
+      "address": "0x1C015D30",
+      "name": "imp_index",
+      "comment": "IO/File_Manager \u2192 sysclib::index (#25, iop 0x00015D30)"
+    },
+    {
+      "address": "0x1C015D38",
+      "name": "imp_strlen",
+      "comment": "IO/File_Manager \u2192 sysclib::strlen (#27, iop 0x00015D38)"
+    },
+    {
+      "address": "0x1C015D40",
+      "name": "imp_strncpy",
+      "comment": "IO/File_Manager \u2192 sysclib::strncpy (#30, iop 0x00015D40)"
+    },
+    {
+      "address": "0x1C015D48",
+      "name": "imp_strtol",
+      "comment": "IO/File_Manager \u2192 sysclib::strtol (#36, iop 0x00015D48)"
+    },
+    {
+      "address": "0x1C019514",
+      "name": "imp_memcpy",
+      "comment": "Moldule_File_loader \u2192 sysclib::memcpy (#12, iop 0x00019514)"
+    },
+    {
+      "address": "0x1C01951C",
+      "name": "imp_memset",
+      "comment": "Moldule_File_loader \u2192 sysclib::memset (#14, iop 0x0001951C)"
+    },
+    {
+      "address": "0x1C019524",
+      "name": "imp_strcmp",
+      "comment": "Moldule_File_loader \u2192 sysclib::strcmp (#22, iop 0x00019524)"
+    },
+    {
+      "address": "0x1C01952C",
+      "name": "imp_strcpy",
+      "comment": "Moldule_File_loader \u2192 sysclib::strcpy (#23, iop 0x0001952C)"
+    },
+    {
+      "address": "0x1C019534",
+      "name": "imp_strlen",
+      "comment": "Moldule_File_loader \u2192 sysclib::strlen (#27, iop 0x00019534)"
+    },
+    {
+      "address": "0x1C01953C",
+      "name": "imp_strncpy",
+      "comment": "Moldule_File_loader \u2192 sysclib::strncpy (#30, iop 0x0001953C)"
+    },
+    {
+      "address": "0x1C019544",
+      "name": "imp_wmemset",
+      "comment": "Moldule_File_loader \u2192 sysclib::wmemset (#41, iop 0x00019544)"
+    },
+    {
+      "address": "0x1C01A334",
+      "name": "imp_memcpy",
+      "comment": "ROM_file_driver \u2192 sysclib::memcpy (#12, iop 0x0001A334)"
+    },
+    {
+      "address": "0x1C01A33C",
+      "name": "imp_memset",
+      "comment": "ROM_file_driver \u2192 sysclib::memset (#14, iop 0x0001A33C)"
+    },
+    {
+      "address": "0x1C01AD18",
+      "name": "imp_look_ctype_table",
+      "comment": "Stdio \u2192 sysclib::look_ctype_table (#8, iop 0x0001AD18)"
+    },
+    {
+      "address": "0x1C01AD20",
+      "name": "imp_prnt",
+      "comment": "Stdio \u2192 sysclib::prnt (#18, iop 0x0001AD20)"
+    },
+    {
+      "address": "0x1C021EB0",
+      "name": "imp_memcpy",
+      "comment": "LoadModuleByEE \u2192 sysclib::memcpy (#12, iop 0x00021EB0)"
+    },
+    {
+      "address": "0x1C021EB8",
+      "name": "imp_strcmp",
+      "comment": "LoadModuleByEE \u2192 sysclib::strcmp (#22, iop 0x00021EB8)"
+    },
+    {
+      "address": "0x1C02E4E4",
+      "name": "imp_memcpy",
+      "comment": "cdvd_driver \u2192 sysclib::memcpy (#12, iop 0x0002E4E4)"
+    },
+    {
+      "address": "0x1C02E4EC",
+      "name": "imp_memset",
+      "comment": "cdvd_driver \u2192 sysclib::memset (#14, iop 0x0002E4EC)"
+    },
+    {
+      "address": "0x1C02E4F4",
+      "name": "imp_sprintf",
+      "comment": "cdvd_driver \u2192 sysclib::sprintf (#19, iop 0x0002E4F4)"
+    },
+    {
+      "address": "0x1C02E4FC",
+      "name": "imp_strcat",
+      "comment": "cdvd_driver \u2192 sysclib::strcat (#20, iop 0x0002E4FC)"
+    },
+    {
+      "address": "0x1C02E504",
+      "name": "imp_strcmp",
+      "comment": "cdvd_driver \u2192 sysclib::strcmp (#22, iop 0x0002E504)"
+    },
+    {
+      "address": "0x1C02E50C",
+      "name": "imp_strcpy",
+      "comment": "cdvd_driver \u2192 sysclib::strcpy (#23, iop 0x0002E50C)"
+    },
+    {
+      "address": "0x1C02E514",
+      "name": "imp_strlen",
+      "comment": "cdvd_driver \u2192 sysclib::strlen (#27, iop 0x0002E514)"
+    },
+    {
+      "address": "0x1C02E51C",
+      "name": "imp_strncmp",
+      "comment": "cdvd_driver \u2192 sysclib::strncmp (#29, iop 0x0002E51C)"
+    },
+    {
+      "address": "0x1C02E524",
+      "name": "imp_strncpy",
+      "comment": "cdvd_driver \u2192 sysclib::strncpy (#30, iop 0x0002E524)"
+    },
+    {
+      "address": "0x1C02E52C",
+      "name": "imp_strtol",
+      "comment": "cdvd_driver \u2192 sysclib::strtol (#36, iop 0x0002E52C)"
+    },
+    {
+      "address": "0x1C03D2E0",
+      "name": "imp_strncmp",
+      "comment": "cdvd_ee_driver \u2192 sysclib::strncmp (#29, iop 0x0003D2E0)"
+    },
+    {
+      "address": "0x1C03D2E8",
+      "name": "imp_strtol",
+      "comment": "cdvd_ee_driver \u2192 sysclib::strtol (#36, iop 0x0003D2E8)"
+    },
+    {
+      "address": "0x1C041820",
+      "name": "imp_memcpy",
+      "comment": "FILEIO_service \u2192 sysclib::memcpy (#12, iop 0x00041820)"
+    },
+    {
+      "address": "0x1C047350",
+      "name": "imp_look_ctype_table",
+      "comment": "sio2man \u2192 sysclib::look_ctype_table (#8, iop 0x00047350)"
+    },
+    {
+      "address": "0x1C047358",
+      "name": "imp_strncmp",
+      "comment": "sio2man \u2192 sysclib::strncmp (#29, iop 0x00047358)"
+    },
+    {
+      "address": "0x1C047360",
+      "name": "imp_strtol",
+      "comment": "sio2man \u2192 sysclib::strtol (#36, iop 0x00047360)"
+    },
+    {
+      "address": "0x1C04C8BC",
+      "name": "imp_memcpy",
+      "comment": "sio2d \u2192 sysclib::memcpy (#12, iop 0x0004C8BC)"
+    },
+    {
+      "address": "0x1C0566A0",
+      "name": "imp_memcpy",
+      "comment": "ds2u_s1 \u2192 sysclib::memcpy (#12, iop 0x000566A0)"
+    },
+    {
+      "address": "0x1C068600",
+      "name": "imp_memcpy",
+      "comment": "mcman \u2192 sysclib::memcpy (#12, iop 0x00068600)"
+    },
+    {
+      "address": "0x1C068608",
+      "name": "imp_memset",
+      "comment": "mcman \u2192 sysclib::memset (#14, iop 0x00068608)"
+    },
+    {
+      "address": "0x1C068610",
+      "name": "imp_strcat",
+      "comment": "mcman \u2192 sysclib::strcat (#20, iop 0x00068610)"
+    },
+    {
+      "address": "0x1C068618",
+      "name": "imp_strcmp",
+      "comment": "mcman \u2192 sysclib::strcmp (#22, iop 0x00068618)"
+    },
+    {
+      "address": "0x1C068620",
+      "name": "imp_strcpy",
+      "comment": "mcman \u2192 sysclib::strcpy (#23, iop 0x00068620)"
+    },
+    {
+      "address": "0x1C068628",
+      "name": "imp_strlen",
+      "comment": "mcman \u2192 sysclib::strlen (#27, iop 0x00068628)"
+    },
+    {
+      "address": "0x1C068630",
+      "name": "imp_strncmp",
+      "comment": "mcman \u2192 sysclib::strncmp (#29, iop 0x00068630)"
+    },
+    {
+      "address": "0x1C068638",
+      "name": "imp_strncpy",
+      "comment": "mcman \u2192 sysclib::strncpy (#30, iop 0x00068638)"
+    },
+    {
+      "address": "0x1C07EF4C",
+      "name": "imp_memcpy",
+      "comment": "mcserv \u2192 sysclib::memcpy (#12, iop 0x0007EF4C)"
+    },
+    {
+      "address": "0x1C07EF54",
+      "name": "imp_memset",
+      "comment": "mcserv \u2192 sysclib::memset (#14, iop 0x0007EF54)"
+    },
+    {
+      "address": "0x1C07EF5C",
+      "name": "imp_strncmp",
+      "comment": "mcserv \u2192 sysclib::strncmp (#29, iop 0x0007EF5C)"
+    },
+    {
+      "address": "0x1C07EF64",
+      "name": "imp_strtol",
+      "comment": "mcserv \u2192 sysclib::strtol (#36, iop 0x0007EF64)"
+    },
+    {
+      "address": "0x1C0879E8",
+      "name": "imp_bcopy",
+      "comment": "USB_driver \u2192 sysclib::bcopy (#16, iop 0x000879E8)"
+    },
+    {
+      "address": "0x1C0879F0",
+      "name": "imp_bzero",
+      "comment": "USB_driver \u2192 sysclib::bzero (#17, iop 0x000879F0)"
+    },
+    {
+      "address": "0x1C090920",
+      "name": "imp_strcmp",
+      "comment": "USB_Keyboard_Driver \u2192 sysclib::strcmp (#22, iop 0x00090920)"
+    },
+    {
+      "address": "0x1C090928",
+      "name": "imp_strtol",
+      "comment": "USB_Keyboard_Driver \u2192 sysclib::strtol (#36, iop 0x00090928)"
+    },
+    {
+      "address": "0x1C098120",
+      "name": "imp_bzero",
+      "comment": "Sound_Device_Library \u2192 sysclib::bzero (#17, iop 0x00098120)"
+    },
+    {
+      "address": "0x1C0B38A4",
+      "name": "imp_memcpy",
+      "comment": "989snd_Library \u2192 sysclib::memcpy (#12, iop 0x000B38A4)"
+    },
+    {
+      "address": "0x1C0B38AC",
+      "name": "imp_memmove",
+      "comment": "989snd_Library \u2192 sysclib::memmove (#13, iop 0x000B38AC)"
+    },
+    {
+      "address": "0x1C0B38B4",
+      "name": "imp_memset",
+      "comment": "989snd_Library \u2192 sysclib::memset (#14, iop 0x000B38B4)"
+    },
+    {
+      "address": "0x1C0B38BC",
+      "name": "imp_strncmp",
+      "comment": "989snd_Library \u2192 sysclib::strncmp (#29, iop 0x000B38BC)"
+    },
+    {
+      "address": "0x1C0B38C4",
+      "name": "imp_strtol",
+      "comment": "989snd_Library \u2192 sysclib::strtol (#36, iop 0x000B38C4)"
+    },
+    {
+      "address": "0x1C0C82C8",
+      "name": "imp_tolower",
+      "comment": "lgAud \u2192 sysclib::tolower (#7, iop 0x000C82C8)"
+    },
+    {
+      "address": "0x1C0C82D0",
+      "name": "imp_memset",
+      "comment": "lgAud \u2192 sysclib::memset (#14, iop 0x000C82D0)"
+    },
+    {
+      "address": "0x1C0C82D8",
+      "name": "imp_strlen",
+      "comment": "lgAud \u2192 sysclib::strlen (#27, iop 0x000C82D8)"
+    },
+    {
+      "address": "0x1C0C82E0",
+      "name": "imp_strtol",
+      "comment": "lgAud \u2192 sysclib::strtol (#36, iop 0x000C82E0)"
+    },
+    {
+      "address": "0x1C0DB970",
+      "name": "imp_strncmp",
+      "comment": "headset_streamer \u2192 sysclib::strncmp (#29, iop 0x000DB970)"
+    },
+    {
+      "address": "0x1C0DB978",
+      "name": "imp_strtol",
+      "comment": "headset_streamer \u2192 sysclib::strtol (#36, iop 0x000DB978)"
+    }
+  ]
+}

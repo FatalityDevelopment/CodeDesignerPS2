@@ -1,0 +1,58 @@
+{
+  "setName": "IOP: heaplib",
+  "gameId": "SCUS-97275",
+  "isBuiltIn": false,
+  "isSystem": true,
+  "entries": [
+    {
+      "address": "0x00012370",
+      "name": "imp_CreateHeap",
+      "comment": "Multi_Thread_Manager \u2192 heaplib::CreateHeap (#4)"
+    },
+    {
+      "address": "0x00012378",
+      "name": "imp_DeleteHeap",
+      "comment": "Multi_Thread_Manager \u2192 heaplib::DeleteHeap (#5)"
+    },
+    {
+      "address": "0x00012380",
+      "name": "imp_AllocHeapMemory",
+      "comment": "Multi_Thread_Manager \u2192 heaplib::AllocHeapMemory (#6)"
+    },
+    {
+      "address": "0x00012388",
+      "name": "imp_FreeHeapMemory",
+      "comment": "Multi_Thread_Manager \u2192 heaplib::FreeHeapMemory (#7)"
+    },
+    {
+      "address": "0x00012390",
+      "name": "imp_HeapTotalFreeSize",
+      "comment": "Multi_Thread_Manager \u2192 heaplib::HeapTotalFreeSize (#8)"
+    },
+    {
+      "address": "0x1C012370",
+      "name": "imp_CreateHeap",
+      "comment": "Multi_Thread_Manager \u2192 heaplib::CreateHeap (#4, iop 0x00012370)"
+    },
+    {
+      "address": "0x1C012378",
+      "name": "imp_DeleteHeap",
+      "comment": "Multi_Thread_Manager \u2192 heaplib::DeleteHeap (#5, iop 0x00012378)"
+    },
+    {
+      "address": "0x1C012380",
+      "name": "imp_AllocHeapMemory",
+      "comment": "Multi_Thread_Manager \u2192 heaplib::AllocHeapMemory (#6, iop 0x00012380)"
+    },
+    {
+      "address": "0x1C012388",
+      "name": "imp_FreeHeapMemory",
+      "comment": "Multi_Thread_Manager \u2192 heaplib::FreeHeapMemory (#7, iop 0x00012388)"
+    },
+    {
+      "address": "0x1C012390",
+      "name": "imp_HeapTotalFreeSize",
+      "comment": "Multi_Thread_Manager \u2192 heaplib::HeapTotalFreeSize (#8, iop 0x00012390)"
+    }
+  ]
+}

@@ -1,0 +1,98 @@
+{
+  "setName": "IOP: usbd",
+  "gameId": "SCUS-97275",
+  "isBuiltIn": false,
+  "isSystem": true,
+  "entries": [
+    {
+      "address": "0x1C0907F4",
+      "name": "imp_sceUsbdRegisterLdd",
+      "comment": "USB_Keyboard_Driver \u2192 usbd::sceUsbdRegisterLdd (#4, iop 0x000907F4)"
+    },
+    {
+      "address": "0x1C0907FC",
+      "name": "imp_sceUsbdUnregisterLdd",
+      "comment": "USB_Keyboard_Driver \u2192 usbd::sceUsbdUnregisterLdd (#5, iop 0x000907FC)"
+    },
+    {
+      "address": "0x1C090804",
+      "name": "imp_sceUsbdScanStaticDescriptor",
+      "comment": "USB_Keyboard_Driver \u2192 usbd::sceUsbdScanStaticDescriptor (#6, iop 0x00090804)"
+    },
+    {
+      "address": "0x1C09080C",
+      "name": "imp_sceUsbdSetPrivateData",
+      "comment": "USB_Keyboard_Driver \u2192 usbd::sceUsbdSetPrivateData (#7, iop 0x0009080C)"
+    },
+    {
+      "address": "0x1C090814",
+      "name": "imp_sceUsbdGetPrivateData",
+      "comment": "USB_Keyboard_Driver \u2192 usbd::sceUsbdGetPrivateData (#8, iop 0x00090814)"
+    },
+    {
+      "address": "0x1C09081C",
+      "name": "imp_sceUsbdOpenPipe",
+      "comment": "USB_Keyboard_Driver \u2192 usbd::sceUsbdOpenPipe (#9, iop 0x0009081C)"
+    },
+    {
+      "address": "0x1C090824",
+      "name": "imp_sceUsbdClosePipe",
+      "comment": "USB_Keyboard_Driver \u2192 usbd::sceUsbdClosePipe (#10, iop 0x00090824)"
+    },
+    {
+      "address": "0x1C09082C",
+      "name": "imp_sceUsbdTransferPipe",
+      "comment": "USB_Keyboard_Driver \u2192 usbd::sceUsbdTransferPipe (#11, iop 0x0009082C)"
+    },
+    {
+      "address": "0x1C090834",
+      "name": "imp_sceUsbdGetDeviceLocation",
+      "comment": "USB_Keyboard_Driver \u2192 usbd::sceUsbdGetDeviceLocation (#13, iop 0x00090834)"
+    },
+    {
+      "address": "0x1C0C8154",
+      "name": "imp_sceUsbdRegisterLdd",
+      "comment": "lgAud \u2192 usbd::sceUsbdRegisterLdd (#4, iop 0x000C8154)"
+    },
+    {
+      "address": "0x1C0C815C",
+      "name": "imp_sceUsbdUnregisterLdd",
+      "comment": "lgAud \u2192 usbd::sceUsbdUnregisterLdd (#5, iop 0x000C815C)"
+    },
+    {
+      "address": "0x1C0C8164",
+      "name": "imp_sceUsbdScanStaticDescriptor",
+      "comment": "lgAud \u2192 usbd::sceUsbdScanStaticDescriptor (#6, iop 0x000C8164)"
+    },
+    {
+      "address": "0x1C0C816C",
+      "name": "imp_sceUsbdSetPrivateData",
+      "comment": "lgAud \u2192 usbd::sceUsbdSetPrivateData (#7, iop 0x000C816C)"
+    },
+    {
+      "address": "0x1C0C8174",
+      "name": "imp_sceUsbdGetPrivateData",
+      "comment": "lgAud \u2192 usbd::sceUsbdGetPrivateData (#8, iop 0x000C8174)"
+    },
+    {
+      "address": "0x1C0C817C",
+      "name": "imp_sceUsbdOpenPipe",
+      "comment": "lgAud \u2192 usbd::sceUsbdOpenPipe (#9, iop 0x000C817C)"
+    },
+    {
+      "address": "0x1C0C8184",
+      "name": "imp_sceUsbdClosePipe",
+      "comment": "lgAud \u2192 usbd::sceUsbdClosePipe (#10, iop 0x000C8184)"
+    },
+    {
+      "address": "0x1C0C818C",
+      "name": "imp_sceUsbdTransferPipe",
+      "comment": "lgAud \u2192 usbd::sceUsbdTransferPipe (#11, iop 0x000C818C)"
+    },
+    {
+      "address": "0x1C0C8194",
+      "name": "imp_sceUsbdMultiIsochronousTransfer",
+      "comment": "lgAud \u2192 usbd::sceUsbdMultiIsochronousTransfer (#18, iop 0x000C8194)"
+    }
+  ]
+}

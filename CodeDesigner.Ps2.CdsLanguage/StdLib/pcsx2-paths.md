@@ -17,7 +17,7 @@
 - `C:\Users\tholu\Desktop\CodeDesigner\pcsx2\3rdparty\cubeb\src\cubeb_wasapi.cpp:1927:Minimum`
 - `C:\Users\tholu\Desktop\CodeDesigner\pcsx2\3rdparty\cubeb\src\cubeb_wasapi.cpp:2333:Setup`
 - `C:\Users\tholu\Desktop\CodeDesigner\pcsx2\3rdparty\cubeb\src\cubeb_wasapi.cpp:2431:Buffer`
-- `C:\Users\tholu\Desktop\CodeDesigner\pcsx2\3rdparty\cubeb\src\cubeb_wasapi.cpp:2617:(000001B20B1D7740)`
+- `C:\Users\tholu\Desktop\CodeDesigner\pcsx2\3rdparty\cubeb\src\cubeb_wasapi.cpp:2617:(000002347152A870)`
 - `C:\Users\tholu\Desktop\CodeDesigner\pcsx2\3rdparty\cubeb\src\cubeb_wasapi.cpp:2668:Target`
 - `C:\Users\tholu\Desktop\CodeDesigner\pcsx2\3rdparty\cubeb\src\cubeb_wasapi.cpp:2870:Follow`
 - `C:\Users\tholu\Desktop\CodeDesigner\pcsx2\3rdparty\cubeb\src\cubeb_wasapi.cpp:2898:Stream`

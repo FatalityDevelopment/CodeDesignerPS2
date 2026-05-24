@@ -1,0 +1,193 @@
+{
+  "setName": "IOP: stdio",
+  "gameId": "SCUS-97275",
+  "isBuiltIn": false,
+  "isSystem": true,
+  "entries": [
+    {
+      "address": "0x000122C4",
+      "name": "imp_printf",
+      "comment": "Multi_Thread_Manager \u2192 stdio::printf (#4)"
+    },
+    {
+      "address": "0x00019568",
+      "name": "imp_printf",
+      "comment": "Moldule_File_loader \u2192 stdio::printf (#4)"
+    },
+    {
+      "address": "0x0001E14C",
+      "name": "imp_printf",
+      "comment": "IOP_SIF_rpc_interface \u2192 stdio::printf (#4)"
+    },
+    {
+      "address": "0x00020084",
+      "name": "imp_printf",
+      "comment": "RebootByEE \u2192 stdio::printf (#4)"
+    },
+    {
+      "address": "0x00021EDC",
+      "name": "imp_printf",
+      "comment": "LoadModuleByEE \u2192 stdio::printf (#4)"
+    },
+    {
+      "address": "0x0002E380",
+      "name": "imp_printf",
+      "comment": "cdvd_driver \u2192 stdio::printf (#4)"
+    },
+    {
+      "address": "0x0003D148",
+      "name": "imp_printf",
+      "comment": "cdvd_ee_driver \u2192 stdio::printf (#4)"
+    },
+    {
+      "address": "0x00041708",
+      "name": "imp_printf",
+      "comment": "FILEIO_service \u2192 stdio::printf (#4)"
+    },
+    {
+      "address": "0x00045908",
+      "name": "imp_printf",
+      "comment": "secrman_for_cex \u2192 stdio::printf (#4)"
+    },
+    {
+      "address": "0x00047234",
+      "name": "imp_printf",
+      "comment": "sio2man \u2192 stdio::printf (#4)"
+    },
+    {
+      "address": "0x0004A498",
+      "name": "imp_printf",
+      "comment": "cdvd_st_driver \u2192 stdio::printf (#4)"
+    },
+    {
+      "address": "0x0004C898",
+      "name": "imp_printf",
+      "comment": "sio2d \u2192 stdio::printf (#4)"
+    },
+    {
+      "address": "0x0004FFB8",
+      "name": "imp_printf",
+      "comment": "Dbc_Manager \u2192 stdio::printf (#4)"
+    },
+    {
+      "address": "0x0006865C",
+      "name": "imp_printf",
+      "comment": "mcman \u2192 stdio::printf (#4)"
+    },
+    {
+      "address": "0x0007EF88",
+      "name": "imp_printf",
+      "comment": "mcserv \u2192 stdio::printf (#4)"
+    },
+    {
+      "address": "0x1C0122C4",
+      "name": "imp_printf",
+      "comment": "Multi_Thread_Manager \u2192 stdio::printf (#4, iop 0x000122C4)"
+    },
+    {
+      "address": "0x1C019568",
+      "name": "imp_printf",
+      "comment": "Moldule_File_loader \u2192 stdio::printf (#4, iop 0x00019568)"
+    },
+    {
+      "address": "0x1C01E14C",
+      "name": "imp_printf",
+      "comment": "IOP_SIF_rpc_interface \u2192 stdio::printf (#4, iop 0x0001E14C)"
+    },
+    {
+      "address": "0x1C020084",
+      "name": "imp_printf",
+      "comment": "RebootByEE \u2192 stdio::printf (#4, iop 0x00020084)"
+    },
+    {
+      "address": "0x1C021EDC",
+      "name": "imp_printf",
+      "comment": "LoadModuleByEE \u2192 stdio::printf (#4, iop 0x00021EDC)"
+    },
+    {
+      "address": "0x1C02E380",
+      "name": "imp_printf",
+      "comment": "cdvd_driver \u2192 stdio::printf (#4, iop 0x0002E380)"
+    },
+    {
+      "address": "0x1C03D148",
+      "name": "imp_printf",
+      "comment": "cdvd_ee_driver \u2192 stdio::printf (#4, iop 0x0003D148)"
+    },
+    {
+      "address": "0x1C041708",
+      "name": "imp_printf",
+      "comment": "FILEIO_service \u2192 stdio::printf (#4, iop 0x00041708)"
+    },
+    {
+      "address": "0x1C045908",
+      "name": "imp_printf",
+      "comment": "secrman_for_cex \u2192 stdio::printf (#4, iop 0x00045908)"
+    },
+    {
+      "address": "0x1C047234",
+      "name": "imp_printf",
+      "comment": "sio2man \u2192 stdio::printf (#4, iop 0x00047234)"
+    },
+    {
+      "address": "0x1C04A498",
+      "name": "imp_printf",
+      "comment": "cdvd_st_driver \u2192 stdio::printf (#4, iop 0x0004A498)"
+    },
+    {
+      "address": "0x1C04C898",
+      "name": "imp_printf",
+      "comment": "sio2d \u2192 stdio::printf (#4, iop 0x0004C898)"
+    },
+    {
+      "address": "0x1C04FFB8",
+      "name": "imp_printf",
+      "comment": "Dbc_Manager \u2192 stdio::printf (#4, iop 0x0004FFB8)"
+    },
+    {
+      "address": "0x1C06865C",
+      "name": "imp_printf",
+      "comment": "mcman \u2192 stdio::printf (#4, iop 0x0006865C)"
+    },
+    {
+      "address": "0x1C07EF88",
+      "name": "imp_printf",
+      "comment": "mcserv \u2192 stdio::printf (#4, iop 0x0007EF88)"
+    },
+    {
+      "address": "0x1C0878F8",
+      "name": "imp_printf",
+      "comment": "USB_driver \u2192 stdio::printf (#4, iop 0x000878F8)"
+    },
+    {
+      "address": "0x1C0908FC",
+      "name": "imp_printf",
+      "comment": "USB_Keyboard_Driver \u2192 stdio::printf (#4, iop 0x000908FC)"
+    },
+    {
+      "address": "0x1C093374",
+      "name": "imp_printf",
+      "comment": "dev9 \u2192 stdio::printf (#4, iop 0x00093374)"
+    },
+    {
+      "address": "0x1C0B3880",
+      "name": "imp_printf",
+      "comment": "989snd_Library \u2192 stdio::printf (#4, iop 0x000B3880)"
+    },
+    {
+      "address": "0x1C0BFA64",
+      "name": "imp_printf",
+      "comment": "989_DATA_STREAMER \u2192 stdio::printf (#4, iop 0x000BFA64)"
+    },
+    {
+      "address": "0x1C0C82A4",
+      "name": "imp_printf",
+      "comment": "lgAud \u2192 stdio::printf (#4, iop 0x000C82A4)"
+    },
+    {
+      "address": "0x1C0DB94C",
+      "name": "imp_printf",
+      "comment": "headset_streamer \u2192 stdio::printf (#4, iop 0x000DB94C)"
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "setName": "IOP: dev9",
+  "gameId": "SCUS-97275",
+  "isBuiltIn": false,
+  "isSystem": true,
+  "entries": [
+    {
+      "address": "0x1C091618",
+      "name": "start",
+      "comment": "dev9 export #0 (iop 0x00091618)",
+      "type": "Function"
+    },
+    {
+      "address": "0x1C091610",
+      "name": "shutdown",
+      "comment": "dev9 export #2 (iop 0x00091610)",
+      "type": "Function"
+    }
+  ]
+}

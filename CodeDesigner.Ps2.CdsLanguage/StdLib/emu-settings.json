@@ -13,6 +13,18 @@
     {
       "name": "DNAS",
       "path": "c:\\Users\\tholu\\Desktop\\DNAS.BIN"
+    },
+    {
+      "name": "SOCOM - Combined Assualt",
+      "path": "d:\\Games\\Playstation\\SOCOM - Combined Assualt.iso"
+    },
+    {
+      "name": "GTA SA",
+      "path": "d:\\Games\\Playstation\\GTA SA.iso"
+    },
+    {
+      "name": "SOCOM",
+      "path": "d:\\Games\\Playstation\\SOCOM.iso"
     }
   ],
   "emulators": [

@@ -3116,6 +3116,46 @@ export class SocketClient {
         return JSON.parse(response.Data ?? '{}') as ZipperOperationResult;
     }
 
+    public async zipperReadNode(inputPath: string, entryIndex: number): Promise<string> {
+        const response = await this.sendCommand(
+            { Command: 'ZIPPER_READ_NODE', InputPath: inputPath, ZipperEntryIndex: entryIndex },
+            60_000,
+        );
+        if (!response.Success) {
+            throw new Error(response.Error || 'ZIPPER_READ_NODE failed');
+        }
+        return response.Data ?? '';
+    }
+
+    public async zipperInspectRdr(inputPath: string, entrySection?: string): Promise<{
+        sourcePath: string;
+        entry?: string;
+        version: number;
+        stringPoolSize: number;
+        atomCount: number;
+        root: unknown;
+    }> {
+        const response = await this.sendCommand(
+            { Command: 'ZIPPER_INSPECT_RDR', InputPath: inputPath, ZipperSection: entrySection },
+            60_000,
+        );
+        if (!response.Success) {
+            throw new Error(response.Error || 'ZIPPER_INSPECT_RDR failed');
+        }
+        return JSON.parse(response.Data ?? '{}');
+    }
+
+    public async zipperReadAllNodes(inputPath: string): Promise<Array<{ index: number; name: string; type: number; data: string }>> {
+        const response = await this.sendCommand(
+            { Command: 'ZIPPER_READ_ALL_NODES', InputPath: inputPath },
+            60_000,
+        );
+        if (!response.Success) {
+            throw new Error(response.Error || 'ZIPPER_READ_ALL_NODES failed');
+        }
+        return JSON.parse(response.Data ?? '[]') as Array<{ index: number; name: string; type: number; data: string }>;
+    }
+
     public async zipperSaveExportDecrypted(inputPath: string, outputPath: string): Promise<ZipperOperationResult> {
         const response = await this.sendCommand(
             { Command: 'ZIPPER_SAVE_EXPORT_DECRYPTED', InputPath: inputPath, OutputPath: outputPath },

@@ -1611,8 +1611,34 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                     target.panel.webview.postMessage({ type: 'gotoAddress', address: addr });
                     this._recordNav(addr, 'user');
                 } else {
-                    // No region found — tell the requesting panel so it can show "out of range".
-                    panel.webview.postMessage({ type: 'gotoRegionNotFound', address: addr });
+                    // No panel currently covers this address — auto-open the
+                    // panel for the address's region (EE RAM / IOP RAM / BIOS /
+                    // VU / GS / HW regs), then dispatch the goto once it's
+                    // registered. Mirrors navigateToAddress() so every memory
+                    // segment is reachable, not just the regions already open.
+                    const info = classifyAddress(addr);
+                    const panelLabel = REGION_TO_PANEL_LABEL[info.region];
+                    if (panelLabel && this.onOpenMemoryView) {
+                        this.onOpenMemoryView(panelLabel)
+                            .then(() => {
+                                const opened = this._findPanelForAddress(info.region, (info.physicalAddress & ~0x3) >>> 0);
+                                if (!opened) {
+                                    panel.webview.postMessage({ type: 'gotoRegionNotFound', address: addr });
+                                    return;
+                                }
+                                opened.panel.reveal(undefined, false);
+                                opened.panel.webview.postMessage({ type: 'gotoAddress', address: addr });
+                                this._recordNav(addr, 'user');
+                            })
+                            .catch(err => {
+                                getOutputChannel().warn(`[gotoRegion] open failed: ${err}`);
+                                panel.webview.postMessage({ type: 'gotoRegionNotFound', address: addr });
+                            });
+                    } else {
+                        // Address didn't classify to a known region — tell the
+                        // requesting panel so it can show "out of range".
+                        panel.webview.postMessage({ type: 'gotoRegionNotFound', address: addr });
+                    }
                 }
             } else if (message.type === 'patchBytes') {
                 if (this.socketClient?.isConnected()) {

@@ -1,0 +1,28 @@
+{
+  "setName": "IOP: excepman",
+  "gameId": "SCUS-97275",
+  "isBuiltIn": false,
+  "isSystem": true,
+  "entries": [
+    {
+      "address": "0x00005688",
+      "name": "imp_RegisterExceptionHandler",
+      "comment": "Interrupt_Manager \u2192 excepman::RegisterExceptionHandler (#4)"
+    },
+    {
+      "address": "0x00005690",
+      "name": "imp_RegisterPriorityExceptionHandler",
+      "comment": "Interrupt_Manager \u2192 excepman::RegisterPriorityExceptionHandler (#5)"
+    },
+    {
+      "address": "0x1C005688",
+      "name": "imp_RegisterExceptionHandler",
+      "comment": "Interrupt_Manager \u2192 excepman::RegisterExceptionHandler (#4, iop 0x00005688)"
+    },
+    {
+      "address": "0x1C005690",
+      "name": "imp_RegisterPriorityExceptionHandler",
+      "comment": "Interrupt_Manager \u2192 excepman::RegisterPriorityExceptionHandler (#5, iop 0x00005690)"
+    }
+  ]
+}

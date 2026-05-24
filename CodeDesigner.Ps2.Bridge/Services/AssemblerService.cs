@@ -779,15 +779,15 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 var results        = new List<InstructionResult>();
                 var instructionList = new List<(uint instruction, uint address)>();
 
-                // Resolve a *mirrored* analysis memory bus so word-formatted rows
-                // and comment-text address hints can dereference pointers and
-                // resolve strings.
-                // Never reach into PCSX2 PINE from here. Comment hints may use
-                // the analysis emulator/static mirror only, which keeps ASCII
-                // and pointer annotations without arbitrary live PINE reads.
+                // Resolve a memory bus for comment-column ASCII / pointer
+                // annotations. Prefer the analysis-emulator mirror when one
+                // is attached (no PINE traffic); fall back to the live client
+                // (PINE or built-in) when no mirror is available so strings
+                // and pointer chains still resolve in plain browsing mode.
+                IDebugClient? hintClient = _ctx.AnalysisClient ?? _ctx.Client;
                 CodeDesigner.Ps2.Common.Interfaces.IPs2MemoryBus? mirrorBus =
-                    _ctx.AnalysisClient != null
-                        ? new ByteEditorMemoryBusAdapter(new DebugClientByteEditor(_ctx.AnalysisClient))
+                    hintClient != null
+                        ? new ByteEditorMemoryBusAdapter(new DebugClientByteEditor(hintClient))
                         : null;
 
                 // Layer the disasm-page bytes on top of the mirror bus so the

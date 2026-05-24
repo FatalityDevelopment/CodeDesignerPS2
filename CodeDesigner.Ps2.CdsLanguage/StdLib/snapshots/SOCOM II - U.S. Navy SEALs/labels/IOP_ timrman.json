@@ -1,0 +1,148 @@
+{
+  "setName": "IOP: timrman",
+  "gameId": "SCUS-97275",
+  "isBuiltIn": false,
+  "isSystem": true,
+  "entries": [
+    {
+      "address": "0x00012314",
+      "name": "imp_AllocHardTimer",
+      "comment": "Multi_Thread_Manager \u2192 timrman::AllocHardTimer (#4)"
+    },
+    {
+      "address": "0x0001231C",
+      "name": "imp_SetTimerMode",
+      "comment": "Multi_Thread_Manager \u2192 timrman::SetTimerMode (#7)"
+    },
+    {
+      "address": "0x00012324",
+      "name": "imp_GetTimerStatus",
+      "comment": "Multi_Thread_Manager \u2192 timrman::GetTimerStatus (#8)"
+    },
+    {
+      "address": "0x0001232C",
+      "name": "imp_SetTimerCounter",
+      "comment": "Multi_Thread_Manager \u2192 timrman::SetTimerCounter (#9)"
+    },
+    {
+      "address": "0x00012334",
+      "name": "imp_GetTimerCounter",
+      "comment": "Multi_Thread_Manager \u2192 timrman::GetTimerCounter (#10)"
+    },
+    {
+      "address": "0x0001233C",
+      "name": "imp_SetTimerCompare",
+      "comment": "Multi_Thread_Manager \u2192 timrman::SetTimerCompare (#11)"
+    },
+    {
+      "address": "0x00012344",
+      "name": "imp_GetHardTimerIntrCode",
+      "comment": "Multi_Thread_Manager \u2192 timrman::GetHardTimerIntrCode (#16)"
+    },
+    {
+      "address": "0x0001234C",
+      "name": "imp_unk_18",
+      "comment": "Multi_Thread_Manager \u2192 timrman::unk_18 (#18)"
+    },
+    {
+      "address": "0x1C012314",
+      "name": "imp_AllocHardTimer",
+      "comment": "Multi_Thread_Manager \u2192 timrman::AllocHardTimer (#4, iop 0x00012314)"
+    },
+    {
+      "address": "0x1C01231C",
+      "name": "imp_SetTimerMode",
+      "comment": "Multi_Thread_Manager \u2192 timrman::SetTimerMode (#7, iop 0x0001231C)"
+    },
+    {
+      "address": "0x1C012324",
+      "name": "imp_GetTimerStatus",
+      "comment": "Multi_Thread_Manager \u2192 timrman::GetTimerStatus (#8, iop 0x00012324)"
+    },
+    {
+      "address": "0x1C01232C",
+      "name": "imp_SetTimerCounter",
+      "comment": "Multi_Thread_Manager \u2192 timrman::SetTimerCounter (#9, iop 0x0001232C)"
+    },
+    {
+      "address": "0x1C012334",
+      "name": "imp_GetTimerCounter",
+      "comment": "Multi_Thread_Manager \u2192 timrman::GetTimerCounter (#10, iop 0x00012334)"
+    },
+    {
+      "address": "0x1C01233C",
+      "name": "imp_SetTimerCompare",
+      "comment": "Multi_Thread_Manager \u2192 timrman::SetTimerCompare (#11, iop 0x0001233C)"
+    },
+    {
+      "address": "0x1C012344",
+      "name": "imp_GetHardTimerIntrCode",
+      "comment": "Multi_Thread_Manager \u2192 timrman::GetHardTimerIntrCode (#16, iop 0x00012344)"
+    },
+    {
+      "address": "0x1C01234C",
+      "name": "imp_unk_18",
+      "comment": "Multi_Thread_Manager \u2192 timrman::unk_18 (#18, iop 0x0001234C)"
+    },
+    {
+      "address": "0x1C0B39A0",
+      "name": "imp_AllocHardTimer",
+      "comment": "989snd_Library \u2192 timrman::AllocHardTimer (#4, iop 0x000B39A0)"
+    },
+    {
+      "address": "0x1C0B39A8",
+      "name": "imp_FreeHardTimer",
+      "comment": "989snd_Library \u2192 timrman::FreeHardTimer (#6, iop 0x000B39A8)"
+    },
+    {
+      "address": "0x1C0B39B0",
+      "name": "imp_SetTimerHandler",
+      "comment": "989snd_Library \u2192 timrman::SetTimerHandler (#20, iop 0x000B39B0)"
+    },
+    {
+      "address": "0x1C0B39B8",
+      "name": "imp_SetupHardTimer",
+      "comment": "989snd_Library \u2192 timrman::SetupHardTimer (#22, iop 0x000B39B8)"
+    },
+    {
+      "address": "0x1C0B39C0",
+      "name": "imp_StartHardTimer",
+      "comment": "989snd_Library \u2192 timrman::StartHardTimer (#23, iop 0x000B39C0)"
+    },
+    {
+      "address": "0x1C0B39C8",
+      "name": "imp_StopHardTimer",
+      "comment": "989snd_Library \u2192 timrman::StopHardTimer (#24, iop 0x000B39C8)"
+    },
+    {
+      "address": "0x1C0DBA3C",
+      "name": "imp_AllocHardTimer",
+      "comment": "headset_streamer \u2192 timrman::AllocHardTimer (#4, iop 0x000DBA3C)"
+    },
+    {
+      "address": "0x1C0DBA44",
+      "name": "imp_FreeHardTimer",
+      "comment": "headset_streamer \u2192 timrman::FreeHardTimer (#6, iop 0x000DBA44)"
+    },
+    {
+      "address": "0x1C0DBA4C",
+      "name": "imp_SetTimerHandler",
+      "comment": "headset_streamer \u2192 timrman::SetTimerHandler (#20, iop 0x000DBA4C)"
+    },
+    {
+      "address": "0x1C0DBA54",
+      "name": "imp_SetupHardTimer",
+      "comment": "headset_streamer \u2192 timrman::SetupHardTimer (#22, iop 0x000DBA54)"
+    },
+    {
+      "address": "0x1C0DBA5C",
+      "name": "imp_StartHardTimer",
+      "comment": "headset_streamer \u2192 timrman::StartHardTimer (#23, iop 0x000DBA5C)"
+    },
+    {
+      "address": "0x1C0DBA64",
+      "name": "imp_StopHardTimer",
+      "comment": "headset_streamer \u2192 timrman::StopHardTimer (#24, iop 0x000DBA64)"
+    }
+  ]
+}

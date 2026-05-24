@@ -1140,12 +1140,29 @@ export class DisasmEditorComponent implements AfterViewInit {
     recordNavigation: (address: number) => void;
     checkAndLoadPage: () => boolean;
     updateCursor: (scrollBlock?: ScrollLogicalPosition | null) => void;
+    vscode: ReturnType<typeof getVsCodeApi>;
   }): void {
-    const physAddr = this.toPhysicalAddress(params.address);
+    // Align the request to a 4-byte instruction boundary. Comment-derived
+    // pointers (e.g. "a1 = 0x00410220") and label addresses can arrive
+    // unaligned; the backend disassembler returns rows at startAddr + N*4,
+    // so an unaligned cursor shifts the landing row.
+    const physAddrRaw = this.toPhysicalAddress(params.address);
+    const physAligned = (physAddrRaw & ~0x3) >>> 0;
+    const alignedAddr = ((params.address & 0xE0000000) | physAligned) >>> 0;
     const physBase = this.toPhysicalAddress(params.state.baseAddress);
-    const instrIndex = Math.floor((physAddr - physBase) / 4);
-    if (instrIndex < 0 || instrIndex >= params.state.totalInstructions) { return; }
-    params.recordNavigation(params.address);
+    const instrIndex = Math.floor((physAligned - physBase) / 4);
+    if (instrIndex < 0 || instrIndex >= params.state.totalInstructions) {
+      // Out of this panel's range — let the extension host route to the
+      // panel that owns the address (opening it if necessary).
+      params.vscode.postMessage({ type: 'gotoRegion', address: alignedAddr });
+      return;
+    }
+    // Re-fetch the destination page with DataFormatOverrides bypassed so
+    // the cursor lands on the typed-address row even if user overrides or
+    // auto-string detection would normally shift the row layout around it.
+    const gotoPageStart = Math.floor(instrIndex / params.state.pageSize) * params.state.pageSize;
+    params.vscode.postMessage({ type: 'requestPage', startIndex: gotoPageStart, bypassOverrides: true });
+    params.recordNavigation(alignedAddr);
     params.pushNavHistory();
     params.state.cursor = instrIndex;
     this.pendingPageScrollBlock = 'center';
@@ -1436,10 +1453,14 @@ export class DisasmEditorComponent implements AfterViewInit {
     getPageStart: (index: number) => number;
     vscode: ReturnType<typeof getVsCodeApi>;
     renderDisassembly: (scrollBlock?: ScrollLogicalPosition | null) => void;
+    bypassOverrides?: boolean;
   }): boolean {
     const startIndex = params.getPageStart(params.state.cursor);
     if (!params.state.loadedPages.has(startIndex)) {
-      params.vscode.postMessage({ type: 'requestPage', startIndex });
+      const msg: { type: string; startIndex: number; bypassOverrides?: boolean } =
+        { type: 'requestPage', startIndex };
+      if (params.bypassOverrides) { msg.bypassOverrides = true; }
+      params.vscode.postMessage(msg);
       return false;
     }
 
@@ -2037,7 +2058,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     nextSearchMatch: () => void;
     pushNavHistory: () => void;
     getPageStart: (index: number) => number;
-    checkAndLoadPage: () => boolean;
+    checkAndLoadPage: (bypassOverrides?: boolean) => boolean;
     updateCursor: (scrollBlock?: ScrollLogicalPosition | null) => void;
     renderDisassembly: (scrollBlock?: ScrollLogicalPosition | null) => void;
     navigateBack: () => void;
@@ -2153,7 +2174,15 @@ export class DisasmEditorComponent implements AfterViewInit {
       if (crossedPageBoundary) {
         this.pendingPageScrollBlock = boundaryScrollBlock;
       }
-      if (params.checkAndLoadPage()) {
+      // The cursor coordinate uses a fixed 4-byte stride, but data-format
+      // overrides and per-page auto-string detection make rows variable
+      // length. When we cross into a new page whose row layout differs from
+      // the cursor model, the cursor "skips" to whatever row the
+      // variable-stride layout produced at that local index. Forcing the
+      // destination page to render with fixed 4-byte rows on the boundary
+      // crossing keeps the cursor on the address the user scrolled toward;
+      // overrides remain visible on pages the user opens explicitly via goto.
+      if (params.checkAndLoadPage(crossedPageBoundary)) {
         if (crossedPageBoundary) {
           this.pendingPageScrollBlock = null;
         }
@@ -2434,11 +2463,12 @@ export class DisasmEditorComponent implements AfterViewInit {
       vscode,
     });
 
-    const checkAndLoadPage = () => this.checkAndLoadPage({
+    const checkAndLoadPage = (bypassOverrides?: boolean) => this.checkAndLoadPage({
       state,
       getPageStart,
       vscode,
       renderDisassembly,
+      bypassOverrides,
     });
     // Returns the 0-based index of the current PC within the page that starts at
     // `pageStart`, or -1 if the PC is not on that page (or not set).
@@ -2669,6 +2699,7 @@ export class DisasmEditorComponent implements AfterViewInit {
       recordNavigation: (addr: number) => vscode.postMessage({ type: 'recordNav', address: addr }),
       checkAndLoadPage,
       updateCursor,
+      vscode,
     });
 
     const navigateToCurrentRowTarget = () => this.navigateToCurrentRowTarget({

@@ -2,11 +2,12 @@
   "setName": "CodeDesigner labels",
   "gameId": "SCUS-97275",
   "isBuiltIn": false,
+  "isSystem": false,
   "entries": [
     {
       "address": "0x00000000",
       "name": "EE_RAM_BASE",
-      "type": "Function"
+      "comment": "EE Main RAM base (physical)"
     },
     {
       "address": "0x00008000",
@@ -1202,56 +1203,6 @@
       "address": "0x1F808274",
       "name": "SIO2_RECV2",
       "comment": "SIO2 \u2013 RECV2 (byte count)"
-    },
-    {
-      "address": "0x000169A0",
-      "name": "step while BD=1 and branch=0",
-      "type": "String"
-    },
-    {
-      "address": "0x00000024",
-      "name": "FNC_0x00000024",
-      "comment": "; No operation"
-    },
-    {
-      "address": "0x00001CEF",
-      "name": "$!0e",
-      "type": "String"
-    },
-    {
-      "address": "0x00003A2B",
-      "name": "$!8C",
-      "type": "String"
-    },
-    {
-      "address": "0x000155C8",
-      "name": "cdrom0:\\SCUS_972.75;1",
-      "type": "String"
-    },
-    {
-      "address": "0x00016530",
-      "name": "send req err",
-      "type": "String"
-    },
-    {
-      "address": "0x00000010",
-      "name": "FNC_0x00000010",
-      "comment": "; t9 = 0x00000000 \u0022FNC_EE_RAM_BASE\u0022"
-    },
-    {
-      "address": "000a0000",
-      "name": "Test Struct",
-      "type": "Struct"
-    },
-    {
-      "address": "000c0000",
-      "name": "test_vtable",
-      "type": "Struct"
-    },
-    {
-      "address": "0x00C716D0",
-      "name": "Test",
-      "type": "Struct"
     }
   ]
 }

@@ -1,0 +1,938 @@
+{
+  "setName": "IOP: intrman",
+  "gameId": "SCUS-97275",
+  "isBuiltIn": false,
+  "isSystem": true,
+  "entries": [
+    {
+      "address": "0x00006338",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "ssbus_service \u2192 intrman::CpuSuspendIntr (#17)"
+    },
+    {
+      "address": "0x00006340",
+      "name": "imp_CpuResumeIntr",
+      "comment": "ssbus_service \u2192 intrman::CpuResumeIntr (#18)"
+    },
+    {
+      "address": "0x000079DC",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "dmacman \u2192 intrman::CpuSuspendIntr (#17)"
+    },
+    {
+      "address": "0x000079E4",
+      "name": "imp_CpuResumeIntr",
+      "comment": "dmacman \u2192 intrman::CpuResumeIntr (#18)"
+    },
+    {
+      "address": "0x00008FA8",
+      "name": "imp_RegisterIntrHandler",
+      "comment": "Timer_Manager \u2192 intrman::RegisterIntrHandler (#4)"
+    },
+    {
+      "address": "0x00008FB0",
+      "name": "imp_ReleaseIntrHandler",
+      "comment": "Timer_Manager \u2192 intrman::ReleaseIntrHandler (#5)"
+    },
+    {
+      "address": "0x00008FB8",
+      "name": "imp_EnableIntr",
+      "comment": "Timer_Manager \u2192 intrman::EnableIntr (#6)"
+    },
+    {
+      "address": "0x00008FC0",
+      "name": "imp_DisableIntr",
+      "comment": "Timer_Manager \u2192 intrman::DisableIntr (#7)"
+    },
+    {
+      "address": "0x00008FC8",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "Timer_Manager \u2192 intrman::CpuSuspendIntr (#17)"
+    },
+    {
+      "address": "0x00008FD0",
+      "name": "imp_CpuResumeIntr",
+      "comment": "Timer_Manager \u2192 intrman::CpuResumeIntr (#18)"
+    },
+    {
+      "address": "0x00008FD8",
+      "name": "imp_QueryIntrContext",
+      "comment": "Timer_Manager \u2192 intrman::QueryIntrContext (#23)"
+    },
+    {
+      "address": "0x00012258",
+      "name": "imp_RegisterIntrHandler",
+      "comment": "Multi_Thread_Manager \u2192 intrman::RegisterIntrHandler (#4)"
+    },
+    {
+      "address": "0x00012260",
+      "name": "imp_EnableIntr",
+      "comment": "Multi_Thread_Manager \u2192 intrman::EnableIntr (#6)"
+    },
+    {
+      "address": "0x00012268",
+      "name": "imp_CpuDisableIntr",
+      "comment": "Multi_Thread_Manager \u2192 intrman::CpuDisableIntr (#8)"
+    },
+    {
+      "address": "0x00012270",
+      "name": "imp_CpuEnableIntr",
+      "comment": "Multi_Thread_Manager \u2192 intrman::CpuEnableIntr (#9)"
+    },
+    {
+      "address": "0x00012278",
+      "name": "imp_syscall0C",
+      "comment": "Multi_Thread_Manager \u2192 intrman::syscall0C (#14)"
+    },
+    {
+      "address": "0x00012280",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "Multi_Thread_Manager \u2192 intrman::CpuSuspendIntr (#17)"
+    },
+    {
+      "address": "0x00012288",
+      "name": "imp_CpuResumeIntr",
+      "comment": "Multi_Thread_Manager \u2192 intrman::CpuResumeIntr (#18)"
+    },
+    {
+      "address": "0x00012290",
+      "name": "imp_QueryIntrContext",
+      "comment": "Multi_Thread_Manager \u2192 intrman::QueryIntrContext (#23)"
+    },
+    {
+      "address": "0x00012298",
+      "name": "imp_set_h1",
+      "comment": "Multi_Thread_Manager \u2192 intrman::set_h1 (#28)"
+    },
+    {
+      "address": "0x000122A0",
+      "name": "imp_set_h2",
+      "comment": "Multi_Thread_Manager \u2192 intrman::set_h2 (#30)"
+    },
+    {
+      "address": "0x00013C48",
+      "name": "imp_RegisterIntrHandler",
+      "comment": "Vblank_service \u2192 intrman::RegisterIntrHandler (#4)"
+    },
+    {
+      "address": "0x00013C50",
+      "name": "imp_EnableIntr",
+      "comment": "Vblank_service \u2192 intrman::EnableIntr (#6)"
+    },
+    {
+      "address": "0x00013C58",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "Vblank_service \u2192 intrman::CpuSuspendIntr (#17)"
+    },
+    {
+      "address": "0x00013C60",
+      "name": "imp_CpuResumeIntr",
+      "comment": "Vblank_service \u2192 intrman::CpuResumeIntr (#18)"
+    },
+    {
+      "address": "0x00013C68",
+      "name": "imp_QueryIntrContext",
+      "comment": "Vblank_service \u2192 intrman::QueryIntrContext (#23)"
+    },
+    {
+      "address": "0x00015CEC",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "IO/File_Manager \u2192 intrman::CpuSuspendIntr (#17)"
+    },
+    {
+      "address": "0x00015CF4",
+      "name": "imp_CpuResumeIntr",
+      "comment": "IO/File_Manager \u2192 intrman::CpuResumeIntr (#18)"
+    },
+    {
+      "address": "0x000195C8",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "Moldule_File_loader \u2192 intrman::CpuSuspendIntr (#17)"
+    },
+    {
+      "address": "0x000195D0",
+      "name": "imp_CpuResumeIntr",
+      "comment": "Moldule_File_loader \u2192 intrman::CpuResumeIntr (#18)"
+    },
+    {
+      "address": "0x000195D8",
+      "name": "imp_QueryIntrContext",
+      "comment": "Moldule_File_loader \u2192 intrman::QueryIntrContext (#23)"
+    },
+    {
+      "address": "0x0001A308",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "ROM_file_driver \u2192 intrman::CpuSuspendIntr (#17)"
+    },
+    {
+      "address": "0x0001A310",
+      "name": "imp_CpuResumeIntr",
+      "comment": "ROM_file_driver \u2192 intrman::CpuResumeIntr (#18)"
+    },
+    {
+      "address": "0x0001BE38",
+      "name": "imp_RegisterIntrHandler",
+      "comment": "IOP_SIF_manager \u2192 intrman::RegisterIntrHandler (#4)"
+    },
+    {
+      "address": "0x0001BE40",
+      "name": "imp_ReleaseIntrHandler",
+      "comment": "IOP_SIF_manager \u2192 intrman::ReleaseIntrHandler (#5)"
+    },
+    {
+      "address": "0x0001BE48",
+      "name": "imp_EnableIntr",
+      "comment": "IOP_SIF_manager \u2192 intrman::EnableIntr (#6)"
+    },
+    {
+      "address": "0x0001BE50",
+      "name": "imp_DisableIntr",
+      "comment": "IOP_SIF_manager \u2192 intrman::DisableIntr (#7)"
+    },
+    {
+      "address": "0x0001BE58",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "IOP_SIF_manager \u2192 intrman::CpuSuspendIntr (#17)"
+    },
+    {
+      "address": "0x0001BE60",
+      "name": "imp_CpuResumeIntr",
+      "comment": "IOP_SIF_manager \u2192 intrman::CpuResumeIntr (#18)"
+    },
+    {
+      "address": "0x0001E100",
+      "name": "imp_RegisterIntrHandler",
+      "comment": "IOP_SIF_rpc_interface \u2192 intrman::RegisterIntrHandler (#4)"
+    },
+    {
+      "address": "0x0001E108",
+      "name": "imp_ReleaseIntrHandler",
+      "comment": "IOP_SIF_rpc_interface \u2192 intrman::ReleaseIntrHandler (#5)"
+    },
+    {
+      "address": "0x0001E110",
+      "name": "imp_EnableIntr",
+      "comment": "IOP_SIF_rpc_interface \u2192 intrman::EnableIntr (#6)"
+    },
+    {
+      "address": "0x0001E118",
+      "name": "imp_DisableIntr",
+      "comment": "IOP_SIF_rpc_interface \u2192 intrman::DisableIntr (#7)"
+    },
+    {
+      "address": "0x0001E120",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "IOP_SIF_rpc_interface \u2192 intrman::CpuSuspendIntr (#17)"
+    },
+    {
+      "address": "0x0001E128",
+      "name": "imp_CpuResumeIntr",
+      "comment": "IOP_SIF_rpc_interface \u2192 intrman::CpuResumeIntr (#18)"
+    },
+    {
+      "address": "0x00020060",
+      "name": "imp_CpuEnableIntr",
+      "comment": "RebootByEE \u2192 intrman::CpuEnableIntr (#9)"
+    },
+    {
+      "address": "0x00021E7C",
+      "name": "imp_CpuEnableIntr",
+      "comment": "LoadModuleByEE \u2192 intrman::CpuEnableIntr (#9)"
+    },
+    {
+      "address": "0x00021E84",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "LoadModuleByEE \u2192 intrman::CpuSuspendIntr (#17)"
+    },
+    {
+      "address": "0x00021E8C",
+      "name": "imp_CpuResumeIntr",
+      "comment": "LoadModuleByEE \u2192 intrman::CpuResumeIntr (#18)"
+    },
+    {
+      "address": "0x0002E32C",
+      "name": "imp_RegisterIntrHandler",
+      "comment": "cdvd_driver \u2192 intrman::RegisterIntrHandler (#4)"
+    },
+    {
+      "address": "0x0002E334",
+      "name": "imp_ReleaseIntrHandler",
+      "comment": "cdvd_driver \u2192 intrman::ReleaseIntrHandler (#5)"
+    },
+    {
+      "address": "0x0002E33C",
+      "name": "imp_EnableIntr",
+      "comment": "cdvd_driver \u2192 intrman::EnableIntr (#6)"
+    },
+    {
+      "address": "0x0002E344",
+      "name": "imp_DisableIntr",
+      "comment": "cdvd_driver \u2192 intrman::DisableIntr (#7)"
+    },
+    {
+      "address": "0x0002E34C",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "cdvd_driver \u2192 intrman::CpuSuspendIntr (#17)"
+    },
+    {
+      "address": "0x0002E354",
+      "name": "imp_CpuResumeIntr",
+      "comment": "cdvd_driver \u2192 intrman::CpuResumeIntr (#18)"
+    },
+    {
+      "address": "0x0002E35C",
+      "name": "imp_QueryIntrContext",
+      "comment": "cdvd_driver \u2192 intrman::QueryIntrContext (#23)"
+    },
+    {
+      "address": "0x0003D114",
+      "name": "imp_DisableIntr",
+      "comment": "cdvd_ee_driver \u2192 intrman::DisableIntr (#7)"
+    },
+    {
+      "address": "0x0003D11C",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "cdvd_ee_driver \u2192 intrman::CpuSuspendIntr (#17)"
+    },
+    {
+      "address": "0x0003D124",
+      "name": "imp_CpuResumeIntr",
+      "comment": "cdvd_ee_driver \u2192 intrman::CpuResumeIntr (#18)"
+    },
+    {
+      "address": "0x00041544",
+      "name": "imp_CpuEnableIntr",
+      "comment": "FILEIO_service \u2192 intrman::CpuEnableIntr (#9)"
+    },
+    {
+      "address": "0x0004154C",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "FILEIO_service \u2192 intrman::CpuSuspendIntr (#17)"
+    },
+    {
+      "address": "0x00041554",
+      "name": "imp_CpuResumeIntr",
+      "comment": "FILEIO_service \u2192 intrman::CpuResumeIntr (#18)"
+    },
+    {
+      "address": "0x000471E8",
+      "name": "imp_RegisterIntrHandler",
+      "comment": "sio2man \u2192 intrman::RegisterIntrHandler (#4)"
+    },
+    {
+      "address": "0x000471F0",
+      "name": "imp_ReleaseIntrHandler",
+      "comment": "sio2man \u2192 intrman::ReleaseIntrHandler (#5)"
+    },
+    {
+      "address": "0x000471F8",
+      "name": "imp_EnableIntr",
+      "comment": "sio2man \u2192 intrman::EnableIntr (#6)"
+    },
+    {
+      "address": "0x00047200",
+      "name": "imp_DisableIntr",
+      "comment": "sio2man \u2192 intrman::DisableIntr (#7)"
+    },
+    {
+      "address": "0x00047208",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "sio2man \u2192 intrman::CpuSuspendIntr (#17)"
+    },
+    {
+      "address": "0x00047210",
+      "name": "imp_CpuResumeIntr",
+      "comment": "sio2man \u2192 intrman::CpuResumeIntr (#18)"
+    },
+    {
+      "address": "0x0004A464",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "cdvd_st_driver \u2192 intrman::CpuSuspendIntr (#17)"
+    },
+    {
+      "address": "0x0004A46C",
+      "name": "imp_CpuResumeIntr",
+      "comment": "cdvd_st_driver \u2192 intrman::CpuResumeIntr (#18)"
+    },
+    {
+      "address": "0x0004A474",
+      "name": "imp_QueryIntrContext",
+      "comment": "cdvd_st_driver \u2192 intrman::QueryIntrContext (#23)"
+    },
+    {
+      "address": "0x0004FEE8",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "Dbc_Manager \u2192 intrman::CpuSuspendIntr (#17)"
+    },
+    {
+      "address": "0x0004FEF0",
+      "name": "imp_CpuResumeIntr",
+      "comment": "Dbc_Manager \u2192 intrman::CpuResumeIntr (#18)"
+    },
+    {
+      "address": "0x00056674",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "ds2u_s1 \u2192 intrman::CpuSuspendIntr (#17)"
+    },
+    {
+      "address": "0x0005667C",
+      "name": "imp_CpuResumeIntr",
+      "comment": "ds2u_s1 \u2192 intrman::CpuResumeIntr (#18)"
+    },
+    {
+      "address": "0x00068590",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "mcman \u2192 intrman::CpuSuspendIntr (#17)"
+    },
+    {
+      "address": "0x00068598",
+      "name": "imp_CpuResumeIntr",
+      "comment": "mcman \u2192 intrman::CpuResumeIntr (#18)"
+    },
+    {
+      "address": "0x0007EF20",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "mcserv \u2192 intrman::CpuSuspendIntr (#17)"
+    },
+    {
+      "address": "0x0007EF28",
+      "name": "imp_CpuResumeIntr",
+      "comment": "mcserv \u2192 intrman::CpuResumeIntr (#18)"
+    },
+    {
+      "address": "0x1C006338",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "ssbus_service \u2192 intrman::CpuSuspendIntr (#17, iop 0x00006338)"
+    },
+    {
+      "address": "0x1C006340",
+      "name": "imp_CpuResumeIntr",
+      "comment": "ssbus_service \u2192 intrman::CpuResumeIntr (#18, iop 0x00006340)"
+    },
+    {
+      "address": "0x1C0079DC",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "dmacman \u2192 intrman::CpuSuspendIntr (#17, iop 0x000079DC)"
+    },
+    {
+      "address": "0x1C0079E4",
+      "name": "imp_CpuResumeIntr",
+      "comment": "dmacman \u2192 intrman::CpuResumeIntr (#18, iop 0x000079E4)"
+    },
+    {
+      "address": "0x1C008FA8",
+      "name": "imp_RegisterIntrHandler",
+      "comment": "Timer_Manager \u2192 intrman::RegisterIntrHandler (#4, iop 0x00008FA8)"
+    },
+    {
+      "address": "0x1C008FB0",
+      "name": "imp_ReleaseIntrHandler",
+      "comment": "Timer_Manager \u2192 intrman::ReleaseIntrHandler (#5, iop 0x00008FB0)"
+    },
+    {
+      "address": "0x1C008FB8",
+      "name": "imp_EnableIntr",
+      "comment": "Timer_Manager \u2192 intrman::EnableIntr (#6, iop 0x00008FB8)"
+    },
+    {
+      "address": "0x1C008FC0",
+      "name": "imp_DisableIntr",
+      "comment": "Timer_Manager \u2192 intrman::DisableIntr (#7, iop 0x00008FC0)"
+    },
+    {
+      "address": "0x1C008FC8",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "Timer_Manager \u2192 intrman::CpuSuspendIntr (#17, iop 0x00008FC8)"
+    },
+    {
+      "address": "0x1C008FD0",
+      "name": "imp_CpuResumeIntr",
+      "comment": "Timer_Manager \u2192 intrman::CpuResumeIntr (#18, iop 0x00008FD0)"
+    },
+    {
+      "address": "0x1C008FD8",
+      "name": "imp_QueryIntrContext",
+      "comment": "Timer_Manager \u2192 intrman::QueryIntrContext (#23, iop 0x00008FD8)"
+    },
+    {
+      "address": "0x1C012258",
+      "name": "imp_RegisterIntrHandler",
+      "comment": "Multi_Thread_Manager \u2192 intrman::RegisterIntrHandler (#4, iop 0x00012258)"
+    },
+    {
+      "address": "0x1C012260",
+      "name": "imp_EnableIntr",
+      "comment": "Multi_Thread_Manager \u2192 intrman::EnableIntr (#6, iop 0x00012260)"
+    },
+    {
+      "address": "0x1C012268",
+      "name": "imp_CpuDisableIntr",
+      "comment": "Multi_Thread_Manager \u2192 intrman::CpuDisableIntr (#8, iop 0x00012268)"
+    },
+    {
+      "address": "0x1C012270",
+      "name": "imp_CpuEnableIntr",
+      "comment": "Multi_Thread_Manager \u2192 intrman::CpuEnableIntr (#9, iop 0x00012270)"
+    },
+    {
+      "address": "0x1C012278",
+      "name": "imp_syscall0C",
+      "comment": "Multi_Thread_Manager \u2192 intrman::syscall0C (#14, iop 0x00012278)"
+    },
+    {
+      "address": "0x1C012280",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "Multi_Thread_Manager \u2192 intrman::CpuSuspendIntr (#17, iop 0x00012280)"
+    },
+    {
+      "address": "0x1C012288",
+      "name": "imp_CpuResumeIntr",
+      "comment": "Multi_Thread_Manager \u2192 intrman::CpuResumeIntr (#18, iop 0x00012288)"
+    },
+    {
+      "address": "0x1C012290",
+      "name": "imp_QueryIntrContext",
+      "comment": "Multi_Thread_Manager \u2192 intrman::QueryIntrContext (#23, iop 0x00012290)"
+    },
+    {
+      "address": "0x1C012298",
+      "name": "imp_set_h1",
+      "comment": "Multi_Thread_Manager \u2192 intrman::set_h1 (#28, iop 0x00012298)"
+    },
+    {
+      "address": "0x1C0122A0",
+      "name": "imp_set_h2",
+      "comment": "Multi_Thread_Manager \u2192 intrman::set_h2 (#30, iop 0x000122A0)"
+    },
+    {
+      "address": "0x1C013C48",
+      "name": "imp_RegisterIntrHandler",
+      "comment": "Vblank_service \u2192 intrman::RegisterIntrHandler (#4, iop 0x00013C48)"
+    },
+    {
+      "address": "0x1C013C50",
+      "name": "imp_EnableIntr",
+      "comment": "Vblank_service \u2192 intrman::EnableIntr (#6, iop 0x00013C50)"
+    },
+    {
+      "address": "0x1C013C58",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "Vblank_service \u2192 intrman::CpuSuspendIntr (#17, iop 0x00013C58)"
+    },
+    {
+      "address": "0x1C013C60",
+      "name": "imp_CpuResumeIntr",
+      "comment": "Vblank_service \u2192 intrman::CpuResumeIntr (#18, iop 0x00013C60)"
+    },
+    {
+      "address": "0x1C013C68",
+      "name": "imp_QueryIntrContext",
+      "comment": "Vblank_service \u2192 intrman::QueryIntrContext (#23, iop 0x00013C68)"
+    },
+    {
+      "address": "0x1C015CEC",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "IO/File_Manager \u2192 intrman::CpuSuspendIntr (#17, iop 0x00015CEC)"
+    },
+    {
+      "address": "0x1C015CF4",
+      "name": "imp_CpuResumeIntr",
+      "comment": "IO/File_Manager \u2192 intrman::CpuResumeIntr (#18, iop 0x00015CF4)"
+    },
+    {
+      "address": "0x1C0195C8",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "Moldule_File_loader \u2192 intrman::CpuSuspendIntr (#17, iop 0x000195C8)"
+    },
+    {
+      "address": "0x1C0195D0",
+      "name": "imp_CpuResumeIntr",
+      "comment": "Moldule_File_loader \u2192 intrman::CpuResumeIntr (#18, iop 0x000195D0)"
+    },
+    {
+      "address": "0x1C0195D8",
+      "name": "imp_QueryIntrContext",
+      "comment": "Moldule_File_loader \u2192 intrman::QueryIntrContext (#23, iop 0x000195D8)"
+    },
+    {
+      "address": "0x1C01A308",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "ROM_file_driver \u2192 intrman::CpuSuspendIntr (#17, iop 0x0001A308)"
+    },
+    {
+      "address": "0x1C01A310",
+      "name": "imp_CpuResumeIntr",
+      "comment": "ROM_file_driver \u2192 intrman::CpuResumeIntr (#18, iop 0x0001A310)"
+    },
+    {
+      "address": "0x1C01BE38",
+      "name": "imp_RegisterIntrHandler",
+      "comment": "IOP_SIF_manager \u2192 intrman::RegisterIntrHandler (#4, iop 0x0001BE38)"
+    },
+    {
+      "address": "0x1C01BE40",
+      "name": "imp_ReleaseIntrHandler",
+      "comment": "IOP_SIF_manager \u2192 intrman::ReleaseIntrHandler (#5, iop 0x0001BE40)"
+    },
+    {
+      "address": "0x1C01BE48",
+      "name": "imp_EnableIntr",
+      "comment": "IOP_SIF_manager \u2192 intrman::EnableIntr (#6, iop 0x0001BE48)"
+    },
+    {
+      "address": "0x1C01BE50",
+      "name": "imp_DisableIntr",
+      "comment": "IOP_SIF_manager \u2192 intrman::DisableIntr (#7, iop 0x0001BE50)"
+    },
+    {
+      "address": "0x1C01BE58",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "IOP_SIF_manager \u2192 intrman::CpuSuspendIntr (#17, iop 0x0001BE58)"
+    },
+    {
+      "address": "0x1C01BE60",
+      "name": "imp_CpuResumeIntr",
+      "comment": "IOP_SIF_manager \u2192 intrman::CpuResumeIntr (#18, iop 0x0001BE60)"
+    },
+    {
+      "address": "0x1C01E100",
+      "name": "imp_RegisterIntrHandler",
+      "comment": "IOP_SIF_rpc_interface \u2192 intrman::RegisterIntrHandler (#4, iop 0x0001E100)"
+    },
+    {
+      "address": "0x1C01E108",
+      "name": "imp_ReleaseIntrHandler",
+      "comment": "IOP_SIF_rpc_interface \u2192 intrman::ReleaseIntrHandler (#5, iop 0x0001E108)"
+    },
+    {
+      "address": "0x1C01E110",
+      "name": "imp_EnableIntr",
+      "comment": "IOP_SIF_rpc_interface \u2192 intrman::EnableIntr (#6, iop 0x0001E110)"
+    },
+    {
+      "address": "0x1C01E118",
+      "name": "imp_DisableIntr",
+      "comment": "IOP_SIF_rpc_interface \u2192 intrman::DisableIntr (#7, iop 0x0001E118)"
+    },
+    {
+      "address": "0x1C01E120",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "IOP_SIF_rpc_interface \u2192 intrman::CpuSuspendIntr (#17, iop 0x0001E120)"
+    },
+    {
+      "address": "0x1C01E128",
+      "name": "imp_CpuResumeIntr",
+      "comment": "IOP_SIF_rpc_interface \u2192 intrman::CpuResumeIntr (#18, iop 0x0001E128)"
+    },
+    {
+      "address": "0x1C020060",
+      "name": "imp_CpuEnableIntr",
+      "comment": "RebootByEE \u2192 intrman::CpuEnableIntr (#9, iop 0x00020060)"
+    },
+    {
+      "address": "0x1C021E7C",
+      "name": "imp_CpuEnableIntr",
+      "comment": "LoadModuleByEE \u2192 intrman::CpuEnableIntr (#9, iop 0x00021E7C)"
+    },
+    {
+      "address": "0x1C021E84",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "LoadModuleByEE \u2192 intrman::CpuSuspendIntr (#17, iop 0x00021E84)"
+    },
+    {
+      "address": "0x1C021E8C",
+      "name": "imp_CpuResumeIntr",
+      "comment": "LoadModuleByEE \u2192 intrman::CpuResumeIntr (#18, iop 0x00021E8C)"
+    },
+    {
+      "address": "0x1C02E32C",
+      "name": "imp_RegisterIntrHandler",
+      "comment": "cdvd_driver \u2192 intrman::RegisterIntrHandler (#4, iop 0x0002E32C)"
+    },
+    {
+      "address": "0x1C02E334",
+      "name": "imp_ReleaseIntrHandler",
+      "comment": "cdvd_driver \u2192 intrman::ReleaseIntrHandler (#5, iop 0x0002E334)"
+    },
+    {
+      "address": "0x1C02E33C",
+      "name": "imp_EnableIntr",
+      "comment": "cdvd_driver \u2192 intrman::EnableIntr (#6, iop 0x0002E33C)"
+    },
+    {
+      "address": "0x1C02E344",
+      "name": "imp_DisableIntr",
+      "comment": "cdvd_driver \u2192 intrman::DisableIntr (#7, iop 0x0002E344)"
+    },
+    {
+      "address": "0x1C02E34C",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "cdvd_driver \u2192 intrman::CpuSuspendIntr (#17, iop 0x0002E34C)"
+    },
+    {
+      "address": "0x1C02E354",
+      "name": "imp_CpuResumeIntr",
+      "comment": "cdvd_driver \u2192 intrman::CpuResumeIntr (#18, iop 0x0002E354)"
+    },
+    {
+      "address": "0x1C02E35C",
+      "name": "imp_QueryIntrContext",
+      "comment": "cdvd_driver \u2192 intrman::QueryIntrContext (#23, iop 0x0002E35C)"
+    },
+    {
+      "address": "0x1C03D114",
+      "name": "imp_DisableIntr",
+      "comment": "cdvd_ee_driver \u2192 intrman::DisableIntr (#7, iop 0x0003D114)"
+    },
+    {
+      "address": "0x1C03D11C",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "cdvd_ee_driver \u2192 intrman::CpuSuspendIntr (#17, iop 0x0003D11C)"
+    },
+    {
+      "address": "0x1C03D124",
+      "name": "imp_CpuResumeIntr",
+      "comment": "cdvd_ee_driver \u2192 intrman::CpuResumeIntr (#18, iop 0x0003D124)"
+    },
+    {
+      "address": "0x1C041544",
+      "name": "imp_CpuEnableIntr",
+      "comment": "FILEIO_service \u2192 intrman::CpuEnableIntr (#9, iop 0x00041544)"
+    },
+    {
+      "address": "0x1C04154C",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "FILEIO_service \u2192 intrman::CpuSuspendIntr (#17, iop 0x0004154C)"
+    },
+    {
+      "address": "0x1C041554",
+      "name": "imp_CpuResumeIntr",
+      "comment": "FILEIO_service \u2192 intrman::CpuResumeIntr (#18, iop 0x00041554)"
+    },
+    {
+      "address": "0x1C0471E8",
+      "name": "imp_RegisterIntrHandler",
+      "comment": "sio2man \u2192 intrman::RegisterIntrHandler (#4, iop 0x000471E8)"
+    },
+    {
+      "address": "0x1C0471F0",
+      "name": "imp_ReleaseIntrHandler",
+      "comment": "sio2man \u2192 intrman::ReleaseIntrHandler (#5, iop 0x000471F0)"
+    },
+    {
+      "address": "0x1C0471F8",
+      "name": "imp_EnableIntr",
+      "comment": "sio2man \u2192 intrman::EnableIntr (#6, iop 0x000471F8)"
+    },
+    {
+      "address": "0x1C047200",
+      "name": "imp_DisableIntr",
+      "comment": "sio2man \u2192 intrman::DisableIntr (#7, iop 0x00047200)"
+    },
+    {
+      "address": "0x1C047208",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "sio2man \u2192 intrman::CpuSuspendIntr (#17, iop 0x00047208)"
+    },
+    {
+      "address": "0x1C047210",
+      "name": "imp_CpuResumeIntr",
+      "comment": "sio2man \u2192 intrman::CpuResumeIntr (#18, iop 0x00047210)"
+    },
+    {
+      "address": "0x1C04A464",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "cdvd_st_driver \u2192 intrman::CpuSuspendIntr (#17, iop 0x0004A464)"
+    },
+    {
+      "address": "0x1C04A46C",
+      "name": "imp_CpuResumeIntr",
+      "comment": "cdvd_st_driver \u2192 intrman::CpuResumeIntr (#18, iop 0x0004A46C)"
+    },
+    {
+      "address": "0x1C04A474",
+      "name": "imp_QueryIntrContext",
+      "comment": "cdvd_st_driver \u2192 intrman::QueryIntrContext (#23, iop 0x0004A474)"
+    },
+    {
+      "address": "0x1C04FEE8",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "Dbc_Manager \u2192 intrman::CpuSuspendIntr (#17, iop 0x0004FEE8)"
+    },
+    {
+      "address": "0x1C04FEF0",
+      "name": "imp_CpuResumeIntr",
+      "comment": "Dbc_Manager \u2192 intrman::CpuResumeIntr (#18, iop 0x0004FEF0)"
+    },
+    {
+      "address": "0x1C056674",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "ds2u_s1 \u2192 intrman::CpuSuspendIntr (#17, iop 0x00056674)"
+    },
+    {
+      "address": "0x1C05667C",
+      "name": "imp_CpuResumeIntr",
+      "comment": "ds2u_s1 \u2192 intrman::CpuResumeIntr (#18, iop 0x0005667C)"
+    },
+    {
+      "address": "0x1C068590",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "mcman \u2192 intrman::CpuSuspendIntr (#17, iop 0x00068590)"
+    },
+    {
+      "address": "0x1C068598",
+      "name": "imp_CpuResumeIntr",
+      "comment": "mcman \u2192 intrman::CpuResumeIntr (#18, iop 0x00068598)"
+    },
+    {
+      "address": "0x1C07EF20",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "mcserv \u2192 intrman::CpuSuspendIntr (#17, iop 0x0007EF20)"
+    },
+    {
+      "address": "0x1C07EF28",
+      "name": "imp_CpuResumeIntr",
+      "comment": "mcserv \u2192 intrman::CpuResumeIntr (#18, iop 0x0007EF28)"
+    },
+    {
+      "address": "0x1C0878AC",
+      "name": "imp_RegisterIntrHandler",
+      "comment": "USB_driver \u2192 intrman::RegisterIntrHandler (#4, iop 0x000878AC)"
+    },
+    {
+      "address": "0x1C0878B4",
+      "name": "imp_ReleaseIntrHandler",
+      "comment": "USB_driver \u2192 intrman::ReleaseIntrHandler (#5, iop 0x000878B4)"
+    },
+    {
+      "address": "0x1C0878BC",
+      "name": "imp_EnableIntr",
+      "comment": "USB_driver \u2192 intrman::EnableIntr (#6, iop 0x000878BC)"
+    },
+    {
+      "address": "0x1C0878C4",
+      "name": "imp_DisableIntr",
+      "comment": "USB_driver \u2192 intrman::DisableIntr (#7, iop 0x000878C4)"
+    },
+    {
+      "address": "0x1C0878CC",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "USB_driver \u2192 intrman::CpuSuspendIntr (#17, iop 0x000878CC)"
+    },
+    {
+      "address": "0x1C0878D4",
+      "name": "imp_CpuResumeIntr",
+      "comment": "USB_driver \u2192 intrman::CpuResumeIntr (#18, iop 0x000878D4)"
+    },
+    {
+      "address": "0x1C090884",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "USB_Keyboard_Driver \u2192 intrman::CpuSuspendIntr (#17, iop 0x00090884)"
+    },
+    {
+      "address": "0x1C09088C",
+      "name": "imp_CpuResumeIntr",
+      "comment": "USB_Keyboard_Driver \u2192 intrman::CpuResumeIntr (#18, iop 0x0009088C)"
+    },
+    {
+      "address": "0x1C093474",
+      "name": "imp_RegisterIntrHandler",
+      "comment": "dev9 \u2192 intrman::RegisterIntrHandler (#4, iop 0x00093474)"
+    },
+    {
+      "address": "0x1C09347C",
+      "name": "imp_EnableIntr",
+      "comment": "dev9 \u2192 intrman::EnableIntr (#6, iop 0x0009347C)"
+    },
+    {
+      "address": "0x1C093484",
+      "name": "imp_DisableIntr",
+      "comment": "dev9 \u2192 intrman::DisableIntr (#7, iop 0x00093484)"
+    },
+    {
+      "address": "0x1C09348C",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "dev9 \u2192 intrman::CpuSuspendIntr (#17, iop 0x0009348C)"
+    },
+    {
+      "address": "0x1C093494",
+      "name": "imp_CpuResumeIntr",
+      "comment": "dev9 \u2192 intrman::CpuResumeIntr (#18, iop 0x00093494)"
+    },
+    {
+      "address": "0x1C098074",
+      "name": "imp_RegisterIntrHandler",
+      "comment": "Sound_Device_Library \u2192 intrman::RegisterIntrHandler (#4, iop 0x00098074)"
+    },
+    {
+      "address": "0x1C09807C",
+      "name": "imp_ReleaseIntrHandler",
+      "comment": "Sound_Device_Library \u2192 intrman::ReleaseIntrHandler (#5, iop 0x0009807C)"
+    },
+    {
+      "address": "0x1C098084",
+      "name": "imp_EnableIntr",
+      "comment": "Sound_Device_Library \u2192 intrman::EnableIntr (#6, iop 0x00098084)"
+    },
+    {
+      "address": "0x1C09808C",
+      "name": "imp_DisableIntr",
+      "comment": "Sound_Device_Library \u2192 intrman::DisableIntr (#7, iop 0x0009808C)"
+    },
+    {
+      "address": "0x1C098094",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "Sound_Device_Library \u2192 intrman::CpuSuspendIntr (#17, iop 0x00098094)"
+    },
+    {
+      "address": "0x1C09809C",
+      "name": "imp_CpuResumeIntr",
+      "comment": "Sound_Device_Library \u2192 intrman::CpuResumeIntr (#18, iop 0x0009809C)"
+    },
+    {
+      "address": "0x1C0980A4",
+      "name": "imp_QueryIntrContext",
+      "comment": "Sound_Device_Library \u2192 intrman::QueryIntrContext (#23, iop 0x000980A4)"
+    },
+    {
+      "address": "0x1C0B3774",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "989snd_Library \u2192 intrman::CpuSuspendIntr (#17, iop 0x000B3774)"
+    },
+    {
+      "address": "0x1C0B377C",
+      "name": "imp_CpuResumeIntr",
+      "comment": "989snd_Library \u2192 intrman::CpuResumeIntr (#18, iop 0x000B377C)"
+    },
+    {
+      "address": "0x1C0BF9FC",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "989_DATA_STREAMER \u2192 intrman::CpuSuspendIntr (#17, iop 0x000BF9FC)"
+    },
+    {
+      "address": "0x1C0BFA04",
+      "name": "imp_CpuResumeIntr",
+      "comment": "989_DATA_STREAMER \u2192 intrman::CpuResumeIntr (#18, iop 0x000BFA04)"
+    },
+    {
+      "address": "0x1C0C81E4",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "lgAud \u2192 intrman::CpuSuspendIntr (#17, iop 0x000C81E4)"
+    },
+    {
+      "address": "0x1C0C81EC",
+      "name": "imp_CpuResumeIntr",
+      "comment": "lgAud \u2192 intrman::CpuResumeIntr (#18, iop 0x000C81EC)"
+    },
+    {
+      "address": "0x1C0DB8C0",
+      "name": "imp_CpuSuspendIntr",
+      "comment": "headset_streamer \u2192 intrman::CpuSuspendIntr (#17, iop 0x000DB8C0)"
+    },
+    {
+      "address": "0x1C0DB8C8",
+      "name": "imp_CpuResumeIntr",
+      "comment": "headset_streamer \u2192 intrman::CpuResumeIntr (#18, iop 0x000DB8C8)"
+    }
+  ]
+}

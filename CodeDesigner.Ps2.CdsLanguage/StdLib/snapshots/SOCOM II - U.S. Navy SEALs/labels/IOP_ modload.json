@@ -1,0 +1,148 @@
+{
+  "setName": "IOP: modload",
+  "gameId": "SCUS-97275",
+  "isBuiltIn": false,
+  "isSystem": true,
+  "entries": [
+    {
+      "address": "0x00020108",
+      "name": "imp_ReBootStart",
+      "comment": "RebootByEE \u2192 modload::ReBootStart (#4)"
+    },
+    {
+      "address": "0x00021FA4",
+      "name": "imp_LoadStartModule",
+      "comment": "LoadModuleByEE \u2192 modload::LoadStartModule (#7)"
+    },
+    {
+      "address": "0x00021FAC",
+      "name": "imp_StartModule",
+      "comment": "LoadModuleByEE \u2192 modload::StartModule (#8)"
+    },
+    {
+      "address": "0x00021FB4",
+      "name": "imp_LoadModuleBuffer",
+      "comment": "LoadModuleByEE \u2192 modload::LoadModuleBuffer (#10)"
+    },
+    {
+      "address": "0x00021FBC",
+      "name": "imp_unk_11",
+      "comment": "LoadModuleByEE \u2192 modload::unk_11 (#11)"
+    },
+    {
+      "address": "0x00021FC4",
+      "name": "imp_unk_14",
+      "comment": "LoadModuleByEE \u2192 modload::unk_14 (#14)"
+    },
+    {
+      "address": "0x00021FCC",
+      "name": "imp_unk_15",
+      "comment": "LoadModuleByEE \u2192 modload::unk_15 (#15)"
+    },
+    {
+      "address": "0x00021FD4",
+      "name": "imp_StopModule",
+      "comment": "LoadModuleByEE \u2192 modload::StopModule (#20)"
+    },
+    {
+      "address": "0x00021FDC",
+      "name": "imp_UnloadModule",
+      "comment": "LoadModuleByEE \u2192 modload::UnloadModule (#21)"
+    },
+    {
+      "address": "0x00021FE4",
+      "name": "imp_SearchModuleByName",
+      "comment": "LoadModuleByEE \u2192 modload::SearchModuleByName (#22)"
+    },
+    {
+      "address": "0x00021FEC",
+      "name": "imp_SearchModuleByAddress",
+      "comment": "LoadModuleByEE \u2192 modload::SearchModuleByAddress (#23)"
+    },
+    {
+      "address": "0x0004597C",
+      "name": "imp_unk_12",
+      "comment": "secrman_for_cex \u2192 modload::unk_12 (#12)"
+    },
+    {
+      "address": "0x000686F8",
+      "name": "imp_unk_13",
+      "comment": "mcman \u2192 modload::unk_13 (#13)"
+    },
+    {
+      "address": "0x1C020108",
+      "name": "imp_ReBootStart",
+      "comment": "RebootByEE \u2192 modload::ReBootStart (#4, iop 0x00020108)"
+    },
+    {
+      "address": "0x1C021FA4",
+      "name": "imp_LoadStartModule",
+      "comment": "LoadModuleByEE \u2192 modload::LoadStartModule (#7, iop 0x00021FA4)"
+    },
+    {
+      "address": "0x1C021FAC",
+      "name": "imp_StartModule",
+      "comment": "LoadModuleByEE \u2192 modload::StartModule (#8, iop 0x00021FAC)"
+    },
+    {
+      "address": "0x1C021FB4",
+      "name": "imp_LoadModuleBuffer",
+      "comment": "LoadModuleByEE \u2192 modload::LoadModuleBuffer (#10, iop 0x00021FB4)"
+    },
+    {
+      "address": "0x1C021FBC",
+      "name": "imp_unk_11",
+      "comment": "LoadModuleByEE \u2192 modload::unk_11 (#11, iop 0x00021FBC)"
+    },
+    {
+      "address": "0x1C021FC4",
+      "name": "imp_unk_14",
+      "comment": "LoadModuleByEE \u2192 modload::unk_14 (#14, iop 0x00021FC4)"
+    },
+    {
+      "address": "0x1C021FCC",
+      "name": "imp_unk_15",
+      "comment": "LoadModuleByEE \u2192 modload::unk_15 (#15, iop 0x00021FCC)"
+    },
+    {
+      "address": "0x1C021FD4",
+      "name": "imp_StopModule",
+      "comment": "LoadModuleByEE \u2192 modload::StopModule (#20, iop 0x00021FD4)"
+    },
+    {
+      "address": "0x1C021FDC",
+      "name": "imp_UnloadModule",
+      "comment": "LoadModuleByEE \u2192 modload::UnloadModule (#21, iop 0x00021FDC)"
+    },
+    {
+      "address": "0x1C021FE4",
+      "name": "imp_SearchModuleByName",
+      "comment": "LoadModuleByEE \u2192 modload::SearchModuleByName (#22, iop 0x00021FE4)"
+    },
+    {
+      "address": "0x1C021FEC",
+      "name": "imp_SearchModuleByAddress",
+      "comment": "LoadModuleByEE \u2192 modload::SearchModuleByAddress (#23, iop 0x00021FEC)"
+    },
+    {
+      "address": "0x1C04597C",
+      "name": "imp_unk_12",
+      "comment": "secrman_for_cex \u2192 modload::unk_12 (#12, iop 0x0004597C)"
+    },
+    {
+      "address": "0x1C0686F8",
+      "name": "imp_unk_13",
+      "comment": "mcman \u2192 modload::unk_13 (#13, iop 0x000686F8)"
+    },
+    {
+      "address": "0x1C0C823C",
+      "name": "imp_ReferModuleStatus",
+      "comment": "lgAud \u2192 modload::ReferModuleStatus (#17, iop 0x000C823C)"
+    },
+    {
+      "address": "0x1C0C8244",
+      "name": "imp_GetModuleIdListByName",
+      "comment": "lgAud \u2192 modload::GetModuleIdListByName (#18, iop 0x000C8244)"
+    }
+  ]
+}

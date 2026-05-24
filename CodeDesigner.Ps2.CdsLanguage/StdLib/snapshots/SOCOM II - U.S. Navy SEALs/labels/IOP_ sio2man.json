@@ -1,0 +1,128 @@
+{
+  "setName": "IOP: sio2man",
+  "gameId": "SCUS-97275",
+  "isBuiltIn": false,
+  "isSystem": true,
+  "entries": [
+    {
+      "address": "0x0004C964",
+      "name": "imp_unk_51",
+      "comment": "sio2d \u2192 sio2man::unk_51 (#51)"
+    },
+    {
+      "address": "0x0004C96C",
+      "name": "imp_unk_61",
+      "comment": "sio2d \u2192 sio2man::unk_61 (#61)"
+    },
+    {
+      "address": "0x0004C974",
+      "name": "imp_unk_62",
+      "comment": "sio2d \u2192 sio2man::unk_62 (#62)"
+    },
+    {
+      "address": "0x0004C97C",
+      "name": "imp_unk_63",
+      "comment": "sio2d \u2192 sio2man::unk_63 (#63)"
+    },
+    {
+      "address": "0x00056770",
+      "name": "imp_unk_51",
+      "comment": "ds2u_s1 \u2192 sio2man::unk_51 (#51)"
+    },
+    {
+      "address": "0x00056778",
+      "name": "imp_unk_61",
+      "comment": "ds2u_s1 \u2192 sio2man::unk_61 (#61)"
+    },
+    {
+      "address": "0x00056780",
+      "name": "imp_unk_62",
+      "comment": "ds2u_s1 \u2192 sio2man::unk_62 (#62)"
+    },
+    {
+      "address": "0x000685BC",
+      "name": "imp_signalExchange2",
+      "comment": "mcman \u2192 sio2man::signalExchange2 (#24)"
+    },
+    {
+      "address": "0x000685C4",
+      "name": "imp_packetExchange",
+      "comment": "mcman \u2192 sio2man::packetExchange (#25)"
+    },
+    {
+      "address": "0x000685CC",
+      "name": "imp_unk_26",
+      "comment": "mcman \u2192 sio2man::unk_26 (#26)"
+    },
+    {
+      "address": "0x000685D4",
+      "name": "imp_unk_57",
+      "comment": "mcman \u2192 sio2man::unk_57 (#57)"
+    },
+    {
+      "address": "0x000685DC",
+      "name": "imp_unk_59",
+      "comment": "mcman \u2192 sio2man::unk_59 (#59)"
+    },
+    {
+      "address": "0x1C04C964",
+      "name": "imp_unk_51",
+      "comment": "sio2d \u2192 sio2man::unk_51 (#51, iop 0x0004C964)"
+    },
+    {
+      "address": "0x1C04C96C",
+      "name": "imp_unk_61",
+      "comment": "sio2d \u2192 sio2man::unk_61 (#61, iop 0x0004C96C)"
+    },
+    {
+      "address": "0x1C04C974",
+      "name": "imp_unk_62",
+      "comment": "sio2d \u2192 sio2man::unk_62 (#62, iop 0x0004C974)"
+    },
+    {
+      "address": "0x1C04C97C",
+      "name": "imp_unk_63",
+      "comment": "sio2d \u2192 sio2man::unk_63 (#63, iop 0x0004C97C)"
+    },
+    {
+      "address": "0x1C056770",
+      "name": "imp_unk_51",
+      "comment": "ds2u_s1 \u2192 sio2man::unk_51 (#51, iop 0x00056770)"
+    },
+    {
+      "address": "0x1C056778",
+      "name": "imp_unk_61",
+      "comment": "ds2u_s1 \u2192 sio2man::unk_61 (#61, iop 0x00056778)"
+    },
+    {
+      "address": "0x1C056780",
+      "name": "imp_unk_62",
+      "comment": "ds2u_s1 \u2192 sio2man::unk_62 (#62, iop 0x00056780)"
+    },
+    {
+      "address": "0x1C0685BC",
+      "name": "imp_signalExchange2",
+      "comment": "mcman \u2192 sio2man::signalExchange2 (#24, iop 0x000685BC)"
+    },
+    {
+      "address": "0x1C0685C4",
+      "name": "imp_packetExchange",
+      "comment": "mcman \u2192 sio2man::packetExchange (#25, iop 0x000685C4)"
+    },
+    {
+      "address": "0x1C0685CC",
+      "name": "imp_unk_26",
+      "comment": "mcman \u2192 sio2man::unk_26 (#26, iop 0x000685CC)"
+    },
+    {
+      "address": "0x1C0685D4",
+      "name": "imp_unk_57",
+      "comment": "mcman \u2192 sio2man::unk_57 (#57, iop 0x000685D4)"
+    },
+    {
+      "address": "0x1C0685DC",
+      "name": "imp_unk_59",
+      "comment": "mcman \u2192 sio2man::unk_59 (#59, iop 0x000685DC)"
+    }
+  ]
+}
