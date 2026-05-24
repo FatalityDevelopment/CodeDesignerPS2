@@ -7,7 +7,15 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Folder Include="Zipper\Trident\" />
+    <Compile Remove="Zipper\Trident\**" />
+    <EmbeddedResource Remove="Zipper\Trident\**" />
+    <None Remove="Zipper\Trident\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="Resources\RUN.zip">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
 </Project>
