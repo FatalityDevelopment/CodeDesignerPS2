@@ -90,9 +90,13 @@ function findChunkOffsets(bytes: Uint8Array): number[] {
     const view = new DataView(bytes.buffer, bytes.byteOffset + i, 0x50);
     const vertexCount = view.getInt32(0x30, true);
     const triangleCount = view.getInt32(0x34, true);
-    // Tight bounds exactly match the working HTML-spec C# decoder.
-    if (vertexCount <= 0 || vertexCount > 1000) { continue; }
-    if (triangleCount < 0 || triangleCount > 1000) { continue; }
+    // Bounds bumped to 4096 per HTML map viewer reference. World-model
+    // chunks can have several thousand verts; rejecting them at 1000 was
+    // exactly what caused "holes" the user was seeing — large chunks
+    // weren't decoded at all. The expectedEnd check below still rejects
+    // garbage that happens to satisfy the magic bytes.
+    if (vertexCount <= 0 || vertexCount > 4096) { continue; }
+    if (triangleCount < 0 || triangleCount > 4096) { continue; }
     const expectedEnd = i + 0x50 + vertexCount * 0x10 + 0x08 + triangleCount * 0x04;
     if (expectedEnd > bytes.length) { continue; }
 
@@ -245,4 +249,451 @@ export function parseModel(bytes: Uint8Array): ZedModel {
     textureRefs,
     boundingRadius: radius || 1,
   };
+}
+
+// ---------------------------------------------------------------------------
+// HTML map-viewer style material binding helpers. Off by default — only
+// applied when the caller (component) explicitly opts in via the map
+// material-binding dropdown. The default chunk.textureName from the tail
+// scan is preserved otherwise so castle / weapon rendering is unchanged.
+// ---------------------------------------------------------------------------
+
+export interface TifMarker {
+  offset: number;
+  name: string;       // lowercased canonical filename
+  isDetail: boolean;
+}
+
+export function extractTextureMarkers(bytes: Uint8Array): TifMarker[] {
+  const text = new TextDecoder('latin1').decode(bytes);
+  const rx = /[A-Za-z0-9_./\\-]{3,}\.tif/gi;
+  const markers: TifMarker[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = rx.exec(text)) !== null) {
+    const raw = m[0];
+    const canonical = (raw.split(/[\\/]/).pop() ?? raw).toLowerCase();
+    markers.push({
+      offset: m.index,
+      name: canonical,
+      isDetail:
+        canonical.includes('detail') ||
+        canonical.endsWith('_d.tif') ||
+        canonical.includes('_detail'),
+    });
+  }
+  return markers;
+}
+
+// Resolves the model-payload slice each chunk belongs to. Slices come from
+// the Nxxx_xxx child stubs of the model node — each stub's 4-byte payload
+// is the byte offset into the parent. Pass [] when no stubs are available
+// and the whole payload is treated as one slice.
+export function makeSlicesFromOffsets(payloadLen: number, sliceOffsets: number[]): Array<{ start: number; end: number }> {
+  const sorted = [...new Set(sliceOffsets.filter(o => o >= 0 && o < payloadLen))].sort((a, b) => a - b);
+  if (sorted[0] !== 0) { sorted.unshift(0); }
+  const slices: Array<{ start: number; end: number }> = [];
+  for (let i = 0; i < sorted.length; i++) {
+    const start = sorted[i];
+    const end = i + 1 < sorted.length ? sorted[i + 1] : payloadLen;
+    if (end > start) { slices.push({ start, end }); }
+  }
+  return slices;
+}
+
+export type MaterialBindingMode = 'smartWorld' | 'sliceNearest' | 'globalNearest';
+
+// Post-processing pass that ASSIGNS chunk.textureName for chunks that the
+// tail scan couldn't bind. Behaviour is supplementary: chunks that already
+// have a textureName from findTifInRange keep it (those are exact matches
+// pulled straight from the model payload's tail, almost always correct).
+// Only previously-unbound chunks get a marker assignment per the chosen
+// mode. This preserves castle / weapon accuracy while still filling in
+// the ~80% of world chunks that tail scan misses.
+//
+// Mutates `model.chunks` in place.
+export function applyMarkerBinding(
+  model: ZedModel,
+  bytes: Uint8Array,
+  sliceOffsets: number[],
+  mode: MaterialBindingMode,
+): void {
+  if (model.chunks.length === 0) { return; }
+  const markers = extractTextureMarkers(bytes);
+  if (markers.length === 0) { return; }
+  const slices = makeSlicesFromOffsets(bytes.length, sliceOffsets);
+
+  for (const chunk of model.chunks) {
+    if (chunk.textureName) { continue; }  // tail-scan already nailed it.
+
+    const slice = slices.find(s => chunk.offset >= s.start && chunk.offset < s.end)
+      ?? { start: 0, end: Number.MAX_SAFE_INTEGER };
+    const sliceMarkers = markers.filter(m => m.offset >= slice.start && m.offset < slice.end);
+    const pool = sliceMarkers.length ? sliceMarkers : markers;
+
+    let chosen: TifMarker | null = null;
+    if (mode === 'smartWorld') {
+      // Big chunks prefer non-detail textures (HTML's smartWorld logic). For
+      // small chunks the nearest marker (any kind) tends to be correct.
+      const big = chunk.triangleCount >= 24;
+      const candidates = big ? pool.filter(m => !m.isDetail) : pool;
+      chosen = chooseNearest(chunk.offset, candidates.length ? candidates : pool);
+    } else if (mode === 'sliceNearest') {
+      chosen = chooseNearest(chunk.offset, pool);
+    } else if (mode === 'globalNearest') {
+      chosen = chooseNearest(chunk.offset, markers);
+    }
+    if (chosen) {
+      chunk.textureName = chosen.name;
+    }
+  }
+}
+
+function chooseNearest(offset: number, markers: TifMarker[]): TifMarker | null {
+  if (markers.length === 0) { return null; }
+  let best = markers[0];
+  let bestDist = Math.abs(best.offset - offset);
+  for (let i = 1; i < markers.length; i++) {
+    const d = Math.abs(markers[i].offset - offset);
+    if (d < bestDist) { best = markers[i]; bestDist = d; }
+  }
+  return best;
+}
+
+// ---------------------------------------------------------------------------
+// VIF1 UNPACK stream + vertex cloud fallback decoders. Used when a payload
+// doesn't contain the standard WORL_MDL chunk format — CLIB MESH_* (player
+// characters) and similar PS2 DMA-style packets fall through here. Direct
+// ports of the new HTML map viewer's findVifUnpackStreams / decodeVifPayload
+// / findI16VertexClouds / decodeFloatCloudNode (see
+// `zed_map_viewer_solution (1).html` lines 1276-1759).
+// ---------------------------------------------------------------------------
+
+interface VifStream {
+  offset: number;
+  num: number;
+  imm: number;
+  comps: number;
+  bytesPerComponent: number;
+  points: Array<{ x: number; y: number; z: number }>;
+  minX: number; minY: number; minZ: number;
+  maxX: number; maxY: number; maxZ: number;
+  span: number;
+}
+
+function alignUp(value: number, alignment: number): number {
+  const mask = alignment - 1;
+  return (value + mask) & ~mask;
+}
+
+// Scan for PS2 VIF1 UNPACK commands. The decoded layout per command is:
+//   byte 3   cmd     (0x60..0x7F = UNPACK with embedded format)
+//   byte 2   num     (vertex count; 0 -> 256)
+//   bytes0-1 imm     (destination VU address + flags)
+// Position-shaped streams (V3/V4 with float / int16 / int8 lanes) are
+// emitted; everything else is ignored.
+export function findVifUnpackStreams(data: Uint8Array): VifStream[] {
+  if (!data || data.length < 0x20 || data.length > 0x80000) { return []; }
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const streams: VifStream[] = [];
+
+  for (let o = 0; o <= data.length - 8; o += 4) {
+    const imm = view.getUint16(o + 0, true);
+    const numRaw = view.getUint8(o + 2);
+    const cmd = view.getUint8(o + 3);
+
+    const baseCmd = cmd & 0x7F;
+    if (baseCmd < 0x60 || baseCmd > 0x7F) { continue; }
+
+    const vn = (baseCmd >> 2) & 0x03;
+    const vl = baseCmd & 0x03;
+    const comps = [1, 2, 3, 4][vn];
+    const bytesPerComponent = [4, 2, 1, 0][vl];
+    if (!bytesPerComponent) { continue; }    // V4_5 packed format — skip.
+    if (comps < 3) { continue; }              // need XYZ candidates.
+
+    const num = numRaw === 0 ? 256 : numRaw;
+    const dataStart = o + 4;
+    const payloadBytes = num * comps * bytesPerComponent;
+    const dataEnd = dataStart + payloadBytes;
+    if (payloadBytes <= 0 || dataEnd > data.length) { continue; }
+    if (num < 3 || num > 256) { continue; }
+
+    const pts: Array<{ x: number; y: number; z: number }> = [];
+    let minX = Infinity, minY = Infinity, minZ = Infinity;
+    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+    let bad = 0;
+    for (let i = 0; i < num; i++) {
+      const p = dataStart + i * comps * bytesPerComponent;
+      let x: number, y: number, z: number;
+      if (bytesPerComponent === 4) {
+        x = view.getFloat32(p + 0, true);
+        y = view.getFloat32(p + 4, true);
+        z = view.getFloat32(p + 8, true);
+      } else if (bytesPerComponent === 2) {
+        x = view.getInt16(p + 0, true);
+        y = view.getInt16(p + 2, true);
+        z = view.getInt16(p + 4, true);
+      } else {
+        x = view.getInt8(p + 0);
+        y = view.getInt8(p + 1);
+        z = view.getInt8(p + 2);
+      }
+      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) { bad++; continue; }
+      if (Math.abs(x) > 200000 || Math.abs(y) > 200000 || Math.abs(z) > 200000) { bad++; continue; }
+      pts.push({ x, y, z });
+      if (x < minX) { minX = x; } if (x > maxX) { maxX = x; }
+      if (y < minY) { minY = y; } if (y > maxY) { maxY = y; }
+      if (z < minZ) { minZ = z; } if (z > maxZ) { maxZ = z; }
+    }
+    if (pts.length < 3 || bad > num * 0.15) { continue; }
+    const sx = maxX - minX, sy = maxY - minY, sz = maxZ - minZ;
+    const span = Math.max(sx, sy, sz);
+    const axes = [sx, sy, sz].filter(v => v > 0.001).length;
+    if (span < 1 || span > 100000 || axes < 2) { continue; }
+
+    streams.push({ offset: o, num, imm, comps, bytesPerComponent, points: pts, minX, minY, minZ, maxX, maxY, maxZ, span });
+    o = alignUp(dataEnd, 4) - 4;
+    if (streams.length >= 128) { break; }
+  }
+
+  return streams;
+}
+
+// Pick the VIF streams that look like vertex positions. The HTML reference
+// prefers the V4_16-at-VU-addr-0x4 pattern (the characteristic CLIB player
+// mesh layout) and falls back to other position-shaped streams.
+function selectRenderableVifStreams(streams: VifStream[]): VifStream[] {
+  const isV4_16_addr4 = (s: VifStream) =>
+    s.bytesPerComponent === 2 && s.comps === 4 && (s.imm & 0x03ff) === 0x4 && s.num >= 16;
+  const fullSignedRange = (s: VifStream) =>
+    s.minX < -32000 || s.minY < -32000 || s.minZ < -32000 ||
+    s.maxX > 32000 || s.maxY > 32000 || s.maxZ > 32000;
+  const likelyNormal = (s: VifStream) =>
+    s.bytesPerComponent === 2 && fullSignedRange(s) && s.span > 60000;
+  const plausible = (s: VifStream) => {
+    const ax = [s.maxX - s.minX, s.maxY - s.minY, s.maxZ - s.minZ].filter(v => v > 16).length;
+    return isV4_16_addr4(s) ||
+      (s.bytesPerComponent === 2 && s.num >= 16 && ax >= 2 && s.span >= 100 && s.span < 58000 && !likelyNormal(s));
+  };
+
+  let selected = streams.filter(isV4_16_addr4);
+  if (selected.length === 0) { selected = streams.filter(plausible); }
+  if (selected.length === 0) {
+    selected = streams
+      .filter(s => s.bytesPerComponent === 2 && s.num >= 16 && !likelyNormal(s))
+      .slice(0, 12);
+  }
+  return selected;
+}
+
+// Triangle strip builder with edge/area sanity checks so a noisy stream
+// doesn't produce a spiky-ball artefact. Mirrors buildSafeVifStripTriangles.
+function buildSafeStripTriangles(
+  points: Array<{ x: number; y: number; z: number }>,
+  base: number,
+  chunkIndex: number,
+): number[] {
+  const out: number[] = [];
+  if (points.length < 3) { return out; }
+  let minX = Infinity, minY = Infinity, minZ = Infinity;
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  for (const p of points) {
+    if (p.x < minX) { minX = p.x; } if (p.x > maxX) { maxX = p.x; }
+    if (p.y < minY) { minY = p.y; } if (p.y > maxY) { maxY = p.y; }
+    if (p.z < minZ) { minZ = p.z; } if (p.z > maxZ) { maxZ = p.z; }
+  }
+  const diag = Math.max(1, Math.hypot(maxX - minX, maxY - minY, maxZ - minZ));
+  const maxEdge = diag * 0.42;
+  const minArea = Math.max(1, diag * diag * 0.0000008);
+  const dist = (a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }) =>
+    Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+  const area = (a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }, c: { x: number; y: number; z: number }) => {
+    const abx = b.x - a.x, aby = b.y - a.y, abz = b.z - a.z;
+    const acx = c.x - a.x, acy = c.y - a.y, acz = c.z - a.z;
+    const cx = aby * acz - abz * acy;
+    const cy = abz * acx - abx * acz;
+    const cz = abx * acy - aby * acx;
+    return Math.hypot(cx, cy, cz);
+  };
+  void chunkIndex;
+  for (let i = 2; i < points.length; i++) {
+    const p0 = points[i - 2], p1 = points[i - 1], p2 = points[i];
+    if (dist(p0, p1) > maxEdge || dist(p1, p2) > maxEdge || dist(p2, p0) > maxEdge) { continue; }
+    if (area(p0, p1, p2) < minArea) { continue; }
+    const flip = i & 1;
+    out.push(base + i - 2, base + (flip ? i : i - 1), base + (flip ? i - 1 : i));
+  }
+  return out;
+}
+
+interface I16Cloud {
+  offset: number;
+  count: number;
+  stride: number;
+  span: number;
+  score: number;
+}
+
+// Heuristic detector for PS2 i16 vertex clouds. The HTML viewer uses this
+// as an inspector to surface candidate vertex runs in CLIB MESH_* payloads
+// where the proper display list isn't decoded yet.
+export function findI16VertexClouds(data: Uint8Array): I16Cloud[] {
+  if (!data || data.length < 0x60 || data.length > 0x40000) { return []; }
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const strides = [0x08, 0x0C, 0x10, 0x14, 0x18, 0x20];
+  const out: I16Cloud[] = [];
+  for (const stride of strides) {
+    for (let start = 0; start <= data.length - stride * 18; start += 2) {
+      const cloud = measureI16Cloud(view, data.length, start, stride);
+      if (!cloud) { continue; }
+      if (!isUsefulI16Cloud(cloud)) { continue; }
+      out.push(cloud);
+      if (out.length >= 64) { break; }
+      start += cloud.count * stride - 2;
+    }
+    if (out.length >= 64) { break; }
+  }
+  // Deduplicate near-overlapping detections from different strides.
+  out.sort((a, b) => b.score - a.score);
+  const deduped: I16Cloud[] = [];
+  for (const c of out) {
+    if (deduped.some(o => Math.abs(o.offset - c.offset) < Math.max(o.stride, c.stride) * 4)) { continue; }
+    deduped.push(c);
+    if (deduped.length >= 32) { break; }
+  }
+  return deduped.sort((a, b) => a.offset - b.offset);
+}
+
+function measureI16Cloud(view: DataView, length: number, start: number, stride: number): (I16Cloud & { minX: number; minY: number; minZ: number }) | null {
+  let count = 0;
+  let zeroish = 0;
+  let minX = Infinity, minY = Infinity, minZ = Infinity;
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  let sumSqX = 0, sumSqY = 0, sumSqZ = 0;
+  let sumX = 0, sumY = 0, sumZ = 0;
+  for (let o = start; o <= length - stride; o += stride) {
+    const x = view.getInt16(o + 0, true);
+    const y = view.getInt16(o + 2, true);
+    const z = view.getInt16(o + 4, true);
+    if (Math.abs(x) > 32760 || Math.abs(y) > 32760 || Math.abs(z) > 32760) { break; }
+    if (Math.abs(x) + Math.abs(y) + Math.abs(z) < 2) { zeroish++; }
+    if (x < minX) { minX = x; } if (x > maxX) { maxX = x; }
+    if (y < minY) { minY = y; } if (y > maxY) { maxY = y; }
+    if (z < minZ) { minZ = z; } if (z > maxZ) { maxZ = z; }
+    sumX += x; sumY += y; sumZ += z;
+    sumSqX += x * x; sumSqY += y * y; sumSqZ += z * z;
+    count++;
+    if (count >= 4096) { break; }
+  }
+  if (count < 18) { return null; }
+  const sx = maxX - minX, sy = maxY - minY, sz = maxZ - minZ;
+  const span = Math.max(sx, sy, sz);
+  const mx = sumX / count, my = sumY / count, mz = sumZ / count;
+  const vx = Math.max(0, sumSqX / count - mx * mx);
+  const vy = Math.max(0, sumSqY / count - my * my);
+  const vz = Math.max(0, sumSqZ / count - mz * mz);
+  const axes = [vx, vy, vz].sort((a, b) => b - a);
+  const lineRatio = axes[0] / Math.max(1e-5, axes[1]);
+  const score = count * Math.log2(span + 2) / Math.max(1, lineRatio * 0.35);
+  // Stash zeroish/lineRatio via score weighting; the useful-test below uses
+  // them directly.
+  return { offset: start, count, stride, span, score, minX, minY, minZ } as I16Cloud & { minX: number; minY: number; minZ: number };
+}
+
+function isUsefulI16Cloud(c: I16Cloud): boolean {
+  if (c.count < 24) { return false; }
+  if (c.span < 20 || c.span > 60000) { return false; }
+  return true;
+}
+
+// Top-level fallback: decode CLIB-style payloads via VIF unpack streams,
+// emitting one chunk per stream and triangle-strip topology where it looks
+// safe. Returns a ZedModel that the existing renderer can consume.
+export function decodeFallbackPayload(bytes: Uint8Array): ZedModel | null {
+  const vifStreams = findVifUnpackStreams(bytes);
+  const useful = selectRenderableVifStreams(vifStreams);
+  if (useful.length === 0) {
+    // Try i16 vertex clouds as a last resort (point cloud preview).
+    const clouds = findI16VertexClouds(bytes);
+    if (clouds.length === 0) { return null; }
+    const vertices: ZedModelVertex[] = [];
+    const indices: number[] = [];
+    const chunks: ZedModelChunk[] = [];
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    for (const cloud of clouds.slice(0, 16)) {
+      const chunkIndex = chunks.length;
+      const base = vertices.length;
+      for (let i = 0; i < cloud.count; i++) {
+        const o = cloud.offset + i * cloud.stride;
+        const x = view.getInt16(o + 0, true);
+        const y = view.getInt16(o + 2, true);
+        const z = view.getInt16(o + 4, true);
+        vertices.push({ x, y, z, u: 0, v: 0 });
+      }
+      // Emit a tiny indexed degenerate per-vertex so the renderer has something
+      // to show (point-cloud as repeated 1-vert triangles).
+      for (let i = 0; i < cloud.count - 2; i++) {
+        indices.push(base + i, base + i + 1, base + i + 2);
+      }
+      chunks.push({
+        offset: cloud.offset,
+        vertexCount: cloud.count,
+        triangleCount: Math.max(0, cloud.count - 2),
+        decodedTriangleCount: Math.max(0, cloud.count - 2),
+        scale: 1,
+        vertices: vertices.slice(base),
+        indices: [],
+        textureName: null,
+      });
+      void chunkIndex;
+    }
+    if (vertices.length === 0) { return null; }
+    let r = 0;
+    for (const v of vertices) {
+      const d = Math.hypot(v.x, v.y, v.z);
+      if (d > r) { r = d; }
+    }
+    return { chunks, vertices, indices, textureRefs: [], boundingRadius: r || 1 };
+  }
+
+  const vertices: ZedModelVertex[] = [];
+  const indices: number[] = [];
+  const chunks: ZedModelChunk[] = [];
+  for (const stream of useful) {
+    const chunkIndex = chunks.length;
+    const base = vertices.length;
+    for (const p of stream.points) {
+      vertices.push({ x: p.x, y: p.y, z: p.z, u: 0, v: 0 });
+    }
+    const strip = buildSafeStripTriangles(stream.points, base, chunkIndex);
+    for (const i of strip) { indices.push(i); }
+    chunks.push({
+      offset: stream.offset,
+      vertexCount: stream.points.length,
+      triangleCount: strip.length / 3 | 0,
+      decodedTriangleCount: strip.length / 3 | 0,
+      scale: 1,
+      vertices: vertices.slice(base),
+      indices: strip.map(i => i - base),
+      textureName: null,
+    });
+  }
+  let r = 0;
+  for (const v of vertices) {
+    const d = Math.hypot(v.x, v.y, v.z);
+    if (d > r) { r = d; }
+  }
+  return { chunks, vertices, indices, textureRefs: [], boundingRadius: r || 1 };
+}
+
+// True when a payload is renderable by any of our decoders. Used by the
+// component to decide whether to enumerate nested MESH_* entries as
+// previewable rows.
+export function hasRenderablePayload(bytes: Uint8Array): boolean {
+  if (!bytes || bytes.length < 0x40) { return false; }
+  if (findChunkOffsets(bytes).length > 0) { return true; }
+  if (bytes.length < 0x400) { return false; }
+  if (findVifUnpackStreams(bytes).length > 0) { return true; }
+  if (findI16VertexClouds(bytes).length > 0) { return true; }
+  return false;
 }

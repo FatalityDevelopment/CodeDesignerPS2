@@ -274,6 +274,13 @@ export function parseTexture(
 
   let palette: ZedPalette | undefined;
   if (palettes) {
+    // Alias-first lookup. `aliasPalettesForTextureEntries` wires each .tif
+    // name (e.g. "door_wood.tif") to the exact palette that came from the
+    // SAME TXR/PAL pair the texture lives in. That pairing is the only
+    // reliable signal once palettes from multiple prefixes (CLIB / FLIB /
+    // M51 / WEAP) get merged into one map — byId-first would happily pick
+    // up texpal_44 from a different package because paletteId 44 isn't
+    // unique across packages.
     if (paletteAlias) {
       palette = palettes.get(paletteAlias.toLowerCase());
     }

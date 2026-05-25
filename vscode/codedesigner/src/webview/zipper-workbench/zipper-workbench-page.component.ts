@@ -21,15 +21,19 @@ import {
   ZedPalette,
   ZedTexture,
 } from './zed-texture-parser';
-import { ZedModel, looksLikeZedContainer, parseModel } from './zed-model-parser';
+import { ZedModel, applyMarkerBinding, decodeFallbackPayload, looksLikeZedContainer, parseModel } from './zed-model-parser';
 import { InspectedZedArchive, parseZedArchive } from './zed-archive-parser';
 import { ZedModelRenderer } from './zed-model-renderer';
 import {
   GeoEntry,
   GeoScene,
+  collectGeoInstances,
   collectVisualPartNames,
+  compactName,
   findSceneNode,
+  instanceNameVariants,
   parseGeoScene,
+  transformPoint,
 } from './zed-geo-parser';
 import './zipper-workbench-page.css';
 
@@ -156,6 +160,9 @@ interface RdrTreeNode {
         </button>
         <button class="zip-btn" [disabled]="!result() || busy()" (click)="refresh()">
           <app-icon name="refreshcw" [size]="14" /> Refresh
+        </button>
+        <button class="zip-btn" [disabled]="!result() || busy() || packageLoading()" (click)="reloadPackage()" title="Force-reload the full ZDB package — bypasses the extension cache. Use after the source file changes on disk.">
+          <app-icon name="refreshcw" [size]="14" /> Reload Package
         </button>
         <button class="zip-btn" [disabled]="!result()?.canExtract || busy()" (click)="extractAll()">
           <app-icon name="save" [size]="14" /> Extract All
@@ -521,122 +528,124 @@ interface RdrTreeNode {
                     </div>
                   }
                   @if (previewMode() === 'model' && model(); as mdl) {
-                    @if (mdl.chunks.length > 1) {
-                      <div>
-                        <span>Chunk</span>
-                        <select class="zip-chunk-select" [value]="selectedChunk()" (change)="onChunkChange($event)">
-                          <option [value]="-1">All chunks ({{ mdl.chunks.length }})</option>
-                          @for (chunk of mdl.chunks; track chunk.offset; let idx = $index) {
-                            <option [value]="idx">{{ chunkLabel(idx, chunk) }}</option>
-                          }
-                        </select>
-                      </div>
-                    }
-                    <div>
-                      <span>Chunks</span><strong>{{ mdl.chunks.length }}</strong>
+                    <!-- Stats -->
+                    <div class="zip-pane-section">
+                      <div class="zip-pane-section-title">Mesh</div>
+                      <div><span>Chunks</span><strong>{{ mdl.chunks.length }}</strong></div>
+                      <div><span>Vertices / Triangles</span><strong>{{ activeVertexCount() }} / {{ activeTriangleCount() }}</strong></div>
+                      @if (mdl.chunks.length > 1) {
+                        <div>
+                          <span>Chunk</span>
+                          <select class="zip-chunk-select" [value]="selectedChunk()" (change)="onChunkChange($event)">
+                            <option [value]="-1">All chunks ({{ mdl.chunks.length }})</option>
+                            @for (chunk of mdl.chunks; track chunk.offset; let idx = $index) {
+                              <option [value]="idx">{{ chunkLabel(idx, chunk) }}</option>
+                            }
+                          </select>
+                        </div>
+                      }
+                      @if (mdl.textureRefs.length > 0) {
+                        <div>
+                          <span>Texture refs</span>
+                          <div class="zip-texrefs">
+                            @for (ref of mdl.textureRefs; track ref) {
+                              <span>{{ ref }}</span>
+                            }
+                          </div>
+                        </div>
+                      }
                     </div>
-                    <div>
-                      <span>Vertices / Triangles</span><strong>{{ activeVertexCount() }} / {{ activeTriangleCount() }}</strong>
-                    </div>
-                    @if (mdl.textureRefs.length > 0) {
-                      <div>
-                        <span>Texture refs</span>
-                        <div class="zip-texrefs">
-                          @for (ref of mdl.textureRefs; track ref) {
-                            <span>{{ ref }}</span>
-                          }
+
+                    <!-- Render — all draw / shading toggles in one place.
+                         Render mode controls wireframe (was a separate
+                         button) and top-down view; V orientation replaces
+                         the old Flip Y button; UV interpretation replaces
+                         the old UV mode dropdown. -->
+                    <div class="zip-pane-section">
+                      <div class="zip-pane-section-title">Render</div>
+                      <div class="zip-map-controls">
+                        <div class="zip-map-ctrl">
+                          <span>Mode</span>
+                          <select [value]="mapRenderMode()" (change)="onMapRenderModeChange($event)">
+                            <option value="view3dTexturedLit">3D textured + fog/lighting</option>
+                            <option value="view3dTextured">3D textured solid</option>
+                            <option value="view3dSolid">3D material solid</option>
+                            <option value="topSolid">top-down material solid</option>
+                            <option value="topWire">top-down wire</option>
+                            <option value="view3dWire">3D wire</option>
+                          </select>
+                        </div>
+                        <div class="zip-map-ctrl">
+                          <span>Triangle stride</span>
+                          <select [value]="mapTriStride()" (change)="onMapTriStrideChange($event)">
+                            <option [value]="1">1 — full solid</option>
+                            <option [value]="2">2 — skip half</option>
+                            <option [value]="4">4 — debug overview</option>
+                            <option [value]="8">8 — wire overview</option>
+                          </select>
+                        </div>
+                        <div class="zip-map-ctrl">
+                          <span>V orientation</span>
+                          <select [value]="mapTextureV()" (change)="onMapTextureVChange($event)">
+                            <option value="flipV">flip V</option>
+                            <option value="direct">direct</option>
+                          </select>
+                        </div>
+                        <div class="zip-map-ctrl">
+                          <span>UV interpretation</span>
+                          <select [value]="mapUvInterpretation()" (change)="onMapUvInterpretationChange($event)">
+                            <option value="autoWorld">auto world UV</option>
+                            <option value="norm4096">raw / 4096 normalized</option>
+                            <option value="pixel16">raw / 16 pixel tiled</option>
+                            <option value="pixel256">raw / 256 pixel tiled</option>
+                          </select>
                         </div>
                       </div>
-                    }
-                    <div>
-                      <span>UV mode</span>
-                      <select class="zip-chunk-select" [value]="uvMode()" (change)="onUvModeChange($event)">
-                        <option value="direct">direct</option>
-                        <option value="flipV">flip V</option>
-                        <option value="swap">swap U/V</option>
-                        <option value="swapFlipV">swap U/V + flip V</option>
-                      </select>
-                    </div>
-                    @if (availablePalettes().length > 0) {
-                      <div>
-                        <span>Palette override</span>
-                        <select class="zip-chunk-select" [value]="paletteOverride() ?? ''" (change)="onPaletteOverrideChange($event)">
-                          <option value="">(auto)</option>
-                          @for (key of availablePalettes(); track key) {
-                            <option [value]="key">{{ key }}</option>
-                          }
-                        </select>
-                      </div>
-                    }
-                    <div style="display:flex;gap:6px;flex-wrap:wrap">
-                      <button class="zip-btn" (click)="toggleWireframe()">
-                        <app-icon name="grid" [size]="13" />
-                        {{ wireframe() ? 'Solid' : 'Wireframe' }}
-                      </button>
-                      <button class="zip-btn" (click)="toggleFlipY()">
-                        <app-icon name="refreshcw" [size]="13" />
-                        {{ flipY() ? 'Unflip Y' : 'Flip Y' }}
-                      </button>
                     </div>
 
-                    <!-- Map-viewer style controls. Ported from the HTML map
-                         viewer sidebar so world / mission models can be
-                         tuned the same way (render mode, triangle stride,
-                         material binding, V flip, UV interpretation). The
-                         settings persist across previews. -->
-                    <div class="zip-map-controls">
-                      <div class="zip-map-ctrl">
-                        <span>Render mode</span>
-                        <select [value]="mapRenderMode()" (change)="onMapRenderModeChange($event)">
-                          <option value="view3dTexturedLit">3D textured + fog/lighting</option>
-                          <option value="view3dTextured">3D textured solid</option>
-                          <option value="view3dSolid">3D material solid</option>
-                          <option value="topSolid">top-down material solid</option>
-                          <option value="topWire">top-down wire</option>
-                          <option value="view3dWire">3D wire</option>
-                        </select>
-                      </div>
-                      <div class="zip-map-ctrl">
-                        <span>Triangle stride</span>
-                        <select [value]="mapTriStride()" (change)="onMapTriStrideChange($event)">
-                          <option [value]="1">1 — full solid</option>
-                          <option [value]="2">2 — skip half</option>
-                          <option [value]="4">4 — debug overview</option>
-                          <option [value]="8">8 — wire overview</option>
-                        </select>
-                      </div>
-                      <div class="zip-map-ctrl">
-                        <span>Material binding</span>
-                        <select [value]="mapMaterialBinding()" (change)="onMapMaterialBindingChange($event)">
-                          <option value="smartWorld">smart world marker</option>
-                          <option value="sliceNearest">slice nearest marker</option>
-                          <option value="globalNearest">global nearest marker</option>
-                        </select>
-                      </div>
-                      <div class="zip-map-ctrl">
-                        <span>V orientation</span>
-                        <select [value]="mapTextureV()" (change)="onMapTextureVChange($event)">
-                          <option value="flipV">flip V</option>
-                          <option value="direct">direct</option>
-                        </select>
-                      </div>
-                      <div class="zip-map-ctrl">
-                        <span>UV interpretation</span>
-                        <select [value]="mapUvInterpretation()" (change)="onMapUvInterpretationChange($event)">
-                          <option value="autoWorld">auto world UV</option>
-                          <option value="norm4096">raw / 4096 normalized</option>
-                          <option value="pixel16">raw / 16 pixel tiled</option>
-                          <option value="pixel256">raw / 256 pixel tiled</option>
-                        </select>
+                    <!-- Materials -->
+                    <div class="zip-pane-section">
+                      <div class="zip-pane-section-title">Materials</div>
+                      <div class="zip-map-controls">
+                        <div class="zip-map-ctrl">
+                          <span>Binding</span>
+                          <select [value]="mapMaterialBinding()" (change)="onMapMaterialBindingChange($event)">
+                            <option value="tailScan">tail scan (default)</option>
+                            <option value="smartWorld">smart world marker</option>
+                            <option value="sliceNearest">slice nearest marker</option>
+                            <option value="globalNearest">global nearest marker</option>
+                          </select>
+                        </div>
+                        @if (availablePalettes().length > 0) {
+                          <div class="zip-map-ctrl">
+                            <span>Palette override</span>
+                            <select [value]="paletteOverride() ?? ''" (change)="onPaletteOverrideChange($event)">
+                              <option value="">(auto)</option>
+                              @for (key of availablePalettes(); track key) {
+                                <option [value]="key">{{ key }}</option>
+                              }
+                            </select>
+                          </div>
+                        }
                       </div>
                     </div>
 
-                    <!-- Dump-report buttons — pipe their output to the
-                         "Code Designer ZDB" output channel. -->
-                    <div class="zip-dump-buttons">
-                      <button class="zip-btn" (click)="dumpMissingTextures()">Dump missing textures</button>
-                      <button class="zip-btn" (click)="dumpMaterialReport()">Dump material report</button>
-                      <button class="zip-btn" (click)="dumpGeoReport()">Dump GEO report</button>
+                    <!-- Compose / dump utilities. Each pipes its output
+                         to the Code Designer ZDB output channel. -->
+                    <div class="zip-pane-section">
+                      <div class="zip-pane-section-title">Tools</div>
+                      <div class="zip-dump-buttons">
+                        <button class="zip-btn zip-primary" [disabled]="!companionScene()" (click)="composeGeoScene()" title="Walk the GEO scene tree, resolve each placed instance to a model from the loaded package, and render the composed mesh.">
+                          Compose GEO scene
+                        </button>
+                        <button class="zip-btn" (click)="composeHierarchicalModel()" title="Decode chunks from the selected entry AND every child node in its subtree, applying per-node transforms. Required for CLIB players and other hierarchical models.">
+                          Compose hierarchical
+                        </button>
+                        <button class="zip-btn" (click)="dumpMissingTextures()">Dump missing textures</button>
+                        <button class="zip-btn" (click)="dumpMaterialReport()">Dump material report</button>
+                        <button class="zip-btn" (click)="dumpGeoReport()">Dump GEO report</button>
+                        <button class="zip-btn" [disabled]="!companionScene()" (click)="dumpGeoInstances()">Dump GEO instances</button>
+                      </div>
                     </div>
                   }
                 </div>
@@ -834,7 +843,17 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
   // material-binding signal used in the model parser path.
   readonly mapRenderMode = signal<'view3dTexturedLit' | 'view3dTextured' | 'view3dSolid' | 'topSolid' | 'topWire' | 'view3dWire'>('view3dTexturedLit');
   readonly mapTriStride = signal<number>(1);
-  readonly mapMaterialBinding = signal<'smartWorld' | 'sliceNearest' | 'globalNearest'>('smartWorld');
+  // Default 'smartWorld' to match the HTML map viewer. tailScan-only
+  // misses ~80% of world chunks because their .tif name doesn't sit in
+  // the tail area; smartWorld supplements with marker-and-slice rules.
+  // For weapons/castles that tail scan handles perfectly, smartWorld's
+  // override of an existing chunk.textureName is harmless because the
+  // nearest marker IS that same .tif.
+  readonly mapMaterialBinding = signal<'tailScan' | 'smartWorld' | 'sliceNearest' | 'globalNearest'>('smartWorld');
+  // The raw model bytes for the currently-displayed model, kept so we can
+  // re-run the binding pass on dropdown change without re-decoding.
+  private currentModelBytes: Uint8Array | null = null;
+  private currentSliceOffsets: number[] = [];
   readonly mapTextureV = signal<'flipV' | 'direct'>('flipV');
   readonly mapUvInterpretation = signal<'autoWorld' | 'norm4096' | 'pixel16' | 'pixel256'>('autoWorld');
   readonly mapTextureFilter = signal<string>('');
@@ -1014,6 +1033,10 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
         break;
       case 'zdbPackage': {
         const nodes = (data['nodes'] as Array<{ index: number; name: string; type: number; data: string }>) ?? [];
+        const fromCache = !!data['fromCache'];
+        if (fromCache) {
+          this.log(`[package] restored from extension cache (${nodes.length} entries)`);
+        }
         this.applyZdbPackage(nodes);
         break;
       }
@@ -1196,6 +1219,21 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
 
   openFile(): void {
     this.vscode.postMessage({ type: 'openFile' });
+  }
+
+  // Force re-extract of the loaded package. Used after the source file
+  // changes on disk or to recover from a state-loss bug.
+  reloadPackage(): void {
+    const filePath = this.result()?.path;
+    if (!filePath) { return; }
+    this.packageEntryBytes.clear();
+    this.companionTextures.set(null);
+    this.companionScene.set(null);
+    this.palettes.set(null);
+    this.packageLoading.set(true);
+    this.packageMessage.set(`Force-reloading ${filePath.split(/[\\/]/).pop()}…`);
+    this.log(`[package] force-reloading ${filePath.split(/[\\/]/).pop()}`);
+    this.vscode.postMessage({ type: 'reloadZdbPackage', path: filePath });
   }
 
   refresh(): void {
@@ -1490,6 +1528,15 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
   // and parse it inline so indexed textures inside resolve to colour instead
   // of grayscale.
   private loadNestedPalettesForCurrentLayer(): void {
+    // When the full ZDB package was preloaded (applyZdbPackage), the
+    // cross-package merged palette map already contains every palette
+    // from every _PAL.ZED in the archive. Re-fetching a single-prefix
+    // PAL here would OVERWRITE the merged map with one prefix's
+    // palettes and break textures from the other prefixes — that was
+    // exactly the bug the user hit drilling into WORL_MDL.ZED inside
+    // M51.ZDB. Skip when package context is intact.
+    if (this.packageEntryBytes.size > 0) { return; }
+
     const stack = this.archiveStack();
     if (stack.length === 0) { return; }
     const current = stack[stack.length - 1];
@@ -1563,6 +1610,17 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
   private rootCompanionPalArchive: InspectedZedArchive | null = null;
 
   private loadMdlCompanionsForCurrentLayer(): void {
+    // Same guard as loadNestedPalettesForCurrentLayer — when the ZDB
+    // package preload already wired up companionTextures, palettes, and
+    // companionScene with merged cross-prefix data, this per-layer
+    // single-prefix loader would CLOBBER that with one prefix's data
+    // (e.g. drilling into M51_MDL.ZED inside M51.ZDB would replace the
+    // M51+CLIB+FLIB+BENZ+WEAP merged palette map with M51-only). Skip.
+    if (this.packageEntryBytes.size > 0) {
+      this.log(`[companion] skipping per-layer load — package context already loaded`);
+      return;
+    }
+
     const stack = this.archiveStack();
     if (stack.length === 0) { return; }
     const current = stack[stack.length - 1];
@@ -1739,14 +1797,19 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       this.previewMessage.set('Parsing RDR table...');
       this.rdr.set(null);
       const filePath = this.result()?.path;
-      if (filePath) {
-        // The bridge can drill into ZAR/ZED/ZDB to extract the .rdr by leaf
-        // name when we're inside a sub-archive.
-        const leaf = entry.name.split(/[\\/]/).pop() ?? entry.name;
-        this.log(`[RDR] inspecting ${leaf} in ${filePath.split(/[\\/]/).pop()}…`);
-        this.vscode.postMessage({ type: 'inspectRdr', path: filePath, entryName: leaf });
-      }
+      const leaf = entry.name.split(/[\\/]/).pop() ?? entry.name;
+      // We already have the .rdr bytes here (passed in via `bytes` arg). Skip
+      // the backend's container drill-down and parse the bytes directly —
+      // this works for any nesting depth, including .rdr-inside-.zar-inside
+      // .zdb where the legacy path was failing.
+      const base64 = bytesToBase64(bytes);
+      this.log(`[RDR] inspecting ${leaf} (${bytes.length}B, in-memory)`);
+      this.vscode.postMessage({ type: 'inspectRdrBytes', base64, entryName: leaf });
       return;
+      // Note: legacy `inspectRdr` (path + entryName) is still available on
+      // the provider for path-only entrypoints, but `decodePayload` is
+      // always called with bytes in hand so we prefer the bytes variant.
+      void filePath; // unused, retained for future telemetry context
     }
 
     // AIMAPS.MPS — parsed server-side via the new MPS handler. The .mps file
@@ -1822,20 +1885,76 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     // chunks are found, so the user sees diagnostics rather than nothing.
     this.previewMode.set('model');
     try {
-      const mdl = parseModel(bytes);
+      let mdl = parseModel(bytes);
+      let fallbackUsed = false;
+      // If the standard chunk format yielded nothing (common for CLIB
+      // MESH_* payloads which start with their name as ASCII rather than
+      // the WORL_MDL chunk magic), try the VIF / vertex-cloud fallback
+      // decoders. They give the user *something* to inspect instead of an
+      // empty pane.
+      if (mdl.chunks.length === 0) {
+        const fallback = decodeFallbackPayload(bytes);
+        if (fallback && fallback.chunks.length > 0) {
+          mdl = fallback;
+          fallbackUsed = true;
+        }
+      }
+      this.currentModelBytes = bytes;
+      // Collect the Nxxx_xxx 4-byte child offsets from the parent archive
+      // so the smartWorld binding pass has slices to work with.
+      this.currentSliceOffsets = this.collectSliceOffsetsForCurrentEntry();
+      this.applyCurrentBinding(mdl);
       this.model.set(mdl);
       if (mdl.chunks.length === 0) {
         this.previewMessage.set(
           `No model chunks found (payload ${bytes.length} bytes, first 4 = ${describeMagic(bytes)})`
         );
+      } else if (fallbackUsed) {
+        this.previewMessage.set(
+          `Decoded ${mdl.vertices.length} verts via VIF / vertex-cloud fallback (no standard chunks).`,
+        );
+        this.log(`[fallback] ${entry.name}: ${mdl.chunks.length} stream(s), ${mdl.vertices.length} verts`);
       } else {
         this.previewMessage.set('');
       }
       setTimeout(() => this.applyModelToRenderer(), 0);
     } catch (err) {
       this.model.set(null);
+      this.currentModelBytes = null;
+      this.currentSliceOffsets = [];
       this.previewMessage.set('Model decode failed: ' + (err instanceof Error ? err.message : String(err)));
     }
+  }
+
+  // Pulls slice offsets from the Nxxx_xxx child stubs of the selected entry.
+  // These nodes hold 4-byte payloads = byte offsets into the parent model
+  // payload, defining where each material slice begins. Returns [] when no
+  // sub-archive context is available (e.g. opened a raw model directly).
+  private collectSliceOffsetsForCurrentEntry(): number[] {
+    const entry = this.selectedEntry();
+    const stack = this.archiveStack();
+    if (!entry || stack.length === 0) { return []; }
+    const archive = stack[stack.length - 1].archive;
+    const modelEntry = archive.entries.find(e => e.index === entry.index);
+    if (!modelEntry) { return []; }
+    const offsets: number[] = [];
+    for (const childIdx of modelEntry.children) {
+      const childBytes = archive.entryData.get(childIdx);
+      if (!childBytes || childBytes.length !== 4) { continue; }
+      const view = new DataView(childBytes.buffer, childBytes.byteOffset, 4);
+      offsets.push(view.getUint32(0, true));
+    }
+    return offsets;
+  }
+
+  // Runs the smartWorld / sliceNearest / globalNearest binding pass per the
+  // current dropdown selection. `tailScan` (default) is a no-op so the
+  // existing chunk.textureName from findTifInRange is preserved.
+  private applyCurrentBinding(mdl: ZedModel): void {
+    const mode = this.mapMaterialBinding();
+    if (mode === 'tailScan') { return; }
+    if (!this.currentModelBytes) { return; }
+    applyMarkerBinding(mdl, this.currentModelBytes, this.currentSliceOffsets, mode);
   }
 
   private refreshPreview(): void {
@@ -1914,10 +2033,16 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     const unlit = renderMode === 'view3dTextured' || renderMode === 'view3dSolid' || renderMode === 'topSolid';
     const solidColor = renderMode === 'view3dSolid' || renderMode === 'topSolid';
 
+    // The old separate "UV mode" and "Flip Y" toggles are gone — derive
+    // their values from the consolidated V-orientation dropdown so the
+    // renderer keeps working without duplicate UI:
+    //   mapTextureV === 'flipV' -> uvMode = 'flipV'
+    //   otherwise               -> uvMode = 'direct'
+    const effectiveUvMode = this.mapTextureV() === 'flipV' ? 'flipV' : 'direct';
     this.modelRenderer.setModel(mdl, {
-      wireframe: this.wireframe() || wireframeFromMode,
-      flipY: this.flipY(),
-      uvMode: this.uvMode(),
+      wireframe: wireframeFromMode,
+      flipY: false,
+      uvMode: effectiveUvMode,
       chunkIndex: this.selectedChunk(),
       textures,
       defaultTexture: defaultTif,
@@ -2150,9 +2275,28 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     );
     this.log(`[package] ${this.packageEntryBytes.size} entries; textures=${tifMap.size} palettes=${mergedPalettes.size} GEO=${geoArchives.length}`);
 
-    // Re-apply the current model if any so the freshly-loaded textures show
-    // up immediately instead of waiting for the next user interaction.
-    this.applyModelToRenderer();
+    // If the user already clicked a preview before the package finished
+    // loading, the initial render had no companion textures. Re-trigger
+    // decodePayload from the cached bytes so the freshly-loaded textures
+    // flow through the full pipeline (not just the renderer re-bind) —
+    // this is what fixes the "have to open views after a fresh open"
+    // symptom.
+    const entry = this.selectedEntry();
+    if (entry) {
+      const cached = this.nodeCache.get(entry.index)
+        ?? this.bytesFromActiveArchive(entry.index);
+      if (cached) {
+        this.log(`[package] re-decoding ${entry.name} with fresh package context`);
+        this.decodePayload(entry.index, cached);
+      } else {
+        // No cached bytes for the selected entry — at least re-bind the
+        // renderer so any model already in `this.model()` picks up the
+        // new texture map.
+        this.applyModelToRenderer();
+      }
+    } else {
+      this.applyModelToRenderer();
+    }
   }
 
   // ------------------------------------------------------------------
@@ -2203,6 +2347,17 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
   }
   onMapMaterialBindingChange(event: Event): void {
     this.mapMaterialBinding.set((event.target as HTMLSelectElement).value as ReturnType<typeof this.mapMaterialBinding>);
+    // Re-run the binding pass against the cached model bytes so the dropdown
+    // takes effect immediately. We re-parse from raw bytes to discard the
+    // previous binding's overrides; otherwise switching back to tailScan
+    // would leave stale smartWorld picks in place.
+    if (this.currentModelBytes) {
+      try {
+        const mdl = parseModel(this.currentModelBytes);
+        this.applyCurrentBinding(mdl);
+        this.model.set(mdl);
+      } catch { /* keep old model */ }
+    }
     this.applyModelToRenderer();
   }
   onMapTextureVChange(event: Event): void {
@@ -2319,6 +2474,333 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       this.log('(no entry selected)');
     }
   }
+  // ------------------------------------------------------------------
+  // GEO scene composition. Mirrors the HTML map viewer's
+  // buildGeoSceneMesh: walks the loaded GEO scene for placed instances,
+  // resolves each instance to a model by name across every loaded
+  // *_MDL.ZED in the package, applies the instance's 4x4 transform, and
+  // merges everything into one big ZedModel. Renders via the existing
+  // model preview pipeline.
+  // ------------------------------------------------------------------
+  composeGeoScene(): void {
+    const scene = this.companionScene();
+    if (!scene) {
+      this.log('[GEO] no GEO scene loaded for this package', true);
+      return;
+    }
+    const entry = this.selectedEntry();
+    // Use the currently-selected node as the GEO root when it matches a
+    // scene node (e.g. user clicks `worldmodel`); otherwise start at the
+    // very top of the GEO tree.
+    let root = entry ? findSceneNode(scene, entry.name) : null;
+    if (!root) { root = scene.root; }
+    const instances = collectGeoInstances(scene, root);
+    if (instances.length === 0) {
+      this.log(`[GEO] no placeable instances found under ${root.name}`, true);
+      return;
+    }
+
+    // Build a model lookup map across EVERY *_MDL.ZED in the package by
+    // walking each archive's full entry tree (HTML reference behaviour —
+    // CLIB / FLIB style packages have model nodes nested as MESH_*
+    // descendants of skeleton roots, not at the top level). Each entry
+    // contributes multiple lookup keys (lowercased, compacted, stripped
+    // of LOD/index suffixes, MESH_-prefixed) so GEO placements with name
+    // variants resolve cleanly.
+    type ModelHit = { node: { index: number; name: string }; sourceFile: string; bytes: Uint8Array };
+    const mdlArchives: Array<{ leaf: string; archive: InspectedZedArchive }> = [];
+    for (const [leaf, bytes] of this.packageEntryBytes) {
+      if (!/_MDL(?:\([^)]+\))?\.zed$/i.test(leaf)) { continue; }
+      try { mdlArchives.push({ leaf, archive: parseZedArchive(bytes) }); }
+      catch { /* skip non-archive entries */ }
+    }
+    const modelLookup = new Map<string, ModelHit[]>();
+    for (const { leaf, archive } of mdlArchives) {
+      for (const e of archive.entries) {
+        if (!e.size) { continue; }
+        const bytes = archive.entryData.get(e.index);
+        if (!bytes || bytes.length === 0) { continue; }
+        const hit: ModelHit = { node: { index: e.index, name: e.name }, sourceFile: leaf, bytes };
+        for (const key of instanceNameVariants(e.name)) {
+          const list = modelLookup.get(key);
+          if (list) { list.push(hit); } else { modelLookup.set(key, [hit]); }
+        }
+      }
+    }
+
+    const preferOrder = ['m51_mdl.zed', 'worl_mdl.zed', 'clib_mdl.zed', 'flib_mdl.zed', 'benz_mdl.zed'];
+    const resolve = (name: string): ModelHit | null => {
+      for (const key of instanceNameVariants(name)) {
+        const hits = modelLookup.get(key);
+        if (!hits || hits.length === 0) { continue; }
+        for (const file of preferOrder) {
+          const h = hits.find(x => x.sourceFile === file);
+          if (h) { return h; }
+        }
+        return hits[0];
+      }
+      return null;
+    };
+
+    // Compose. Each instance contributes a transformed copy of its model's
+    // vertices and a re-based index list. Cache parsed models by source so
+    // repeated placements don't re-parse.
+    const meshCache = new Map<string, ZedModel>();
+    const composedVertices: ZedModel['vertices'] = [];
+    const composedIndices: number[] = [];
+    const composedChunks: ZedModel['chunks'] = [];
+    const composedTextureRefs = new Set<string>();
+    const missing: string[] = [];
+    let rendered = 0;
+    let fallbackUsed = 0;
+
+    for (const inst of instances) {
+      const hit = resolve(inst.modelName);
+      if (!hit) { missing.push(inst.modelName); continue; }
+      const cacheKey = `${hit.sourceFile}|${hit.node.name}|${this.mapMaterialBinding()}`;
+      let mdl = meshCache.get(cacheKey);
+      if (!mdl) {
+        try { mdl = parseModel(hit.bytes); } catch { mdl = null as unknown as ZedModel; }
+        // If the resolved model parses to nothing standard (CLIB-style
+        // payload), try the VIF/cloud fallback so the instance still
+        // contributes geometry to the composed scene.
+        if (!mdl || mdl.chunks.length === 0) {
+          const fb = decodeFallbackPayload(hit.bytes);
+          if (fb && fb.chunks.length > 0) {
+            mdl = fb;
+            fallbackUsed++;
+          } else if (!mdl) {
+            continue;
+          }
+        }
+        // Run the marker binding pass against this payload BEFORE we merge
+        // its chunks into the scene. Composed chunks have mangled offsets,
+        // so binding has to happen here — the per-payload bytes are the
+        // only context where chunk.offset is still meaningful.
+        const bindMode = this.mapMaterialBinding();
+        if (bindMode !== 'tailScan' && mdl.chunks.length > 0) {
+          try { applyMarkerBinding(mdl, hit.bytes, [], bindMode); }
+          catch { /* keep tail-scan names */ }
+        }
+        meshCache.set(cacheKey, mdl);
+      }
+
+      const vertexBase = composedVertices.length;
+      const chunkBase = composedChunks.length;
+      for (const v of mdl.vertices) {
+        const [tx, ty, tz] = transformPoint(inst.matrix, v.x, v.y, v.z);
+        composedVertices.push({ ...v, x: tx, y: ty, z: tz });
+      }
+      for (const idx of mdl.indices) { composedIndices.push(vertexBase + idx); }
+      for (const c of mdl.chunks) {
+        composedChunks.push({ ...c, offset: c.offset + chunkBase * 0x80 });
+      }
+      for (const ref of mdl.textureRefs) { composedTextureRefs.add(ref); }
+      rendered++;
+    }
+
+    if (composedVertices.length === 0) {
+      this.log(`[GEO] composition produced no vertices (instances=${instances.length}, missing=${missing.length})`, true);
+      return;
+    }
+
+    let radius = 0;
+    for (const v of composedVertices) {
+      const d = Math.hypot(v.x, v.y, v.z);
+      if (d > radius) { radius = d; }
+    }
+    const composedModel: ZedModel = {
+      chunks: composedChunks,
+      vertices: composedVertices,
+      indices: composedIndices,
+      textureRefs: [...composedTextureRefs],
+      boundingRadius: radius || 1,
+    };
+
+    this.model.set(composedModel);
+    this.previewMode.set('model');
+    this.currentModelBytes = null; // composed scene has no single payload
+    this.currentSliceOffsets = [];
+    setTimeout(() => this.applyModelToRenderer(), 0);
+
+    const uniqueMissing = [...new Set(missing.map(m => m.toLowerCase()))];
+    this.log('--- GEO scene composed ---', true);
+    this.log(`Root: ${root.name}, instances=${instances.length}, rendered=${rendered}, missingModels=${uniqueMissing.length}, fallbackDecodes=${fallbackUsed}`);
+    this.log(`Composed model: ${composedVertices.length} verts, ${composedIndices.length / 3 | 0} tris, ${composedChunks.length} chunks across ${meshCache.size} unique source model(s)`);
+    if (uniqueMissing.length) {
+      this.log(`Missing model refs: ${uniqueMissing.slice(0, 60).join(', ')}${uniqueMissing.length > 60 ? '…' : ''}`);
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Hierarchical model decode. Walks the currently-selected node's
+  // subtree in the active archive, decoding chunks from EVERY child
+  // node that contains them and applying any per-node transform matrix
+  // pulled from the node's data. Produces one composed mesh — required
+  // for CLIB / player rendering, where the actual geometry lives in
+  // nested MESH_* children rather than the root payload.
+  // (HTML map viewer's decodeHierarchicalModelNode parity.)
+  // ------------------------------------------------------------------
+  composeHierarchicalModel(): void {
+    const entry = this.selectedEntry();
+    const stack = this.archiveStack();
+    if (!entry || stack.length === 0) {
+      this.log('[hierarchical] requires drilling into an archive first', true);
+      return;
+    }
+    const archive = stack[stack.length - 1].archive;
+    const rootEntry = archive.entries.find(e => e.index === entry.index);
+    if (!rootEntry) {
+      this.log(`[hierarchical] entry ${entry.name} not found in current archive`, true);
+      return;
+    }
+
+    const composedVertices: ZedModel['vertices'] = [];
+    const composedIndices: number[] = [];
+    const composedChunks: ZedModel['chunks'] = [];
+    const composedRefs = new Set<string>();
+    let payloadsWithChunks = 0;
+
+    const visit = (entryIndex: number, parentMatrix: number[]) => {
+      const ent = archive.entries.find(e => e.index === entryIndex);
+      if (!ent) { return; }
+      const bytes = archive.entryData.get(ent.index);
+      const localMatrix = bytes ? tryReadLocalMatrix(bytes) : identityMatrix();
+      const matrix = multiplyMatrices(parentMatrix, localMatrix);
+
+      if (bytes && bytes.length > 0) {
+        let local: ZedModel | null = null;
+        try { local = parseModel(bytes); } catch { local = null; }
+        // CLIB / similar payloads don't use the standard chunk format —
+        // fall back to VIF / vertex-cloud decoding so the hierarchical
+        // walk actually picks up character meshes etc.
+        if (!local || local.chunks.length === 0) {
+          local = decodeFallbackPayload(bytes);
+        }
+        if (local && local.chunks.length > 0) {
+          // Apply the user's material-binding mode to THIS payload's
+          // chunks while we still have the right bytes in hand. Composed
+          // chunk offsets are mangled across payloads so we can't run
+          // binding after merging — this is the only place it works.
+          const bindMode = this.mapMaterialBinding();
+          if (bindMode !== 'tailScan') {
+            try { applyMarkerBinding(local, bytes, [], bindMode); }
+            catch { /* keep tail-scan names */ }
+          }
+          payloadsWithChunks++;
+          const vertexBase = composedVertices.length;
+          const chunkBase = composedChunks.length;
+          for (const v of local.vertices) {
+            const [tx, ty, tz] = transformPoint(matrix, v.x, v.y, v.z);
+            composedVertices.push({ ...v, x: tx, y: ty, z: tz });
+          }
+          for (const idx of local.indices) { composedIndices.push(vertexBase + idx); }
+          for (const c of local.chunks) {
+            composedChunks.push({ ...c, offset: c.offset + chunkBase * 0x80 });
+          }
+          for (const ref of local.textureRefs) { composedRefs.add(ref); }
+        }
+      }
+
+      for (const childIdx of ent.children) { visit(childIdx, matrix); }
+    };
+    visit(rootEntry.index, identityMatrix());
+
+    if (composedVertices.length === 0) {
+      this.log(`[hierarchical] ${entry.name}: no chunks found in subtree`, true);
+      return;
+    }
+
+    let radius = 0;
+    for (const v of composedVertices) {
+      const d = Math.hypot(v.x, v.y, v.z);
+      if (d > radius) { radius = d; }
+    }
+    this.model.set({
+      chunks: composedChunks,
+      vertices: composedVertices,
+      indices: composedIndices,
+      textureRefs: [...composedRefs],
+      boundingRadius: radius || 1,
+    });
+    this.previewMode.set('model');
+    this.currentModelBytes = null;
+    this.currentSliceOffsets = [];
+    setTimeout(() => this.applyModelToRenderer(), 0);
+    this.log(`[hierarchical] ${entry.name}: ${payloadsWithChunks} payload(s) with chunks, ${composedVertices.length} verts, ${composedIndices.length / 3 | 0} tris`, true);
+  }
+
+  // Walks the loaded GEO scene like composeGeoScene does, but instead of
+  // building a mesh, logs every instance with its resolved/missing status,
+  // the variant keys we tried, and the resolved MDL source file. This is
+  // the fastest way to figure out why so many GEO instances aren't matching
+  // any of the package's MDL nodes.
+  dumpGeoInstances(): void {
+    const scene = this.companionScene();
+    if (!scene) {
+      this.log('[GEO instances] no GEO scene loaded for this package', true);
+      return;
+    }
+    const entry = this.selectedEntry();
+    let root = entry ? findSceneNode(scene, entry.name) : null;
+    if (!root) { root = scene.root; }
+    const instances = collectGeoInstances(scene, root);
+
+    // Build the same lookup map composeGeoScene uses so the report
+    // reflects exactly what compose will do.
+    type ModelHit = { sourceFile: string; nodeName: string };
+    const modelLookup = new Map<string, ModelHit[]>();
+    for (const [leaf, bytes] of this.packageEntryBytes) {
+      if (!/_MDL(?:\([^)]+\))?\.zed$/i.test(leaf)) { continue; }
+      let archive: InspectedZedArchive;
+      try { archive = parseZedArchive(bytes); } catch { continue; }
+      for (const e of archive.entries) {
+        if (!e.size) { continue; }
+        for (const key of instanceNameVariants(e.name)) {
+          const list = modelLookup.get(key);
+          if (list) { list.push({ sourceFile: leaf, nodeName: e.name }); }
+          else { modelLookup.set(key, [{ sourceFile: leaf, nodeName: e.name }]); }
+        }
+      }
+    }
+
+    let resolved = 0, missing = 0;
+    const missingNames = new Set<string>();
+    const resolutionDetails: string[] = [];
+
+    for (const inst of instances) {
+      const variants = instanceNameVariants(inst.modelName);
+      let hit: ModelHit | null = null;
+      for (const key of variants) {
+        const hits = modelLookup.get(key);
+        if (hits && hits.length > 0) { hit = hits[0]; break; }
+      }
+      if (hit) {
+        resolved++;
+        if (resolutionDetails.length < 60) {
+          resolutionDetails.push(`  OK   ${inst.modelName.padEnd(40)} -> ${hit.sourceFile} / ${hit.nodeName}`);
+        }
+      } else {
+        missing++;
+        missingNames.add(inst.modelName.toLowerCase());
+        if (resolutionDetails.length < 60) {
+          resolutionDetails.push(`  MISS ${inst.modelName.padEnd(40)} (variants tried: ${variants.slice(0, 4).join(', ')}${variants.length > 4 ? '…' : ''})`);
+        }
+      }
+    }
+
+    this.log('--- GEO instance dump ---', true);
+    this.log(`Root: ${root.name}  instances=${instances.length}  resolved=${resolved}  missing=${missing}`);
+    this.log(`Package MDL archives: ${[...this.packageEntryBytes.keys()].filter(k => /_MDL(?:\([^)]+\))?\.zed$/i.test(k)).join(', ')}`);
+    this.log(`First ${Math.min(resolutionDetails.length, 60)} instance(s):`);
+    for (const line of resolutionDetails) { this.log(line); }
+    if (missingNames.size > 0) {
+      const sorted = [...missingNames].sort();
+      this.log(`Unique missing names (${missingNames.size}):`);
+      this.log(`  ${sorted.slice(0, 80).join(', ')}${sorted.length > 80 ? '…' : ''}`);
+    }
+  }
+
   dumpRdrReport(): void {
     const r = this.rdr();
     if (!r) { this.log('[DUMP rdr] no RDR loaded', true); return; }
@@ -2478,6 +2960,46 @@ function bytesToBase64(bytes: Uint8Array): string {
     s += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + CHUNK)));
   }
   return btoa(s);
+}
+
+// Matrix helpers used by composeHierarchicalModel + GEO scene composition.
+// Direct ports of the HTML map viewer's tryReadLocalMatrix / multiplyMatrices
+// / identityMatrix — same column-major convention so the two composition
+// paths interoperate.
+function identityMatrix(): number[] {
+  return [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+}
+function multiplyMatrices(a: number[], b: number[]): number[] {
+  const out = new Array<number>(16).fill(0);
+  for (let row = 0; row < 4; row++) {
+    for (let col = 0; col < 4; col++) {
+      out[col * 4 + row] =
+        a[0 * 4 + row] * b[col * 4 + 0] +
+        a[1 * 4 + row] * b[col * 4 + 1] +
+        a[2 * 4 + row] * b[col * 4 + 2] +
+        a[3 * 4 + row] * b[col * 4 + 3];
+    }
+  }
+  return out;
+}
+// Reads the first 16 float32s of a node payload as a 4x4 matrix and rejects
+// it if any sanity check fails (scale, translation magnitude, bottom row
+// near identity). When the data doesn't look like a transform we fall back
+// to identity so the chunks aren't accidentally warped into oblivion.
+function tryReadLocalMatrix(bytes: Uint8Array): number[] {
+  if (!bytes || bytes.length < 0x40) { return identityMatrix(); }
+  if (bytes.length > 0x90) { return identityMatrix(); }
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const m: number[] = [];
+  for (let i = 0; i < 16; i++) { m.push(view.getFloat32(i * 4, true)); }
+  if (!m.every(Number.isFinite)) { return identityMatrix(); }
+  const sx = Math.hypot(m[0], m[1], m[2]);
+  const sy = Math.hypot(m[4], m[5], m[6]);
+  const sz = Math.hypot(m[8], m[9], m[10]);
+  const saneScale = sx > 0.001 && sy > 0.001 && sz > 0.001 && sx < 500 && sy < 500 && sz < 500;
+  const saneBottom = Math.abs(m[3]) < 0.01 && Math.abs(m[7]) < 0.01 && Math.abs(m[11]) < 0.01 && Math.abs(Math.abs(m[15]) - 1) < 0.25;
+  const saneTranslate = Math.abs(m[12]) < 100000 && Math.abs(m[13]) < 100000 && Math.abs(m[14]) < 100000;
+  return saneScale && saneBottom && saneTranslate ? m : identityMatrix();
 }
 
 function describeMagic(bytes: Uint8Array): string {

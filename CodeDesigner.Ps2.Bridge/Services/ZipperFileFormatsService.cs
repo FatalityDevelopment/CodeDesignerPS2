@@ -32,6 +32,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
             reg.Add(c => HandleReadNode(c.InputPath, c.ZipperEntryIndex), "ZIPPER_READ_NODE");
             reg.Add(c => HandleReadAllNodes(c.InputPath), "ZIPPER_READ_ALL_NODES");
             reg.Add(c => HandleInspectRdr(c.InputPath, c.ZipperSection), "ZIPPER_INSPECT_RDR");
+            reg.Add(c => HandleInspectRdrBytes(c.Data, c.ZipperSection), "ZIPPER_INSPECT_RDR_BYTES");
             reg.Add(c => HandleInspectMps(c.InputPath), "ZIPPER_INSPECT_MPS");
             reg.Add(c => HandleSaveExportDecrypted(c.InputPath, c.OutputPath), "ZIPPER_SAVE_EXPORT_DECRYPTED");
             reg.Add(c => HandleSaveCraft(c.InputPath, c.OutputDirectory, c.SaveMode, c.SaveTitle, c.SaveTitleLength), "ZIPPER_SAVE_CRAFT");
@@ -226,13 +227,29 @@ namespace CodeDesigner.Ps2.Bridge.Services
             {
                 return Responses.Error($"ZIPPER_INSPECT_RDR error: {ex.Message}");
             }
+            return BuildRdrResponse(rdrBytes, Path.GetFullPath(filePath), entryName);
+        }
 
-            // Try the strict typed-table parse first. RDR files in the wild
-            // occasionally trip the parser; rather than bubbling the exception
-            // (which leaves the webview with nothing to show), fall back to the
-            // HTML reference's printable-string scan and categorise the hits
-            // into texture / file / model refs. Mirrors zed_map_viewer_solution
-            // .html extractReaderStrings + dumpReaderReport.
+        /// <summary>
+        /// Parse an .rdr from base64 bytes the webview already has in memory
+        /// (e.g. an .rdr nested inside a ZAR we've already parsed client-side).
+        /// Avoids the brittle ZDB drill-down path and works for any container
+        /// arrangement.
+        /// </summary>
+        private string HandleInspectRdrBytes(string? base64, string? entryName)
+        {
+            if (string.IsNullOrEmpty(base64)) return Responses.Error("Data is required");
+            byte[] rdrBytes;
+            try { rdrBytes = Convert.FromBase64String(base64); }
+            catch (Exception ex) { return Responses.Error($"ZIPPER_INSPECT_RDR_BYTES base64 error: {ex.Message}"); }
+            return BuildRdrResponse(rdrBytes, "(in-memory)", entryName);
+        }
+
+        // Common path used by both the file-based and bytes-based RDR handlers.
+        // Tries the strict typed-table parse first; on failure falls back to
+        // the HTML reference's printable-string scan with categorised refs.
+        private string BuildRdrResponse(byte[] rdrBytes, string sourcePath, string? entryName)
+        {
             try
             {
                 var rdr = RdrFile.Parse(rdrBytes);
@@ -241,7 +258,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
 
                 var result = new
                 {
-                    sourcePath = Path.GetFullPath(filePath),
+                    sourcePath,
                     entry = entryName,
                     version = rdr.Version,
                     stringPoolSize = rdr.StringPool.Length,
@@ -272,7 +289,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
 
                 var fallbackResult = new
                 {
-                    sourcePath = Path.GetFullPath(filePath),
+                    sourcePath,
                     entry = entryName,
                     version = 0u,
                     stringPoolSize = rdrBytes.Length,
@@ -424,16 +441,25 @@ namespace CodeDesigner.Ps2.Bridge.Services
                             || EndsWithLeaf(e.Name, entryName)));
                     if (directMatch != null) return (byte[])directMatch.Data.Clone();
 
-                    var zarMatch = SelectFirstZdbEntry(archive.Entries, e =>
-                        e.Name.EndsWith(".zar", StringComparison.OrdinalIgnoreCase) &&
-                        (entryName == null || ContainsTokenIgnoreCase(e.Name, entryName ?? "")));
-                    if (zarMatch != null)
+                    // Scan EVERY .zar entry in the ZDB for a matching .rdr. The
+                    // previous version required the .zar's name to contain the
+                    // .rdr name, which never matched real packages where a
+                    // generic ZAR like READERM.ZAR holds the .rdr files.
+                    foreach (var zarEntry in archive.Entries)
                     {
-                        using var zar = ZarArchive.FromBytes(zarMatch.Data);
-                        var innerMatch = SelectRdrNode(zar.Entries, entryName);
-                        if (innerMatch != null) return innerMatch.Data;
+                        if (!zarEntry.Name.EndsWith(".zar", StringComparison.OrdinalIgnoreCase)) continue;
+                        try
+                        {
+                            using var zar = ZarArchive.FromBytes(zarEntry.Data);
+                            var innerMatch = SelectRdrNode(zar.Entries, entryName);
+                            if (innerMatch != null) return innerMatch.Data;
+                        }
+                        catch { /* skip non-ZAR-shaped entries */ }
                     }
-                    throw new InvalidDataException("No .rdr entry resolvable inside ZDB.");
+                    throw new InvalidDataException(
+                        entryName == null
+                            ? "No .rdr entry resolvable inside ZDB."
+                            : $"No .rdr entry '{entryName}' found inside any ZAR within the ZDB.");
                 }
 
                 default:

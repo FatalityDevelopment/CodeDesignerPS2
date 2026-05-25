@@ -10,6 +10,16 @@ export class ZipperWorkbenchProvider {
 
     private _panel: vscode.WebviewPanel | undefined;
     private _pendingInitialPath = '';
+    // Cache of the last fully-loaded ZDB package so closing + reopening the
+    // panel doesn't force the user to wait for a fresh extract. Keyed by
+    // absolute file path. Storing nodes in the extension process means the
+    // data survives the webview lifecycle (which can recreate the page).
+    private _packageCache = new Map<string, {
+        nodes: Array<{ index: number; name: string; type: number; data: string }>;
+        loadedAt: number;
+    }>();
+    // The last path the user inspected — used to auto-restore on panel reopen.
+    private _lastInspectPath = '';
 
     constructor(
         private readonly _extensionUri: vscode.Uri,
@@ -23,7 +33,10 @@ export class ZipperWorkbenchProvider {
             return;
         }
 
-        this._pendingInitialPath = initialPath ?? '';
+        // When no explicit initial path is provided, default to the last
+        // package the user inspected. This restores their work after a
+        // close/reopen cycle without having to re-pick the file.
+        this._pendingInitialPath = initialPath ?? this._lastInspectPath ?? '';
         const panel = vscode.window.createWebviewPanel(
             ZipperWorkbenchProvider.viewType,
             'Zipper FileFormats',
@@ -109,6 +122,13 @@ export class ZipperWorkbenchProvider {
                     msg['entryName'] as string | undefined,
                 );
                 break;
+            case 'inspectRdrBytes':
+                await this._inspectRdrBytes(
+                    webview,
+                    msg['base64'] as string | undefined,
+                    msg['entryName'] as string | undefined,
+                );
+                break;
             case 'inspectMps':
                 await this._inspectMps(webview, msg['path'] as string | undefined);
                 break;
@@ -117,7 +137,11 @@ export class ZipperWorkbenchProvider {
                 // fetch every top-level entry's bytes in one shot so the webview
                 // can decode textures / palettes / GEO across the whole package
                 // without round-tripping per entry.
-                await this._loadZdbPackage(webview, msg['path'] as string | undefined);
+                await this._loadZdbPackage(webview, msg['path'] as string | undefined, false);
+                break;
+            case 'reloadZdbPackage':
+                // Force-bypass the cache (toolbar "Reload Package" button).
+                await this._loadZdbPackage(webview, msg['path'] as string | undefined, true);
                 break;
             case 'zipperLog': {
                 // Stream the webview's log line into the dedicated output channel
@@ -211,6 +235,22 @@ export class ZipperWorkbenchProvider {
         }
     }
 
+    private async _inspectRdrBytes(
+        webview: vscode.Webview,
+        base64: string | undefined,
+        entryName: string | undefined,
+    ): Promise<void> {
+        if (!base64) { return; }
+        if (!this._ensureConnected(webview)) { return; }
+        try {
+            const result = await this._socketClient.zipperInspectRdrBytes(base64, entryName);
+            webview.postMessage({ type: 'rdrData', entryName, result });
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            webview.postMessage({ type: 'rdrError', entryName, message });
+        }
+    }
+
     // AIMAPS.MPS inspection. The .mps file isn't inside a container so we
     // ship it straight from the file system to the parser.
     private async _inspectMps(webview: vscode.Webview, filePath: string | undefined): Promise<void> {
@@ -225,15 +265,37 @@ export class ZipperWorkbenchProvider {
         }
     }
 
-    private async _loadZdbPackage(webview: vscode.Webview, filePath: string | undefined): Promise<void> {
+    private async _loadZdbPackage(
+        webview: vscode.Webview,
+        filePath: string | undefined,
+        force = false,
+    ): Promise<void> {
         if (!filePath) { return; }
+
+        // Reuse the cached package when available — survives the panel being
+        // closed and reopened, since the cache lives in the extension process
+        // (not in the webview's JS memory).
+        if (!force) {
+            const cached = this._packageCache.get(filePath);
+            if (cached) {
+                webview.postMessage({ type: 'zdbPackage', path: filePath, nodes: cached.nodes, fromCache: true });
+                return;
+            }
+        }
+
         if (!this._ensureConnected(webview)) { return; }
         try {
             // zipperReadAllNodes handles ZDB / ZAR / ZED on the backend and
             // returns base64 bytes per entry. For ZDB this gives us every
             // sibling ZED (TXR/PAL/GEO/MDL) in one round trip.
             const nodes = await this._socketClient.zipperReadAllNodes(filePath);
-            webview.postMessage({ type: 'zdbPackage', path: filePath, nodes });
+            this._packageCache.set(filePath, { nodes, loadedAt: Date.now() });
+            // Trim cache to the last 4 packages so memory doesn't grow forever.
+            if (this._packageCache.size > 4) {
+                const oldest = [...this._packageCache.entries()].sort((a, b) => a[1].loadedAt - b[1].loadedAt)[0];
+                if (oldest) { this._packageCache.delete(oldest[0]); }
+            }
+            webview.postMessage({ type: 'zdbPackage', path: filePath, nodes, fromCache: false });
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
             webview.postMessage({ type: 'zdbPackageError', path: filePath, message });
@@ -319,6 +381,10 @@ export class ZipperWorkbenchProvider {
         try {
             this._postStatus(webview, 'Inspecting file...', true);
             const result = await this._socketClient.zipperInspect(cleanPath);
+            // Remember the path so re-opening the panel auto-restores the
+            // last-loaded file (combined with _packageCache this means the
+            // user can close + reopen without re-extracting anything).
+            this._lastInspectPath = cleanPath;
             webview.postMessage({ type: 'zipperLoaded', result });
         } catch (err) {
             this._postError(webview, err);

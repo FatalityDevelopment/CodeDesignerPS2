@@ -70,11 +70,20 @@ export class ZedModelRenderer {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
     this.renderer.setClearColor(0x222222, 1);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    // PS2 textures are stored in their final display form — no sRGB tag
+    // needed. Tell Three.js to treat the framebuffer as linear so the
+    // output sampler doesn't gamma-correct an already-correct image (this
+    // was making the world model look washed out compared to the HTML
+    // reference renderer).
+    this.renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
 
     this.scene.add(this.root);
 
-    const ambient = new THREE.AmbientLight(0xffffff, 0.7);
-    const key = new THREE.DirectionalLight(0xffffff, 0.7);
+    // Brighter ambient + dimmer key light to better approximate the HTML
+    // map-viewer's flat-lit look (which uses fog + a single directional
+    // term rather than a full PBR setup).
+    const ambient = new THREE.AmbientLight(0xffffff, 1.05);
+    const key = new THREE.DirectionalLight(0xffffff, 0.35);
     key.position.set(2, 2, 3);
     this.scene.add(ambient, key);
 
@@ -162,9 +171,15 @@ export class ZedModelRenderer {
         THREE.UnsignedByteType,
       );
       dt.flipY = false;
-      dt.colorSpace = THREE.SRGBColorSpace;
+      // PS2 textures are stored in display-ready colour. Tagging them as
+      // sRGB makes Three.js gamma-decode them on sample, which double-
+      // corrects and washes out the colours vs. the HTML reference.
+      dt.colorSpace = THREE.LinearSRGBColorSpace;
+      // Closer to PS2 bilinear: linear mag, no mipmap (PS2 rarely uses
+      // them in fixed-camera shots), repeat wrap for atlas tiling.
       dt.magFilter = THREE.LinearFilter;
       dt.minFilter = THREE.LinearFilter;
+      dt.generateMipmaps = false;
       dt.wrapS = THREE.RepeatWrapping;
       dt.wrapT = THREE.RepeatWrapping;
       dt.needsUpdate = true;

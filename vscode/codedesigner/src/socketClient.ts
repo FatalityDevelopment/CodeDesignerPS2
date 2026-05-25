@@ -3147,6 +3147,29 @@ export class SocketClient {
         return JSON.parse(response.Data ?? '{}');
     }
 
+    // Parse an .rdr from base64 bytes already in the webview's memory. Used
+    // when an .rdr lives inside a ZAR we've already parsed client-side, so
+    // we don't have to round-trip through the backend's ZDB drill-down.
+    public async zipperInspectRdrBytes(base64: string, entryName?: string): Promise<{
+        sourcePath: string;
+        entry?: string;
+        version: number;
+        stringPoolSize: number;
+        atomCount: number;
+        root: unknown;
+        fallback?: boolean;
+        parseError?: string;
+    }> {
+        const response = await this.sendCommand(
+            { Command: 'ZIPPER_INSPECT_RDR_BYTES', Data: base64, ZipperSection: entryName },
+            60_000,
+        );
+        if (!response.Success) {
+            throw new Error(response.Error || 'ZIPPER_INSPECT_RDR_BYTES failed');
+        }
+        return JSON.parse(response.Data ?? '{}');
+    }
+
     // AIMAPS.MPS — returns the parsed AI map manifest. Mirrors the HTML map
     // viewer's parseAiMaps. Displayed as a table by the zipper workbench.
     public async zipperInspectMps(inputPath: string): Promise<{

@@ -1,10 +1,12 @@
 # PCSX2 discovered paths
 
+- `//github.com/pcsx2/pcsx2.`
 - `/06/2004)`
 - `/11/03)`
 - `/11/05)`
 - `/11/10)`
 - `/11/15)`
+- `/25/2026`
 - `/MM/DD`
 - `/S1`
 - `/TX`
@@ -13,14 +15,24 @@
 - `/max)`
 - `C:\Users\tholu\Desktop`
 - `C:\Users\tholu\Desktop\CodeDesigner\pcsx2\3rdparty\cubeb\src\cubeb_resampler_internal.h:553:Input`
+- `C:\Users\tholu\Desktop\CodeDesigner\pcsx2\3rdparty\cubeb\src\cubeb_wasapi.cpp:1050:Try`
+- `C:\Users\tholu\Desktop\CodeDesigner\pcsx2\3rdparty\cubeb\src\cubeb_wasapi.cpp:1198:Output`
+- `C:\Users\tholu\Desktop\CodeDesigner\pcsx2\3rdparty\cubeb\src\cubeb_wasapi.cpp:1461:Reconfiguring`
+- `C:\Users\tholu\Desktop\CodeDesigner\pcsx2\3rdparty\cubeb\src\cubeb_wasapi.cpp:1466:Output`
+- `C:\Users\tholu\Desktop\CodeDesigner\pcsx2\3rdparty\cubeb\src\cubeb_wasapi.cpp:1473:Stream`
+- `C:\Users\tholu\Desktop\CodeDesigner\pcsx2\3rdparty\cubeb\src\cubeb_wasapi.cpp:1485:Stream`
 - `C:\Users\tholu\Desktop\CodeDesigner\pcsx2\3rdparty\cubeb\src\cubeb_wasapi.cpp:1912:default`
 - `C:\Users\tholu\Desktop\CodeDesigner\pcsx2\3rdparty\cubeb\src\cubeb_wasapi.cpp:1927:Minimum`
 - `C:\Users\tholu\Desktop\CodeDesigner\pcsx2\3rdparty\cubeb\src\cubeb_wasapi.cpp:2333:Setup`
 - `C:\Users\tholu\Desktop\CodeDesigner\pcsx2\3rdparty\cubeb\src\cubeb_wasapi.cpp:2431:Buffer`
-- `C:\Users\tholu\Desktop\CodeDesigner\pcsx2\3rdparty\cubeb\src\cubeb_wasapi.cpp:2617:(000002347152A870)`
+- `C:\Users\tholu\Desktop\CodeDesigner\pcsx2\3rdparty\cubeb\src\cubeb_wasapi.cpp:2617:(0000017D0FD054A0)`
 - `C:\Users\tholu\Desktop\CodeDesigner\pcsx2\3rdparty\cubeb\src\cubeb_wasapi.cpp:2668:Target`
 - `C:\Users\tholu\Desktop\CodeDesigner\pcsx2\3rdparty\cubeb\src\cubeb_wasapi.cpp:2870:Follow`
 - `C:\Users\tholu\Desktop\CodeDesigner\pcsx2\3rdparty\cubeb\src\cubeb_wasapi.cpp:2898:Stream`
+- `C:\Users\tholu\Desktop\CodeDesigner\pcsx2\3rdparty\cubeb\src\cubeb_wasapi.cpp:769:endpoint:`
+- `C:\Users\tholu\Desktop\CodeDesigner\pcsx2\3rdparty\cubeb\src\cubeb_wasapi.cpp:780:endpoint:`
+- `C:\Users\tholu\Desktop\CodeDesigner\pcsx2\3rdparty\cubeb\src\cubeb_wasapi.cpp:790:endpoint:`
+- `C:\Users\tholu\Desktop\CodeDesigner\pcsx2\3rdparty\cubeb\src\cubeb_wasapi.cpp:817:endpoint:`
 - `C:\Users\tholu\Desktop\CodeDesigner\pcsx2\bin`
 - `C:\Users\tholu\Desktop\CodeDesigner\pcsx2\bin\pcsx2-qtx64-dbg.exe`
 - `C:\Users\tholu\Desktop\CodeDesigner\pcsx2\bin\resources`
@@ -29,10 +41,9 @@
 - `C:\Users\tholu\OneDrive\Documents\PCSX2\cache`
 - `C:\Users\tholu\OneDrive\Documents\PCSX2\cache\gl_programs.idx`
 - `C:\Users\tholu\OneDrive\Documents\PCSX2\cheats`
-- `C:\Users\tholu\OneDrive\Documents\PCSX2\cheats\SCUS-97275_0F6FC6CF.pnach.`
 - `C:\Users\tholu\OneDrive\Documents\PCSX2\covers`
 - `C:\Users\tholu\OneDrive\Documents\PCSX2\gamesettings`
-- `C:\Users\tholu\OneDrive\Documents\PCSX2\gamesettings\SCUS-97275_0F6FC6CF.ini`
+- `C:\Users\tholu\OneDrive\Documents\PCSX2\gamesettings\D7CFDCCF.ini`
 - `C:\Users\tholu\OneDrive\Documents\PCSX2\inis\PCSX2.ini.`
 - `C:\Users\tholu\OneDrive\Documents\PCSX2\inis\debuggerlayouts`
 - `C:\Users\tholu\OneDrive\Documents\PCSX2\inis\debuggersettings`
@@ -47,5 +58,4 @@
 - `C:\Users\tholu\OneDrive\Documents\PCSX2\sstates`
 - `C:\Users\tholu\OneDrive\Documents\PCSX2\textures`
 - `C:\Users\tholu\OneDrive\Documents\PCSX2\videos`
-- `c:\Users\tholu\Desktop`
-- `c:\Users\tholu\Desktop\SOCOM`
+- `f:\SOCOM`

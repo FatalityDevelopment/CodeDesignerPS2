@@ -781,12 +781,36 @@ input {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-top: 10px;
 }
 .zip-dump-buttons .zip-btn {
   font-size: 11px;
   padding: 4px 8px;
 }
+
+/* Section grouping in the preview info pane so the model toolbox doesn't
+   look like one giant column of controls. Each section gets a quiet
+   uppercase title and consistent spacing. */
+.zip-pane-section {
+  border-top: 1px solid var(--vscode-panel-border, #3e3e42);
+  margin-top: 10px;
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.zip-pane-section:first-of-type {
+  border-top: 0;
+  margin-top: 0;
+  padding-top: 0;
+}
+.zip-pane-section-title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--vscode-descriptionForeground, #94a3b8);
+  margin-bottom: 2px;
+}
+.zip-pane-section .zip-map-controls { margin-top: 0; }
 
 /* Collapsible RDR tree view. Replaces the raw JSON pre block. */
 .zip-rdr-tree {

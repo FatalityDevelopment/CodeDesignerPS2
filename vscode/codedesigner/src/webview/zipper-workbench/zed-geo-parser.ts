@@ -169,3 +169,184 @@ export function collectVisualPartNames(node: GeoNode | null): string[] {
   for (const c of node.children) { walk(c); }
   return names;
 }
+
+// ---------------------------------------------------------------------------
+// GEO scene composition (HTML map viewer parity). Walks the scene tree and
+// emits one placement record per node that names a model (via `model_name` or
+// implied by a `visuals` child). Each placement carries the resolved 4x4
+// matrix from its `nparams` child so the caller can transform the model's
+// vertices into world space.
+// ---------------------------------------------------------------------------
+
+export interface GeoInstance {
+  // The cleaned name of the placed-into-the-scene model (e.g. "car_benz_black").
+  modelName: string;
+  // The name of the scene node itself (sometimes "{var} car_benz_black").
+  instanceName: string;
+  // Slash-joined breadcrumb for diagnostics (e.g. "models/worldmodel/children/objects/inst_42").
+  path: string;
+  // The 4x4 transform pulled from nparams. Column-major (matches HTML reference).
+  matrix: number[];
+  // Source GEO node for further inspection.
+  node: GeoNode;
+}
+
+function safeFindChild(node: GeoNode, name: string): GeoNode | null {
+  return node.children.find(c => c.name === name) ?? null;
+}
+
+function cleanInstanceName(value: string): string {
+  let s = (value ?? '').trim();
+  const brace = s.indexOf('{');
+  if (brace >= 0) {
+    const end = s.indexOf('}', brace + 1);
+    if (end > brace) { s = s.slice(brace + 1, end).trim(); }
+    else { s = s.slice(0, brace).trim(); }
+  }
+  return s;
+}
+
+function bytesToAscii(data: Uint8Array): string {
+  let s = '';
+  for (let i = 0; i < data.length; i++) {
+    const b = data[i];
+    if (b === 0) break;
+    if (b >= 0x20 && b < 0x7f) { s += String.fromCharCode(b); }
+  }
+  return s.trim();
+}
+
+function identityMatrix(): number[] {
+  return [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+}
+
+export function readGeoTransform(node: GeoNode): number[] {
+  const nparams = safeFindChild(node, 'nparams');
+  if (!nparams || !nparams.rawData || nparams.rawData.length < 0x40) { return identityMatrix(); }
+  const data = nparams.rawData;
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const f: number[] = [];
+  const max = Math.min(16, Math.floor(data.length / 4));
+  for (let i = 0; i < max; i++) { f.push(view.getFloat32(i * 4, true)); }
+  while (f.length < 16) { f.push(0); }
+  // Identity rows store 1 at f[0]; if not we treat as junk and fall back to
+  // identity. Mirrors the HTML guard.
+  if (!Number.isFinite(f[0]) || Math.abs(f[0]) < 1e-6) { return identityMatrix(); }
+  return f;
+}
+
+// Column-major matrix-vector multiply: row[k] = sum(m[k + col*4] * v[col]).
+export function transformPoint(m: number[], x: number, y: number, z: number): [number, number, number] {
+  return [
+    x * m[0] + y * m[4] + z * m[8] + m[12],
+    x * m[1] + y * m[5] + z * m[9] + m[13],
+    x * m[2] + y * m[6] + z * m[10] + m[14],
+  ];
+}
+
+function formatGeoPath(node: GeoNode, root: GeoNode): string {
+  // Walk from `node` up to `root` via parent links? The flat tree doesn't
+  // carry parent refs; do a DFS-with-trail instead.
+  const trail: string[] = [];
+  const walk = (n: GeoNode, acc: string[]): boolean => {
+    acc.push(n.name);
+    if (n === node) { trail.push(...acc); return true; }
+    for (const c of n.children) {
+      if (walk(c, acc)) { return true; }
+    }
+    acc.pop();
+    return false;
+  };
+  walk(root, []);
+  return trail.join('/');
+}
+
+// Walks the scene tree for nodes that look like placed models — they either
+// carry a `model_name` child (explicit) or a `visuals` child (implicit, name
+// comes from the node itself). Skips the sky shell because it usually
+// dominates bounds and hides the actual playable area.
+export function collectGeoInstances(scene: GeoScene, root: GeoNode): GeoInstance[] {
+  const out: GeoInstance[] = [];
+  const walk = (node: GeoNode) => {
+    const explicitChild = safeFindChild(node, 'model_name');
+    const explicitName = explicitChild?.rawData ? bytesToAscii(explicitChild.rawData) : '';
+    const hasVisuals = safeFindChild(node, 'visuals') !== null;
+    const cleanNode = cleanInstanceName(node.name);
+    const candidate = explicitName || (hasVisuals ? cleanNode : '');
+
+    if (candidate && cleanNode.toLowerCase() !== 'sky' && candidate.toLowerCase() !== 'sky') {
+      out.push({
+        modelName: candidate,
+        instanceName: cleanNode,
+        path: formatGeoPath(node, scene.root),
+        matrix: readGeoTransform(node),
+        node,
+      });
+    }
+
+    for (const c of node.children) { walk(c); }
+  };
+  walk(root);
+
+  // Dedup by path+modelName so a model placed in multiple equivalent ways
+  // doesn't get rendered twice.
+  const seen = new Set<string>();
+  return out.filter(inst => {
+    const key = `${inst.path}|${inst.modelName.toLowerCase()}`;
+    if (seen.has(key)) { return false; }
+    seen.add(key);
+    return true;
+  });
+}
+
+// Loose name matching for resolving an instance's `modelName` to an actual
+// model entry across every loaded *_MDL.ZED. Mirrors the HTML's findModelFor
+// Instance + preferModelHit cascade.
+export function compactName(value: string): string {
+  let out = '';
+  const s = String(value).toLowerCase();
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if ((c >= 48 && c <= 57) || (c >= 97 && c <= 122)) { out += s[i]; }
+  }
+  return out;
+}
+
+// Strip LOD / index suffixes from model names so a placement that asks for
+// "car_benz_01" can resolve to a node called "car_benz". Matches the new
+// HTML map viewer's stripModelSuffix.
+export function stripModelSuffix(name: string): string {
+  let s = String(name ?? '').trim();
+  s = s.replace(/_LO$/i, '');
+  s = s.replace(/_[0-9]+$/i, '');
+  return s;
+}
+
+// Generate every name variant we should try when matching a GEO instance
+// name to an MDL entry. Includes:
+//   1. lowercased original
+//   2. lowercased cleaned (braces stripped)
+//   3. compact (alphanumerics only)
+//   4. stripped suffix variants of the above
+//   5. MESH_-prefixed variants (CLIB convention)
+export function instanceNameVariants(rawName: string): string[] {
+  const clean = cleanInstanceName(rawName);
+  const variants = new Set<string>();
+  const addAll = (base: string) => {
+    const lower = base.toLowerCase();
+    if (!lower) { return; }
+    variants.add(lower);
+    variants.add(compactName(lower));
+    const stripped = stripModelSuffix(lower);
+    variants.add(stripped);
+    variants.add(compactName(stripped));
+    variants.add('mesh_' + lower);
+    variants.add('mesh_' + stripped);
+    variants.add(compactName('mesh' + lower));
+    variants.add(compactName('mesh' + stripped));
+  };
+  addAll(rawName);
+  addAll(clean);
+  variants.delete('');
+  return [...variants];
+}
