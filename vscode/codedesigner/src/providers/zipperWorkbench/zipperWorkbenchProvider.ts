@@ -17,6 +17,7 @@ export class ZipperWorkbenchProvider {
     private _packageCache = new Map<string, {
         nodes: Array<{ index: number; name: string; type: number; data: string }>;
         loadedAt: number;
+        preloadToken?: string;
     }>();
     // The last path the user inspected — used to auto-restore on panel reopen.
     private _lastInspectPath = '';
@@ -278,24 +279,29 @@ export class ZipperWorkbenchProvider {
         if (!force) {
             const cached = this._packageCache.get(filePath);
             if (cached) {
-                webview.postMessage({ type: 'zdbPackage', path: filePath, nodes: cached.nodes, fromCache: true });
+                webview.postMessage({ type: 'zdbPackage', path: filePath, nodes: cached.nodes, fromCache: true, preloadToken: cached.preloadToken });
                 return;
             }
         }
 
         if (!this._ensureConnected(webview)) { return; }
         try {
-            // zipperReadAllNodes handles ZDB / ZAR / ZED on the backend and
-            // returns base64 bytes per entry. For ZDB this gives us every
-            // sibling ZED (TXR/PAL/GEO/MDL) in one round trip.
+            const preload = await this._socketClient.zipperPreloadMapPackage(filePath);
+            // Current webview pipeline still expects full node payloads. We keep
+            // this for compatibility while also priming backend preload cache.
             const nodes = await this._socketClient.zipperReadAllNodes(filePath);
-            this._packageCache.set(filePath, { nodes, loadedAt: Date.now() });
+            this._packageCache.set(filePath, { nodes, loadedAt: Date.now(), preloadToken: preload.preloadToken });
             // Trim cache to the last 4 packages so memory doesn't grow forever.
             if (this._packageCache.size > 4) {
                 const oldest = [...this._packageCache.entries()].sort((a, b) => a[1].loadedAt - b[1].loadedAt)[0];
-                if (oldest) { this._packageCache.delete(oldest[0]); }
+                if (oldest) {
+                    if (oldest[1].preloadToken) {
+                        this._socketClient.zipperReleasePreload(oldest[1].preloadToken).catch(() => undefined);
+                    }
+                    this._packageCache.delete(oldest[0]);
+                }
             }
-            webview.postMessage({ type: 'zdbPackage', path: filePath, nodes, fromCache: false });
+            webview.postMessage({ type: 'zdbPackage', path: filePath, nodes, fromCache: false, preloadToken: preload.preloadToken, preloadStats: preload });
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
             webview.postMessage({ type: 'zdbPackageError', path: filePath, message });
@@ -358,6 +364,38 @@ export class ZipperWorkbenchProvider {
         return undefined;
     }
 
+
+    private _findParentPackageCache(filePath: string): { path: string; nodes: Array<{ index: number; name: string; type: number; data: string }>; preloadToken?: string } | undefined {
+        const direct = this._packageCache.get(filePath);
+        if (direct) {
+            return { path: filePath, nodes: direct.nodes, preloadToken: direct.preloadToken };
+        }
+
+        const dir = path.dirname(filePath);
+        const lowered = filePath.toLowerCase();
+        // When a child archive from a map package is opened (e.g. .zar/.zed),
+        // reuse any cached parent .zdb package in the same directory so common
+        // resources remain available to the webview resolver.
+        const candidate = [...this._packageCache.entries()]
+            .filter(([cachedPath]) => cachedPath.toLowerCase().endsWith('.zdb') && path.dirname(cachedPath) === dir)
+            .sort((a, b) => b[1].loadedAt - a[1].loadedAt)[0];
+
+        if (candidate) {
+            return { path: candidate[0], nodes: candidate[1].nodes, preloadToken: candidate[1].preloadToken };
+        }
+
+        // Last fallback: prefix match helps when child path contains same base stem.
+        const stem = path.basename(filePath, path.extname(filePath)).toLowerCase();
+        const byStem = [...this._packageCache.entries()]
+            .filter(([cachedPath]) => cachedPath.toLowerCase().endsWith('.zdb') && path.basename(cachedPath, '.zdb').toLowerCase().includes(stem.slice(0, Math.min(stem.length, 6))))
+            .sort((a, b) => b[1].loadedAt - a[1].loadedAt)[0];
+        if (byStem) {
+            return { path: byStem[0], nodes: byStem[1].nodes, preloadToken: byStem[1].preloadToken };
+        }
+
+        return undefined;
+    }
+
     private async _openFile(webview: vscode.Webview): Promise<void> {
         const uris = await vscode.window.showOpenDialog({
             title: 'Open Zipper/FileFormats File',
@@ -386,6 +424,21 @@ export class ZipperWorkbenchProvider {
             // user can close + reopen without re-extracting anything).
             this._lastInspectPath = cleanPath;
             webview.postMessage({ type: 'zipperLoaded', result });
+
+            const ext = path.extname(cleanPath).toLowerCase();
+            if (ext === '.zar' || ext === '.zed') {
+                const parent = this._findParentPackageCache(cleanPath);
+                if (parent) {
+                    webview.postMessage({
+                        type: 'zdbPackage',
+                        path: parent.path,
+                        nodes: parent.nodes,
+                        fromCache: true,
+                        fromParentPackage: true,
+                        preloadToken: parent.preloadToken,
+                    });
+                }
+            }
         } catch (err) {
             this._postError(webview, err);
         }
