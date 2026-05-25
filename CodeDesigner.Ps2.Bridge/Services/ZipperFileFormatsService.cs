@@ -514,25 +514,68 @@ namespace CodeDesigner.Ps2.Bridge.Services
         private static IReadOnlyList<object> ReadAllNodes(string filePath)
         {
             string ext = Path.GetExtension(filePath).ToLowerInvariant();
+            var flat = new List<(string Name, uint Type, byte[] Data)>();
             switch (ext)
             {
-                case ".zar":
-                    using (ZarArchive archive = ZarArchive.Open(filePath))
-                        return archive.Entries
-                            .Select((e, i) => (object)new { index = i, name = e.Name, type = e.Type, data = Convert.ToBase64String(e.Data) })
-                            .ToList();
-                case ".zed":
-                    using (ZedStructure structure = ZedStructure.Open(filePath))
-                        return structure.Nodes
-                            .Select((n, i) => (object)new { index = i, name = n.Name, type = n.Type, data = Convert.ToBase64String(n.Data) })
-                            .ToList();
                 case ".zdb":
                     using (ZdbArchive archive = ZdbArchive.Open(filePath))
-                        return archive.Entries
-                            .Select((e, i) => (object)new { index = i, name = e.Name, type = 0u, data = Convert.ToBase64String(e.Data) })
-                            .ToList();
+                        CollectNodesFromZdbEntries(archive.Entries, 0, flat);
+                    break;
+                case ".zar":
+                    using (ZarArchive archive = ZarArchive.Open(filePath))
+                        CollectNodesFromZedNodes(archive.Entries, 0, flat);
+                    break;
+                case ".zed":
+                    using (ZedStructure structure = ZedStructure.Open(filePath))
+                        CollectNodesFromZedNodes(structure.Nodes, 0, flat);
+                    break;
                 default:
                     throw new InvalidOperationException("This file type does not expose bulk node reads.");
+            }
+
+            return flat.Select((n, i) => (object)new { index = i, name = n.Name, type = n.Type, data = Convert.ToBase64String(n.Data) }).ToList();
+        }
+
+        private static void CollectNodesFromZdbEntries(IReadOnlyList<ZdbEntry> entries, int depth, List<(string Name, uint Type, byte[] Data)> output)
+        {
+            if (depth > 6) return;
+            foreach (ZdbEntry entry in entries)
+            {
+                output.Add((entry.FullPath, 0u, entry.Data));
+                if (entry.Name.EndsWith(".zar", StringComparison.OrdinalIgnoreCase))
+                {
+                    using ZarArchive nested = ZarArchive.FromBytes(entry.Data);
+                    CollectNodesFromZedNodes(nested.Entries, depth + 1, output);
+                }
+                else if (entry.Name.EndsWith(".zed", StringComparison.OrdinalIgnoreCase))
+                {
+                    using ZedStructure nested = ZedStructure.FromBytes(entry.Data);
+                    CollectNodesFromZedNodes(nested.Nodes, depth + 1, output);
+                }
+            }
+        }
+
+        private static void CollectNodesFromZedNodes(IReadOnlyList<ZedNode> nodes, int depth, List<(string Name, uint Type, byte[] Data)> output)
+        {
+            if (depth > 6) return;
+            foreach (ZedNode node in nodes)
+            {
+                output.Add((node.Name, node.Type, node.Data));
+                if (node.Name.EndsWith(".zar", StringComparison.OrdinalIgnoreCase))
+                {
+                    using ZarArchive nested = ZarArchive.FromBytes(node.Data);
+                    CollectNodesFromZedNodes(nested.Entries, depth + 1, output);
+                }
+                else if (node.Name.EndsWith(".zed", StringComparison.OrdinalIgnoreCase))
+                {
+                    using ZedStructure nested = ZedStructure.FromBytes(node.Data);
+                    CollectNodesFromZedNodes(nested.Nodes, depth + 1, output);
+                }
+                else if (node.Name.EndsWith(".zdb", StringComparison.OrdinalIgnoreCase))
+                {
+                    using ZdbArchive nested = ZdbArchive.FromBytes(node.Data);
+                    CollectNodesFromZdbEntries(nested.Entries, depth + 1, output);
+                }
             }
         }
 
