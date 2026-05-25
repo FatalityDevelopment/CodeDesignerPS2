@@ -17,6 +17,7 @@ export class ZipperWorkbenchProvider {
     private _packageCache = new Map<string, {
         nodes: Array<{ index: number; name: string; type: number; data: string }>;
         loadedAt: number;
+        preloadToken?: string;
     }>();
     // The last path the user inspected — used to auto-restore on panel reopen.
     private _lastInspectPath = '';
@@ -278,24 +279,29 @@ export class ZipperWorkbenchProvider {
         if (!force) {
             const cached = this._packageCache.get(filePath);
             if (cached) {
-                webview.postMessage({ type: 'zdbPackage', path: filePath, nodes: cached.nodes, fromCache: true });
+                webview.postMessage({ type: 'zdbPackage', path: filePath, nodes: cached.nodes, fromCache: true, preloadToken: cached.preloadToken });
                 return;
             }
         }
 
         if (!this._ensureConnected(webview)) { return; }
         try {
-            // zipperReadAllNodes handles ZDB / ZAR / ZED on the backend and
-            // returns base64 bytes per entry. For ZDB this gives us every
-            // sibling ZED (TXR/PAL/GEO/MDL) in one round trip.
+            const preload = await this._socketClient.zipperPreloadMapPackage(filePath);
+            // Current webview pipeline still expects full node payloads. We keep
+            // this for compatibility while also priming backend preload cache.
             const nodes = await this._socketClient.zipperReadAllNodes(filePath);
-            this._packageCache.set(filePath, { nodes, loadedAt: Date.now() });
+            this._packageCache.set(filePath, { nodes, loadedAt: Date.now(), preloadToken: preload.preloadToken });
             // Trim cache to the last 4 packages so memory doesn't grow forever.
             if (this._packageCache.size > 4) {
                 const oldest = [...this._packageCache.entries()].sort((a, b) => a[1].loadedAt - b[1].loadedAt)[0];
-                if (oldest) { this._packageCache.delete(oldest[0]); }
+                if (oldest) {
+                    if (oldest[1].preloadToken) {
+                        this._socketClient.zipperReleasePreload(oldest[1].preloadToken).catch(() => undefined);
+                    }
+                    this._packageCache.delete(oldest[0]);
+                }
             }
-            webview.postMessage({ type: 'zdbPackage', path: filePath, nodes, fromCache: false });
+            webview.postMessage({ type: 'zdbPackage', path: filePath, nodes, fromCache: false, preloadToken: preload.preloadToken, preloadStats: preload });
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
             webview.postMessage({ type: 'zdbPackageError', path: filePath, message });
