@@ -322,6 +322,15 @@ export function stripModelSuffix(name: string): string {
   return s;
 }
 
+
+// Known cross-convention aliases seen in weapon/map packages where the GEO
+// instance name (iw*/ra*/etc) differs from the MDL node naming family.
+const MODEL_NAME_ALIASES: Record<string, string[]> = {
+  // M51 packages often place iw80a2 instances that resolve to m16a2 meshes.
+  iw80a2: ['m16a2', 'm16', 'mesh_m16a2', 'mesh_m16'],
+  mesh_iw80a2: ['m16a2', 'm16', 'mesh_m16a2', 'mesh_m16'],
+};
+
 // Generate every name variant we should try when matching a GEO instance
 // name to an MDL entry. Includes:
 //   1. lowercased original
@@ -347,6 +356,14 @@ export function instanceNameVariants(rawName: string): string[] {
   };
   addAll(rawName);
   addAll(clean);
+
+  const aliasKeys = [String(rawName ?? "").toLowerCase(), String(clean ?? "").toLowerCase()];
+  for (const k of aliasKeys) {
+    const aliases = MODEL_NAME_ALIASES[k];
+    if (!aliases) { continue; }
+    for (const a of aliases) { addAll(a); }
+  }
+
   variants.delete('');
   return [...variants];
 }
