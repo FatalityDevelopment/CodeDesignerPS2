@@ -23,6 +23,12 @@ namespace CodeDesigner.Ps2.Bridge.Services
     internal sealed class ZipperFileFormatsService : ICommandService
     {
         private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+        private static readonly object PreloadGate = new();
+        private static readonly Dictionary<string, PreloadedBundle> PreloadByToken = new(StringComparer.OrdinalIgnoreCase);
+        private static readonly Dictionary<string, string> TokenByFingerprint = new(StringComparer.OrdinalIgnoreCase);
+        private const long MaxBundleBytes = 1536L * 1024 * 1024;
+        private const int MaxBundleCount = 3;
+        private static readonly TimeSpan PreloadTtl = TimeSpan.FromMinutes(10);
 
         public void Register(CommandRegistry reg)
         {
@@ -38,6 +44,9 @@ namespace CodeDesigner.Ps2.Bridge.Services
             reg.Add(c => HandleSaveCraft(c.InputPath, c.OutputDirectory, c.SaveMode, c.SaveTitle, c.SaveTitleLength), "ZIPPER_SAVE_CRAFT");
             reg.Add(c => HandleApacheDecryptSection(c.InputPath, c.OutputDirectory, c.ZipperSection), "APACHE_DECRYPT_SECTION");
             reg.Add(c => HandleApacheBuildPatch(c.InputPath, c.FilePath, c.OutputDirectory, c.SigningKeyPath), "APACHE_BUILD_PATCH");
+            reg.Add(c => HandlePreloadMapPackage(c.InputPath), "ZIPPER_PRELOAD_MAP_PACKAGE");
+            reg.Add(c => HandleGetPreloadedResource(c.ZipperPreloadToken ?? c.ZipperSection, c.Query), "ZIPPER_GET_PRELOADED_RESOURCE");
+            reg.Add(c => HandleReleasePreload(c.ZipperPreloadToken ?? c.ZipperSection), "ZIPPER_RELEASE_PRELOAD");
         }
 
         private string HandleInspect(string? inputPath)
@@ -505,25 +514,68 @@ namespace CodeDesigner.Ps2.Bridge.Services
         private static IReadOnlyList<object> ReadAllNodes(string filePath)
         {
             string ext = Path.GetExtension(filePath).ToLowerInvariant();
+            var flat = new List<(string Name, uint Type, byte[] Data)>();
             switch (ext)
             {
-                case ".zar":
-                    using (ZarArchive archive = ZarArchive.Open(filePath))
-                        return archive.Entries
-                            .Select((e, i) => (object)new { index = i, name = e.Name, type = e.Type, data = Convert.ToBase64String(e.Data) })
-                            .ToList();
-                case ".zed":
-                    using (ZedStructure structure = ZedStructure.Open(filePath))
-                        return structure.Nodes
-                            .Select((n, i) => (object)new { index = i, name = n.Name, type = n.Type, data = Convert.ToBase64String(n.Data) })
-                            .ToList();
                 case ".zdb":
                     using (ZdbArchive archive = ZdbArchive.Open(filePath))
-                        return archive.Entries
-                            .Select((e, i) => (object)new { index = i, name = e.Name, type = 0u, data = Convert.ToBase64String(e.Data) })
-                            .ToList();
+                        CollectNodesFromZdbEntries(archive.Entries, 0, flat);
+                    break;
+                case ".zar":
+                    using (ZarArchive archive = ZarArchive.Open(filePath))
+                        CollectNodesFromZedNodes(archive.Entries, 0, flat);
+                    break;
+                case ".zed":
+                    using (ZedStructure structure = ZedStructure.Open(filePath))
+                        CollectNodesFromZedNodes(structure.Nodes, 0, flat);
+                    break;
                 default:
                     throw new InvalidOperationException("This file type does not expose bulk node reads.");
+            }
+
+            return flat.Select((n, i) => (object)new { index = i, name = n.Name, type = n.Type, data = Convert.ToBase64String(n.Data) }).ToList();
+        }
+
+        private static void CollectNodesFromZdbEntries(IReadOnlyList<ZdbEntry> entries, int depth, List<(string Name, uint Type, byte[] Data)> output)
+        {
+            if (depth > 6) return;
+            foreach (ZdbEntry entry in entries)
+            {
+                output.Add((entry.FullPath, 0u, entry.Data));
+                if (entry.Name.EndsWith(".zar", StringComparison.OrdinalIgnoreCase))
+                {
+                    using ZarArchive nested = ZarArchive.FromBytes(entry.Data);
+                    CollectNodesFromZedNodes(nested.Entries, depth + 1, output);
+                }
+                else if (entry.Name.EndsWith(".zed", StringComparison.OrdinalIgnoreCase))
+                {
+                    using ZedStructure nested = ZedStructure.FromBytes(entry.Data);
+                    CollectNodesFromZedNodes(nested.Nodes, depth + 1, output);
+                }
+            }
+        }
+
+        private static void CollectNodesFromZedNodes(IReadOnlyList<ZedNode> nodes, int depth, List<(string Name, uint Type, byte[] Data)> output)
+        {
+            if (depth > 6) return;
+            foreach (ZedNode node in nodes)
+            {
+                output.Add((node.Name, node.Type, node.Data));
+                if (node.Name.EndsWith(".zar", StringComparison.OrdinalIgnoreCase))
+                {
+                    using ZarArchive nested = ZarArchive.FromBytes(node.Data);
+                    CollectNodesFromZedNodes(nested.Entries, depth + 1, output);
+                }
+                else if (node.Name.EndsWith(".zed", StringComparison.OrdinalIgnoreCase))
+                {
+                    using ZedStructure nested = ZedStructure.FromBytes(node.Data);
+                    CollectNodesFromZedNodes(nested.Nodes, depth + 1, output);
+                }
+                else if (node.Name.EndsWith(".zdb", StringComparison.OrdinalIgnoreCase))
+                {
+                    using ZdbArchive nested = ZdbArchive.FromBytes(node.Data);
+                    CollectNodesFromZdbEntries(nested.Entries, depth + 1, output);
+                }
             }
         }
 
@@ -608,6 +660,72 @@ namespace CodeDesigner.Ps2.Bridge.Services
             catch (Exception ex)
             {
                 return Responses.Error($"ZIPPER_SAVE_CRAFT error: {ex.Message}");
+            }
+        }
+
+        private string HandlePreloadMapPackage(string? inputPath)
+        {
+            string? pathError = ValidateInputFile(inputPath, out string filePath);
+            if (pathError != null) return Responses.Error(pathError);
+            string ext = Path.GetExtension(filePath).ToLowerInvariant();
+            if (ext != ".zdb" && ext != ".zar" && ext != ".zed") return Responses.Error("InputPath must be a .zdb, .zar, or .zed map package.");
+
+            try
+            {
+                string fingerprint = BuildFingerprint(filePath);
+                lock (PreloadGate)
+                {
+                    PruneExpiredBundles();
+                    if (TokenByFingerprint.TryGetValue(fingerprint, out string existingToken) && PreloadByToken.TryGetValue(existingToken, out PreloadedBundle existing))
+                    {
+                        existing.Touch();
+                        return OperationResult("ZIPPER_PRELOAD_MAP_PACKAGE", "Using cached preloaded map package.", new { preloadToken = existing.Token, resourceCount = existing.Resources.Count, totalBytes = existing.TotalBytes, cacheHit = true });
+                    }
+                }
+
+                var bundle = BuildBundle(filePath);
+                lock (PreloadGate)
+                {
+                    PreloadByToken[bundle.Token] = bundle;
+                    TokenByFingerprint[fingerprint] = bundle.Token;
+                    EvictBundlesIfNeeded();
+                }
+
+                return OperationResult("ZIPPER_PRELOAD_MAP_PACKAGE", "Preloaded map package resources.", new { preloadToken = bundle.Token, resourceCount = bundle.Resources.Count, totalBytes = bundle.TotalBytes, cacheHit = false });
+            }
+            catch (Exception ex)
+            {
+                return Responses.Error($"ZIPPER_PRELOAD_MAP_PACKAGE error: {ex.Message}");
+            }
+        }
+
+        private string HandleGetPreloadedResource(string? preloadToken, string? query)
+        {
+            if (string.IsNullOrWhiteSpace(preloadToken)) return Responses.Error("ZipperPreloadToken is required");
+            if (string.IsNullOrWhiteSpace(query)) return Responses.Error("Query is required");
+            lock (PreloadGate)
+            {
+                PruneExpiredBundles();
+                if (!PreloadByToken.TryGetValue(preloadToken, out PreloadedBundle? bundle)) return Responses.Error("Preload token not found");
+                bundle.Touch();
+                if (bundle.TryGet(query, out BundledResource? resource))
+                {
+                    return Responses.Json(new CommandResponse { Success = true, Command = "ZIPPER_GET_PRELOADED_RESOURCE", Data = JsonSerializer.Serialize(new { key = resource.Key, source = resource.SourcePath, bytes = resource.Data.Length, data = Convert.ToBase64String(resource.Data) }, JsonOptions) });
+                }
+            }
+
+            return Responses.Error($"Resource not found for query '{query}'");
+        }
+
+        private string HandleReleasePreload(string? preloadToken)
+        {
+            if (string.IsNullOrWhiteSpace(preloadToken)) return Responses.Error("ZipperPreloadToken is required");
+            lock (PreloadGate)
+            {
+                PruneExpiredBundles();
+                if (!PreloadByToken.Remove(preloadToken, out PreloadedBundle? removed)) return Responses.Error("Preload token not found");
+                foreach (var pair in TokenByFingerprint.Where(p => p.Value.Equals(preloadToken, StringComparison.OrdinalIgnoreCase)).ToList()) TokenByFingerprint.Remove(pair.Key);
+                return OperationResult("ZIPPER_RELEASE_PRELOAD", "Preloaded bundle released.", new { preloadToken = removed.Token, resourceCount = removed.Resources.Count, totalBytes = removed.TotalBytes });
             }
         }
 
@@ -962,6 +1080,154 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 throw new InvalidDataException($"Archive entry escapes output directory: {archivePath}");
 
             return full;
+        }
+
+        private static string BuildFingerprint(string filePath)
+        {
+            FileInfo info = new(filePath);
+            string material = $"{Path.GetFullPath(filePath)}|{info.Length}|{info.LastWriteTimeUtc.Ticks}";
+            byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(material));
+            return Convert.ToHexString(hash);
+        }
+
+        private static PreloadedBundle BuildBundle(string filePath)
+        {
+            string token = Guid.NewGuid().ToString("N");
+            var resources = new Dictionary<string, BundledResource>(StringComparer.OrdinalIgnoreCase);
+            var basename = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            long totalBytes = 0;
+
+            string ext = Path.GetExtension(filePath).ToLowerInvariant();
+            if (ext == ".zdb")
+            {
+                using ZdbArchive zdb = ZdbArchive.Open(filePath);
+                TraverseZdb(zdb.Entries, filePath, 0, resources, basename, ref totalBytes);
+            }
+            else if (ext == ".zar")
+            {
+                using ZarArchive zar = ZarArchive.Open(filePath);
+                TraverseZedNodes(zar.Entries, filePath, 0, resources, basename, ref totalBytes);
+            }
+            else
+            {
+                using ZedStructure zed = ZedStructure.Open(filePath);
+                TraverseZedNodes(zed.Nodes, filePath, 0, resources, basename, ref totalBytes);
+            }
+
+            return new PreloadedBundle(token, resources, basename, totalBytes);
+        }
+
+        private static void TraverseZdb(IReadOnlyList<ZdbEntry> entries, string source, int depth, Dictionary<string, BundledResource> resources, Dictionary<string, string> basename, ref long totalBytes)
+        {
+            if (depth > 6) return;
+            foreach (var entry in entries)
+            {
+                AddResource(entry.FullPath, entry.Data, source, resources, basename, ref totalBytes);
+                if (entry.Name.EndsWith(".zar", StringComparison.OrdinalIgnoreCase))
+                {
+                    using ZarArchive nested = ZarArchive.FromBytes(entry.Data);
+                    TraverseZedNodes(nested.Entries, $"{source}:{entry.FullPath}", depth + 1, resources, basename, ref totalBytes);
+                }
+                else if (entry.Name.EndsWith(".zed", StringComparison.OrdinalIgnoreCase))
+                {
+                    using ZedStructure nested = ZedStructure.FromBytes(entry.Data);
+                    TraverseZedNodes(nested.Nodes, $"{source}:{entry.FullPath}", depth + 1, resources, basename, ref totalBytes);
+                }
+            }
+        }
+
+        private static void TraverseZedNodes(IReadOnlyList<ZedNode> nodes, string source, int depth, Dictionary<string, BundledResource> resources, Dictionary<string, string> basename, ref long totalBytes)
+        {
+            if (depth > 6) return;
+            foreach (var node in nodes)
+            {
+                AddResource(node.Name, node.Data, source, resources, basename, ref totalBytes);
+
+                if (node.Name.EndsWith(".zar", StringComparison.OrdinalIgnoreCase))
+                {
+                    using ZarArchive nested = ZarArchive.FromBytes(node.Data);
+                    TraverseZedNodes(nested.Entries, $"{source}:{node.Name}", depth + 1, resources, basename, ref totalBytes);
+                }
+                else if (node.Name.EndsWith(".zed", StringComparison.OrdinalIgnoreCase))
+                {
+                    using ZedStructure nested = ZedStructure.FromBytes(node.Data);
+                    TraverseZedNodes(nested.Nodes, $"{source}:{node.Name}", depth + 1, resources, basename, ref totalBytes);
+                }
+                else if (node.Name.EndsWith(".zdb", StringComparison.OrdinalIgnoreCase))
+                {
+                    using ZdbArchive nested = ZdbArchive.FromBytes(node.Data);
+                    TraverseZdb(nested.Entries, $"{source}:{node.Name}", depth + 1, resources, basename, ref totalBytes);
+                }
+            }
+        }
+
+        private static void AddResource(string path, byte[] data, string source, Dictionary<string, BundledResource> resources, Dictionary<string, string> basename, ref long totalBytes)
+        {
+            if (data.Length == 0) return;
+            string key = path.Replace('\\','/').TrimStart('/');
+            bool isCommon = key.Contains("/common/", StringComparison.OrdinalIgnoreCase) || key.StartsWith("common/", StringComparison.OrdinalIgnoreCase);
+            bool shouldReplace = !resources.ContainsKey(key) || (resources[key].IsCommon && !isCommon);
+            if (shouldReplace)
+            {
+                if (resources.TryGetValue(key, out var prev)) totalBytes -= prev.Data.Length;
+                var r = new BundledResource(key, source, isCommon, (byte[])data.Clone());
+                resources[key] = r;
+                totalBytes += r.Data.Length;
+                basename[Path.GetFileName(key)] = key;
+                if (totalBytes > MaxBundleBytes) throw new InvalidDataException($"Preload exceeded max bundle bytes: {MaxBundleBytes}");
+            }
+        }
+
+        private static void PruneExpiredBundles()
+        {
+            DateTime utcNow = DateTime.UtcNow;
+            foreach (PreloadedBundle bundle in PreloadByToken.Values.Where(v => utcNow - v.LastAccessUtc > PreloadTtl).ToList())
+            {
+                PreloadByToken.Remove(bundle.Token);
+                foreach (var pair in TokenByFingerprint.Where(p => p.Value.Equals(bundle.Token, StringComparison.OrdinalIgnoreCase)).ToList())
+                    TokenByFingerprint.Remove(pair.Key);
+            }
+        }
+
+        private static void EvictBundlesIfNeeded()
+        {
+            while (PreloadByToken.Count > MaxBundleCount)
+            {
+                var oldest = PreloadByToken.Values.OrderBy(v => v.LastAccessUtc).First();
+                PreloadByToken.Remove(oldest.Token);
+                foreach (var pair in TokenByFingerprint.Where(p => p.Value.Equals(oldest.Token, StringComparison.OrdinalIgnoreCase)).ToList()) TokenByFingerprint.Remove(pair.Key);
+            }
+        }
+
+        private sealed class BundledResource
+        {
+            public BundledResource(string key, string sourcePath, bool isCommon, byte[] data) { Key = key; SourcePath = sourcePath; IsCommon = isCommon; Data = data; }
+            public string Key { get; }
+            public string SourcePath { get; }
+            public bool IsCommon { get; }
+            public byte[] Data { get; }
+        }
+
+        private sealed class PreloadedBundle
+        {
+            public PreloadedBundle(string token, Dictionary<string, BundledResource> resources, Dictionary<string, string> basenameIndex, long totalBytes)
+            {
+                Token = token; Resources = resources; BasenameIndex = basenameIndex; TotalBytes = totalBytes; LastAccessUtc = DateTime.UtcNow;
+            }
+            public string Token { get; }
+            public Dictionary<string, BundledResource> Resources { get; }
+            public Dictionary<string, string> BasenameIndex { get; }
+            public long TotalBytes { get; }
+            public DateTime LastAccessUtc { get; private set; }
+            public void Touch() => LastAccessUtc = DateTime.UtcNow;
+            public bool TryGet(string query, out BundledResource resource)
+            {
+                string key = query.Replace('\\','/').TrimStart('/');
+                if (Resources.TryGetValue(key, out resource!)) return true;
+                if (BasenameIndex.TryGetValue(Path.GetFileName(key), out string? resolved) && Resources.TryGetValue(resolved, out resource!)) return true;
+                resource = null!;
+                return false;
+            }
         }
 
         private static bool LooksLikeSocom2Save(string filePath)

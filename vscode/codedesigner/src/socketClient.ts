@@ -3197,6 +3197,40 @@ export class SocketClient {
         return JSON.parse(response.Data ?? '{}');
     }
 
+
+    public async zipperPreloadMapPackage(inputPath: string): Promise<{ preloadToken: string; resourceCount: number; totalBytes: number; cacheHit: boolean; }> {
+        const response = await this.sendCommand(
+            { Command: 'ZIPPER_PRELOAD_MAP_PACKAGE', InputPath: inputPath },
+            120_000,
+        );
+        if (!response.Success) {
+            throw new Error(response.Error || 'ZIPPER_PRELOAD_MAP_PACKAGE failed');
+        }
+        return JSON.parse(response.Data ?? '{}') as { preloadToken: string; resourceCount: number; totalBytes: number; cacheHit: boolean; };
+    }
+
+    public async zipperGetPreloadedResource(preloadToken: string, query: string): Promise<{ key: string; source: string; bytes: number; data: string; }> {
+        const response = await this.sendCommand(
+            { Command: 'ZIPPER_GET_PRELOADED_RESOURCE', ZipperPreloadToken: preloadToken, Query: query },
+            60_000,
+        );
+        if (!response.Success) {
+            throw new Error(response.Error || 'ZIPPER_GET_PRELOADED_RESOURCE failed');
+        }
+        return JSON.parse(response.Data ?? '{}') as { key: string; source: string; bytes: number; data: string; };
+    }
+
+    public async zipperReleasePreload(preloadToken: string): Promise<ZipperOperationResult> {
+        const response = await this.sendCommand(
+            { Command: 'ZIPPER_RELEASE_PRELOAD', ZipperPreloadToken: preloadToken },
+            30_000,
+        );
+        if (!response.Success) {
+            throw new Error(response.Error || 'ZIPPER_RELEASE_PRELOAD failed');
+        }
+        return JSON.parse(response.Data ?? '{}') as ZipperOperationResult;
+    }
+
     public async zipperReadAllNodes(inputPath: string): Promise<Array<{ index: number; name: string; type: number; data: string }>> {
         const response = await this.sendCommand(
             { Command: 'ZIPPER_READ_ALL_NODES', InputPath: inputPath },

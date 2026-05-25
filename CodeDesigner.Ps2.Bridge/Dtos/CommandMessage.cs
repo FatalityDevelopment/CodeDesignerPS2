@@ -46,6 +46,8 @@ namespace CodeDesigner.Ps2.Bridge
         // FileFormats/Zipper fields
         public int?    ZipperEntryIndex { get; set; }
         public string? ZipperSection { get; set; }
+        /// <summary>Token returned from ZIPPER_PRELOAD_MAP_PACKAGE.</summary>
+        public string? ZipperPreloadToken { get; set; }
         public string? SaveMode { get; set; }
         public string? SaveTitle { get; set; }
         public int?    SaveTitleLength { get; set; }
