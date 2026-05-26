@@ -33,6 +33,16 @@ export interface ZedModelChunk {
   // Name of the .tif this chunk references (lowercased). Found in the tail
   // area after the triangle table, before the next chunk header.
   textureName: string | null;
+  // Where textureName came from. Weapon MDL descriptor tables are explicit
+  // material bindings and should not be second-guessed by render heuristics.
+  textureBinding?: 'tail' | 'descriptor';
+  // Original MDL/GEO source for composed scenes. Palette selection can depend
+  // on the model that referenced a shared .tif page.
+  sourceModelName?: string;
+  // Original archive/prefix for composed scenes. This lets the renderer prefer
+  // FLIB/WEAP/M51-specific TXR/PAL aliases when multiple packages contain the
+  // same .tif name.
+  sourceArchiveName?: string;
 }
 
 export interface ZedModel {
@@ -210,6 +220,7 @@ function parseChunk(bytes: Uint8Array, offset: number, nextChunkOffset: number):
     vertices,
     indices,
     textureName,
+    textureBinding: textureName ? 'tail' : undefined,
   };
 }
 
@@ -346,6 +357,78 @@ export function applyMarkerBinding(
       chunk.textureName = chosen.name;
     }
   }
+}
+
+export function applyWeaponDescriptorBinding(
+  model: ZedModel,
+  bytes: Uint8Array,
+  descriptorOffsets: number[],
+): boolean {
+  if (model.chunks.length === 0 || descriptorOffsets.length === 0) { return false; }
+
+  const chunksByOffset = new Map<number, ZedModelChunk>();
+  for (const chunk of model.chunks) {
+    chunksByOffset.set(chunk.offset, chunk);
+  }
+
+  let applied = false;
+  const uniqueRefs = new Set(model.textureRefs.map(r => r.toLowerCase()));
+  const readU32 = (offset: number): number => {
+    return (
+      bytes[offset] |
+      (bytes[offset + 1] << 8) |
+      (bytes[offset + 2] << 16) |
+      (bytes[offset + 3] << 24)
+    ) >>> 0;
+  };
+
+  for (const descriptorOffset of [...new Set(descriptorOffsets)].sort((a, b) => a - b)) {
+    if (descriptorOffset < 0 || descriptorOffset + 0x10 > bytes.length) { continue; }
+    const recordCount = readU32(descriptorOffset);
+    if (recordCount <= 0 || recordCount > 1024) { continue; }
+    const recordsStart = descriptorOffset + 0x10;
+    const recordsEnd = recordsStart + recordCount * 0x10;
+    if (recordsEnd > bytes.length) { continue; }
+
+    let currentTexture: string | null = null;
+    for (let i = 0; i < recordCount; i++) {
+      const record = recordsStart + i * 0x10;
+      const command = readU32(record);
+      const refOffset = readU32(record + 0x04);
+      const opcode = (command >>> 16) & 0xffff;
+
+      if (opcode === 0x1006) {
+        currentTexture = readTifAt(bytes, refOffset);
+        if (currentTexture && !uniqueRefs.has(currentTexture)) {
+          model.textureRefs.push(currentTexture);
+          uniqueRefs.add(currentTexture);
+        }
+      } else if (opcode === 0x3002 && currentTexture) {
+        const chunk = chunksByOffset.get(refOffset);
+        if (chunk) {
+          chunk.textureName = currentTexture;
+          chunk.textureBinding = 'descriptor';
+          applied = true;
+        }
+      }
+    }
+  }
+
+  return applied;
+}
+
+function readTifAt(bytes: Uint8Array, offset: number): string | null {
+  if (offset < 0 || offset >= bytes.length) { return null; }
+  let text = '';
+  for (let i = offset; i < bytes.length; i++) {
+    const b = bytes[i];
+    if (b === 0) { break; }
+    if (b < 0x20 || b > 0x7e) { break; }
+    text += String.fromCharCode(b);
+    if (text.length > 128) { break; }
+  }
+  const match = text.match(/[A-Za-z0-9_\-.]+\.tif/i);
+  return match ? match[0].toLowerCase() : null;
 }
 
 function chooseNearest(offset: number, markers: TifMarker[]): TifMarker | null {
@@ -610,6 +693,9 @@ function isUsefulI16Cloud(c: I16Cloud): boolean {
 // emitting one chunk per stream and triangle-strip topology where it looks
 // safe. Returns a ZedModel that the existing renderer can consume.
 export function decodeFallbackPayload(bytes: Uint8Array): ZedModel | null {
+  const effectModel = decodeEffectMdlPayload(bytes);
+  if (effectModel) { return effectModel; }
+
   const vifStreams = findVifUnpackStreams(bytes);
   const useful = selectRenderableVifStreams(vifStreams);
   if (useful.length === 0) {
@@ -692,8 +778,281 @@ export function decodeFallbackPayload(bytes: Uint8Array): ZedModel | null {
 export function hasRenderablePayload(bytes: Uint8Array): boolean {
   if (!bytes || bytes.length < 0x40) { return false; }
   if (findChunkOffsets(bytes).length > 0) { return true; }
+  if (findEffectVifStarts(bytes).length > 0) { return true; }
   if (bytes.length < 0x400) { return false; }
   if (findVifUnpackStreams(bytes).length > 0) { return true; }
   if (findI16VertexClouds(bytes).length > 0) { return true; }
   return false;
+}
+
+// ---------------------------------------------------------------------------
+// EFFE_MDL / gun-FX decoder. These payloads do not use the full WORL_MDL
+// chunk header, but they do start with the familiar STCYCL word followed by a
+// compact VIF command stream. The standalone SOCOM gun-FX preview proved the
+// key layout:
+//   0x01000101
+//   V4_32/V4_16/V4_8 UNPACK commands
+//   MSCAL/MSCNT terminator
+//   ASCII .tif references near the segment tail
+//
+// V4_16 rows are position/normal pairs. V4_8 rows are triangle slot indices;
+// divide the first three bytes by 3 to get vertex indices. This preserves the
+// explicit FX topology instead of falling back to noisy generic strips.
+// ---------------------------------------------------------------------------
+
+type EffectVifValue = number[];
+
+interface EffectVifArray {
+  cmd: number;
+  name: string;
+  imm: number;
+  num: number;
+  offset: number;
+  rows: EffectVifValue[];
+}
+
+interface EffectVifSegment {
+  start: number;
+  end: number;
+  arrays: EffectVifArray[];
+}
+
+const effectUnpackInfo: Record<number, { name: string; comps: number; bytesPerComponent: number }> = {
+  0x60: { name: 'S32', comps: 1, bytesPerComponent: 4 },
+  0x61: { name: 'S16', comps: 1, bytesPerComponent: 2 },
+  0x62: { name: 'S8', comps: 1, bytesPerComponent: 1 },
+  0x64: { name: 'V2_32', comps: 2, bytesPerComponent: 4 },
+  0x65: { name: 'V2_16', comps: 2, bytesPerComponent: 2 },
+  0x66: { name: 'V2_8', comps: 2, bytesPerComponent: 1 },
+  0x68: { name: 'V3_32', comps: 3, bytesPerComponent: 4 },
+  0x69: { name: 'V3_16', comps: 3, bytesPerComponent: 2 },
+  0x6a: { name: 'V3_8', comps: 3, bytesPerComponent: 1 },
+  0x6c: { name: 'V4_32', comps: 4, bytesPerComponent: 4 },
+  0x6d: { name: 'V4_16', comps: 4, bytesPerComponent: 2 },
+  0x6e: { name: 'V4_8', comps: 4, bytesPerComponent: 1 },
+  0x6f: { name: 'V4_5', comps: 4, bytesPerComponent: 0 },
+};
+
+const effectKnownVifCommands = new Set([0, 1, 0x10, 0x11, 0x13, 0x14, 0x17, 0x20, 0x30, 0x31]);
+
+function findEffectVifStarts(bytes: Uint8Array): number[] {
+  const starts: number[] = [];
+  for (let o = 0; o + 8 < bytes.length; o += 0x10) {
+    if (readU32LE(bytes, o) !== 0x01000101) { continue; }
+    const next = readU32LE(bytes, o + 4);
+    if ((next >>> 24) === 0x6c) { starts.push(o); }
+  }
+  return starts;
+}
+
+function effectCmdName(cmd: number): string {
+  switch (cmd) {
+    case 0: return 'NOP';
+    case 1: return 'STCYCL';
+    case 0x10: return 'FLUSH';
+    case 0x11: return 'FLUSHE';
+    case 0x13: return 'FLUSHA';
+    case 0x14: return 'MSCAL';
+    case 0x17: return 'MSCNT';
+    case 0x20: return 'STMASK';
+    case 0x30: return 'STROW';
+    case 0x31: return 'STCOL';
+    default: return effectUnpackInfo[cmd]?.name ?? `CMD_${cmd.toString(16)}`;
+  }
+}
+
+function effectUnpackByteLength(cmd: number, num: number): number {
+  const info = effectUnpackInfo[cmd];
+  if (!info) { return 0; }
+  const bytes = info.bytesPerComponent === 0
+    ? num * 4
+    : num * info.comps * info.bytesPerComponent;
+  return alignUp(bytes, 4);
+}
+
+function readEffectArray(bytes: Uint8Array, offset: number, cmd: number, num: number): EffectVifValue[] {
+  const info = effectUnpackInfo[cmd];
+  if (!info || info.bytesPerComponent === 0) { return []; }
+  const out: EffectVifValue[] = [];
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const rowSize = info.comps * info.bytesPerComponent;
+  if (offset + num * rowSize > bytes.length) { return []; }
+
+  for (let i = 0; i < num; i++) {
+    const row: number[] = [];
+    const rowOffset = offset + i * rowSize;
+    for (let c = 0; c < info.comps; c++) {
+      const valueOffset = rowOffset + c * info.bytesPerComponent;
+      if (info.bytesPerComponent === 4) {
+        row.push(cmd === 0x6c || cmd === 0x68 || cmd === 0x64
+          ? view.getFloat32(valueOffset, true)
+          : view.getInt32(valueOffset, true));
+      } else if (info.bytesPerComponent === 2) {
+        row.push(view.getInt16(valueOffset, true));
+      } else {
+        row.push(bytes[valueOffset]);
+      }
+    }
+    out.push(row);
+  }
+  return out;
+}
+
+function parseEffectVifSegment(bytes: Uint8Array, start: number): EffectVifSegment | null {
+  const arrays: EffectVifArray[] = [];
+  let o = start;
+  let guard = 0;
+  while (o + 4 <= bytes.length && guard++ < 96) {
+    const word = readU32LE(bytes, o);
+    const imm = word & 0xffff;
+    const num = (word >>> 16) & 0xff;
+    const cmd = (word >>> 24) & 0xff;
+    const dataLen = effectUnpackByteLength(cmd, num);
+    o += 4;
+
+    if (dataLen) {
+      if (o + dataLen > bytes.length) { return null; }
+      arrays.push({
+        cmd,
+        name: effectCmdName(cmd),
+        imm,
+        num,
+        offset: o,
+        rows: readEffectArray(bytes, o, cmd, num),
+      });
+      o += dataLen;
+    }
+
+    if (cmd === 0x17 || cmd === 0x14) {
+      return { start, end: alignUp(o, 0x10), arrays };
+    }
+    if (!effectUnpackInfo[cmd] && !effectKnownVifCommands.has(cmd)) { return null; }
+  }
+  return null;
+}
+
+function chooseEffectTextureName(markers: TifMarker[], segment: EffectVifSegment, nextStart: number): string | null {
+  const afterInSegment = markers.find(m => m.offset >= segment.end && m.offset < nextStart);
+  if (afterInSegment) { return afterInSegment.name; }
+  const after = markers.find(m => m.offset >= segment.end);
+  return after?.name ?? markers[0]?.name ?? null;
+}
+
+function decodeEffectChunk(bytes: Uint8Array, segment: EffectVifSegment, textureName: string | null): ZedModelChunk | null {
+  void bytes;
+  const v16 = segment.arrays
+    .filter(a => a.cmd === 0x6d)
+    .sort((a, b) => b.num - a.num)[0];
+  const v32 = segment.arrays
+    .filter(a => a.cmd === 0x6c && a.rows.some(r => r.some(v => Number.isFinite(v) && Math.abs(v) > 0.001)))
+    .slice(-1)[0];
+  const i8 = segment.arrays
+    .filter(a => a.cmd === 0x6e)
+    .sort((a, b) => b.num - a.num)[0];
+
+  const positions: Array<{ x: number; y: number; z: number }> = [];
+  if (v16 && v16.rows.length >= 2) {
+    for (let i = 0; i + 1 < v16.rows.length; i += 2) {
+      const p = v16.rows[i];
+      positions.push({ x: p[0] / 4096, y: p[1] / 4096, z: p[2] / 4096 });
+    }
+  } else if (v32 && v32.rows.length >= 3) {
+    for (const p of v32.rows) {
+      positions.push({ x: p[0], y: p[1], z: p[2] });
+    }
+  }
+  if (positions.length === 0) { return null; }
+
+  const minX = Math.min(...positions.map(p => p.x));
+  const maxX = Math.max(...positions.map(p => p.x));
+  const minY = Math.min(...positions.map(p => p.y));
+  const maxY = Math.max(...positions.map(p => p.y));
+  const sx = maxX - minX || 1;
+  const sy = maxY - minY || 1;
+  const vertices = positions.map(p => ({
+    x: p.x,
+    y: p.y,
+    z: p.z,
+    // The preview HTML did not surface dedicated UV rows. Use stable planar
+    // UVs so textured mode reveals the referenced atlas instead of sampling
+    // one corner pixel across the whole FX card.
+    u: (p.x - minX) / sx,
+    v: (p.y - minY) / sy,
+  }));
+
+  const indices: number[] = [];
+  if (i8) {
+    for (const r of i8.rows) {
+      const a = Math.floor(r[0] / 3);
+      const b = Math.floor(r[1] / 3);
+      const c = Math.floor(r[2] / 3);
+      if (a < 0 || b < 0 || c < 0) { continue; }
+      if (a >= vertices.length || b >= vertices.length || c >= vertices.length) { continue; }
+      if (a === b || b === c || a === c) { continue; }
+      indices.push(a, b, c);
+    }
+  }
+  if (indices.length === 0 && vertices.length === 4) {
+    indices.push(0, 1, 2, 0, 2, 3);
+  }
+  if (indices.length === 0 && vertices.length >= 3) {
+    for (let i = 0; i + 2 < vertices.length; i += 3) {
+      indices.push(i, i + 1, i + 2);
+    }
+  }
+  if (indices.length === 0) { return null; }
+
+  return {
+    offset: segment.start,
+    vertexCount: vertices.length,
+    triangleCount: indices.length / 3 | 0,
+    decodedTriangleCount: indices.length / 3 | 0,
+    scale: 1,
+    vertices,
+    indices,
+    textureName,
+    textureBinding: textureName ? 'tail' : undefined,
+  };
+}
+
+function decodeEffectMdlPayload(bytes: Uint8Array): ZedModel | null {
+  const starts = findEffectVifStarts(bytes);
+  if (starts.length === 0) { return null; }
+  const markers = extractTextureMarkers(bytes);
+  const chunks: ZedModelChunk[] = [];
+  for (let i = 0; i < starts.length; i++) {
+    const start = starts[i];
+    if (chunks.some(c => start >= c.offset && start < c.offset + Math.max(1, c.vertexCount * 0x10))) { continue; }
+    const segment = parseEffectVifSegment(bytes, start);
+    if (!segment) { continue; }
+    const nextStart = starts.find(s => s > segment.end) ?? bytes.length;
+    const textureName = chooseEffectTextureName(markers, segment, nextStart);
+    const chunk = decodeEffectChunk(bytes, segment, textureName);
+    if (chunk) { chunks.push(chunk); }
+  }
+  if (chunks.length === 0) { return null; }
+
+  const vertices: ZedModelVertex[] = [];
+  const indices: number[] = [];
+  let radius = 0;
+  for (const chunk of chunks) {
+    const base = vertices.length;
+    for (const v of chunk.vertices) {
+      vertices.push(v);
+      const d = Math.hypot(v.x, v.y, v.z);
+      if (d > radius) { radius = d; }
+    }
+    for (const idx of chunk.indices) {
+      indices.push(base + idx);
+    }
+  }
+
+  const textureRefs = [...new Set(markers.map(m => m.name))];
+  return {
+    chunks,
+    vertices,
+    indices,
+    textureRefs,
+    boundingRadius: radius || 1,
+  };
 }

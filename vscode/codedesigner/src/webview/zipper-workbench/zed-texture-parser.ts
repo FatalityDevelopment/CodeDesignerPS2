@@ -111,10 +111,18 @@ function rgba5551ToRgba8888(clut: Uint8Array): Uint8Array {
   const view = new DataView(clut.buffer, clut.byteOffset, clut.byteLength);
   for (let i = 0; i < 256; i++) {
     const v = view.getUint16(i * 2, true);
-    out[i * 4 + 0] = expand5To8(v & 0x1f);
-    out[i * 4 + 1] = expand5To8((v >> 5) & 0x1f);
-    out[i * 4 + 2] = expand5To8((v >> 10) & 0x1f);
-    out[i * 4 + 3] = (v & 0x8000) !== 0 ? 255 : 0;
+    const r = expand5To8(v & 0x1f);
+    const g = expand5To8((v >> 5) & 0x1f);
+    const b = expand5To8((v >> 10) & 0x1f);
+    const hasStp = (v & 0x8000) !== 0;
+    out[i * 4 + 0] = r;
+    out[i * 4 + 1] = g;
+    out[i * 4 + 2] = b;
+    // PS2 16-bit CLUT bit 15 is controlled by TEXA/STP state; treating a
+    // clear bit as PNG alpha 0 punches black holes through opaque textures.
+    // Keep real coloured entries visible and reserve transparency for the
+    // fully-empty palette entry.
+    out[i * 4 + 3] = (r !== 0 || g !== 0 || b !== 0 || hasStp) ? 255 : 0;
   }
   return out;
 }
@@ -123,10 +131,11 @@ function rgba32PaletteToRgba8888(clut: Uint8Array): Uint8Array {
   const out = new Uint8Array(256 * 4);
   for (let i = 0; i < 256; i++) {
     const p = i * 4;
+    const alpha = ps2AlphaToPngAlpha(clut[p + 3]);
     out[p + 0] = clut[p + 0];
     out[p + 1] = clut[p + 1];
     out[p + 2] = clut[p + 2];
-    out[p + 3] = ps2AlphaToPngAlpha(clut[p + 3]);
+    out[p + 3] = alpha > 0 || clut[p + 0] !== 0 || clut[p + 1] !== 0 || clut[p + 2] !== 0 ? 255 : 0;
   }
   return out;
 }

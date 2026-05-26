@@ -544,13 +544,21 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 output.Add((entry.FullPath, 0u, entry.Data));
                 if (entry.Name.EndsWith(".zar", StringComparison.OrdinalIgnoreCase))
                 {
-                    using ZarArchive nested = ZarArchive.FromBytes(entry.Data);
-                    CollectNodesFromZedNodes(nested.Entries, depth + 1, output);
+                    try
+                    {
+                        using ZarArchive nested = ZarArchive.FromBytes(entry.Data);
+                        CollectNodesFromZedNodes(nested.Entries, depth + 1, output);
+                    }
+                    catch (InvalidDataException) { /* keep raw entry, skip invalid nested archive */ }
                 }
                 else if (entry.Name.EndsWith(".zed", StringComparison.OrdinalIgnoreCase))
                 {
-                    using ZedStructure nested = ZedStructure.FromBytes(entry.Data);
-                    CollectNodesFromZedNodes(nested.Nodes, depth + 1, output);
+                    try
+                    {
+                        using ZedStructure nested = ZedStructure.FromBytes(entry.Data);
+                        CollectNodesFromZedNodes(nested.Nodes, depth + 1, output);
+                    }
+                    catch (InvalidDataException) { /* keep raw entry, skip invalid nested archive */ }
                 }
             }
         }
@@ -563,18 +571,30 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 output.Add((node.Name, node.Type, node.Data));
                 if (node.Name.EndsWith(".zar", StringComparison.OrdinalIgnoreCase))
                 {
-                    using ZarArchive nested = ZarArchive.FromBytes(node.Data);
-                    CollectNodesFromZedNodes(nested.Entries, depth + 1, output);
+                    try
+                    {
+                        using ZarArchive nested = ZarArchive.FromBytes(node.Data);
+                        CollectNodesFromZedNodes(nested.Entries, depth + 1, output);
+                    }
+                    catch (InvalidDataException) { /* keep raw node, skip invalid nested archive */ }
                 }
                 else if (node.Name.EndsWith(".zed", StringComparison.OrdinalIgnoreCase))
                 {
-                    using ZedStructure nested = ZedStructure.FromBytes(node.Data);
-                    CollectNodesFromZedNodes(nested.Nodes, depth + 1, output);
+                    try
+                    {
+                        using ZedStructure nested = ZedStructure.FromBytes(node.Data);
+                        CollectNodesFromZedNodes(nested.Nodes, depth + 1, output);
+                    }
+                    catch (InvalidDataException) { /* keep raw node, skip invalid nested archive */ }
                 }
                 else if (node.Name.EndsWith(".zdb", StringComparison.OrdinalIgnoreCase))
                 {
-                    using ZdbArchive nested = ZdbArchive.FromBytes(node.Data);
-                    CollectNodesFromZdbEntries(nested.Entries, depth + 1, output);
+                    try
+                    {
+                        using ZdbArchive nested = ZdbArchive.FromBytes(node.Data);
+                        CollectNodesFromZdbEntries(nested.Entries, depth + 1, output);
+                    }
+                    catch (InvalidDataException) { /* keep raw node, skip invalid nested archive */ }
                 }
             }
         }
@@ -1125,13 +1145,21 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 AddResource(entry.FullPath, entry.Data, source, resources, basename, ref totalBytes);
                 if (entry.Name.EndsWith(".zar", StringComparison.OrdinalIgnoreCase))
                 {
-                    using ZarArchive nested = ZarArchive.FromBytes(entry.Data);
-                    TraverseZedNodes(nested.Entries, $"{source}:{entry.FullPath}", depth + 1, resources, basename, ref totalBytes);
+                    try
+                    {
+                        using ZarArchive nested = ZarArchive.FromBytes(entry.Data);
+                        TraverseZedNodes(nested.Entries, $"{source}:{entry.FullPath}", depth + 1, resources, basename, ref totalBytes);
+                    }
+                    catch (InvalidDataException) { /* keep raw resource, skip invalid nested archive */ }
                 }
                 else if (entry.Name.EndsWith(".zed", StringComparison.OrdinalIgnoreCase))
                 {
-                    using ZedStructure nested = ZedStructure.FromBytes(entry.Data);
-                    TraverseZedNodes(nested.Nodes, $"{source}:{entry.FullPath}", depth + 1, resources, basename, ref totalBytes);
+                    try
+                    {
+                        using ZedStructure nested = ZedStructure.FromBytes(entry.Data);
+                        TraverseZedNodes(nested.Nodes, $"{source}:{entry.FullPath}", depth + 1, resources, basename, ref totalBytes);
+                    }
+                    catch (InvalidDataException) { /* keep raw resource, skip invalid nested archive */ }
                 }
             }
         }
@@ -1145,18 +1173,30 @@ namespace CodeDesigner.Ps2.Bridge.Services
 
                 if (node.Name.EndsWith(".zar", StringComparison.OrdinalIgnoreCase))
                 {
-                    using ZarArchive nested = ZarArchive.FromBytes(node.Data);
-                    TraverseZedNodes(nested.Entries, $"{source}:{node.Name}", depth + 1, resources, basename, ref totalBytes);
+                    try
+                    {
+                        using ZarArchive nested = ZarArchive.FromBytes(node.Data);
+                        TraverseZedNodes(nested.Entries, $"{source}:{node.Name}", depth + 1, resources, basename, ref totalBytes);
+                    }
+                    catch (InvalidDataException) { /* keep raw resource, skip invalid nested archive */ }
                 }
                 else if (node.Name.EndsWith(".zed", StringComparison.OrdinalIgnoreCase))
                 {
-                    using ZedStructure nested = ZedStructure.FromBytes(node.Data);
-                    TraverseZedNodes(nested.Nodes, $"{source}:{node.Name}", depth + 1, resources, basename, ref totalBytes);
+                    try
+                    {
+                        using ZedStructure nested = ZedStructure.FromBytes(node.Data);
+                        TraverseZedNodes(nested.Nodes, $"{source}:{node.Name}", depth + 1, resources, basename, ref totalBytes);
+                    }
+                    catch (InvalidDataException) { /* keep raw resource, skip invalid nested archive */ }
                 }
                 else if (node.Name.EndsWith(".zdb", StringComparison.OrdinalIgnoreCase))
                 {
-                    using ZdbArchive nested = ZdbArchive.FromBytes(node.Data);
-                    TraverseZdb(nested.Entries, $"{source}:{node.Name}", depth + 1, resources, basename, ref totalBytes);
+                    try
+                    {
+                        using ZdbArchive nested = ZdbArchive.FromBytes(node.Data);
+                        TraverseZdb(nested.Entries, $"{source}:{node.Name}", depth + 1, resources, basename, ref totalBytes);
+                    }
+                    catch (InvalidDataException) { /* keep raw resource, skip invalid nested archive */ }
                 }
             }
         }

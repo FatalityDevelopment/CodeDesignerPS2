@@ -18,12 +18,29 @@ import {
   parsePaletteEntries,
   parsePaletteNodes,
   parseTexture,
+  parseTextureHeader,
   ZedPalette,
   ZedTexture,
 } from './zed-texture-parser';
-import { ZedModel, applyMarkerBinding, decodeFallbackPayload, looksLikeZedContainer, parseModel } from './zed-model-parser';
+import { ZedModel, applyMarkerBinding, applyWeaponDescriptorBinding, decodeFallbackPayload, looksLikeZedContainer, parseModel } from './zed-model-parser';
 import { InspectedZedArchive, parseZedArchive } from './zed-archive-parser';
 import { ZedModelRenderer } from './zed-model-renderer';
+import {
+  RdrAnimationClip,
+  RdrAnimationTrack,
+  animationFrameRate,
+  cleanBoneName as cleanAnimationBoneName,
+  hex as formatAnimationHex,
+  parseRdrAnimation,
+  trackTypeKey,
+} from './rdr-animation-parser';
+import { RdrAnimationCanvasRenderer } from './rdr-animation-renderer';
+import {
+  ZanimAnimationSummary,
+  ZanimArchiveSummary,
+  findZanimAnimationForEntry,
+  parseZanimArchive,
+} from './zanim-parser';
 import {
   GeoEntry,
   GeoScene,
@@ -100,7 +117,7 @@ interface ZipperOperationResult {
   generatedNewKey?: boolean;
 }
 
-type PreviewMode = 'none' | 'texture' | 'model' | 'rdr' | 'mps';
+type PreviewMode = 'none' | 'texture' | 'model' | 'rdr' | 'mps' | 'animation' | 'zanim';
 
 interface RdrResult {
   sourcePath: string;
@@ -336,6 +353,220 @@ interface RdrTreeNode {
                 <div><span>String Base</span><strong>{{ hex(result()?.zed?.stringBasePointer) }}</strong></div>
                 <div><span>Header 5C</span><strong>{{ hex(result()?.zed?.headerWord5C) }}</strong></div>
                 <div><span>Align</span><strong>{{ result()?.zed?.dataAlignment }}</strong></div>
+              </div>
+            }
+
+            @if (previewMode() === 'zanim') {
+              <div class="zip-preview zip-zanim-preview">
+                <div class="zip-preview-stage zip-zanim-stage">
+                  @if (zanimSummary(); as z) {
+                    <div class="zip-zanim-layout">
+                      <div class="zip-zanim-list">
+                        <div class="zip-zanim-title">Animations ({{ visibleZanimAnimations().length }} / {{ z.totalAnimations }})</div>
+                        @for (anim of visibleZanimAnimations(); track anim.entryIndex) {
+                          <button
+                            type="button"
+                            class="zip-zanim-item"
+                            [class.active]="selectedZanimAnimation()?.entryIndex === anim.entryIndex"
+                            (click)="selectZanimAnimation(anim.entryIndex)">
+                            <span class="name">{{ anim.name }}</span>
+                            <span class="meta">{{ anim.nameRefs.slice(1).join(' · ') || 'no refs' }}</span>
+                            <span class="meta">{{ anim.seqSize || anim.sequence?.size || 0 }}B seq · {{ anim.nodeRefs.length }} node refs</span>
+                          </button>
+                        }
+                      </div>
+                      <div class="zip-zanim-detail">
+                        @if (selectedZanimAnimation(); as anim) {
+                          <div class="zip-zanim-title">{{ anim.name }}</div>
+                          <div class="zip-zanim-kv">
+                            <div><span>Entry</span><strong>#{{ anim.entryIndex }}</strong></div>
+                            <div><span>Names</span><strong>{{ anim.nameRefs.length }}</strong></div>
+                            <div><span>Node refs</span><strong>{{ anim.nodeRefs.length }}</strong></div>
+                            <div><span>Sequence</span><strong>{{ anim.seqSize || anim.sequence?.size || 0 }} bytes</strong></div>
+                          </div>
+                          <div class="zip-zanim-section">
+                            <span>Name refs</span>
+                            <div class="zip-zanim-tags">
+                              @for (ref of anim.nameRefs; track $index) {
+                                <span>{{ ref }}</span>
+                              }
+                            </div>
+                          </div>
+                          <div class="zip-zanim-section">
+                            <span>Anim params</span>
+                            <code>{{ zanimParamsLabel(anim.params) }}</code>
+                          </div>
+                          @if (anim.nodeRefs.length > 0) {
+                            <div class="zip-zanim-section">
+                              <span>Node refs</span>
+                              <div class="zip-zanim-code-list">
+                                @for (ref of anim.nodeRefs.slice(0, 16); track $index) {
+                                  <code>{{ zanimNodeRefLabel(ref.words) }}</code>
+                                }
+                              </div>
+                            </div>
+                          }
+                          @if (anim.sequence; as seq) {
+                            <div class="zip-zanim-section">
+                              <span>Seq header u32</span>
+                              <code>{{ zanimWordsLabel(seq.headerWords) }}</code>
+                            </div>
+                            <div class="zip-zanim-section">
+                              <span>Seq preview u16</span>
+                              <code>{{ zanimWordsLabel(seq.previewU16) }}</code>
+                            </div>
+                            <div class="zip-zanim-section">
+                              <span>Seq bytes</span>
+                              <code>{{ seq.previewHex }}</code>
+                            </div>
+                          } @else {
+                            <div class="zip-zanim-section">
+                              <span>Seq bytes</span>
+                              <code>{{ z.nodesLoaded ? 'empty' : 'loading payloads...' }}</code>
+                            </div>
+                          }
+                        } @else {
+                          <div class="zip-zanim-title">Archive Summary</div>
+                          <div class="zip-zanim-section">
+                            <span>RDR search paths</span>
+                            <div class="zip-zanim-code-list">
+                              @for (set of z.sets; track set.entryIndex) {
+                                @for (path of set.rdrPaths; track path) {
+                                  <code>{{ path }}</code>
+                                }
+                              }
+                            </div>
+                          </div>
+                        }
+                      </div>
+                    </div>
+                    @if (previewMessage()) {
+                      <div class="zip-preview-overlay">{{ previewMessage() }}</div>
+                    }
+                  } @else {
+                    <div class="zip-preview-overlay">{{ previewMessage() || 'No ZANIM data selected.' }}</div>
+                  }
+                </div>
+                <div class="zip-preview-info">
+                  @if (zanimSummary(); as z) {
+                    <div><span>Format</span><strong>ZANIM script/effect archive</strong></div>
+                    <div><span>Sets</span><strong>{{ z.sets.length }} / declared {{ z.declaredSetCount ?? '-' }}</strong></div>
+                    <div><span>Names</span><strong>{{ z.totalNames }}</strong></div>
+                    <div><span>RDR paths</span><strong>{{ z.totalRdrPaths }}</strong></div>
+                    <div><span>Animations</span><strong>{{ z.totalAnimations }}</strong></div>
+                    <div><span>Payloads</span><strong>{{ z.nodesLoaded ? 'loaded' : 'loading' }}</strong></div>
+                    @if (z.mainParams) {
+                      <div><span>Main params</span><strong>{{ zanimParamsLabel(z.mainParams) }}</strong></div>
+                    }
+                  } @else {
+                    <div><span>Status</span><strong>{{ previewMessage() || 'Loading...' }}</strong></div>
+                  }
+                </div>
+              </div>
+            }
+
+            @if (previewMode() === 'animation') {
+              <div class="zip-preview zip-animation-preview">
+                <div class="zip-preview-stage zip-animation-stage">
+                  <canvas #animationCanvas class="zip-preview-canvas zip-animation-canvas"></canvas>
+                  @if (!animationClip() && previewMessage()) {
+                    <div class="zip-preview-overlay">{{ previewMessage() }}</div>
+                  }
+                </div>
+                <div class="zip-preview-info">
+                  @if (animationClip(); as clip) {
+                    <div class="zip-pane-section">
+                      <div class="zip-pane-section-title">Animation</div>
+                      <div><span>Clip</span><strong>{{ clip.name }}</strong></div>
+                      <div><span>Duration</span><strong>{{ clip.duration.toFixed(6) }} sec</strong></div>
+                      <div><span>Frames</span><strong>{{ clip.sampleCount }} samples / {{ animationFpsLabel(clip) }}</strong></div>
+                      <div><span>Bones</span><strong>{{ clip.boneCount }} total / {{ clip.attachmentBones.length }} sockets</strong></div>
+                      <div><span>Status</span><strong>{{ clip.parseOk ? 'clean parse' : 'partial parse' }}</strong></div>
+                    </div>
+
+                    <div class="zip-pane-section">
+                      <div class="zip-pane-section-title">Playback</div>
+                      <div class="zip-animation-controls">
+                        <button class="zip-btn" type="button" (click)="toggleAnimationPlayback()">
+                          <app-icon [name]="animationPlaying() ? 'pause' : 'play'" [size]="13" />
+                          {{ animationPlaying() ? 'Pause' : 'Play' }}
+                        </button>
+                        <button class="zip-btn" type="button" (click)="resetAnimationView()">
+                          <app-icon name="refreshcw" [size]="13" />
+                          Reset View
+                        </button>
+                      </div>
+                      <label class="zip-animation-scrub">
+                        <span>Frame {{ animationFrame() }} / {{ animationFrameMax(clip) }}</span>
+                        <input
+                          type="range"
+                          min="0"
+                          [max]="animationFrameMax(clip)"
+                          [value]="animationFrame()"
+                          (input)="onAnimationFrameInput($event)" />
+                      </label>
+                    </div>
+
+                    <div class="zip-pane-section">
+                      <div class="zip-pane-section-title">Tracks</div>
+                      <div class="zip-animation-counts">
+                        <span>0x0C {{ clip.counts['0x0C'] || 0 }}</span>
+                        <span>0x1C {{ clip.counts['0x1C'] || 0 }}</span>
+                        <span>0x2C {{ clip.counts['0x2C'] || 0 }}</span>
+                        <span>0x3C {{ clip.counts['0x3C'] || 0 }}</span>
+                      </div>
+                      @if (clip.attachmentBones.length > 0) {
+                        <div class="zip-animation-tags">
+                          @for (bone of clip.attachmentBones; track bone) {
+                            <span class="weapon">{{ cleanAnimationBoneLabel(bone) }}</span>
+                          }
+                        </div>
+                      }
+                      @if (clip.errors.length > 0) {
+                        <div class="zip-animation-errors">
+                          @for (err of clip.errors.slice(0, 4); track err) {
+                            <div>{{ err }}</div>
+                          }
+                        </div>
+                      }
+                    </div>
+
+                    <div class="zip-pane-section">
+                      <div class="zip-pane-section-title">Bones</div>
+                      <div class="zip-animation-list">
+                        @for (bone of animationBoneRows(); track bone.index) {
+                          <div class="zip-animation-row" [class.weapon]="bone.attachment">
+                            <span class="idx">{{ bone.index.toString().padStart(2, '0') }}</span>
+                            <span class="bone" [style.padding-left.px]="bone.depth * 10">{{ bone.clean }}</span>
+                            <span class="tag">{{ bone.trackType }}</span>
+                            <span class="tag">p={{ bone.parent }}</span>
+                          </div>
+                        }
+                      </div>
+                    </div>
+
+                    <div class="zip-pane-section">
+                      <div class="zip-pane-section-title">Track Detail</div>
+                      <div class="zip-animation-list">
+                        @for (track of animationTrackRows(); track track.offset) {
+                          <div class="zip-animation-track" [class.weapon]="isAnimationAttachment(track.boneName)">
+                            <div>
+                              <span class="idx">{{ track.boneIndex.toString().padStart(2, '0') }}</span>
+                              <strong>{{ cleanAnimationBoneLabel(track.boneName) }}</strong>
+                              <span class="tag">{{ animationHex(track.type) }}</span>
+                              <span class="muted">&#64; {{ animationHex(track.offset) }}</span>
+                            </div>
+                            <div class="muted">{{ track.typeName }}</div>
+                            <div>base={{ animationTrackBase(track) }}</div>
+                            <div>quat={{ animationTrackQuat(track) }}</div>
+                          </div>
+                        }
+                      </div>
+                    </div>
+                  } @else {
+                    <div><span>Status</span><strong>{{ previewMessage() || 'Loading animation...' }}</strong></div>
+                  }
+                </div>
               </div>
             }
 
@@ -668,7 +899,7 @@ interface RdrTreeNode {
                 <div>
                   <div class="zip-section-title">Modules</div>
                   <div class="zip-module-list">
-                    @for (module of result()?.save?.modules || []; track module) {
+                    @for (module of result()?.save?.modules || []; track $index) {
                       <span>{{ module }}</span>
                     }
                   </div>
@@ -759,15 +990,18 @@ interface RdrTreeNode {
 })
 export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterViewInit {
   @ViewChild('previewCanvas') private previewCanvas?: ElementRef<HTMLCanvasElement>;
+  @ViewChild('animationCanvas') private animationCanvas?: ElementRef<HTMLCanvasElement>;
 
   private readonly vscode = getVsCodeApi();
   private modelRenderer: ZedModelRenderer | null = null;
+  private animationRenderer: RdrAnimationCanvasRenderer | null = null;
   private nodeCache = new Map<number, Uint8Array>();
   private inflightNode: number | null = null;
   // Maps a fetched node index back to the selected entry index that triggered
   // the fetch (used when .tif markers redirect to the next texdat entry).
   private nodeAliasForFetch = new Map<number, number>();
   private palettesRequested = false;
+  private lastTextureDiagnostic = '';
 
   readonly result = signal<ZipperInspectResult | null>(null);
   readonly search = signal('');
@@ -828,6 +1062,48 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
 
   // AIMAPS.MPS preview state.
   readonly mps = signal<MpsResult | null>(null);
+  readonly animationClip = signal<RdrAnimationClip | null>(null);
+  readonly animationPlaying = signal(true);
+  readonly animationFrame = signal(0);
+  private archiveNodesRequestedFor = '';
+  readonly archiveNodesVersion = signal(0);
+  readonly zanimSummary = computed<ZanimArchiveSummary | null>(() => {
+    this.archiveNodesVersion();
+    const summary = parseZanimArchive(this.rawEntries(), index => this.nodeCache.get(index));
+    return summary.isZanim ? summary : null;
+  });
+  readonly selectedZanimAnimation = computed<ZanimAnimationSummary | null>(() => {
+    const entry = this.selectedEntry();
+    return findZanimAnimationForEntry(this.zanimSummary(), entry?.index ?? null, entry?.name ?? null);
+  });
+  readonly visibleZanimAnimations = computed<ZanimAnimationSummary[]>(() => {
+    const summary = this.zanimSummary();
+    if (!summary) { return []; }
+    const q = this.search().trim().toLowerCase();
+    const animations = summary.sets.flatMap(set => set.animations);
+    if (!q) { return animations; }
+    return animations.filter(anim =>
+      [anim.name, ...anim.nameRefs].join(' ').toLowerCase().includes(q));
+  });
+  readonly animationBoneRows = computed<Array<{ index: number; name: string; clean: string; parent: number; trackType: string; attachment: boolean; depth: number }>>(() => {
+    const clip = this.animationClip();
+    if (!clip) { return []; }
+    return clip.bones.map((name, index) => {
+      const clean = cleanAnimationBoneName(name);
+      const track = clip.tracks[index];
+      const depth = ((name || '').match(/^-*/) || [''])[0].length;
+      return {
+        index,
+        name,
+        clean,
+        parent: clip.parents[index] ?? -1,
+        trackType: track ? trackTypeKey(track.type) : '-',
+        attachment: /weapon|rifle|gun|pistol|cig|cigar|smoke|prop|attach/i.test(clean),
+        depth,
+      };
+    });
+  });
+  readonly animationTrackRows = computed<RdrAnimationTrack[]>(() => this.animationClip()?.tracks ?? []);
 
   // Full ZDB-package state. After the user opens a .zdb, we fetch every
   // top-level entry's bytes in one socket round trip and decode all
@@ -843,17 +1119,17 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
   // material-binding signal used in the model parser path.
   readonly mapRenderMode = signal<'view3dTexturedLit' | 'view3dTextured' | 'view3dSolid' | 'topSolid' | 'topWire' | 'view3dWire'>('view3dTexturedLit');
   readonly mapTriStride = signal<number>(1);
-  // Default 'smartWorld' to match the HTML map viewer. tailScan-only
-  // misses ~80% of world chunks because their .tif name doesn't sit in
-  // the tail area; smartWorld supplements with marker-and-slice rules.
-  // For weapons/castles that tail scan handles perfectly, smartWorld's
-  // override of an existing chunk.textureName is harmless because the
-  // nearest marker IS that same .tif.
+  // Default 'smartWorld' to match the HTML map viewer for world/map models.
+  // WEAP_MDL payloads are forced back to tail-scan in the decode paths below:
+  // weapon payloads often store helper + primary .tif names in one marker
+  // block, and smart marker binding can pick the helper atlas.
   readonly mapMaterialBinding = signal<'tailScan' | 'smartWorld' | 'sliceNearest' | 'globalNearest'>('smartWorld');
   // The raw model bytes for the currently-displayed model, kept so we can
   // re-run the binding pass on dropdown change without re-decoding.
   private currentModelBytes: Uint8Array | null = null;
   private currentSliceOffsets: number[] = [];
+  private currentModelBindingMode: 'weaponDescriptor' | 'map' | 'tail' = 'tail';
+  private currentModelSourceArchive: string | null = null;
   readonly mapTextureV = signal<'flipV' | 'direct'>('flipV');
   readonly mapUvInterpretation = signal<'autoWorld' | 'norm4096' | 'pixel16' | 'pixel256'>('autoWorld');
   readonly mapTextureFilter = signal<string>('');
@@ -1018,6 +1294,8 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
         this.selectedIndex.set(null);
         this.lastOperation.set(null);
         this.nodeCache.clear();
+        this.archiveNodesRequestedFor = '';
+        this.archiveNodesVersion.update(v => v + 1);
         this.palettes.set(null);
         this.palettesRequested = false;
         this.archiveStack.set([]);
@@ -1030,6 +1308,8 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
         // For ZDB packages, kick off the full-package preload so the model
         // viewer never has to chase per-entry round-trips later.
         this.requestZdbPackageIfNeeded();
+        this.requestArchiveNodesIfNeeded();
+        this.selectInitialZanimEntryIfNeeded();
         break;
       case 'zdbPackage': {
         const nodes = (data['nodes'] as Array<{ index: number; name: string; type: number; data: string }>) ?? [];
@@ -1045,6 +1325,26 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
         this.packageLoading.set(false);
         this.packageMessage.set('Package load failed: ' + message);
         this.log(`[package] ERROR: ${message}`);
+        break;
+      }
+      case 'archiveNodes': {
+        const nodes = (data['nodes'] as Array<{ index: number; name: string; type: number; data: string }>) ?? [];
+        for (const node of nodes) {
+          this.nodeCache.set(node.index, base64ToBytes(node.data));
+        }
+        this.archiveNodesVersion.update(v => v + 1);
+        this.setStatus(`Loaded ${nodes.length} archive node payload(s).`, false, false);
+        if (this.previewMode() === 'zanim') {
+          this.previewMessage.set('');
+        }
+        break;
+      }
+      case 'archiveNodesError': {
+        const message = (data['message'] as string) ?? 'unknown';
+        this.setStatus(`Archive node preload failed: ${message}`, true, false);
+        if (this.previewMode() === 'zanim') {
+          this.previewMessage.set('Archive node preload failed: ' + message);
+        }
         break;
       }
       case 'zipperOperation':
@@ -1215,6 +1515,8 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     window.removeEventListener('message', this.onMessage);
     this.modelRenderer?.dispose();
     this.modelRenderer = null;
+    this.animationRenderer?.dispose();
+    this.animationRenderer = null;
   }
 
   openFile(): void {
@@ -1351,8 +1653,10 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
   setPreviewMode(mode: PreviewMode): void {
     if (mode === 'model' && !this.canPreviewModel()) { return; }
     if (mode === 'texture' && !this.canPreviewTexture()) { return; }
+    if (mode === 'animation' && !this.animationClip()) { return; }
     this.previewMode.set(mode);
     if (mode === 'model') { this.ensureModelRenderer(); }
+    if (mode === 'animation') { this.ensureAnimationRenderer(); }
   }
 
   toggleWireframe(): void {
@@ -1383,6 +1687,80 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     const value = (event.target as HTMLSelectElement).value;
     this.paletteOverride.set(value && value.length > 0 ? value : null);
     this.applyModelToRenderer();
+  }
+
+  selectZanimAnimation(entryIndex: number): void {
+    this.selectedIndex.set(entryIndex);
+  }
+
+  zanimWordsLabel(words: number[] | undefined): string {
+    if (!words || words.length === 0) { return '-'; }
+    return words.map(w => '0x' + (w >>> 0).toString(16).toUpperCase()).join(' ');
+  }
+
+  zanimParamsLabel(params: { words: number[]; floats: number[] } | null): string {
+    if (!params) { return 'loading...'; }
+    const words = params.words.map(w => '0x' + (w >>> 0).toString(16).toUpperCase()).join(' ');
+    const floats = params.floats.map(f => Number.isFinite(f) ? f.toFixed(3) : 'nan').join(', ');
+    return `${words}  | f32 ${floats}`;
+  }
+
+  zanimNodeRefLabel(words: [number, number, number, number]): string {
+    return `[${words.map(w => '0x' + w.toString(16).toUpperCase()).join(', ')}]`;
+  }
+
+  toggleAnimationPlayback(): void {
+    const next = !this.animationPlaying();
+    this.animationPlaying.set(next);
+    this.animationRenderer?.setPlaying(next);
+  }
+
+  resetAnimationView(): void {
+    this.animationRenderer?.resetView();
+  }
+
+  onAnimationFrameInput(event: Event): void {
+    const value = Number((event.target as HTMLInputElement).value);
+    if (!Number.isFinite(value)) { return; }
+    this.animationPlaying.set(false);
+    this.animationRenderer?.setPlaying(false);
+    this.animationRenderer?.setFrame(value);
+    this.animationFrame.set(Math.floor(value));
+  }
+
+  animationFrameMax(clip: RdrAnimationClip): number {
+    return Math.max(0, clip.sampleCount - 1);
+  }
+
+  animationFpsLabel(clip: RdrAnimationClip): string {
+    return `${animationFrameRate(clip).toFixed(2)} fps`;
+  }
+
+  cleanAnimationBoneLabel(name: string): string {
+    return cleanAnimationBoneName(name);
+  }
+
+  isAnimationAttachment(name: string): boolean {
+    return /weapon|rifle|gun|pistol|cig|cigar|smoke|prop|attach/i.test(cleanAnimationBoneName(name));
+  }
+
+  animationHex(value: number): string {
+    return formatAnimationHex(value);
+  }
+
+  animationTrackBase(track: RdrAnimationTrack): string {
+    if (track.baseVec4) { return `[${track.baseVec4.join(', ')}]`; }
+    if (track.posSamples?.length) {
+      const p = track.posSamples[0];
+      return `[${p.map(v => Math.round(v)).join(', ')}] -> animated`;
+    }
+    return 'n/a';
+  }
+
+  animationTrackQuat(track: RdrAnimationTrack): string {
+    if (track.staticQuat) { return `[${track.staticQuat.join(', ')}] static`; }
+    if (track.quatSamples?.length) { return `[${track.quatSamples[0].join(', ')}] -> animated`; }
+    return 'n/a';
   }
 
 
@@ -1433,12 +1811,18 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     this.texture.set(null);
     this.textureDataUrl.set('');
     this.model.set(null);
+    this.rdr.set(null);
+    this.mps.set(null);
+    this.animationClip.set(null);
+    this.animationFrame.set(0);
+    this.animationPlaying.set(true);
     this.previewMessage.set('');
     this.wireframe.set(false);
     this.selectedChunk.set(-1);
     this.paletteOverride.set(null);
     this.pendingArchiveEntry.set(null);
     this.modelRenderer?.setModel(null);
+    this.animationRenderer?.setClip(null);
   }
 
   enterPendingArchive(): void {
@@ -1468,6 +1852,13 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     if (!filePath) { return; }
 
     this.resetPreview();
+    if (this.zanimSummary()) {
+      this.previewMode.set('zanim');
+      this.previewMessage.set(this.zanimSummary()?.nodesLoaded ? '' : 'Loading animation payloads...');
+      this.requestArchiveNodesIfNeeded();
+      return;
+    }
+
     const looksTif = /\.tif$/i.test(name);
     this.previewMode.set(looksTif ? 'texture' : 'model');
     this.previewMessage.set('Loading preview...');
@@ -1606,8 +1997,8 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
   // from the root ZDB). Once bytes arrive, populate companionTextures and
   // palettes so model chunks can resolve their textures by .tif name.
   private rootCompanionFetches = new Map<number, 'txr' | 'pal' | 'geo'>();
-  private rootCompanionTxrArchive: InspectedZedArchive | null = null;
-  private rootCompanionPalArchive: InspectedZedArchive | null = null;
+  private rootCompanionTxrArchives = new Map<string, InspectedZedArchive>();
+  private rootCompanionPalArchives = new Map<string, InspectedZedArchive>();
 
   private loadMdlCompanionsForCurrentLayer(): void {
     // Same guard as loadNestedPalettesForCurrentLayer — when the ZDB
@@ -1629,14 +2020,22 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     if (!mdlMatch) { return; }
     const prefix = mdlMatch[1];
 
-    const targets: Array<{ kind: 'txr' | 'pal' | 'geo'; leafName: string }> = [
-      { kind: 'txr', leafName: `${prefix}_TXR.ZED`.toLowerCase() },
-      { kind: 'pal', leafName: `${prefix}_PAL.ZED`.toLowerCase() },
-      { kind: 'geo', leafName: `${prefix}_GEO.ZED`.toLowerCase() },
-    ];
+    const companionPrefixes = [prefix];
+    if (/^effe$/i.test(prefix)) {
+      companionPrefixes.push('ALPH');
+    }
+    const targets: Array<{ kind: 'txr' | 'pal' | 'geo'; leafName: string }> = [];
+    for (const p of companionPrefixes) {
+      targets.push({ kind: 'txr', leafName: `${p}_TXR.ZED`.toLowerCase() });
+      targets.push({ kind: 'pal', leafName: `${p}_PAL.ZED`.toLowerCase() });
+    }
+    targets.push({ kind: 'geo', leafName: `${prefix}_GEO.ZED`.toLowerCase() });
 
-    this.rootCompanionTxrArchive = null;
-    this.rootCompanionPalArchive = null;
+    this.rootCompanionFetches.clear();
+    this.rootCompanionTxrArchives.clear();
+    this.rootCompanionPalArchives.clear();
+    this.companionTextures.set(null);
+    this.palettes.set(null);
 
     // Search in-memory sub-archives on the stack first (excluding current).
     const previous = stack.length >= 2 ? stack[stack.length - 2].archive : null;
@@ -1683,10 +2082,11 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     try {
       const archive = parseZedArchive(bytes);
       this.setStatus(`Loaded companion ${kind.toUpperCase()} (${name}, ${archive.entries.length} entries).`, false, false);
+      const namespace = namespaceFromArchiveName(name) ?? name.toLowerCase();
       if (kind === 'txr') {
-        this.rootCompanionTxrArchive = archive;
+        this.rootCompanionTxrArchives.set(namespace, archive);
         // Build the .tif -> texdat map used by buildTifByteMap.
-        const map = new Map<string, Uint8Array>();
+        const map = new Map<string, Uint8Array>(this.companionTextures() ?? []);
         const entries = archive.entries;
         for (let i = 0; i < entries.length; i++) {
           if (!/\.tif$/i.test(entries[i].name)) { continue; }
@@ -1694,7 +2094,9 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
             if (/^texdat$/i.test(entries[j].name)) {
               const data = archive.entryData.get(entries[j].index);
               if (data && data.length > 0) {
-                map.set(entries[i].name.toLowerCase(), data);
+                const key = entries[i].name.toLowerCase();
+                map.set(key, data);
+                map.set(`${namespace}:${key}`, data);
               }
               break;
             }
@@ -1703,7 +2105,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
         }
         this.companionTextures.set(map);
       } else if (kind === 'pal') {
-        this.rootCompanionPalArchive = archive;
+        this.rootCompanionPalArchives.set(namespace, archive);
       } else if (kind === 'geo') {
         const entries: GeoEntry[] = archive.entries.map(e => ({
           index: e.index,
@@ -1722,25 +2124,31 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
   }
 
   private rebuildAliasedPalettes(sourceName: string): void {
-    const pal = this.rootCompanionPalArchive;
-    if (!pal) { return; }
-    let palettes = parsePaletteEntries(
-      pal.entries.map(e => ({ name: e.name })),
-      i => pal.entryData.get(pal.entries[i].index) ?? new Uint8Array(0),
-    );
-    const txr = this.rootCompanionTxrArchive;
-    if (txr) {
-      palettes = aliasPalettesForTextureEntries(
-        palettes,
-        txr.entries.map(e => ({ name: e.name })),
-        i => txr.entryData.get(txr.entries[i].index) ?? new Uint8Array(0),
+    if (this.rootCompanionPalArchives.size === 0) { return; }
+    const merged = new Map<string, ZedPalette>();
+    for (const [namespace, pal] of this.rootCompanionPalArchives) {
+      let palettes = parsePaletteEntries(
+        pal.entries.map(e => ({ name: e.name })),
+        i => pal.entryData.get(pal.entries[i].index) ?? new Uint8Array(0),
       );
+      const txr = this.rootCompanionTxrArchives.get(namespace);
+      if (txr) {
+        palettes = aliasPalettesForTextureEntries(
+          palettes,
+          txr.entries.map(e => ({ name: e.name })),
+          i => txr.entryData.get(txr.entries[i].index) ?? new Uint8Array(0),
+        );
+      }
+      for (const [key, value] of palettes) {
+        merged.set(key, value);
+        merged.set(`${namespace}:${key}`, value);
+      }
     }
-    if (palettes.size > 0) {
-      this.palettes.set(palettes);
-      this.paletteMessage.set(`Loaded ${palettes.size} palette(s) from ${sourceName}.`);
+    if (merged.size > 0) {
+      this.palettes.set(merged);
+      this.paletteMessage.set(`Loaded ${merged.size} palette alias(es) from ${sourceName}.`);
       this.setStatus(
-        `Palettes ready (${palettes.size}). TXR loaded: ${!!this.rootCompanionTxrArchive}.`,
+        `Palettes ready (${merged.size}). TXR loaded: ${this.rootCompanionTxrArchives.size}.`,
         false,
         false,
       );
@@ -1793,11 +2201,13 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
 
     // RDR typed-table data: ask the bridge to parse and display structured tree.
     if (/\.rdr$/i.test(entry.name)) {
+      const leaf = entry.name.split(/[\\/]/).pop() ?? entry.name;
+      if (this.tryApplyAnimationPreview(bytes, leaf)) { return; }
+
       this.previewMode.set('rdr');
       this.previewMessage.set('Parsing RDR table...');
       this.rdr.set(null);
       const filePath = this.result()?.path;
-      const leaf = entry.name.split(/[\\/]/).pop() ?? entry.name;
       // We already have the .rdr bytes here (passed in via `bytes` arg). Skip
       // the backend's container drill-down and parse the bytes directly —
       // this works for any nesting depth, including .rdr-inside-.zar-inside
@@ -1881,11 +2291,32 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     }
     this.pendingArchiveEntry.set(null);
 
+    // Motion archives store raw animation payloads under bare clip names
+    // (civ_jog, guard_checkwatch, etc.) rather than ".rdr" filenames.
+    if (this.tryApplyAnimationPreview(bytes, entry.name)) { return; }
+
     // Anything else: try to parse as a model. Keep the pane open even when no
     // chunks are found, so the user sees diagnostics rather than nothing.
     this.previewMode.set('model');
     try {
-      let mdl = parseModel(bytes);
+      const alternate = this.resolveAlternateModelPayload(entry.name);
+      const modelBytes = alternate?.bytes ?? bytes;
+      const sliceOffsets = alternate?.sliceOffsets ?? this.collectSliceOffsetsForCurrentEntry();
+      const bindingMode: 'weaponDescriptor' | 'map' | 'tail' = alternate
+        ? 'tail'
+        : this.isCurrentWeaponModelLayer()
+          ? 'weaponDescriptor'
+          : this.isCurrentEffectModelLayer()
+            ? 'tail'
+            : 'map';
+      const sourceArchive = alternate?.sourceArchiveName ?? this.currentArchiveLeaf();
+      if (alternate) {
+        this.log(`[model] ${entry.name}: using ${alternate.sourceName}`);
+      }
+
+      let mdl = this.isCurrentEffectModelLayer()
+        ? (decodeFallbackPayload(modelBytes) ?? parseModel(modelBytes))
+        : parseModel(modelBytes);
       let fallbackUsed = false;
       // If the standard chunk format yielded nothing (common for CLIB
       // MESH_* payloads which start with their name as ASCII rather than
@@ -1893,21 +2324,21 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       // decoders. They give the user *something* to inspect instead of an
       // empty pane.
       if (mdl.chunks.length === 0) {
-        const fallback = decodeFallbackPayload(bytes);
+        const fallback = decodeFallbackPayload(modelBytes);
         if (fallback && fallback.chunks.length > 0) {
           mdl = fallback;
           fallbackUsed = true;
         }
       }
-      this.currentModelBytes = bytes;
-      // Collect the Nxxx_xxx 4-byte child offsets from the parent archive
-      // so the smartWorld binding pass has slices to work with.
-      this.currentSliceOffsets = this.collectSliceOffsetsForCurrentEntry();
+      this.currentModelBytes = modelBytes;
+      this.currentSliceOffsets = sliceOffsets;
+      this.currentModelBindingMode = bindingMode;
+      this.currentModelSourceArchive = sourceArchive;
       this.applyCurrentBinding(mdl);
       this.model.set(mdl);
       if (mdl.chunks.length === 0) {
         this.previewMessage.set(
-          `No model chunks found (payload ${bytes.length} bytes, first 4 = ${describeMagic(bytes)})`
+          `No model chunks found (payload ${modelBytes.length} bytes, first 4 = ${describeMagic(modelBytes)})`
         );
       } else if (fallbackUsed) {
         this.previewMessage.set(
@@ -1922,8 +2353,103 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       this.model.set(null);
       this.currentModelBytes = null;
       this.currentSliceOffsets = [];
+      this.currentModelBindingMode = 'tail';
+      this.currentModelSourceArchive = null;
       this.previewMessage.set('Model decode failed: ' + (err instanceof Error ? err.message : String(err)));
     }
+  }
+
+  private tryApplyAnimationPreview(bytes: Uint8Array, name: string): boolean {
+    const leaf = name.split(/[\\/]/).pop() ?? name;
+    const animation = parseRdrAnimation(bytes, leaf);
+    if (!animation.animationLike) { return false; }
+
+    this.previewMode.set('animation');
+    this.animationClip.set(animation);
+    this.animationPlaying.set(true);
+    this.animationFrame.set(0);
+    this.previewMessage.set(animation.parseOk
+      ? ''
+      : `Animation parsed partially (${animation.tracks.length}/${animation.boneCount} tracks).`);
+    this.log(
+      `[ANIM] ${leaf}: ${animation.boneCount} bones, ${animation.sampleCount} samples, ` +
+      `${animation.tracks.length} tracks, ${animation.parseOk ? 'clean' : 'partial'}`,
+    );
+    setTimeout(() => this.applyAnimationToRenderer(), 0);
+    return true;
+  }
+
+  private resolveAlternateModelPayload(entryName: string): { bytes: Uint8Array; sliceOffsets: number[]; sourceName: string; sourceArchiveName: string } | null {
+    if (entryName.toLowerCase() !== 'footbomb') { return null; }
+    const flibBytes = this.packageEntryBytes.get('flib_mdl.zed');
+    if (!flibBytes) { return null; }
+    try {
+      const archive = parseZedArchive(flibBytes);
+      const satchel = archive.entries.find(e => e.name.toLowerCase() === 'satchel');
+      if (!satchel) { return null; }
+      const bytes = archive.entryData.get(satchel.index);
+      if (!bytes || bytes.length === 0) { return null; }
+      const sliceOffsets: number[] = [];
+      for (const childIdx of satchel.children) {
+        const childBytes = archive.entryData.get(childIdx);
+        if (!childBytes || childBytes.length !== 4) { continue; }
+        const view = new DataView(childBytes.buffer, childBytes.byteOffset, 4);
+        sliceOffsets.push(view.getUint32(0, true));
+      }
+      return { bytes, sliceOffsets, sourceName: 'flib_mdl.zed / Satchel', sourceArchiveName: 'flib_mdl.zed' };
+    } catch {
+      return null;
+    }
+  }
+
+  private currentArchiveLeaf(): string | null {
+    const stack = this.archiveStack();
+    if (stack.length === 0) {
+      const path = this.result()?.path;
+      return path ? (path.split(/[\\/]/).pop() ?? path).toLowerCase() : null;
+    }
+    const current = stack[stack.length - 1].name;
+    return (current.split(/[\\/]/).pop() ?? current).toLowerCase();
+  }
+
+  private textureNamespaceForArchiveName(archiveName: string | null | undefined): string | null {
+    const namespace = namespaceFromArchiveName(archiveName);
+    if (!namespace) { return null; }
+    if (this.packageHasArchive(namespace, 'txr')) { return namespace; }
+
+    // WORL_MDL is the map's baked world mesh, but SOCOM packages do not ship
+    // a WORL_TXR/PAL pair. Its texture refs resolve through the active map
+    // namespace instead: M51.ZDB -> M51_TXR/PAL, MP63.ZDB -> MP63_TXR/PAL, etc.
+    if (namespace === 'worl') {
+      return this.primaryMapTextureNamespace();
+    }
+
+    return namespace;
+  }
+
+  private packageHasArchive(namespace: string, kind: 'txr' | 'pal' | 'mdl' | 'geo'): boolean {
+    const escaped = namespace.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const rx = new RegExp(`^${escaped}_${kind}(?:\\([^)]+\\))?\\.zed$`, 'i');
+    for (const key of this.packageEntryBytes.keys()) {
+      if (rx.test(key)) { return true; }
+    }
+    return false;
+  }
+
+  private primaryMapTextureNamespace(): string | null {
+    const path = this.result()?.path;
+    const leaf = path ? (path.split(/[\\/]/).pop() ?? path).replace(/\.[^.]+$/i, '').toLowerCase() : '';
+    if (leaf && this.packageHasArchive(leaf, 'txr')) { return leaf; }
+
+    const supportPrefixes = new Set(['weap', 'flib', 'clib', 'benz', 'objt', 'effe', 'trmg', 'tlrm', 'alph', 'font', 'hud', 'hud2', 'hudw', 'load']);
+    for (const key of this.packageEntryBytes.keys()) {
+      const ns = namespaceFromArchiveName(key);
+      if (!ns || supportPrefixes.has(ns)) { continue; }
+      if (this.packageHasArchive(ns, 'txr') && (this.packageHasArchive(ns, 'mdl') || this.packageHasArchive(ns, 'geo'))) {
+        return ns;
+      }
+    }
+    return null;
   }
 
   // Pulls slice offsets from the Nxxx_xxx child stubs of the selected entry.
@@ -1951,10 +2477,29 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
   // current dropdown selection. `tailScan` (default) is a no-op so the
   // existing chunk.textureName from findTifInRange is preserved.
   private applyCurrentBinding(mdl: ZedModel): void {
+    if (!this.currentModelBytes) { return; }
+    if (this.currentModelBindingMode === 'weaponDescriptor') {
+      applyWeaponDescriptorBinding(mdl, this.currentModelBytes, this.currentSliceOffsets);
+      return;
+    }
+    if (this.currentModelBindingMode === 'tail') { return; }
     const mode = this.mapMaterialBinding();
     if (mode === 'tailScan') { return; }
-    if (!this.currentModelBytes) { return; }
     applyMarkerBinding(mdl, this.currentModelBytes, this.currentSliceOffsets, mode);
+  }
+
+  private isCurrentWeaponModelLayer(): boolean {
+    const stack = this.archiveStack();
+    const current = stack.length > 0 ? stack[stack.length - 1].name : '';
+    const leaf = current.split(/[\\/]/).pop() ?? current;
+    return /^weap_mdl(?:\([^)]+\))?\.zed$/i.test(leaf);
+  }
+
+  private isCurrentEffectModelLayer(): boolean {
+    const stack = this.archiveStack();
+    const current = stack.length > 0 ? stack[stack.length - 1].name : '';
+    const leaf = current.split(/[\\/]/).pop() ?? current;
+    return /^effe_mdl(?:\([^)]+\))?\.zed$/i.test(leaf);
   }
 
   private refreshPreview(): void {
@@ -1979,6 +2524,26 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     }
   }
 
+  private ensureAnimationRenderer(): void {
+    const canvas = this.animationCanvas?.nativeElement;
+    if (!canvas) { return; }
+    if (this.animationRenderer && this.animationRenderer.attachedCanvas !== canvas) {
+      this.animationRenderer.dispose();
+      this.animationRenderer = null;
+    }
+    if (!this.animationRenderer) {
+      this.animationRenderer = new RdrAnimationCanvasRenderer(canvas);
+      this.animationRenderer.onFrameChange = frame => this.animationFrame.set(frame);
+    }
+  }
+
+  private applyAnimationToRenderer(): void {
+    this.ensureAnimationRenderer();
+    if (!this.animationRenderer) { return; }
+    this.animationRenderer.setClip(this.animationClip());
+    this.animationRenderer.setPlaying(this.animationPlaying());
+  }
+
   private applyModelToRenderer(): void {
     this.ensureModelRenderer();
     const mdl = this.model();
@@ -1992,35 +2557,153 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     // sample different UV regions of the same sheet. Pick a primary atlas
     // texture for the weapon, then load any per-chunk overrides on top.
     const textures: Record<string, { width: number; height: number; rgba: Uint8Array }> = {};
+    const missingTextureSources = new Set<string>();
+    const failedTextureDecodes = new Set<string>();
+    const paletteOverride = this.paletteOverride();
     let defaultTif: string | null = null;
+    let defaultTextureKey: string | null = null;
+
+    const sourceNameForChunk = (chunk: ZedModel['chunks'][number]): string =>
+      chunk.sourceModelName ?? entry?.name ?? '';
+
+    const sourceArchiveForChunk = (chunk: ZedModel['chunks'][number]): string | null =>
+      chunk.sourceArchiveName ?? this.currentModelSourceArchive;
+
+    const paletteAliasFor = (
+      sourceName: string | null | undefined,
+      tifName: string,
+      sourceArchiveName: string | null | undefined = null,
+    ): string | null => {
+      const tex = tifName.toLowerCase();
+      if (paletteOverride && defaultTif && tex === defaultTif.toLowerCase()) {
+        return paletteOverride;
+      }
+      const source = sourceName ?? '';
+      const explicit = source ? weaponPrimaryPaletteAlias(source, tex) : null;
+      if (explicit) { return explicit; }
+      const namespace = this.textureNamespaceForArchiveName(sourceArchiveName);
+      if (namespace && palettes?.has(`${namespace}:${tex}`)) {
+        return `${namespace}:${tex}`;
+      }
+      return null;
+    };
+
+    const textureRenderKeyFor = (
+      sourceName: string | null | undefined,
+      tifName: string,
+      paletteAlias: string | null = paletteAliasFor(sourceName, tifName),
+    ): string => {
+      const tex = tifName.toLowerCase();
+      if (!paletteAlias) { return tex; }
+      const source = (sourceName || entry?.name || 'model')
+        .toLowerCase()
+        .replace(/[^a-z0-9_.-]+/g, '_');
+      return `${source}::${tex}::${paletteAlias.toLowerCase()}`;
+    };
+
     if (entry) {
       defaultTif = guessTextureForWeapon(entry.name, sources, mdl);
       if (defaultTif) {
-        const bytes = sources.get(defaultTif);
+        const bytes = textureBytesFor(
+          sources,
+          defaultTif,
+          this.currentModelSourceArchive,
+          this.textureNamespaceForArchiveName(this.currentModelSourceArchive),
+        );
         if (bytes) {
           try {
-            // Honour the user's manual palette override if present.
-            const aliasForLookup = this.paletteOverride() ?? defaultTif;
-            const tex = parseTexture(bytes, palettes, aliasForLookup);
-            textures[defaultTif] = { width: tex.header.width, height: tex.header.height, rgba: tex.rgba };
-          } catch { defaultTif = null; }
-        } else { defaultTif = null; }
+            // Honour the user's manual palette override if present, otherwise
+            // use weapon-specific TXR/PAL aliases where the texture header id
+            // is known to point at the wrong colourway.
+            const sourcePaletteAlias = paletteAliasFor(entry.name, defaultTif, this.currentModelSourceArchive);
+            const forcedPaletteAlias = paletteOverride ?? sourcePaletteAlias;
+            const aliasForLookup = forcedPaletteAlias ?? defaultTif;
+            defaultTextureKey = textureRenderKeyFor(entry.name, defaultTif, forcedPaletteAlias);
+            const tex = parseModelTexture(bytes, palettes, aliasForLookup, defaultTif);
+            textures[defaultTextureKey] = { width: tex.header.width, height: tex.header.height, rgba: tex.rgba };
+          } catch {
+            failedTextureDecodes.add(defaultTif);
+            defaultTif = null;
+            defaultTextureKey = null;
+          }
+        } else {
+          missingTextureSources.add(defaultTif);
+          defaultTif = null;
+          defaultTextureKey = null;
+        }
       }
     }
 
+    const hasWeaponPrimaryAtlas = !!(entry && defaultTif && isWeaponPrimaryTexture(entry.name, defaultTif));
+
     // Per-chunk overrides for chunks that explicitly reference a different tif.
-    const needed = new Set<string>();
+    const effectiveChunkTexture = (chunk: ZedModel['chunks'][number]): string | null => {
+      const name = chunk.textureName;
+      if (!name || !defaultTif) { return name; }
+      if (chunk.textureBinding === 'descriptor') {
+        return descriptorTextureForWeapon(sourceNameForChunk(chunk), defaultTif, name);
+      }
+      // Weapon payloads often keep helper/marker .tif names near the real
+      // atlas name in the same tail block (M4: mark03.tif + m4.tif). For
+      // known weapon models, the selected weapon atlas is authoritative.
+      if (hasWeaponPrimaryAtlas && name.toLowerCase() !== defaultTif) {
+        return defaultTif;
+      }
+      if (isHelperTextureRef(name) && !isHelperTextureRef(defaultTif)) {
+        return defaultTif;
+      }
+      return name;
+    };
+
+    type NeededTexture = { sourceName: string; sourceArchiveName: string | null; textureName: string; paletteAlias: string | null };
+    const needed = new Map<string, NeededTexture>();
     for (const c of mdl.chunks) {
-      if (c.textureName) { needed.add(c.textureName.toLowerCase()); }
+      const texName = effectiveChunkTexture(c);
+      if (!texName) { continue; }
+      const sourceName = sourceNameForChunk(c);
+      const sourceArchiveName = sourceArchiveForChunk(c);
+      const paletteAlias = paletteAliasFor(sourceName, texName, sourceArchiveName);
+      const key = textureRenderKeyFor(sourceName, texName, paletteAlias);
+      if (!needed.has(key)) {
+        needed.set(key, { sourceName, sourceArchiveName, textureName: texName.toLowerCase(), paletteAlias });
+      }
     }
-    for (const name of needed) {
-      if (textures[name]) { continue; }
-      const bytes = sources.get(name);
-      if (!bytes) { continue; }
+    for (const [key, req] of needed) {
+      if (textures[key]) { continue; }
+      const bytes = textureBytesFor(
+        sources,
+        req.textureName,
+        req.sourceArchiveName,
+        this.textureNamespaceForArchiveName(req.sourceArchiveName),
+      );
+      if (!bytes) {
+        missingTextureSources.add(req.textureName);
+        continue;
+      }
       try {
-        const tex = parseTexture(bytes, palettes, name);
-        textures[name] = { width: tex.header.width, height: tex.header.height, rgba: tex.rgba };
-      } catch { /* skip */ }
+        const aliasForLookup = req.paletteAlias ?? req.textureName;
+        const tex = parseModelTexture(bytes, palettes, aliasForLookup, req.textureName);
+        textures[key] = { width: tex.header.width, height: tex.header.height, rgba: tex.rgba };
+      } catch { failedTextureDecodes.add(req.textureName); }
+    }
+
+    const traceTextureHandoff = !!entry && entry.name.toLowerCase().includes('fiveseven');
+    if (entry && (missingTextureSources.size > 0 || failedTextureDecodes.size > 0 || traceTextureHandoff)) {
+      const missing = [...missingTextureSources].sort();
+      const failed = [...failedTextureDecodes].sort();
+      const loaded = Object.keys(textures).sort();
+      const required = [...needed.values()]
+        .map(req => req.paletteAlias ? `${req.textureName}@${req.paletteAlias}` : req.textureName)
+        .sort();
+      const digest = `${entry.name}|default=${defaultTif ?? ''}|needed=${required.join(',')}|loaded=${loaded.join(',')}|missing=${missing.join(',')}|failed=${failed.join(',')}`;
+      if (digest !== this.lastTextureDiagnostic) {
+        this.log(`[texture] ${entry.name}: default=${defaultTif ?? '(none)'} needed=${required.join(', ') || '(none)'} loaded=${loaded.join(', ') || '(none)'}`);
+        if (missing.length) { this.log(`[texture] missing source(s): ${missing.join(', ')}`); }
+        if (failed.length) { this.log(`[texture] decode failed: ${failed.join(', ')}`); }
+        this.lastTextureDiagnostic = digest;
+      }
+    } else {
+      this.lastTextureDiagnostic = '';
     }
 
     // Map-viewer dropdowns flow through as part of the render options. The
@@ -2032,6 +2715,8 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     const topDown = renderMode === 'topSolid' || renderMode === 'topWire';
     const unlit = renderMode === 'view3dTextured' || renderMode === 'view3dSolid' || renderMode === 'topSolid';
     const solidColor = renderMode === 'view3dSolid' || renderMode === 'topSolid';
+    const hasEffectSource = this.isCurrentEffectModelLayer() ||
+      mdl.chunks.some(c => namespaceFromArchiveName(c.sourceArchiveName ?? this.currentModelSourceArchive) === 'effe');
 
     // The old separate "UV mode" and "Flip Y" toggles are gone — derive
     // their values from the consolidated V-orientation dropdown so the
@@ -2039,17 +2724,36 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     //   mapTextureV === 'flipV' -> uvMode = 'flipV'
     //   otherwise               -> uvMode = 'direct'
     const effectiveUvMode = this.mapTextureV() === 'flipV' ? 'flipV' : 'direct';
-    this.modelRenderer.setModel(mdl, {
+    const renderModel = {
+      ...mdl,
+      chunks: mdl.chunks.map(c => {
+        const textureName = effectiveChunkTexture(c);
+        const sourceName = sourceNameForChunk(c);
+        const sourceArchiveName = sourceArchiveForChunk(c);
+        return {
+          ...c,
+          textureName: textureName
+            ? textureRenderKeyFor(sourceName, textureName, paletteAliasFor(sourceName, textureName, sourceArchiveName))
+            : null,
+        };
+      }),
+    };
+
+    this.modelRenderer.setModel(renderModel, {
       wireframe: wireframeFromMode,
       flipY: false,
       uvMode: effectiveUvMode,
       chunkIndex: this.selectedChunk(),
       textures,
-      defaultTexture: defaultTif,
+      defaultTexture: defaultTextureKey ?? defaultTif,
+      textureRgba: hasWeaponPrimaryAtlas && defaultTextureKey ? textures[defaultTextureKey] ?? null : null,
       triStride: this.mapTriStride(),
       topDown,
-      unlit,
+      unlit: unlit || hasEffectSource,
       solidColor,
+      transparentTextures: hasEffectSource,
+      wireOverlay: hasEffectSource,
+      wireOverlayColor: effectWireOverlayColor(entry?.name ?? ''),
     });
   }
 
@@ -2109,6 +2813,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     }
     for (const layer of this.archiveStack()) {
       const archive = layer.archive;
+      const namespace = namespaceFromArchiveName(layer.name);
       const entries = archive.entries;
       for (let i = 0; i < entries.length; i++) {
         if (!/\.tif$/i.test(entries[i].name)) { continue; }
@@ -2116,7 +2821,9 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
           if (/^texdat$/i.test(entries[j].name)) {
             const data = archive.entryData.get(entries[j].index);
             if (data && data.length > 0) {
-              map.set(entries[i].name.toLowerCase(), data);
+              const key = entries[i].name.toLowerCase();
+              map.set(key, data);
+              if (namespace) { map.set(`${namespace}:${key}`, data); }
             }
             break;
           }
@@ -2179,6 +2886,24 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     this.vscode.postMessage({ type: 'loadZdbPackage', path: filePath });
   }
 
+  private requestArchiveNodesIfNeeded(): void {
+    const filePath = this.result()?.path;
+    if (!filePath || this.archiveNodesRequestedFor === filePath) { return; }
+    if (!this.zanimSummary()) { return; }
+    this.archiveNodesRequestedFor = filePath;
+    this.setStatus(`Loading ${filePath.split(/[\\/]/).pop()} animation payloads...`, false, true);
+    this.vscode.postMessage({ type: 'loadArchiveNodes', path: filePath });
+  }
+
+  private selectInitialZanimEntryIfNeeded(): void {
+    if (this.selectedIndex() !== null) { return; }
+    const summary = this.zanimSummary();
+    if (!summary) { return; }
+    const firstAnimation = summary.sets[0]?.animations[0];
+    const animSets = summary.entries.find(e => e.parent < 0 && e.name.toLowerCase() === 'anim_sets');
+    this.selectedIndex.set(firstAnimation?.entryIndex ?? animSets?.index ?? null);
+  }
+
   // Decode every top-level node of the just-loaded ZDB. _TXR / _PAL / _GEO
   // ZEDs are parsed inline so model previews resolve textures cross-archive
   // (the gap that caused 64-missing-textures on M51). Other entries are
@@ -2188,6 +2913,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     const txrArchives: Array<{ name: string; archive: InspectedZedArchive }> = [];
     const palArchives: Array<{ name: string; archive: InspectedZedArchive }> = [];
     const geoArchives: Array<{ name: string; archive: InspectedZedArchive }> = [];
+    const hasRootPaths = nodes.some(n => /[\\/]/.test(n.name));
 
     for (const node of nodes) {
       if (!node.data) { continue; }
@@ -2195,6 +2921,8 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       try { bytes = base64ToBytes(node.data); }
       catch { continue; }
       const leaf = (node.name.split(/[\\/]/).pop() ?? node.name).toLowerCase();
+      const isRootPackageEntry = !hasRootPaths || /[\\/]/.test(node.name);
+      if (!isRootPackageEntry) { continue; }
       this.packageEntryBytes.set(leaf, bytes);
 
       // Parse each sibling ZED inline. We tolerate parse errors (some
@@ -2213,7 +2941,8 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
 
     // Build the .tif -> texdat map across every TXR archive in the package.
     const tifMap = new Map<string, Uint8Array>();
-    for (const { archive } of txrArchives) {
+    for (const { name, archive } of txrArchives) {
+      const namespace = namespaceFromArchiveName(name);
       const entries = archive.entries;
       for (let i = 0; i < entries.length; i++) {
         if (!/\.tif$/i.test(entries[i].name)) { continue; }
@@ -2222,7 +2951,9 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
           if (/^texdat$/i.test(entries[j].name)) {
             const data = archive.entryData.get(entries[j].index);
             if (data && data.length > 0) {
-              tifMap.set(entries[i].name.toLowerCase(), data);
+              const key = entries[i].name.toLowerCase();
+              tifMap.set(key, data);
+              if (namespace) { tifMap.set(`${namespace}:${key}`, data); }
             }
             break;
           }
@@ -2250,7 +2981,11 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
           i => txrMatch.archive.entryData.get(txrMatch.archive.entries[i].index) ?? new Uint8Array(0),
         );
       }
-      for (const [k, v] of p) { mergedPalettes.set(k, v); }
+      const namespace = prefix.toLowerCase();
+      for (const [k, v] of p) {
+        mergedPalettes.set(k, v);
+        mergedPalettes.set(`${namespace}:${k}`, v);
+      }
     }
     if (mergedPalettes.size > 0) { this.palettes.set(mergedPalettes); }
 
@@ -2273,7 +3008,11 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     this.packageMessage.set(
       `Package loaded: ${tifMap.size} texture(s), ${mergedPalettes.size} palette(s), ${geoArchives.length} GEO archive(s).`,
     );
-    this.log(`[package] ${this.packageEntryBytes.size} entries; textures=${tifMap.size} palettes=${mergedPalettes.size} GEO=${geoArchives.length}`);
+    const mdlLeaves = [...this.packageEntryBytes.keys()].filter(k => /_MDL(?:\([^)]+\))?\.zed$/i.test(k));
+    this.log(`[package] ${this.packageEntryBytes.size} top-level entries; textures=${tifMap.size} palettes=${mergedPalettes.size} GEO=${geoArchives.length} MDL=${mdlLeaves.length}`);
+    if (mdlLeaves.length) {
+      this.log(`[package] MDL archives: ${mdlLeaves.join(', ')}`);
+    }
 
     // If the user already clicked a preview before the package finished
     // loading, the initial render had no companion textures. Re-trigger
@@ -2494,12 +3233,6 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     // very top of the GEO tree.
     let root = entry ? findSceneNode(scene, entry.name) : null;
     if (!root) { root = scene.root; }
-    const instances = collectGeoInstances(scene, root);
-    if (instances.length === 0) {
-      this.log(`[GEO] no placeable instances found under ${root.name}`, true);
-      return;
-    }
-
     // Build a model lookup map across EVERY *_MDL.ZED in the package by
     // walking each archive's full entry tree (HTML reference behaviour —
     // CLIB / FLIB style packages have model nodes nested as MESH_*
@@ -2507,7 +3240,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     // contributes multiple lookup keys (lowercased, compacted, stripped
     // of LOD/index suffixes, MESH_-prefixed) so GEO placements with name
     // variants resolve cleanly.
-    type ModelHit = { node: { index: number; name: string }; sourceFile: string; bytes: Uint8Array };
+    type ModelHit = { node: { index: number; name: string; size: number; children: number[] }; archive: InspectedZedArchive; sourceFile: string; bytes: Uint8Array };
     const mdlArchives: Array<{ leaf: string; archive: InspectedZedArchive }> = [];
     for (const [leaf, bytes] of this.packageEntryBytes) {
       if (!/_MDL(?:\([^)]+\))?\.zed$/i.test(leaf)) { continue; }
@@ -2517,10 +3250,14 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     const modelLookup = new Map<string, ModelHit[]>();
     for (const { leaf, archive } of mdlArchives) {
       for (const e of archive.entries) {
-        if (!e.size) { continue; }
         const bytes = archive.entryData.get(e.index);
-        if (!bytes || bytes.length === 0) { continue; }
-        const hit: ModelHit = { node: { index: e.index, name: e.name }, sourceFile: leaf, bytes };
+        if ((!bytes || bytes.length === 0) && e.children.length === 0) { continue; }
+        const hit: ModelHit = {
+          node: { index: e.index, name: e.name, size: e.size, children: e.children },
+          archive,
+          sourceFile: leaf,
+          bytes: bytes ?? new Uint8Array(0),
+        };
         for (const key of instanceNameVariants(e.name)) {
           const list = modelLookup.get(key);
           if (list) { list.push(hit); } else { modelLookup.set(key, [hit]); }
@@ -2528,8 +3265,13 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       }
     }
 
-    const preferOrder = ['m51_mdl.zed', 'worl_mdl.zed', 'clib_mdl.zed', 'flib_mdl.zed', 'benz_mdl.zed'];
+    const preferOrder = ['m51_mdl.zed', 'worl_mdl.zed', 'weap_mdl.zed', 'clib_mdl.zed', 'flib_mdl.zed', 'benz_mdl.zed'];
     const resolve = (name: string): ModelHit | null => {
+      if (name.toLowerCase() === 'footbomb') {
+        const satchelHits = modelLookup.get('satchel');
+        const satchel = satchelHits?.find(x => x.sourceFile === 'flib_mdl.zed') ?? satchelHits?.[0];
+        if (satchel) { return satchel; }
+      }
       for (const key of instanceNameVariants(name)) {
         const hits = modelLookup.get(key);
         if (!hits || hits.length === 0) { continue; }
@@ -2541,6 +3283,26 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       }
       return null;
     };
+
+    let instances = collectGeoInstances(scene, root);
+    const rootHit = root !== scene.root ? resolve(root.name) : null;
+    if (rootHit) {
+      // Weapon GEO roots such as m4Acarbine_203 own visual part children
+      // (m4_high/m4_low), while the actual renderable MDL entry is the root.
+      // Treat the selected root as the instance so part names don't resolve
+      // as standalone models.
+      instances = [{
+        modelName: root.name,
+        instanceName: root.name,
+        path: root.name,
+        matrix: identityMatrix(),
+        node: root,
+      }];
+    }
+    if (instances.length === 0) {
+      this.log(`[GEO] no placeable instances found under ${root.name}`, true);
+      return;
+    }
 
     // Compose. Each instance contributes a transformed copy of its model's
     // vertices and a re-based index list. Cache parsed models by source so
@@ -2554,35 +3316,118 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     let rendered = 0;
     let fallbackUsed = 0;
 
-    for (const inst of instances) {
-      const hit = resolve(inst.modelName);
-      if (!hit) { missing.push(inst.modelName); continue; }
-      const cacheKey = `${hit.sourceFile}|${hit.node.name}|${this.mapMaterialBinding()}`;
-      let mdl = meshCache.get(cacheKey);
-      if (!mdl) {
-        try { mdl = parseModel(hit.bytes); } catch { mdl = null as unknown as ZedModel; }
-        // If the resolved model parses to nothing standard (CLIB-style
-        // payload), try the VIF/cloud fallback so the instance still
-        // contributes geometry to the composed scene.
+    const decodeHit = (hit: ModelHit): ZedModel | null => {
+      const descriptorOffsetsFor = (archive: InspectedZedArchive, childIndices: number[]): number[] => {
+        const offsets: number[] = [];
+        for (const childIdx of childIndices) {
+          const childBytes = archive.entryData.get(childIdx);
+          if (!childBytes || childBytes.length !== 4) { continue; }
+          const view = new DataView(childBytes.buffer, childBytes.byteOffset, 4);
+          offsets.push(view.getUint32(0, true));
+        }
+        return offsets;
+      };
+      const isWeaponSource = /(^|[\\/])weap_mdl(?:\([^)]+\))?\.zed$/i.test(hit.sourceFile);
+      const isEffectSource = /(^|[\\/])effe_mdl(?:\([^)]+\))?\.zed$/i.test(hit.sourceFile);
+      const bindMode = isWeaponSource || isEffectSource ? 'tailScan' : this.mapMaterialBinding();
+      const mergePayload = (
+        target: ZedModel,
+        local: ZedModel,
+        matrix: number[],
+        sourceModelName: string,
+      ) => {
+        const vertexBase = target.vertices.length;
+        const chunkBase = target.chunks.length;
+        for (const v of local.vertices) {
+          const [tx, ty, tz] = transformPoint(matrix, v.x, v.y, v.z);
+          target.vertices.push({ ...v, x: tx, y: ty, z: tz });
+        }
+        for (const idx of local.indices) { target.indices.push(vertexBase + idx); }
+        for (const c of local.chunks) {
+          target.chunks.push({
+            ...c,
+            sourceModelName: c.sourceModelName ?? sourceModelName,
+            sourceArchiveName: c.sourceArchiveName ?? hit.sourceFile,
+            offset: c.offset + chunkBase * 0x80,
+          });
+        }
+        for (const ref of local.textureRefs) {
+          if (!target.textureRefs.includes(ref)) { target.textureRefs.push(ref); }
+        }
+      };
+
+      const decodePayloadModel = (bytes: Uint8Array, descriptorOffsets: number[] = []): ZedModel | null => {
+        let mdl: ZedModel | null = null;
+        try {
+          mdl = isEffectSource
+            ? (decodeFallbackPayload(bytes) ?? parseModel(bytes))
+            : parseModel(bytes);
+        } catch { mdl = null; }
         if (!mdl || mdl.chunks.length === 0) {
-          const fb = decodeFallbackPayload(hit.bytes);
+          const fb = decodeFallbackPayload(bytes);
           if (fb && fb.chunks.length > 0) {
             mdl = fb;
             fallbackUsed++;
-          } else if (!mdl) {
-            continue;
           }
         }
-        // Run the marker binding pass against this payload BEFORE we merge
-        // its chunks into the scene. Composed chunks have mangled offsets,
-        // so binding has to happen here — the per-payload bytes are the
-        // only context where chunk.offset is still meaningful.
-        const bindMode = this.mapMaterialBinding();
-        if (bindMode !== 'tailScan' && mdl.chunks.length > 0) {
-          try { applyMarkerBinding(mdl, hit.bytes, [], bindMode); }
+        if (mdl && isWeaponSource && descriptorOffsets.length > 0 && mdl.chunks.length > 0) {
+          try { applyWeaponDescriptorBinding(mdl, bytes, descriptorOffsets); }
           catch { /* keep tail-scan names */ }
         }
-        meshCache.set(cacheKey, mdl);
+        if (mdl && !isWeaponSource && !isEffectSource && bindMode !== 'tailScan' && mdl.chunks.length > 0) {
+          try { applyMarkerBinding(mdl, bytes, descriptorOffsets, bindMode); }
+          catch { /* keep tail-scan names */ }
+        }
+        return mdl && mdl.chunks.length > 0 ? mdl : null;
+      };
+
+      if (hit.bytes.length > 0) {
+        return decodePayloadModel(hit.bytes, descriptorOffsetsFor(hit.archive, hit.node.children));
+      }
+
+      const out: ZedModel = {
+        chunks: [],
+        vertices: [],
+        indices: [],
+        textureRefs: [],
+        boundingRadius: 1,
+      };
+      const visit = (entryIndex: number, parentMatrix: number[]) => {
+        const ent = hit.archive.entries.find(e => e.index === entryIndex);
+        if (!ent) { return; }
+        const bytes = hit.archive.entryData.get(ent.index) ?? new Uint8Array(0);
+        const localMatrix = bytes.length > 0 ? tryReadLocalMatrix(bytes) : identityMatrix();
+        const matrix = multiplyMatrices(parentMatrix, localMatrix);
+        if (bytes.length > 0) {
+          const local = decodePayloadModel(bytes, descriptorOffsetsFor(hit.archive, ent.children));
+          if (local) { mergePayload(out, local, matrix, hit.node.name); }
+        }
+        for (const childIdx of ent.children) { visit(childIdx, matrix); }
+      };
+      for (const childIdx of hit.node.children) { visit(childIdx, identityMatrix()); }
+      if (out.vertices.length === 0) { return null; }
+      let radius = 0;
+      for (const v of out.vertices) {
+        const d = Math.hypot(v.x, v.y, v.z);
+        if (d > radius) { radius = d; }
+      }
+      out.boundingRadius = radius || 1;
+      return out;
+    };
+
+    for (const inst of instances) {
+      const hit = resolve(inst.modelName);
+      if (!hit) { missing.push(inst.modelName); continue; }
+      const bindKey = /(^|[\\/])weap_mdl(?:\([^)]+\))?\.zed$/i.test(hit.sourceFile)
+        ? 'tailScan'
+        : this.mapMaterialBinding();
+      const cacheKey = `${hit.sourceFile}|${hit.node.name}|${bindKey}`;
+      let mdl = meshCache.get(cacheKey);
+      if (!mdl) {
+        const decoded = decodeHit(hit);
+        if (!decoded) { continue; }
+        mdl = decoded;
+        meshCache.set(cacheKey, decoded);
       }
 
       const vertexBase = composedVertices.length;
@@ -2593,7 +3438,12 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       }
       for (const idx of mdl.indices) { composedIndices.push(vertexBase + idx); }
       for (const c of mdl.chunks) {
-        composedChunks.push({ ...c, offset: c.offset + chunkBase * 0x80 });
+        composedChunks.push({
+          ...c,
+          sourceModelName: c.sourceModelName ?? hit.node.name ?? inst.modelName,
+          sourceArchiveName: c.sourceArchiveName ?? hit.sourceFile,
+          offset: c.offset + chunkBase * 0x80,
+        });
       }
       for (const ref of mdl.textureRefs) { composedTextureRefs.add(ref); }
       rendered++;
@@ -2621,6 +3471,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     this.previewMode.set('model');
     this.currentModelBytes = null; // composed scene has no single payload
     this.currentSliceOffsets = [];
+    this.currentModelSourceArchive = null;
     setTimeout(() => this.applyModelToRenderer(), 0);
 
     const uniqueMissing = [...new Set(missing.map(m => m.toLowerCase()))];
@@ -2649,6 +3500,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       return;
     }
     const archive = stack[stack.length - 1].archive;
+    const sourceArchiveName = this.currentArchiveLeaf();
     const rootEntry = archive.entries.find(e => e.index === entry.index);
     if (!rootEntry) {
       this.log(`[hierarchical] entry ${entry.name} not found in current archive`, true);
@@ -2661,6 +3513,17 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     const composedRefs = new Set<string>();
     let payloadsWithChunks = 0;
 
+    const descriptorOffsetsFor = (childIndices: number[]): number[] => {
+      const offsets: number[] = [];
+      for (const childIdx of childIndices) {
+        const childBytes = archive.entryData.get(childIdx);
+        if (!childBytes || childBytes.length !== 4) { continue; }
+        const view = new DataView(childBytes.buffer, childBytes.byteOffset, 4);
+        offsets.push(view.getUint32(0, true));
+      }
+      return offsets;
+    };
+
     const visit = (entryIndex: number, parentMatrix: number[]) => {
       const ent = archive.entries.find(e => e.index === entryIndex);
       if (!ent) { return; }
@@ -2670,7 +3533,11 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
 
       if (bytes && bytes.length > 0) {
         let local: ZedModel | null = null;
-        try { local = parseModel(bytes); } catch { local = null; }
+        try {
+          local = this.isCurrentEffectModelLayer()
+            ? (decodeFallbackPayload(bytes) ?? parseModel(bytes))
+            : parseModel(bytes);
+        } catch { local = null; }
         // CLIB / similar payloads don't use the standard chunk format —
         // fall back to VIF / vertex-cloud decoding so the hierarchical
         // walk actually picks up character meshes etc.
@@ -2682,9 +3549,16 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
           // chunks while we still have the right bytes in hand. Composed
           // chunk offsets are mangled across payloads so we can't run
           // binding after merging — this is the only place it works.
-          const bindMode = this.mapMaterialBinding();
-          if (bindMode !== 'tailScan') {
-            try { applyMarkerBinding(local, bytes, [], bindMode); }
+          const sliceOffsets = descriptorOffsetsFor(ent.children);
+          const isWeaponSource = this.isCurrentWeaponModelLayer();
+          const isEffectSource = this.isCurrentEffectModelLayer();
+          const bindMode = isWeaponSource || isEffectSource ? 'tailScan' : this.mapMaterialBinding();
+          if (isWeaponSource) {
+            try { applyWeaponDescriptorBinding(local, bytes, sliceOffsets); }
+            catch { /* keep tail-scan names */ }
+          }
+          if (!isWeaponSource && !isEffectSource && bindMode !== 'tailScan') {
+            try { applyMarkerBinding(local, bytes, sliceOffsets, bindMode); }
             catch { /* keep tail-scan names */ }
           }
           payloadsWithChunks++;
@@ -2696,7 +3570,12 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
           }
           for (const idx of local.indices) { composedIndices.push(vertexBase + idx); }
           for (const c of local.chunks) {
-            composedChunks.push({ ...c, offset: c.offset + chunkBase * 0x80 });
+            composedChunks.push({
+              ...c,
+              sourceModelName: c.sourceModelName ?? entry.name,
+              sourceArchiveName: c.sourceArchiveName ?? sourceArchiveName ?? undefined,
+              offset: c.offset + chunkBase * 0x80,
+            });
           }
           for (const ref of local.textureRefs) { composedRefs.add(ref); }
         }
@@ -2726,6 +3605,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     this.previewMode.set('model');
     this.currentModelBytes = null;
     this.currentSliceOffsets = [];
+    this.currentModelSourceArchive = sourceArchiveName;
     setTimeout(() => this.applyModelToRenderer(), 0);
     this.log(`[hierarchical] ${entry.name}: ${payloadsWithChunks} payload(s) with chunks, ${composedVertices.length} verts, ${composedIndices.length / 3 | 0} tris`, true);
   }
@@ -2744,8 +3624,6 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     const entry = this.selectedEntry();
     let root = entry ? findSceneNode(scene, entry.name) : null;
     if (!root) { root = scene.root; }
-    const instances = collectGeoInstances(scene, root);
-
     // Build the same lookup map composeGeoScene uses so the report
     // reflects exactly what compose will do.
     type ModelHit = { sourceFile: string; nodeName: string };
@@ -2755,7 +3633,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       let archive: InspectedZedArchive;
       try { archive = parseZedArchive(bytes); } catch { continue; }
       for (const e of archive.entries) {
-        if (!e.size) { continue; }
+        if (!e.size && e.children.length === 0) { continue; }
         for (const key of instanceNameVariants(e.name)) {
           const list = modelLookup.get(key);
           if (list) { list.push({ sourceFile: leaf, nodeName: e.name }); }
@@ -2764,17 +3642,44 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       }
     }
 
+    const preferOrder = ['m51_mdl.zed', 'worl_mdl.zed', 'weap_mdl.zed', 'clib_mdl.zed', 'flib_mdl.zed', 'benz_mdl.zed'];
+    const resolve = (name: string): ModelHit | null => {
+      if (name.toLowerCase() === 'footbomb') {
+        const satchelHits = modelLookup.get('satchel');
+        const satchel = satchelHits?.find(x => x.sourceFile === 'flib_mdl.zed') ?? satchelHits?.[0];
+        if (satchel) { return satchel; }
+      }
+      for (const key of instanceNameVariants(name)) {
+        const hits = modelLookup.get(key);
+        if (!hits || hits.length === 0) { continue; }
+        for (const file of preferOrder) {
+          const h = hits.find(x => x.sourceFile === file);
+          if (h) { return h; }
+        }
+        return hits[0];
+      }
+      return null;
+    };
+
+    let instances = collectGeoInstances(scene, root);
+    const rootHit = root !== scene.root ? resolve(root.name) : null;
+    if (rootHit) {
+      instances = [{
+        modelName: root.name,
+        instanceName: root.name,
+        path: root.name,
+        matrix: identityMatrix(),
+        node: root,
+      }];
+    }
+
     let resolved = 0, missing = 0;
     const missingNames = new Set<string>();
     const resolutionDetails: string[] = [];
 
     for (const inst of instances) {
       const variants = instanceNameVariants(inst.modelName);
-      let hit: ModelHit | null = null;
-      for (const key of variants) {
-        const hits = modelLookup.get(key);
-        if (hits && hits.length > 0) { hit = hits[0]; break; }
-      }
+      const hit = resolve(inst.modelName);
       if (hit) {
         resolved++;
         if (resolutionDetails.length < 60) {
@@ -2840,6 +3745,8 @@ function guessTextureForWeapon(
   model: { chunks: Array<{ textureName: string | null }>; textureRefs: string[] },
 ): string | null {
   const lower = weaponName.toLowerCase();
+  const embedded = chooseEmbeddedWeaponTexture(weaponName, sources, model);
+  if (embedded) { return embedded; }
 
   // Specific matches FIRST so longer / more-specific weapon names win over
   // generic substrings (e.g. "mp5sd" must be checked before "mp5").
@@ -2850,14 +3757,14 @@ function guessTextureForWeapon(
     ['m4acarbine', 'm4.tif'],
     ['m16_m203', 'm16.tif'],
     ['m16a2', 'm16.tif'],
-    ['ak105', 'ak47.tif'],
+    ['ak105', 'aks74_s.tif'],
     ['ak47', 'ak47.tif'],
     ['aks74', 'aks74_s.tif'],
     ['m14_gun', 'm14.tif'],
     ['m14', 'm14.tif'],
     ['steyr_aug9', 'steyr.tif'],
     ['steyr', 'steyr.tif'],
-    ['iw80a2', 'm16.tif'],
+    ['iw80a2', 'RA14_groza.tif'],
     ['ra14_groza', 'RA14_groza.tif'],
     ['bmmg_f2k', 'BMMG_f2k.tif'],
     // SMGs
@@ -2912,13 +3819,13 @@ function guessTextureForWeapon(
     ['claymore', 'claymore.tif'],
     ['flashbang', 'flashbang.tif'],
     ['hegrenade', 'HEgrenade.tif'],
+    ['grenade', 'm79.tif'],
     ['a_smoke_grenade', 'smoke_grenade.tif'],
     ['smoke', 'smoke_grenade.tif'],
-    ['grenade', 'HEgrenade.tif'],
     ['detonator', 'a_buttonpanel01.tif'],
     ['fiftycal_box', '50cal_box_top.tif'],
-    ['artillery_shell', 'HEgrenade.tif'],
-    ['footbomb', 'HEgrenade.tif'],
+    ['artillery_shell', 'G11b.tif'],
+    ['footbomb', 'satchel_tex.tif'],
     ['bleu_chem', 'a_buttonpanel01.tif'],
     // Misc
     ['laser_designator', 'laser_designator.tif'],
@@ -2951,6 +3858,275 @@ function guessTextureForWeapon(
   }
 
   return null;
+}
+
+function chooseEmbeddedWeaponTexture(
+  weaponName: string,
+  sources: Map<string, Uint8Array>,
+  model: { chunks: Array<{ textureName: string | null }>; textureRefs: string[] },
+): string | null {
+  const candidates: string[] = [];
+  const add = (name: string | null) => {
+    if (!name) { return; }
+    const key = name.toLowerCase();
+    if (!sources.has(key) || candidates.includes(key)) { return; }
+    candidates.push(key);
+  };
+
+  for (const ref of model.textureRefs ?? []) { add(ref); }
+  for (const chunk of model.chunks) { add(chunk.textureName); }
+  if (candidates.length === 0) { return null; }
+  if (candidates.length === 1) { return candidates[0]; }
+
+  const weaponKey = compactTextureName(weaponName);
+  const direct = candidates.find(c => {
+    const texKey = compactTextureName(c.replace(/\.tif$/i, ''));
+    return weaponKey.includes(texKey) || texKey.includes(weaponKey);
+  });
+  if (direct) { return direct; }
+
+  const nonHelper = candidates.filter(c => !isHelperTextureRef(c));
+  if (nonHelper.length === 1) { return nonHelper[0]; }
+  if (nonHelper.length > 1) { return null; }
+
+  return candidates[candidates.length - 1];
+}
+
+function compactTextureName(value: string): string {
+  return value.toLowerCase().replace(/\.tif$/i, '').replace(/[^a-z0-9]+/g, '');
+}
+
+function isHelperTextureRef(value: string): boolean {
+  const key = compactTextureName(value);
+  return key === 'mark03' ||
+    key === 'mark03b' ||
+    key === 'handle01' ||
+    key === 'laserdesignator' ||
+    key === 'smokegrenade02' ||
+    key === 'abuttonpanel01';
+}
+
+function isWeaponPrimaryTexture(weaponName: string, tifName: string): boolean {
+  const lower = weaponName.toLowerCase();
+  const tif = tifName.toLowerCase();
+  const primaries: Array<[string, string]> = [
+    ['m4acarbine_203', 'm4.tif'],
+    ['m4acarbine_sd', 'm4.tif'],
+    ['m4acarbine', 'm4.tif'],
+    ['m16_m203', 'm16.tif'],
+    ['m16a2', 'm16.tif'],
+    ['ak105', 'aks74_s.tif'],
+    ['ak47', 'ak47.tif'],
+    ['aks74', 'aks74_s.tif'],
+    ['m14_gun', 'm14.tif'],
+    ['m14', 'm14.tif'],
+    ['steyr_aug9', 'steyr.tif'],
+    ['steyr', 'steyr.tif'],
+    ['iw80a2', 'RA14_groza.tif'],
+    ['ra14_groza', 'RA14_groza.tif'],
+    ['bmmg_f2k', 'BMMG_f2k.tif'],
+    ['sig_commando', 'sig_commando.tif'],
+    ['mp5sd', 'mp5.tif'],
+    ['mp5', 'mp5.tif'],
+    ['fnp90', 'fnp90.tif'],
+    ['uzi', 'uzi.tif'],
+    ['hk5k', 'mp5.tif'],
+    ['sp10_gyuraz', 'SP10_gyuraz.tif'],
+    ['barretm82a1', 'barretm82.tif'],
+    ['barret', 'barretm82.tif'],
+    ['mcmillanm87', 'mcmillan_m87.tif'],
+    ['mcmillan', 'mcmillan_m87.tif'],
+    ['stoner_sr25', 'stoner_sr25.tif'],
+    ['remington700', 'remington700.tif'],
+    ['dragunov', 'drag.tif'],
+    ['stoner_m63a', 'stoner_m63a.tif'],
+    ['m60e', 'm60.tif'],
+    ['remington870', 'remington870.tif'],
+    ['spas12', 'spas12.tif'],
+    ['jackhammer', 'jackhammer.tif'],
+    ['m11_p228', 'M11_p228.tif'],
+    ['a_mark23sd', 'mark23.tif'],
+    ['a_mark23', 'mark23.tif'],
+    ['mark23', 'mark23.tif'],
+    ['fiveseven', 'fiveseven.tif'],
+    ['glock18', 'glock18.tif'],
+    ['baretta_m9', 'baretta_m9.tif'],
+    ['baretta', 'baretta_m9.tif'],
+    ['desert_eagle', 'deserteagle.tif'],
+    ['hkp9s', 'p9s.tif'],
+    ['sig226', 'sig_p226.tif'],
+  ];
+  return primaries.some(([needle, primary]) => lower.includes(needle) && tif === primary.toLowerCase());
+}
+
+function effectWireOverlayColor(modelName: string): number {
+  const lower = modelName.toLowerCase();
+  if (lower.includes('tracer')) { return 0xffcd5a; }
+  if (lower.includes('shotgun')) { return 0xd24b37; }
+  if (lower.includes('shell')) { return 0xd6b450; }
+  if (lower.includes('muzzle') || lower.includes('flash')) { return 0xffd36a; }
+  return 0x78beff;
+}
+
+function descriptorTextureForWeapon(weaponName: string, defaultTif: string, descriptorTif: string): string {
+  const lower = weaponName.toLowerCase();
+  const fallback = defaultTif.toLowerCase();
+  const tex = descriptorTif.toLowerCase();
+
+  if (lower.includes('dragunov') && fallback === 'drag.tif') {
+    // Dragunov's WEAP_MDL descriptor table names unrelated weapon atlases
+    // (barretm82/mp5/jackhammer/etc.) for earlier chunks. The actual model
+    // uses drag.tif plus the small DragBar detail page.
+    return tex === 'drag.tif' || tex === 'dragbar.tif' ? tex : fallback;
+  }
+
+  return tex;
+}
+
+function weaponPrimaryPaletteAlias(weaponName: string, tifName: string): string | null {
+  const lower = weaponName.toLowerCase();
+  const tif = tifName.toLowerCase();
+  for (const rule of WEAP_PALETTE_OVERRIDES) {
+    if (!lower.includes(rule.model)) { continue; }
+    if (!rule.textures.includes(tif)) { continue; }
+    return rule.palette;
+  }
+  return null;
+}
+
+function namespaceFromArchiveName(archiveName: string | null | undefined): string | null {
+  if (!archiveName) { return null; }
+  const leaf = (archiveName.split(/[\\/]/).pop() ?? archiveName).toLowerCase();
+  const m = /^(.+?)_(?:mdl|txr|pal|geo)(?:\([^)]+\))?\.zed$/i.exec(leaf);
+  return m ? m[1].toLowerCase() : null;
+}
+
+function textureBytesFor(
+  sources: Map<string, Uint8Array>,
+  tifName: string,
+  sourceArchiveName: string | null | undefined,
+  textureNamespace: string | null = null,
+): Uint8Array | undefined {
+  const tex = tifName.toLowerCase();
+  const namespace = textureNamespace ?? namespaceFromArchiveName(sourceArchiveName);
+  if (namespace) {
+    const namespaced = sources.get(`${namespace}:${tex}`);
+    if (namespaced) { return namespaced; }
+  }
+  return sources.get(tex);
+}
+
+// WEAP_TXR texture header ids are not sufficient for every weapon. Several
+// pages are colour variants sharing the same index art; keep confirmed fixes
+// here so model binding and palette binding stay separate.
+const WEAP_PALETTE_OVERRIDES: Array<{ model: string; textures: string[]; palette: string }> = [
+  { model: 'm4acarbine', textures: ['m4.tif'], palette: 'weap:texpal_4' },
+  { model: 'm16', textures: ['m16.tif'], palette: 'weap:texpal_13' },
+  { model: 'mp5', textures: ['mp5.tif'], palette: 'weap:texpal_6' },
+  { model: 'hk5k', textures: ['mp5.tif'], palette: 'weap:texpal_6' },
+  { model: 'ak105', textures: ['aks74_s.tif'], palette: 'weap:texpal_14' },
+  { model: 'ak105', textures: ['uzi.tif'], palette: 'weap:texpal_25' },
+  { model: 'ak105', textures: ['mcmillan_m87.tif'], palette: 'weap:texpal_32' },
+  { model: 'ak105', textures: ['drag.tif'], palette: 'weap:texpal_47' },
+  { model: 'ak47', textures: ['ak47.tif'], palette: 'weap:texpal_8' },
+  { model: 'aks74', textures: ['aks74_s.tif'], palette: 'weap:texpal_14' },
+  { model: 'm14', textures: ['m14.tif'], palette: 'weap:texpal_39' },
+  { model: 'steyr', textures: ['steyr.tif'], palette: 'weap:texpal_46' },
+  { model: 'bmmg_f2k', textures: ['bmmg_f2k.tif'], palette: 'weap:texpal_31' },
+  { model: 'ra14_groza', textures: ['ra14_groza.tif'], palette: 'weap:texpal_51' },
+  { model: 'iw80a2', textures: ['ra14_groza.tif'], palette: 'weap:texpal_51' },
+  { model: 'iw80a2', textures: ['spas12.tif'], palette: 'weap:texpal_42' },
+  { model: 'sig_commando', textures: ['sig_commando.tif'], palette: 'weap:texpal_23' },
+  { model: 'sig_commando', textures: ['m4.tif'], palette: 'weap:texpal_4' },
+  { model: 'fnp90', textures: ['fnp90.tif'], palette: 'weap:texpal_24' },
+  { model: 'uzi', textures: ['uzi.tif'], palette: 'weap:texpal_25' },
+  { model: 'sp10_gyuraz', textures: ['sp10_gyuraz.tif'], palette: 'weap:texpal_50' },
+  { model: 'barret', textures: ['barretm82.tif'], palette: 'weap:texpal_30' },
+  { model: 'barret', textures: ['bmmg_f2k.tif'], palette: 'weap:texpal_31' },
+  { model: 'barret', textures: ['mark03.tif'], palette: 'weap:texpal_5' },
+  { model: 'mcmillan', textures: ['mcmillan_m87.tif'], palette: 'weap:texpal_32' },
+  { model: 'mcmillan', textures: ['bmmg_f2k.tif'], palette: 'weap:texpal_31' },
+  { model: 'mcmillan', textures: ['mark03.tif'], palette: 'weap:texpal_5' },
+  { model: 'mcmillan', textures: ['mark03b.tif'], palette: 'weap:texpal_20' },
+  { model: 'stoner_sr25', textures: ['stoner_sr25.tif'], palette: 'weap:texpal_33' },
+  { model: 'stoner_sr25', textures: ['bmmg_f2k.tif'], palette: 'weap:texpal_31' },
+  { model: 'stoner_sr25', textures: ['mark03.tif'], palette: 'weap:texpal_5' },
+  { model: 'remington700', textures: ['remington700.tif'], palette: 'weap:texpal_44' },
+  { model: 'remington700', textures: ['bmmg_f2k.tif'], palette: 'weap:texpal_31' },
+  { model: 'remington700', textures: ['mark03.tif'], palette: 'weap:texpal_5' },
+  { model: 'remington700', textures: ['mark03b.tif'], palette: 'weap:texpal_20' },
+  { model: 'hegrenade', textures: ['hegrenade.tif'], palette: 'weap:texpal_2' },
+  { model: 'rpgrenade', textures: ['hegrenade.tif'], palette: 'weap:texpal_2' },
+  { model: 'rpgrenade', textures: ['mglmk2.tif'], palette: 'weap:texpal_37' },
+  { model: 'stoner_m63a', textures: ['stoner_m63a.tif'], palette: 'weap:texpal_27' },
+  { model: 'm60e', textures: ['m60.tif'], palette: 'weap:texpal_26' },
+  { model: 'jackhammer', textures: ['jackhammer.tif'], palette: 'weap:texpal_22' },
+  { model: 'm11_p228', textures: ['m11_p228.tif'], palette: 'weap:texpal_49' },
+  { model: 'mark23', textures: ['mark23.tif'], palette: 'weap:texpal_10' },
+  { model: 'baretta', textures: ['baretta_m9.tif'], palette: 'weap:texpal_11' },
+  { model: 'desert_eagle', textures: ['deserteagle.tif'], palette: 'weap:texpal_19' },
+  { model: 'glock18', textures: ['glock18.tif'], palette: 'weap:texpal_20' },
+  { model: 'hkp9s', textures: ['p9s.tif'], palette: 'weap:texpal_21' },
+  { model: 'sig226', textures: ['sig_p226.tif'], palette: 'weap:texpal_18' },
+  { model: 'fiveseven', textures: ['fiveseven.tif'], palette: 'weap:texpal_34' },
+  { model: 'dragunov', textures: ['drag.tif'], palette: 'weap:texpal_47' },
+  { model: 'artillery_shell', textures: ['g11b.tif'], palette: 'weap:texpal_0' },
+  { model: 'grenade', textures: ['g11b.tif'], palette: 'weap:texpal_0' },
+  { model: 'grenade', textures: ['m79.tif'], palette: 'weap:texpal_1' },
+  { model: 'm203', textures: ['m79.tif'], palette: 'weap:texpal_1' },
+  { model: 'm79', textures: ['m79.tif'], palette: 'weap:texpal_1' },
+  { model: 'mglmk1', textures: ['mglmk1.tif'], palette: 'weap:texpal_36' },
+  { model: 'mglmk2', textures: ['mglmk2.tif'], palette: 'weap:texpal_37' },
+  { model: 'at4', textures: ['at4_text.tif'], palette: 'weap:texpal_49' },
+  { model: 'at4', textures: ['laser_designator.tif'], palette: 'weap:texpal_40' },
+  { model: 'at4', textures: ['mark03.tif'], palette: 'weap:texpal_5' },
+  { model: 'rpg7', textures: ['barretm82.tif'], palette: 'weap:texpal_30' },
+  { model: 'rpg7', textures: ['mp5.tif'], palette: 'weap:texpal_6' },
+  { model: 'rpg7', textures: ['jackhammer.tif'], palette: 'weap:texpal_22' },
+  { model: 'rpg7', textures: ['stoner_sr25.tif'], palette: 'weap:texpal_33' },
+  { model: 'rpg7', textures: ['laser_designator.tif'], palette: 'weap:texpal_40' },
+  { model: 'rpg7', textures: ['m79.tif'], palette: 'weap:texpal_1' },
+  { model: 'rpg7', textures: ['mcmillan_m87.tif'], palette: 'weap:texpal_32' },
+  { model: 'rpg7', textures: ['mglmk1.tif'], palette: 'weap:texpal_36' },
+  { model: 'rpg7', textures: ['mark03.tif'], palette: 'weap:texpal_5' },
+  { model: 'claymore', textures: ['claymore.tif'], palette: 'weap:texpal_5' },
+  { model: 'detonator', textures: ['claymore.tif'], palette: 'weap:texpal_5' },
+  { model: 'flashbang', textures: ['flashbang.tif'], palette: 'weap:texpal_49' },
+  { model: 'flashbang', textures: ['smoke_grenade02.tif'], palette: 'weap:texpal_18' },
+  { model: 'smoke', textures: ['smoke_grenade.tif'], palette: 'weap:texpal_12' },
+  { model: 'footbomb', textures: ['satchel_handle.tif', 'satchel_tex.tif'], palette: 'flib:texpal_34' },
+  { model: 'bleu_chem', textures: ['sp10_gyuraz.tif', 'a_buttonpanel01.tif'], palette: 'weap:texpal_33' },
+  { model: 'fiftycal_box', textures: ['50cal_box_top.tif', '50cal_box_side.tif'], palette: 'weap:texpal_29' },
+  { model: 'laser_designator', textures: ['laser_designator.tif'], palette: 'weap:texpal_40' },
+];
+
+function parseModelTexture(
+  bytes: Uint8Array,
+  palettes: Map<string, ZedPalette> | null,
+  primaryAlias: string | null,
+  fallbackAlias: string | null = null,
+): ZedTexture {
+  const aliases: Array<string | null> = [];
+  const addAlias = (alias: string | null) => {
+    const key = alias?.toLowerCase() ?? null;
+    if (aliases.some(a => (a?.toLowerCase() ?? null) === key)) { return; }
+    aliases.push(alias);
+  };
+  addAlias(primaryAlias);
+  addAlias(fallbackAlias);
+  try {
+    const header = parseTextureHeader(bytes);
+    addAlias(`weap:texpal_${header.paletteId}`);
+    addAlias(`texpal_${header.paletteId}`);
+  } catch { /* parseTexture will report the real error below */ }
+
+  let last: ZedTexture | null = null;
+  for (const alias of aliases) {
+    const tex = parseTexture(bytes, palettes, alias);
+    if (!tex.header.isIndexed || tex.paletteResolved) { return tex; }
+    last = tex;
+  }
+  return last ?? parseTexture(bytes, palettes, primaryAlias);
 }
 
 function bytesToBase64(bytes: Uint8Array): string {

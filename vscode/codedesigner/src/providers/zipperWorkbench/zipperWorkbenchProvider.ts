@@ -140,6 +140,9 @@ export class ZipperWorkbenchProvider {
                 // without round-tripping per entry.
                 await this._loadZdbPackage(webview, msg['path'] as string | undefined, false);
                 break;
+            case 'loadArchiveNodes':
+                await this._loadArchiveNodes(webview, msg['path'] as string | undefined);
+                break;
             case 'reloadZdbPackage':
                 // Force-bypass the cache (toolbar "Reload Package" button).
                 await this._loadZdbPackage(webview, msg['path'] as string | undefined, true);
@@ -305,6 +308,18 @@ export class ZipperWorkbenchProvider {
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
             webview.postMessage({ type: 'zdbPackageError', path: filePath, message });
+        }
+    }
+
+    private async _loadArchiveNodes(webview: vscode.Webview, filePath: string | undefined): Promise<void> {
+        if (!filePath) { return; }
+        if (!this._ensureConnected(webview)) { return; }
+        try {
+            const nodes = await this._socketClient.zipperReadAllNodes(filePath);
+            webview.postMessage({ type: 'archiveNodes', path: filePath, nodes });
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            webview.postMessage({ type: 'archiveNodesError', path: filePath, message });
         }
     }
 

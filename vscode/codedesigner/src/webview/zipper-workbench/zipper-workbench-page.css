@@ -812,6 +812,236 @@ input {
 }
 .zip-pane-section .zip-map-controls { margin-top: 0; }
 
+/* ZANIM catalogue preview for CZANIM/LDZANIM/MZANIM style archives. These
+   are script/effect sequence records, not skeletal motion clips. */
+.zip-zanim-stage {
+  min-height: 360px;
+}
+.zip-zanim-layout {
+  display: grid;
+  grid-template-columns: minmax(210px, 34%) minmax(0, 1fr);
+  height: 100%;
+  min-height: 360px;
+}
+.zip-zanim-list {
+  border-right: 1px solid var(--vscode-panel-border, #3e3e42);
+  overflow: auto;
+  background: rgba(0, 0, 0, 0.12);
+}
+.zip-zanim-title {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 8px 10px;
+  background: var(--vscode-editorWidget-background, #252526);
+  border-bottom: 1px solid var(--vscode-panel-border, #3e3e42);
+  color: #9cdcfe;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.zip-zanim-item {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.045);
+  background: transparent;
+  color: var(--vscode-editor-foreground, #d4d4d4);
+  text-align: left;
+  cursor: pointer;
+}
+.zip-zanim-item:hover {
+  background: rgba(55, 148, 255, 0.08);
+}
+.zip-zanim-item.active {
+  background: rgba(78, 201, 176, 0.12);
+  box-shadow: inset 2px 0 0 #4ec9b0;
+}
+.zip-zanim-item .name {
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.zip-zanim-item .meta {
+  color: var(--vscode-descriptionForeground, #94a3b8);
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.zip-zanim-detail {
+  min-width: 0;
+  overflow: auto;
+  padding-bottom: 12px;
+}
+.zip-zanim-kv {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  padding: 10px;
+}
+.zip-zanim-kv div {
+  border: 1px solid var(--vscode-panel-border, #3e3e42);
+  border-radius: 4px;
+  padding: 7px;
+  background: rgba(255, 255, 255, 0.03);
+}
+.zip-zanim-kv span,
+.zip-zanim-section > span {
+  display: block;
+  color: var(--vscode-descriptionForeground, #94a3b8);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.zip-zanim-kv strong {
+  display: block;
+  margin-top: 3px;
+  font-size: 12px;
+}
+.zip-zanim-section {
+  display: grid;
+  gap: 5px;
+  padding: 8px 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.045);
+}
+.zip-zanim-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.zip-zanim-tags span {
+  border: 1px solid var(--vscode-panel-border, #3e3e42);
+  border-radius: 999px;
+  padding: 2px 7px;
+  font-size: 10px;
+  color: #ce9178;
+  background: rgba(255, 255, 255, 0.035);
+}
+.zip-zanim-section code,
+.zip-zanim-code-list code {
+  display: block;
+  padding: 5px 6px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.24);
+  color: var(--vscode-editor-foreground, #d4d4d4);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.zip-zanim-code-list {
+  display: grid;
+  gap: 4px;
+}
+
+/* RDR animation preview. This ports the standalone canvas inspector into the
+   workbench while keeping the existing preview/info split. */
+.zip-animation-stage {
+  min-height: 320px;
+}
+.zip-animation-canvas {
+  background: #1e1e1e;
+  cursor: grab;
+}
+.zip-animation-canvas:active {
+  cursor: grabbing;
+}
+.zip-animation-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.zip-animation-controls .zip-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.zip-animation-scrub {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.zip-animation-scrub input {
+  width: 100%;
+}
+.zip-animation-counts,
+.zip-animation-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.zip-animation-counts span,
+.zip-animation-tags span,
+.zip-animation-row .tag,
+.zip-animation-track .tag {
+  border: 1px solid var(--vscode-panel-border, #3e3e42);
+  border-radius: 999px;
+  padding: 1px 6px;
+  font-size: 10px;
+  color: var(--vscode-editor-foreground, #d4d4d4);
+  background: rgba(255, 255, 255, 0.035);
+}
+.zip-animation-tags .weapon,
+.zip-animation-row.weapon,
+.zip-animation-track.weapon {
+  color: #ce9178;
+}
+.zip-animation-errors {
+  color: #f48771;
+  font-size: 11px;
+  line-height: 1.35;
+}
+.zip-animation-list {
+  max-height: 220px;
+  overflow: auto;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.zip-animation-row,
+.zip-animation-track {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.045);
+  padding: 4px 0;
+}
+.zip-animation-row {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 5px;
+}
+.zip-animation-row .idx,
+.zip-animation-track .idx,
+.zip-animation-track .muted {
+  color: var(--vscode-descriptionForeground, #94a3b8);
+}
+.zip-animation-row .bone {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.zip-animation-track {
+  display: grid;
+  gap: 2px;
+}
+.zip-animation-track > div:first-child {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+.zip-animation-track strong {
+  color: var(--vscode-editor-foreground, #d4d4d4);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Collapsible RDR tree view. Replaces the raw JSON pre block. */
 .zip-rdr-tree {
   font-family: var(--vscode-editor-font-family, monospace);

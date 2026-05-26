@@ -49,6 +49,7 @@ interface CommandMessage {
     // FileFormats/Zipper fields
     ZipperEntryIndex?: number;
     ZipperSection?: string;
+    ZipperPreloadToken?: string;
     SaveMode?: string;
     SaveTitle?: string;
     SaveTitleLength?: number;

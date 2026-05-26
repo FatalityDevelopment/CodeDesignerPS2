@@ -40,6 +40,9 @@ export interface ModelRendererOptions {
   topDown?: boolean;         // orthographic top-down camera.
   unlit?: boolean;           // ignore directional light (ambient only).
   solidColor?: boolean;      // skip texture sampling, render flat material.
+  transparentTextures?: boolean;
+  wireOverlay?: boolean;
+  wireOverlayColor?: number;
 }
 
 export class ZedModelRenderer {
@@ -51,6 +54,7 @@ export class ZedModelRenderer {
 
   private frameId = 0;
   private mesh: THREE.Mesh | null = null;
+  private wireOverlay: THREE.LineSegments | null = null;
   private materials: THREE.Material[] = [];
   private textures: THREE.DataTexture[] = [];
   private boundingRadius = 1;
@@ -117,6 +121,7 @@ export class ZedModelRenderer {
     // `solidColor` map-viewer mode skips texture sampling entirely so the
     // chunks render as flat material — useful for inspecting topology.
     const solidColorMode = !!options.solidColor;
+    const transparentTextures = !!options.transparentTextures;
     // `unlit` removes the directional light contribution; everything is lit
     // by the ambient only. We approximate by using MeshBasicMaterial instead
     // of MeshStandardMaterial for textured chunks.
@@ -129,26 +134,28 @@ export class ZedModelRenderer {
     // DataTexture + Mesh material. Chunks with no matching .tif fall
     // back to a plain grey material.
     const makeMaterial = (color: number, map?: THREE.DataTexture): THREE.Material => {
-      if (unlit) {
-        return new THREE.MeshBasicMaterial({
-          color,
-          map,
-          side: THREE.DoubleSide,
-          wireframe: this.wireframe,
-        });
-      }
-      return new THREE.MeshStandardMaterial({
+      const base = {
         color,
-        map,
-        metalness: 0,
-        roughness: 0.85,
         side: THREE.DoubleSide,
         wireframe: this.wireframe,
+        transparent: transparentTextures,
+        depthWrite: !transparentTextures,
+        alphaTest: transparentTextures ? 0.02 : 0,
+      };
+      const params = map ? { ...base, map } : base;
+      if (unlit) {
+        return new THREE.MeshBasicMaterial(params);
+      }
+      return new THREE.MeshStandardMaterial({
+        ...params,
+        metalness: 0,
+        roughness: 0.85,
       });
     };
     const materialIndexByTif = new Map<string, number>();
     const fallbackMaterial = makeMaterial(0xb8b8b8);
     this.materials = [fallbackMaterial];
+    const fallbackTexture = options.textureRgba ?? null;
 
     const materialFor = (tifName: string | null): number => {
       // solidColor mode short-circuits to the flat fallback material so
@@ -161,7 +168,7 @@ export class ZedModelRenderer {
       const key = effective.toLowerCase();
       const existing = materialIndexByTif.get(key);
       if (existing !== undefined) { return existing; }
-      const tex = textures[key];
+      const tex = textures[key] ?? fallbackTexture;
       if (!tex) { return 0; }
       const dt = new THREE.DataTexture(
         tex.rgba,
@@ -268,6 +275,18 @@ export class ZedModelRenderer {
     }
     this.root.add(this.mesh);
 
+    if (options.wireOverlay && !this.wireframe) {
+      const wireGeometry = new THREE.WireframeGeometry(geometry);
+      const wireMaterial = new THREE.LineBasicMaterial({
+        color: options.wireOverlayColor ?? 0xffd36a,
+        transparent: true,
+        opacity: 0.9,
+        depthWrite: false,
+      });
+      this.wireOverlay = new THREE.LineSegments(wireGeometry, wireMaterial);
+      this.root.add(this.wireOverlay);
+    }
+
     // Top-down map view: orient the root so we look down the Y axis. The
     // mouse-drag handlers still work but feel like pan/orbit-around-Y; for
     // a debug view that's good enough.
@@ -364,6 +383,17 @@ export class ZedModelRenderer {
       this.root.remove(this.mesh);
       this.mesh.geometry.dispose();
       this.mesh = null;
+    }
+    if (this.wireOverlay) {
+      this.root.remove(this.wireOverlay);
+      this.wireOverlay.geometry.dispose();
+      const material = this.wireOverlay.material;
+      if (Array.isArray(material)) {
+        for (const m of material) { m.dispose(); }
+      } else {
+        material.dispose();
+      }
+      this.wireOverlay = null;
     }
     for (const m of this.materials) { m.dispose(); }
     this.materials = [];
