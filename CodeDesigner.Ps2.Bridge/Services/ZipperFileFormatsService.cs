@@ -1105,7 +1105,17 @@ namespace CodeDesigner.Ps2.Bridge.Services
         private static string BuildFingerprint(string filePath)
         {
             FileInfo info = new(filePath);
-            string material = $"{Path.GetFullPath(filePath)}|{info.Length}|{info.LastWriteTimeUtc.Ticks}";
+            var materialParts = new List<string>
+            {
+                $"{Path.GetFullPath(filePath)}|{info.Length}|{info.LastWriteTimeUtc.Ticks}"
+            };
+            foreach (string sidecarPath in ResolveExternalResourceArchives(filePath))
+            {
+                FileInfo sidecar = new(sidecarPath);
+                materialParts.Add($"{Path.GetFullPath(sidecarPath)}|{sidecar.Length}|{sidecar.LastWriteTimeUtc.Ticks}");
+            }
+
+            string material = string.Join("||", materialParts);
             byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(material));
             return Convert.ToHexString(hash);
         }
@@ -1134,7 +1144,36 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 TraverseZedNodes(zed.Nodes, filePath, 0, resources, basename, ref totalBytes);
             }
 
+            foreach (string sidecarPath in ResolveExternalResourceArchives(filePath))
+            {
+                using ZarArchive sidecar = ZarArchive.Open(sidecarPath);
+                TraverseZedNodes(sidecar.Entries, sidecarPath, 0, resources, basename, ref totalBytes);
+            }
+
             return new PreloadedBundle(token, resources, basename, totalBytes);
+        }
+
+        private static IEnumerable<string> ResolveExternalResourceArchives(string mapPackagePath)
+        {
+            if (string.IsNullOrWhiteSpace(mapPackagePath)) yield break;
+            string? packageDirectory = Path.GetDirectoryName(Path.GetFullPath(mapPackagePath));
+            if (string.IsNullOrWhiteSpace(packageDirectory)) yield break;
+
+            string[] candidates =
+            {
+                Path.Combine(packageDirectory, "ZWEAPON.zar"),
+                Path.Combine(packageDirectory, "run", "ZWEAPON.zar"),
+                Path.Combine(packageDirectory, "..", "run", "ZWEAPON.zar"),
+            };
+
+            var yielded = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (string candidate in candidates)
+            {
+                string fullPath = Path.GetFullPath(candidate);
+                if (!yielded.Add(fullPath)) continue;
+                if (!File.Exists(fullPath)) continue;
+                yield return fullPath;
+            }
         }
 
         private static void TraverseZdb(IReadOnlyList<ZdbEntry> entries, string source, int depth, Dictionary<string, BundledResource> resources, Dictionary<string, string> basename, ref long totalBytes)
