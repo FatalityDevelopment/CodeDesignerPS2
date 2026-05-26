@@ -289,6 +289,25 @@ export class ZipperWorkbenchProvider {
 
         if (!this._ensureConnected(webview)) { return; }
         try {
+            if (this._isLooseMapPackageFile(filePath)) {
+                const nodes = this._loadLooseMapPackageNodes(filePath);
+                this._packageCache.set(filePath, { nodes, loadedAt: Date.now() });
+                webview.postMessage({
+                    type: 'zdbPackage',
+                    path: filePath,
+                    nodes,
+                    fromCache: false,
+                    preloadStats: {
+                        preloadToken: '',
+                        resourceCount: nodes.length,
+                        totalBytes: nodes.reduce((sum, n) => sum + Math.floor((n.data.length * 3) / 4), 0),
+                        cacheHit: false,
+                    },
+                    looseMapPackage: true,
+                });
+                return;
+            }
+
             const preload = await this._socketClient.zipperPreloadMapPackage(filePath);
             // Current webview pipeline still expects full node payloads. We keep
             // this for compatibility while also priming backend preload cache.
@@ -309,6 +328,46 @@ export class ZipperWorkbenchProvider {
             const message = err instanceof Error ? err.message : String(err);
             webview.postMessage({ type: 'zdbPackageError', path: filePath, message });
         }
+    }
+
+    private _isLooseMapPackageFile(filePath: string): boolean {
+        if (path.extname(filePath).toLowerCase() !== '.zed') { return false; }
+        const dir = path.dirname(filePath);
+        const stem = path.basename(filePath, path.extname(filePath));
+        const dirPrefix = path.basename(dir);
+        const hasWorldModel = fs.existsSync(path.join(dir, 'WORL_MDL.ZED'));
+        const hasMapFamily = (prefix: string): boolean =>
+            fs.existsSync(path.join(dir, `${prefix}_TXR.ZED`)) &&
+            fs.existsSync(path.join(dir, `${prefix}_PAL.ZED`));
+        return hasWorldModel && (hasMapFamily(stem) || hasMapFamily(dirPrefix) || !!this._findMapCompanionPrefix(dir));
+    }
+
+    private _loadLooseMapPackageNodes(filePath: string): Array<{ index: number; name: string; type: number; data: string }> {
+        const dir = path.dirname(filePath);
+        const candidates = fs.readdirSync(dir)
+            .filter(name => /\.ZED$/i.test(name))
+            .filter(name => /(?:_(?:MDL|TXR|PAL|GEO)(?:\([^)]+\))?|^WORL_MDL)\.ZED$/i.test(name))
+            .sort((a, b) => {
+                const rank = (name: string): number => {
+                    if (/^worl_mdl/i.test(name)) { return 0; }
+                    if (/_geo/i.test(name)) { return 1; }
+                    if (/_mdl/i.test(name)) { return 2; }
+                    if (/_txr/i.test(name)) { return 3; }
+                    if (/_pal/i.test(name)) { return 4; }
+                    return 5;
+                };
+                return rank(a) - rank(b) || a.localeCompare(b);
+            });
+
+        return candidates.map((name, index) => {
+            const bytes = fs.readFileSync(path.join(dir, name));
+            return {
+                index,
+                name,
+                type: 0,
+                data: Buffer.from(bytes).toString('base64'),
+            };
+        });
     }
 
     private async _loadArchiveNodes(webview: vscode.Webview, filePath: string | undefined): Promise<void> {
@@ -332,11 +391,14 @@ export class ZipperWorkbenchProvider {
         const familyMatch = base.match(/^(.+?)_(MDL|TXR|PAL|GEO)(\([^)]+\))?\.ZED$/i);
         if (!familyMatch) { return result; }
         const prefix = familyMatch[1];
+        const companionPrefix = /^worl$/i.test(prefix)
+            ? (this._findMapCompanionPrefix(dir) ?? prefix)
+            : prefix;
 
         const candidates: Record<'txr' | 'pal' | 'geo' | 'mdl', string[]> = {
-            txr: [`${prefix}_TXR.ZED`, `${prefix}_TXR(1).ZED`],
-            pal: [`${prefix}_PAL.ZED`, `${prefix}_PAL(1).ZED`],
-            geo: [`${prefix}_GEO.ZED`],
+            txr: [`${companionPrefix}_TXR.ZED`, `${companionPrefix}_TXR(1).ZED`],
+            pal: [`${companionPrefix}_PAL.ZED`, `${companionPrefix}_PAL(1).ZED`],
+            geo: [`${companionPrefix}_GEO.ZED`, `${prefix}_GEO.ZED`],
             mdl: [`${prefix}_MDL.ZED`],
         };
 
@@ -350,6 +412,39 @@ export class ZipperWorkbenchProvider {
             }
         }
         return result;
+    }
+
+    private _findMapCompanionPrefix(dir: string): string | undefined {
+        const dirPrefix = path.basename(dir);
+        const hasTxrPal = (prefix: string): boolean =>
+            fs.existsSync(path.join(dir, `${prefix}_TXR.ZED`)) &&
+            fs.existsSync(path.join(dir, `${prefix}_PAL.ZED`));
+
+        if (dirPrefix && hasTxrPal(dirPrefix)) {
+            return dirPrefix;
+        }
+
+        const supportPrefixes = new Set([
+            'alph', 'benz', 'clib', 'effe', 'flib', 'font', 'hud', 'hud2',
+            'hudw', 'junk', 'ld', 'load', 'objt', 'tlrm', 'trmg', 'weap',
+        ]);
+        try {
+            const entries = fs.readdirSync(dir);
+            const prefixes = new Set<string>();
+            for (const entry of entries) {
+                const m = /^(.+?)_TXR(?:\([^)]+\))?\.ZED$/i.exec(entry);
+                if (m) { prefixes.add(m[1]); }
+            }
+            const candidates = [...prefixes].filter(prefix => {
+                const lower = prefix.toLowerCase();
+                if (supportPrefixes.has(lower)) { return false; }
+                if (/^ld\d+$/i.test(prefix) || /^z.+\d+$/i.test(prefix)) { return false; }
+                return hasTxrPal(prefix);
+            });
+            return candidates[0];
+        } catch {
+            return undefined;
+        }
     }
 
     private _findSiblingPaletteFile(currentPath: string): string | undefined {

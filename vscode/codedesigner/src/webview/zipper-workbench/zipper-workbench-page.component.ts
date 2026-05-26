@@ -1300,6 +1300,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
         this.palettesRequested = false;
         this.archiveStack.set([]);
         this.packageEntryBytes.clear();
+        this.directCompanionTextureNamespaces.clear();
         this.companionTextures.set(null);
         this.companionScene.set(null);
         this.resetPreview();
@@ -1449,6 +1450,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
         break;
       case 'companionFiles': {
         const companions = (data['companions'] as Record<string, { path: string; nodes: Array<{ index: number; name: string; type: number; data: string }> }>) ?? {};
+        this.directCompanionTextureNamespaces.clear();
         // PAL. If TXR is also available, add exact aliases from TXR texture ids
         // to the real texpal_NNN records, skipping RGBA32 textures that do not
         // consume a palette.
@@ -1462,17 +1464,30 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
               i => base64ToBytes(txrNodes[i].data),
             );
           }
+          const namespace = namespaceFromArchiveName(companions['pal'].path) ?? namespaceFromArchiveName(companions['txr']?.path);
+          if (namespace) {
+            const namespaced = new Map<string, ZedPalette>(palettes);
+            for (const [key, value] of palettes) {
+              namespaced.set(`${namespace}:${key}`, value);
+            }
+            palettes = namespaced;
+          }
           this.palettes.set(palettes);
         }
         // TXR -> .tif name to texdat bytes map
         if (companions['txr']) {
           const map = new Map<string, Uint8Array>();
           const nodes = companions['txr'].nodes;
+          const namespace = namespaceFromArchiveName(companions['txr'].path);
+          if (namespace) { this.directCompanionTextureNamespaces.add(namespace); }
           for (let i = 0; i < nodes.length; i++) {
             if (/\.tif$/i.test(nodes[i].name)) {
               for (let j = i + 1; j < Math.min(i + 4, nodes.length); j++) {
                 if (/^texdat$/i.test(nodes[j].name)) {
-                  map.set(nodes[i].name.toLowerCase(), base64ToBytes(nodes[j].data));
+                  const key = nodes[i].name.toLowerCase();
+                  const bytes = base64ToBytes(nodes[j].data);
+                  map.set(key, bytes);
+                  if (namespace) { map.set(`${namespace}:${key}`, bytes); }
                   break;
                 }
                 if (/\.tif$/i.test(nodes[j].name)) { break; }
@@ -1999,6 +2014,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
   private rootCompanionFetches = new Map<number, 'txr' | 'pal' | 'geo'>();
   private rootCompanionTxrArchives = new Map<string, InspectedZedArchive>();
   private rootCompanionPalArchives = new Map<string, InspectedZedArchive>();
+  private directCompanionTextureNamespaces = new Set<string>();
 
   private loadMdlCompanionsForCurrentLayer(): void {
     // Same guard as loadNestedPalettesForCurrentLayer — when the ZDB
@@ -2024,12 +2040,20 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     if (/^effe$/i.test(prefix)) {
       companionPrefixes.push('ALPH');
     }
+    const previous = stack.length >= 2 ? stack[stack.length - 2].archive : null;
+    const mapPrefix = /^worl$/i.test(prefix) ? this.mapCompanionPrefixForCurrentLayer(previous) : null;
+    if (mapPrefix && !companionPrefixes.some(p => p.toLowerCase() === mapPrefix.toLowerCase())) {
+      companionPrefixes.push(mapPrefix);
+    }
     const targets: Array<{ kind: 'txr' | 'pal' | 'geo'; leafName: string }> = [];
     for (const p of companionPrefixes) {
       targets.push({ kind: 'txr', leafName: `${p}_TXR.ZED`.toLowerCase() });
       targets.push({ kind: 'pal', leafName: `${p}_PAL.ZED`.toLowerCase() });
     }
     targets.push({ kind: 'geo', leafName: `${prefix}_GEO.ZED`.toLowerCase() });
+    if (mapPrefix) {
+      targets.push({ kind: 'geo', leafName: `${mapPrefix}_GEO.ZED`.toLowerCase() });
+    }
 
     this.rootCompanionFetches.clear();
     this.rootCompanionTxrArchives.clear();
@@ -2038,7 +2062,6 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     this.palettes.set(null);
 
     // Search in-memory sub-archives on the stack first (excluding current).
-    const previous = stack.length >= 2 ? stack[stack.length - 2].archive : null;
     if (previous) {
       for (const t of targets) {
         const entry = previous.entries.find(
@@ -2359,6 +2382,39 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     }
   }
 
+  private mapCompanionPrefixForCurrentLayer(previous: InspectedZedArchive | null): string | null {
+    const path = this.result()?.path;
+    const leaf = path ? (path.split(/[\\/]/).pop() ?? path).replace(/\.[^.]+$/i, '') : '';
+    const supportPrefixes = new Set(['weap', 'flib', 'clib', 'benz', 'objt', 'effe', 'trmg', 'tlrm', 'alph', 'font', 'hud', 'hud2', 'hudw', 'load', 'junk']);
+    const hasPair = (prefix: string): boolean => {
+      if (this.packageHasArchive(prefix.toLowerCase(), 'txr') && this.packageHasArchive(prefix.toLowerCase(), 'pal')) {
+        return true;
+      }
+      if (!previous) { return false; }
+      const txr = `${prefix}_TXR.ZED`.toLowerCase();
+      const pal = `${prefix}_PAL.ZED`.toLowerCase();
+      return previous.entries.some(e => (e.name.split(/[\\/]/).pop() ?? e.name).toLowerCase() === txr) &&
+        previous.entries.some(e => (e.name.split(/[\\/]/).pop() ?? e.name).toLowerCase() === pal);
+    };
+
+    if (leaf && hasPair(leaf)) { return leaf; }
+    if (previous) {
+      const prefixes = new Set<string>();
+      for (const entry of previous.entries) {
+        const entryLeaf = entry.name.split(/[\\/]/).pop() ?? entry.name;
+        const m = /^(.+?)_TXR(?:\([^)]+\))?\.ZED$/i.exec(entryLeaf);
+        if (m) { prefixes.add(m[1]); }
+      }
+      for (const prefix of prefixes) {
+        const lower = prefix.toLowerCase();
+        if (supportPrefixes.has(lower)) { continue; }
+        if (/^ld\d+$/i.test(prefix) || /^z.+\d+$/i.test(prefix)) { continue; }
+        if (hasPair(prefix)) { return prefix; }
+      }
+    }
+    return this.primaryMapTextureNamespace();
+  }
+
   private tryApplyAnimationPreview(bytes: Uint8Array, name: string): boolean {
     const leaf = name.split(/[\\/]/).pop() ?? name;
     const animation = parseRdrAnimation(bytes, leaf);
@@ -2412,6 +2468,48 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     return (current.split(/[\\/]/).pop() ?? current).toLowerCase();
   }
 
+  private collectModelLookupArchives(): Array<{ leaf: string; archive: InspectedZedArchive }> {
+    const out: Array<{ leaf: string; archive: InspectedZedArchive }> = [];
+    const seen = new Set<string>();
+    const addArchive = (leafName: string, archive: InspectedZedArchive): void => {
+      const leaf = (leafName.split(/[\\/]/).pop() ?? leafName).toLowerCase();
+      if (!/_MDL(?:\([^)]+\))?\.zed$/i.test(leaf) || seen.has(leaf)) { return; }
+      seen.add(leaf);
+      out.push({ leaf, archive });
+    };
+    const addBytes = (leafName: string, bytes: Uint8Array | undefined): void => {
+      if (!bytes || bytes.length === 0) { return; }
+      const leaf = (leafName.split(/[\\/]/).pop() ?? leafName).toLowerCase();
+      if (!/_MDL(?:\([^)]+\))?\.zed$/i.test(leaf) || seen.has(leaf)) { return; }
+      try { addArchive(leaf, parseZedArchive(bytes)); } catch { /* skip non-ZED payloads */ }
+    };
+
+    for (const [leaf, bytes] of this.packageEntryBytes) { addBytes(leaf, bytes); }
+
+    for (const layer of this.archiveStack()) {
+      addArchive(layer.name, layer.archive);
+      for (const entry of layer.archive.entries) {
+        addBytes(entry.name, layer.archive.entryData.get(entry.index));
+      }
+    }
+
+    return out;
+  }
+
+  private modelSourcePreferOrder(): string[] {
+    const order: string[] = [];
+    const add = (value: string | null | undefined): void => {
+      const leaf = (value?.split(/[\\/]/).pop() ?? '').toLowerCase();
+      if (leaf && !order.includes(leaf)) { order.push(leaf); }
+    };
+    const path = this.result()?.path ?? '';
+    const stem = path ? (path.split(/[\\/]/).pop() ?? path).replace(/\.[^.]+$/i, '').toLowerCase() : '';
+    if (stem) { add(`${stem}_mdl.zed`); }
+    add(this.currentArchiveLeaf());
+    for (const leaf of ['worl_mdl.zed', 'weap_mdl.zed', 'clib_mdl.zed', 'flib_mdl.zed', 'benz_mdl.zed']) { add(leaf); }
+    return order;
+  }
+
   private textureNamespaceForArchiveName(archiveName: string | null | undefined): string | null {
     const namespace = namespaceFromArchiveName(archiveName);
     if (!namespace) { return null; }
@@ -2441,7 +2539,17 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     const leaf = path ? (path.split(/[\\/]/).pop() ?? path).replace(/\.[^.]+$/i, '').toLowerCase() : '';
     if (leaf && this.packageHasArchive(leaf, 'txr')) { return leaf; }
 
-    const supportPrefixes = new Set(['weap', 'flib', 'clib', 'benz', 'objt', 'effe', 'trmg', 'tlrm', 'alph', 'font', 'hud', 'hud2', 'hudw', 'load']);
+    const supportPrefixes = new Set(['weap', 'flib', 'clib', 'benz', 'objt', 'effe', 'trmg', 'tlrm', 'alph', 'font', 'hud', 'hud2', 'hudw', 'load', 'junk']);
+    for (const ns of this.directCompanionTextureNamespaces) {
+      if (supportPrefixes.has(ns)) { continue; }
+      if (/^ld\d+$/i.test(ns) || /^z.+\d+$/i.test(ns)) { continue; }
+      return ns;
+    }
+    for (const ns of this.rootCompanionTxrArchives.keys()) {
+      if (supportPrefixes.has(ns)) { continue; }
+      if (/^ld\d+$/i.test(ns) || /^z.+\d+$/i.test(ns)) { continue; }
+      return ns;
+    }
     for (const key of this.packageEntryBytes.keys()) {
       const ns = namespaceFromArchiveName(key);
       if (!ns || supportPrefixes.has(ns)) { continue; }
@@ -2687,7 +2795,11 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       } catch { failedTextureDecodes.add(req.textureName); }
     }
 
-    const traceTextureHandoff = !!entry && entry.name.toLowerCase().includes('fiveseven');
+    const traceTextureHandoff = !!entry && (
+      entry.name.toLowerCase().includes('fiveseven') ||
+      entry.name.toLowerCase() === 'worldmodel' ||
+      /^worl_mdl(?:\([^)]+\))?\.zed$/i.test(this.currentModelSourceArchive ?? '')
+    );
     if (entry && (missingTextureSources.size > 0 || failedTextureDecodes.size > 0 || traceTextureHandoff)) {
       const missing = [...missingTextureSources].sort();
       const failed = [...failedTextureDecodes].sort();
@@ -2876,7 +2988,13 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
   private requestZdbPackageIfNeeded(): void {
     const filePath = this.result()?.path;
     if (!filePath) { return; }
-    if (!/\.zdb$/i.test(filePath)) { return; }
+    const leaf = filePath.split(/[\\/]/).pop() ?? filePath;
+    const isZdb = /\.zdb$/i.test(leaf);
+    const isLooseMapWorld = /\.zed$/i.test(leaf) && (
+      /^worl_mdl(?:\([^)]+\))?\.zed$/i.test(leaf) ||
+      !/_(?:MDL|TXR|PAL|GEO)(?:\([^)]+\))?\.ZED$/i.test(leaf)
+    );
+    if (!isZdb && !isLooseMapWorld) { return; }
     // Skip apache/save ZDBs — they don't carry the sibling-ZED package layout.
     const role = this.result()?.role ?? '';
     if (role === 'apache-patch-archive' || role === 'game-save') { return; }
@@ -3021,6 +3139,9 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     // this is what fixes the "have to open views after a fresh open"
     // symptom.
     const entry = this.selectedEntry();
+    if (!entry && this.autoEnterLooseMapWorldModel()) {
+      return;
+    }
     if (entry) {
       const cached = this.nodeCache.get(entry.index)
         ?? this.bytesFromActiveArchive(entry.index);
@@ -3035,6 +3156,31 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       }
     } else {
       this.applyModelToRenderer();
+    }
+  }
+
+  private autoEnterLooseMapWorldModel(): boolean {
+    const filePath = this.result()?.path ?? '';
+    const leaf = filePath.split(/[\\/]/).pop() ?? filePath;
+    if (!/\.zed$/i.test(leaf)) { return false; }
+    if (/_(?:MDL|TXR|PAL|GEO)(?:\([^)]+\))?\.ZED$/i.test(leaf)) { return false; }
+
+    const bytes = this.packageEntryBytes.get('worl_mdl.zed');
+    if (!bytes) { return false; }
+    try {
+      const archive = parseZedArchive(bytes);
+      const world = archive.entries.find(e => e.name.toLowerCase() === 'worldmodel')
+        ?? archive.entries.find(e => e.size > 0);
+      if (!world) { return false; }
+      this.archiveStack.set([{ name: 'WORL_MDL.ZED', archive }]);
+      this.selectedIndex.set(world.index);
+      this.pendingArchiveEntry.set(null);
+      this.setStatus(`Loaded root map world (${archive.entries.length} entries).`, false, false);
+      this.log(`[package] auto-entered WORL_MDL.ZED / ${world.name}`);
+      return true;
+    } catch (err) {
+      this.log(`[package] failed to auto-enter WORL_MDL.ZED: ${err instanceof Error ? err.message : err}`);
+      return false;
     }
   }
 
@@ -3241,12 +3387,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     // of LOD/index suffixes, MESH_-prefixed) so GEO placements with name
     // variants resolve cleanly.
     type ModelHit = { node: { index: number; name: string; size: number; children: number[] }; archive: InspectedZedArchive; sourceFile: string; bytes: Uint8Array };
-    const mdlArchives: Array<{ leaf: string; archive: InspectedZedArchive }> = [];
-    for (const [leaf, bytes] of this.packageEntryBytes) {
-      if (!/_MDL(?:\([^)]+\))?\.zed$/i.test(leaf)) { continue; }
-      try { mdlArchives.push({ leaf, archive: parseZedArchive(bytes) }); }
-      catch { /* skip non-archive entries */ }
-    }
+    const mdlArchives = this.collectModelLookupArchives();
     const modelLookup = new Map<string, ModelHit[]>();
     for (const { leaf, archive } of mdlArchives) {
       for (const e of archive.entries) {
@@ -3265,7 +3406,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       }
     }
 
-    const preferOrder = ['m51_mdl.zed', 'worl_mdl.zed', 'weap_mdl.zed', 'clib_mdl.zed', 'flib_mdl.zed', 'benz_mdl.zed'];
+    const preferOrder = this.modelSourcePreferOrder();
     const resolve = (name: string): ModelHit | null => {
       if (name.toLowerCase() === 'footbomb') {
         const satchelHits = modelLookup.get('satchel');
@@ -3628,10 +3769,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     // reflects exactly what compose will do.
     type ModelHit = { sourceFile: string; nodeName: string };
     const modelLookup = new Map<string, ModelHit[]>();
-    for (const [leaf, bytes] of this.packageEntryBytes) {
-      if (!/_MDL(?:\([^)]+\))?\.zed$/i.test(leaf)) { continue; }
-      let archive: InspectedZedArchive;
-      try { archive = parseZedArchive(bytes); } catch { continue; }
+    for (const { leaf, archive } of this.collectModelLookupArchives()) {
       for (const e of archive.entries) {
         if (!e.size && e.children.length === 0) { continue; }
         for (const key of instanceNameVariants(e.name)) {
@@ -3642,7 +3780,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       }
     }
 
-    const preferOrder = ['m51_mdl.zed', 'worl_mdl.zed', 'weap_mdl.zed', 'clib_mdl.zed', 'flib_mdl.zed', 'benz_mdl.zed'];
+    const preferOrder = this.modelSourcePreferOrder();
     const resolve = (name: string): ModelHit | null => {
       if (name.toLowerCase() === 'footbomb') {
         const satchelHits = modelLookup.get('satchel');
