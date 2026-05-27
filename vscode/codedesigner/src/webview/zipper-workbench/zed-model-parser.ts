@@ -610,6 +610,189 @@ function buildSafeStripTriangles(
   return out;
 }
 
+function buildCharacterStripTriangles(
+  points: Array<{ x: number; y: number; z: number }>,
+  base: number,
+): number[] {
+  const out: number[] = [];
+  if (points.length < 3) { return out; }
+
+  let minX = Infinity, minY = Infinity, minZ = Infinity;
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  for (const p of points) {
+    if (p.x < minX) { minX = p.x; } if (p.x > maxX) { maxX = p.x; }
+    if (p.y < minY) { minY = p.y; } if (p.y > maxY) { maxY = p.y; }
+    if (p.z < minZ) { minZ = p.z; } if (p.z > maxZ) { maxZ = p.z; }
+  }
+  const diag = Math.max(1, Math.hypot(maxX - minX, maxY - minY, maxZ - minZ));
+  const consecutive: number[] = [];
+  const dist = (a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }) =>
+    Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+  for (let i = 1; i < points.length; i++) {
+    const d = dist(points[i - 1], points[i]);
+    if (d > 0.00001) { consecutive.push(d); }
+  }
+  consecutive.sort((a, b) => a - b);
+  const medianEdge = consecutive[Math.floor(consecutive.length / 2)] || diag;
+  const upperEdge = consecutive[Math.floor(consecutive.length * 0.75)] || medianEdge;
+  const maxEdge = Math.min(diag * 0.28, Math.max(medianEdge * 4, upperEdge * 2.5));
+  const minArea = Math.max(0.00001, diag * diag * 0.0000008);
+  const area = (a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }, c: { x: number; y: number; z: number }) => {
+    const abx = b.x - a.x, aby = b.y - a.y, abz = b.z - a.z;
+    const acx = c.x - a.x, acy = c.y - a.y, acz = c.z - a.z;
+    const cx = aby * acz - abz * acy;
+    const cy = abz * acx - abx * acz;
+    const cz = abx * acy - aby * acx;
+    return Math.hypot(cx, cy, cz);
+  };
+
+  for (let i = 2; i < points.length; i++) {
+    const p0 = points[i - 2], p1 = points[i - 1], p2 = points[i];
+    if (dist(p0, p1) > maxEdge || dist(p1, p2) > maxEdge || dist(p2, p0) > maxEdge) { continue; }
+    if (area(p0, p1, p2) < minArea) { continue; }
+    const flip = i & 1;
+    out.push(base + i - 2, base + (flip ? i : i - 1), base + (flip ? i - 1 : i));
+  }
+  return out;
+}
+
+interface CharacterVifStream {
+  offset: number;
+  matrixId: number;
+  points: Array<{ x: number; y: number; z: number }>;
+}
+
+export interface CharacterFallbackOptions {
+  boneMatrices?: Array<number[] | undefined>;
+  positionScale?: number;
+}
+
+function findCharacterVifStreams(data: Uint8Array): CharacterVifStream[] {
+  if (!data || data.length < 0x80 || data.length > 0x80000) { return []; }
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const streams: CharacterVifStream[] = [];
+
+  for (let o = 0; o <= data.length - 12; o += 4) {
+    const imm = view.getUint16(o + 0, true);
+    const numRaw = view.getUint8(o + 2);
+    const cmd = view.getUint8(o + 3);
+    const baseCmd = cmd & 0x7f;
+
+    // CLIB/FLIB character mesh packets use V4_16 at VU address 0x4. Row 0 is
+    // a small strip/control header; rows 1,3,5... are positions and rows
+    // 2,4,6... are normals/flags. The generic fallback used to consume both
+    // halves as XYZ, which is what made characters collapse into a ball.
+    if (baseCmd !== 0x6d || (imm & 0x03ff) !== 0x4) { continue; }
+
+    const num = numRaw === 0 ? 256 : numRaw;
+    const dataStart = o + 4;
+    const dataEnd = dataStart + num * 8;
+    if (num < 7 || num > 256 || dataEnd > data.length) { continue; }
+
+    const headerX = view.getInt16(dataStart + 0, true);
+    const headerY = view.getInt16(dataStart + 2, true);
+    const headerZ = view.getInt16(dataStart + 4, true);
+    const positionCount = view.getInt16(dataStart + 6, true);
+    const isPositionStream = headerX === 2 || headerX === 6;
+    if (
+      !isPositionStream ||
+      Math.abs(headerX) > 256 ||
+      Math.abs(headerY) > 256 ||
+      Math.abs(headerZ) > 256 ||
+      positionCount < 3 ||
+      positionCount > 128 ||
+      Math.abs(num - (positionCount * 2 + 1)) > 1
+    ) {
+      continue;
+    }
+
+    const points: Array<{ x: number; y: number; z: number }> = [];
+    let minX = Infinity, minY = Infinity, minZ = Infinity;
+    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+    let bad = 0;
+    for (let i = 0; i < positionCount; i++) {
+      const p = dataStart + (1 + i * 2) * 8;
+      const x = view.getInt16(p + 0, true);
+      const y = view.getInt16(p + 2, true);
+      const z = view.getInt16(p + 4, true);
+      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) { bad++; continue; }
+      if (Math.abs(x) > 30000 || Math.abs(y) > 30000 || Math.abs(z) > 30000) { bad++; continue; }
+      points.push({ x, y, z });
+      if (x < minX) { minX = x; } if (x > maxX) { maxX = x; }
+      if (y < minY) { minY = y; } if (y > maxY) { maxY = y; }
+      if (z < minZ) { minZ = z; } if (z > maxZ) { maxZ = z; }
+    }
+    if (points.length < 3 || bad > Math.max(1, positionCount * 0.1)) { continue; }
+    const sx = maxX - minX, sy = maxY - minY, sz = maxZ - minZ;
+    const span = Math.max(sx, sy, sz);
+    const axes = [sx, sy, sz].filter(v => v > 16).length;
+    if (span < 20 || span > 60000 || axes < 2) { continue; }
+
+    streams.push({ offset: o, matrixId: headerZ, points });
+    o = alignUp(dataEnd, 4) - 4;
+    if (streams.length >= 256) { break; }
+  }
+
+  return streams;
+}
+
+function transformCharacterPoint(m: number[], x: number, y: number, z: number): { x: number; y: number; z: number } {
+  return {
+    x: x * m[0] + y * m[4] + z * m[8] + m[12],
+    y: x * m[1] + y * m[5] + z * m[9] + m[13],
+    z: x * m[2] + y * m[6] + z * m[10] + m[14],
+  };
+}
+
+export function decodeCharacterFallbackPayload(bytes: Uint8Array, options: CharacterFallbackOptions = {}): ZedModel | null {
+  const streams = findCharacterVifStreams(bytes);
+  if (streams.length === 0) { return null; }
+
+  const vertices: ZedModelVertex[] = [];
+  const indices: number[] = [];
+  const chunks: ZedModelChunk[] = [];
+  const positionScale = options.positionScale ?? (options.boneMatrices ? 1 / 4096 : 1);
+  for (const stream of streams) {
+    const base = vertices.length;
+    const matrix = options.boneMatrices?.[stream.matrixId];
+    const points = stream.points.map(p => {
+      const x = p.x * positionScale;
+      const y = p.y * positionScale;
+      const z = p.z * positionScale;
+      return matrix ? transformCharacterPoint(matrix, x, y, z) : { x, y, z };
+    });
+    for (const p of points) {
+      vertices.push({ x: p.x, y: p.y, z: p.z, u: 0, v: 0 });
+    }
+    const strip = buildCharacterStripTriangles(points, base);
+    for (const i of strip) { indices.push(i); }
+    chunks.push({
+      offset: stream.offset,
+      vertexCount: stream.points.length,
+      triangleCount: strip.length / 3 | 0,
+      decodedTriangleCount: strip.length / 3 | 0,
+      scale: 1,
+      vertices: vertices.slice(base),
+      indices: strip.map(i => i - base),
+      textureName: null,
+    });
+  }
+  if (vertices.length === 0 || indices.length === 0) { return null; }
+
+  let r = 0;
+  for (const v of vertices) {
+    const d = Math.hypot(v.x, v.y, v.z);
+    if (d > r) { r = d; }
+  }
+  return {
+    chunks,
+    vertices,
+    indices,
+    textureRefs: extractTextureRefs(bytes, 0, bytes.length),
+    boundingRadius: r || 1,
+  };
+}
+
 interface I16Cloud {
   offset: number;
   count: number;

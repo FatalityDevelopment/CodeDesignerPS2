@@ -22,7 +22,7 @@ import {
   ZedPalette,
   ZedTexture,
 } from './zed-texture-parser';
-import { ZedModel, applyMarkerBinding, applyWeaponDescriptorBinding, decodeFallbackPayload, looksLikeZedContainer, parseModel } from './zed-model-parser';
+import { ZedModel, applyMarkerBinding, applyWeaponDescriptorBinding, decodeCharacterFallbackPayload, decodeFallbackPayload, looksLikeZedContainer, parseModel } from './zed-model-parser';
 import { InspectedZedArchive, parseZedArchive } from './zed-archive-parser';
 import { type ModelBounds3, type ModelCameraView, ZedModelRenderer } from './zed-model-renderer';
 import {
@@ -44,6 +44,7 @@ import {
 import {
   GeoEntry,
   GeoInstance,
+  GeoNode,
   GeoScene,
   collectGeoInstances,
   collectVisualPartNames,
@@ -51,6 +52,7 @@ import {
   findSceneNode,
   instanceNameVariants,
   parseGeoScene,
+  readGeoTransform,
   transformPoint,
 } from './zed-geo-parser';
 import './zipper-workbench-page.css';
@@ -2056,6 +2058,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
   private rootCompanionFetches = new Map<number, 'txr' | 'pal' | 'geo'>();
   private rootCompanionTxrArchives = new Map<string, InspectedZedArchive>();
   private rootCompanionPalArchives = new Map<string, InspectedZedArchive>();
+  private companionScenesByNamespace = new Map<string, GeoScene>();
   private directCompanionTextureNamespaces = new Set<string>();
 
   private loadMdlCompanionsForCurrentLayer(): void {
@@ -2179,6 +2182,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
           data: bytesToBase64(archive.entryData.get(e.index) ?? new Uint8Array(0)),
         }));
         const scene = parseGeoScene(entries);
+        this.companionScenesByNamespace.set(namespace, scene);
         this.companionScene.set(scene);
       }
       // Re-derive palettes whenever TXR or PAL arrives, since aliasing needs both.
@@ -2388,6 +2392,34 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
         this.log(`[model] ${entry.name}: using ${alternate.sourceName}`);
       }
 
+      const activeArchive = this.archiveStack().at(-1)?.archive ?? null;
+      const activeNode = activeArchive?.entries.find(e => e.index === entry.index) ?? null;
+      if (!alternate && activeArchive && activeNode && this.shouldAutoComposeCharacterNode(activeNode, sourceArchive)) {
+        const composed = this.buildHierarchicalModel(activeArchive, activeNode, sourceArchive);
+        if (composed) {
+          this.currentModelBytes = null;
+          this.currentSliceOffsets = [];
+          this.currentModelBindingMode = 'tail';
+          this.currentModelSourceArchive = sourceArchive;
+          this.selectedChunk.set(-1);
+          this.model.set(composed.model);
+          this.previewMessage.set(
+            `Composed ${composed.payloadsWithChunks} character payload(s) from hierarchy.`,
+          );
+          this.log(`[character] ${entry.name}: auto-composed ${composed.payloadsWithChunks} payload(s), ${composed.model.vertices.length} verts, ${composed.model.indices.length / 3 | 0} tris`);
+          setTimeout(() => this.applyModelToRenderer(), 0);
+          return;
+        }
+        this.currentModelBytes = null;
+        this.currentSliceOffsets = [];
+        this.currentModelBindingMode = 'tail';
+        this.currentModelSourceArchive = sourceArchive;
+        this.model.set(null);
+        this.previewMessage.set(`No character mesh chunks found in ${entry.name}'s hierarchy.`);
+        this.log(`[character] ${entry.name}: hierarchy produced no renderable chunks`);
+        return;
+      }
+
       let mdl = this.isCurrentEffectModelLayer()
         ? (decodeFallbackPayload(modelBytes) ?? parseModel(modelBytes))
         : parseModel(modelBytes);
@@ -2398,7 +2430,12 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       // decoders. They give the user *something* to inspect instead of an
       // empty pane.
       if (mdl.chunks.length === 0) {
-        const fallback = decodeFallbackPayload(modelBytes);
+        const characterBones = this.isCharacterModelArchive(sourceArchive)
+          ? this.characterBoneMatricesForEntry(entry.name, sourceArchive)
+          : null;
+        const fallback = this.isCharacterModelArchive(sourceArchive)
+          ? (decodeCharacterFallbackPayload(modelBytes, characterBones ? { boneMatrices: characterBones } : {}) ?? decodeFallbackPayload(modelBytes))
+          : decodeFallbackPayload(modelBytes);
         if (fallback && fallback.chunks.length > 0) {
           mdl = fallback;
           fallbackUsed = true;
@@ -2674,14 +2711,237 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     const stack = this.archiveStack();
     const current = stack.length > 0 ? stack[stack.length - 1].name : '';
     const leaf = current.split(/[\\/]/).pop() ?? current;
-    return /^weap_mdl(?:\([^)]+\))?\.zed$/i.test(leaf);
+    return this.isWeaponModelArchive(leaf);
   }
 
   private isCurrentEffectModelLayer(): boolean {
     const stack = this.archiveStack();
     const current = stack.length > 0 ? stack[stack.length - 1].name : '';
     const leaf = current.split(/[\\/]/).pop() ?? current;
+    return this.isEffectModelArchive(leaf);
+  }
+
+  private isWeaponModelArchive(archiveName: string | null | undefined): boolean {
+    const leaf = (archiveName?.split(/[\\/]/).pop() ?? '').toLowerCase();
+    return /^weap_mdl(?:\([^)]+\))?\.zed$/i.test(leaf);
+  }
+
+  private isEffectModelArchive(archiveName: string | null | undefined): boolean {
+    const leaf = (archiveName?.split(/[\\/]/).pop() ?? '').toLowerCase();
     return /^effe_mdl(?:\([^)]+\))?\.zed$/i.test(leaf);
+  }
+
+  private isCharacterModelArchive(archiveName: string | null | undefined): boolean {
+    const leaf = (archiveName?.split(/[\\/]/).pop() ?? '').toLowerCase();
+    return /^(?:clib|flib)_mdl(?:\([^)]+\))?\.zed$/i.test(leaf);
+  }
+
+  private companionSceneForArchive(archiveName: string | null | undefined): GeoScene | null {
+    const namespace = namespaceFromArchiveName(archiveName);
+    if (namespace) {
+      const scene = this.companionScenesByNamespace.get(namespace);
+      if (scene) { return scene; }
+    }
+    return this.companionScene();
+  }
+
+  private characterGeoNameCandidates(entryName: string): string[] {
+    const leaf = (entryName.split(/[\\/]/).pop() ?? entryName).replace(/\.[^.]+$/i, '');
+    const withoutPrefix = leaf.replace(/^mesh[_-]/i, '');
+    const out = new Set<string>();
+    const add = (value: string) => {
+      const cleaned = value.replace(/_lo$/i, '');
+      if (cleaned) { out.add(cleaned); }
+      const noIndex = cleaned.replace(/_[0-9]+$/i, '');
+      if (noIndex) { out.add(noIndex); }
+    };
+    add(withoutPrefix);
+    add(leaf);
+    return [...out];
+  }
+
+  private characterBoneMatricesForEntry(entryName: string, sourceArchiveName: string | null | undefined): Array<number[] | undefined> | null {
+    const scene = this.companionSceneForArchive(sourceArchiveName);
+    if (!scene) { return null; }
+    let root: GeoNode | null = null;
+    for (const name of this.characterGeoNameCandidates(entryName)) {
+      root = findSceneNode(scene, name);
+      if (root) { break; }
+    }
+    if (!root) { return null; }
+
+    const matrices: Array<number[] | undefined> = [];
+    const childNamed = (node: GeoNode, name: string): GeoNode | null =>
+      node.children.find(c => c.name.toLowerCase() === name.toLowerCase()) ?? null;
+    const readU32 = (node: GeoNode | null): number | null => {
+      const data = node?.rawData;
+      if (!data || data.length < 4) { return null; }
+      return new DataView(data.buffer, data.byteOffset, data.byteLength).getUint32(0, true);
+    };
+
+    const walk = (node: GeoNode, parentMatrix: number[]) => {
+      const matrix = multiplyMatrices(parentMatrix, readGeoTransform(node));
+      const visuals = childNamed(node, 'visuals');
+      if (visuals) {
+        for (const vis of visuals.children.filter(c => c.name.toLowerCase() === 'vis')) {
+          const matrixId = readU32(childNamed(vis, 'matrix_id'));
+          if (matrixId !== null && matrixId >= 0 && matrixId < 256) {
+            matrices[matrixId] = matrix;
+          }
+        }
+      }
+
+      const children = childNamed(node, 'children');
+      if (children) {
+        for (const child of children.children) { walk(child, matrix); }
+      }
+    };
+    walk(root, identityMatrix());
+    return matrices.some(Boolean) ? matrices : null;
+  }
+
+  private shouldAutoComposeCharacterNode(entry: { size: number; children: number[] }, archiveName: string | null | undefined): boolean {
+    if (!this.isCharacterModelArchive(archiveName)) { return false; }
+    if (entry.children.length === 0) { return false; }
+    // CLIB/FLIB roots often carry skeleton/control bytes that look vaguely
+    // renderable to the fallback scanner. Prefer the subtree mesh children
+    // for roots and grouped body parts, but leave leaf payloads inspectable.
+    return entry.size === 0 || entry.children.length > 1 || entry.size < 0x4000;
+  }
+
+  private buildHierarchicalModel(
+    archive: InspectedZedArchive,
+    rootEntry: InspectedZedArchive['entries'][number],
+    sourceArchiveName: string | null,
+  ): { model: ZedModel; payloadsWithChunks: number; fallbackPayloads: number } | null {
+    const composedVertices: ZedModel['vertices'] = [];
+    const composedIndices: number[] = [];
+    const composedChunks: ZedModel['chunks'] = [];
+    const composedRefs = new Set<string>();
+    const isWeaponSource = this.isWeaponModelArchive(sourceArchiveName);
+    const isEffectSource = this.isEffectModelArchive(sourceArchiveName);
+    const isCharacterSource = this.isCharacterModelArchive(sourceArchiveName);
+    const bindMode = isWeaponSource || isEffectSource ? 'tailScan' : this.mapMaterialBinding();
+    let payloadsWithChunks = 0;
+    let fallbackPayloads = 0;
+
+    const descriptorOffsetsFor = (childIndices: number[]): number[] => {
+      const offsets: number[] = [];
+      for (const childIdx of childIndices) {
+        const childBytes = archive.entryData.get(childIdx);
+        if (!childBytes || childBytes.length !== 4) { continue; }
+        const view = new DataView(childBytes.buffer, childBytes.byteOffset, 4);
+        offsets.push(view.getUint32(0, true));
+      }
+      return offsets;
+    };
+
+    const hasOnlyDescriptorChildren = (entry: InspectedZedArchive['entries'][number]): boolean =>
+      entry.children.length > 0 &&
+      entry.children.every(childIdx => (archive.entryData.get(childIdx)?.length ?? 0) === 4);
+
+    const canUseFallbackForEntry = (entry: InspectedZedArchive['entries'][number]): boolean => {
+      if (!isCharacterSource) { return true; }
+      if (entry.children.length === 0 || hasOnlyDescriptorChildren(entry)) { return true; }
+      const leaf = (entry.name.split(/[\\/]/).pop() ?? entry.name).toLowerCase();
+      return /^mesh(?:[_-]|$)/i.test(leaf) || /[_-]mesh(?:[_-]|$)/i.test(leaf);
+    };
+
+    const decodePayloadModel = (
+      bytes: Uint8Array,
+      entryForBytes: InspectedZedArchive['entries'][number],
+      descriptorOffsets: number[],
+    ): ZedModel | null => {
+      let mdl: ZedModel | null = null;
+      try {
+        mdl = isEffectSource
+          ? (decodeFallbackPayload(bytes) ?? parseModel(bytes))
+          : parseModel(bytes);
+      } catch { mdl = null; }
+
+      if ((!mdl || mdl.chunks.length === 0) && canUseFallbackForEntry(entryForBytes)) {
+        const characterBones = isCharacterSource
+          ? this.characterBoneMatricesForEntry(entryForBytes.name, sourceArchiveName)
+          : null;
+        const fallback = isCharacterSource
+          ? (decodeCharacterFallbackPayload(bytes, characterBones ? { boneMatrices: characterBones } : {}) ?? decodeFallbackPayload(bytes))
+          : decodeFallbackPayload(bytes);
+        if (fallback && fallback.chunks.length > 0) {
+          mdl = fallback;
+          fallbackPayloads++;
+        }
+      }
+
+      if (!mdl || mdl.chunks.length === 0) { return null; }
+      if (isWeaponSource) {
+        try { applyWeaponDescriptorBinding(mdl, bytes, descriptorOffsets); }
+        catch { /* keep tail-scan names */ }
+      }
+      if (!isWeaponSource && !isEffectSource && bindMode !== 'tailScan') {
+        try { applyMarkerBinding(mdl, bytes, descriptorOffsets, bindMode); }
+        catch { /* keep tail-scan names */ }
+      }
+      return mdl;
+    };
+
+    const mergePayload = (
+      local: ZedModel,
+      matrix: number[],
+      sourceModelName: string,
+    ): void => {
+      payloadsWithChunks++;
+      const vertexBase = composedVertices.length;
+      const chunkBase = composedChunks.length;
+      for (const v of local.vertices) {
+        const [tx, ty, tz] = transformPoint(matrix, v.x, v.y, v.z);
+        composedVertices.push({ ...v, x: tx, y: ty, z: tz });
+      }
+      for (const idx of local.indices) { composedIndices.push(vertexBase + idx); }
+      for (const c of local.chunks) {
+        composedChunks.push({
+          ...c,
+          sourceModelName: c.sourceModelName ?? sourceModelName,
+          sourceArchiveName: c.sourceArchiveName ?? sourceArchiveName ?? undefined,
+          offset: c.offset + chunkBase * 0x80,
+        });
+      }
+      for (const ref of local.textureRefs) { composedRefs.add(ref); }
+    };
+
+    const visit = (entryIndex: number, parentMatrix: number[]) => {
+      const ent = archive.entries.find(e => e.index === entryIndex);
+      if (!ent) { return; }
+      const bytes = archive.entryData.get(ent.index);
+      const localMatrix = bytes ? tryReadLocalMatrix(bytes) : identityMatrix();
+      const matrix = multiplyMatrices(parentMatrix, localMatrix);
+
+      if (bytes && bytes.length > 0) {
+        const local = decodePayloadModel(bytes, ent, descriptorOffsetsFor(ent.children));
+        if (local) { mergePayload(local, matrix, ent.name); }
+      }
+
+      for (const childIdx of ent.children) { visit(childIdx, matrix); }
+    };
+
+    visit(rootEntry.index, identityMatrix());
+    if (composedVertices.length === 0) { return null; }
+
+    let radius = 0;
+    for (const v of composedVertices) {
+      const d = Math.hypot(v.x, v.y, v.z);
+      if (d > radius) { radius = d; }
+    }
+    return {
+      model: {
+        chunks: composedChunks,
+        vertices: composedVertices,
+        indices: composedIndices,
+        textureRefs: [...composedRefs],
+        boundingRadius: radius || 1,
+      },
+      payloadsWithChunks,
+      fallbackPayloads,
+    };
   }
 
   private refreshPreview(): void {
@@ -3147,6 +3407,8 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
   private applyZdbPackage(nodes: Array<{ index: number; name: string; data: string }>): void {
     this.packageEntryBytes.clear();
     this.packageMpsResults.set([]);
+    this.companionScenesByNamespace.clear();
+    this.companionScene.set(null);
     const txrArchives: Array<{ name: string; archive: InspectedZedArchive }> = [];
     const palArchives: Array<{ name: string; archive: InspectedZedArchive }> = [];
     const geoArchives: Array<{ name: string; archive: InspectedZedArchive }> = [];
@@ -3229,8 +3491,9 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     }
     if (mergedPalettes.size > 0) { this.palettes.set(mergedPalettes); }
 
-    // Parse the first GEO archive into a scene tree (used by the chunk
-    // label / part-name lookups).
+    // Parse every GEO archive into a namespace lookup. Keep the first one as
+    // the legacy companionScene for map/debug tools, but character meshes need
+    // their own CLIB/FLIB skeleton scenes even when a full package is loaded.
     for (const geo of geoArchives) {
       try {
         const geoEntries: GeoEntry[] = geo.archive.entries.map(e => ({
@@ -3239,8 +3502,10 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
           type: e.type,
           data: bytesToBase64(geo.archive.entryData.get(e.index) ?? new Uint8Array(0)),
         }));
-        this.companionScene.set(parseGeoScene(geoEntries));
-        break;
+        const scene = parseGeoScene(geoEntries);
+        const namespace = namespaceFromArchiveName(geo.name);
+        if (namespace) { this.companionScenesByNamespace.set(namespace, scene); }
+        if (!this.companionScene()) { this.companionScene.set(scene); }
       } catch { /* try next */ }
     }
 
@@ -3975,6 +4240,22 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     const rootEntry = archive.entries.find(e => e.index === entry.index);
     if (!rootEntry) {
       this.log(`[hierarchical] entry ${entry.name} not found in current archive`, true);
+      return;
+    }
+
+    const composed = this.buildHierarchicalModel(archive, rootEntry, sourceArchiveName);
+    if (composed) {
+      this.model.set(composed.model);
+      this.previewMode.set('model');
+      this.currentModelBytes = null;
+      this.currentSliceOffsets = [];
+      this.currentModelSourceArchive = sourceArchiveName;
+      setTimeout(() => this.applyModelToRenderer(), 0);
+      this.log(`[hierarchical] ${entry.name}: ${composed.payloadsWithChunks} payload(s) with chunks, ${composed.model.vertices.length} verts, ${composed.model.indices.length / 3 | 0} tris, fallback=${composed.fallbackPayloads}`, true);
+      return;
+    }
+    if (this.isCharacterModelArchive(sourceArchiveName)) {
+      this.log(`[hierarchical] ${entry.name}: no chunks found in subtree`, true);
       return;
     }
 
