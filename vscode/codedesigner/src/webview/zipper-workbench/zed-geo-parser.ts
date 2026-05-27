@@ -191,6 +191,10 @@ export interface GeoInstance {
   node: GeoNode;
 }
 
+export interface CollectGeoInstancesOptions {
+  accumulateTransforms?: boolean;
+}
+
 function safeFindChild(node: GeoNode, name: string): GeoNode | null {
   return node.children.find(c => c.name === name) ?? null;
 }
@@ -220,6 +224,31 @@ function identityMatrix(): number[] {
   return [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 }
 
+function multiplyMatrices(a: number[], b: number[]): number[] {
+  const out = new Array<number>(16).fill(0);
+  for (let row = 0; row < 4; row++) {
+    for (let col = 0; col < 4; col++) {
+      out[col * 4 + row] =
+        a[0 * 4 + row] * b[col * 4 + 0] +
+        a[1 * 4 + row] * b[col * 4 + 1] +
+        a[2 * 4 + row] * b[col * 4 + 2] +
+        a[3 * 4 + row] * b[col * 4 + 3];
+    }
+  }
+  return out;
+}
+
+function looksLikeTransform(m: number[]): boolean {
+  if (!m.every(Number.isFinite)) { return false; }
+  const sx = Math.hypot(m[0], m[1], m[2]);
+  const sy = Math.hypot(m[4], m[5], m[6]);
+  const sz = Math.hypot(m[8], m[9], m[10]);
+  const saneScale = sx > 0.001 && sy > 0.001 && sz > 0.001 && sx < 500 && sy < 500 && sz < 500;
+  const saneBottom = Math.abs(m[3]) < 0.01 && Math.abs(m[7]) < 0.01 && Math.abs(m[11]) < 0.01 && Math.abs(Math.abs(m[15]) - 1) < 0.25;
+  const saneTranslate = Math.abs(m[12]) < 100000 && Math.abs(m[13]) < 100000 && Math.abs(m[14]) < 100000;
+  return saneScale && saneBottom && saneTranslate;
+}
+
 export function readGeoTransform(node: GeoNode): number[] {
   const nparams = safeFindChild(node, 'nparams');
   if (!nparams || !nparams.rawData || nparams.rawData.length < 0x40) { return identityMatrix(); }
@@ -229,9 +258,9 @@ export function readGeoTransform(node: GeoNode): number[] {
   const max = Math.min(16, Math.floor(data.length / 4));
   for (let i = 0; i < max; i++) { f.push(view.getFloat32(i * 4, true)); }
   while (f.length < 16) { f.push(0); }
-  // Identity rows store 1 at f[0]; if not we treat as junk and fall back to
-  // identity. Mirrors the HTML guard.
-  if (!Number.isFinite(f[0]) || Math.abs(f[0]) < 1e-6) { return identityMatrix(); }
+  // A valid rotated PS2 placement matrix can have m00 close to zero, so use
+  // full transform sanity checks instead of treating that as junk.
+  if (!looksLikeTransform(f)) { return identityMatrix(); }
   return f;
 }
 
@@ -265,9 +294,13 @@ function formatGeoPath(node: GeoNode, root: GeoNode): string {
 // carry a `model_name` child (explicit) or a `visuals` child (implicit, name
 // comes from the node itself). Skips the sky shell because it usually
 // dominates bounds and hides the actual playable area.
-export function collectGeoInstances(scene: GeoScene, root: GeoNode): GeoInstance[] {
+export function collectGeoInstances(scene: GeoScene, root: GeoNode, options: CollectGeoInstancesOptions = {}): GeoInstance[] {
   const out: GeoInstance[] = [];
-  const walk = (node: GeoNode) => {
+  const walk = (node: GeoNode, parentMatrix: number[]) => {
+    const localMatrix = readGeoTransform(node);
+    const worldMatrix = options.accumulateTransforms
+      ? multiplyMatrices(parentMatrix, localMatrix)
+      : localMatrix;
     const explicitChild = safeFindChild(node, 'model_name');
     const explicitName = explicitChild?.rawData ? bytesToAscii(explicitChild.rawData) : '';
     const hasVisuals = safeFindChild(node, 'visuals') !== null;
@@ -279,14 +312,14 @@ export function collectGeoInstances(scene: GeoScene, root: GeoNode): GeoInstance
         modelName: candidate,
         instanceName: cleanNode,
         path: formatGeoPath(node, scene.root),
-        matrix: readGeoTransform(node),
+        matrix: worldMatrix,
         node,
       });
     }
 
-    for (const c of node.children) { walk(c); }
+    for (const c of node.children) { walk(c, worldMatrix); }
   };
-  walk(root);
+  walk(root, identityMatrix());
 
   // Dedup by path+modelName so a model placed in multiple equivalent ways
   // doesn't get rendered twice.

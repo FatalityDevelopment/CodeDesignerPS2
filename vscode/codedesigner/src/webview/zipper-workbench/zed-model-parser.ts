@@ -35,7 +35,7 @@ export interface ZedModelChunk {
   textureName: string | null;
   // Where textureName came from. Weapon MDL descriptor tables are explicit
   // material bindings and should not be second-guessed by render heuristics.
-  textureBinding?: 'tail' | 'descriptor';
+  textureBinding?: 'tail' | 'descriptor' | 'smartWorld' | 'sliceNearest' | 'globalNearest';
   // Original MDL/GEO source for composed scenes. Palette selection can depend
   // on the model that referenced a shared .tif page.
   sourceModelName?: string;
@@ -355,6 +355,7 @@ export function applyMarkerBinding(
     }
     if (chosen) {
       chunk.textureName = chosen.name;
+      chunk.textureBinding = mode;
     }
   }
 }

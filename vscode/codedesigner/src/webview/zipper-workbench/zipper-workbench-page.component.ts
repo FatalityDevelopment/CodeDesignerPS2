@@ -24,7 +24,7 @@ import {
 } from './zed-texture-parser';
 import { ZedModel, applyMarkerBinding, applyWeaponDescriptorBinding, decodeFallbackPayload, looksLikeZedContainer, parseModel } from './zed-model-parser';
 import { InspectedZedArchive, parseZedArchive } from './zed-archive-parser';
-import { ZedModelRenderer } from './zed-model-renderer';
+import { type ModelBounds3, type ModelCameraView, ZedModelRenderer } from './zed-model-renderer';
 import {
   RdrAnimationClip,
   RdrAnimationTrack,
@@ -43,6 +43,7 @@ import {
 } from './zanim-parser';
 import {
   GeoEntry,
+  GeoInstance,
   GeoScene,
   collectGeoInstances,
   collectVisualPartNames,
@@ -140,12 +141,25 @@ interface MpsMap {
   scaleX: number; scaleZ: number;
 }
 
+interface Bounds3 {
+  minX: number; minY: number; minZ: number;
+  maxX: number; maxY: number; maxZ: number;
+}
+
 interface MpsResult {
   sourcePath: string;
   declaredCount: number;
   foundCount: number;
   fileSize: number;
   maps: MpsMap[];
+}
+
+interface MapCameraReference {
+  source: string;
+  map: MpsMap;
+  bounds: Bounds3;
+  label: string;
+  distance: number;
 }
 
 // One node in the collapsible RDR tree. `path` is a unique key (uses dotted
@@ -572,7 +586,7 @@ interface RdrTreeNode {
 
             @if (previewMode() === 'rdr') {
               <div class="zip-preview">
-                <div class="zip-preview-stage" style="display:block;overflow:auto;padding:8px;background:var(--vscode-editorWidget-background, #1a1a1a)">
+                <div class="zip-preview-stage" style="display:block;overflow:auto;padding:8px;background:#111318">
                   @if (rdr(); as r) {
                     @if (r.fallback) {
                       @if (rdrFallbackLists(); as f) {
@@ -807,6 +821,20 @@ interface RdrTreeNode {
                           </select>
                         </div>
                         <div class="zip-map-ctrl">
+                          <span>Camera</span>
+                          <select [value]="mapCameraView()" (change)="onMapCameraViewChange($event)">
+                            <option value="auto">auto</option>
+                            <option value="iso">3D iso</option>
+                            <option value="top">top</option>
+                            <option value="front">front</option>
+                            <option value="back">back</option>
+                            <option value="left">left</option>
+                            <option value="right">right</option>
+                            <option value="mapTop" [disabled]="!activeMapCameraReference()">nearest map top</option>
+                            <option value="mapIso" [disabled]="!activeMapCameraReference()">nearest map iso</option>
+                          </select>
+                        </div>
+                        <div class="zip-map-ctrl">
                           <span>Triangle stride</span>
                           <select [value]="mapTriStride()" (change)="onMapTriStrideChange($event)">
                             <option [value]="1">1 — full solid</option>
@@ -832,6 +860,9 @@ interface RdrTreeNode {
                           </select>
                         </div>
                       </div>
+                      @if (activeMapCameraReference(); as ref) {
+                        <div><span>Nearest map bounds</span><strong>{{ ref.label }}</strong></div>
+                      }
                     </div>
 
                     <!-- Materials -->
@@ -841,9 +872,9 @@ interface RdrTreeNode {
                         <div class="zip-map-ctrl">
                           <span>Binding</span>
                           <select [value]="mapMaterialBinding()" (change)="onMapMaterialBindingChange($event)">
-                            <option value="tailScan">tail scan (default)</option>
+                            <option value="tailScan">tail scan</option>
                             <option value="smartWorld">smart world marker</option>
-                            <option value="sliceNearest">slice nearest marker</option>
+                            <option value="sliceNearest">slice nearest marker (default)</option>
                             <option value="globalNearest">global nearest marker</option>
                           </select>
                         </div>
@@ -1062,6 +1093,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
 
   // AIMAPS.MPS preview state.
   readonly mps = signal<MpsResult | null>(null);
+  private readonly packageMpsResults = signal<MpsResult[]>([]);
   readonly animationClip = signal<RdrAnimationClip | null>(null);
   readonly animationPlaying = signal(true);
   readonly animationFrame = signal(0);
@@ -1119,11 +1151,12 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
   // material-binding signal used in the model parser path.
   readonly mapRenderMode = signal<'view3dTexturedLit' | 'view3dTextured' | 'view3dSolid' | 'topSolid' | 'topWire' | 'view3dWire'>('view3dTexturedLit');
   readonly mapTriStride = signal<number>(1);
-  // Default 'smartWorld' to match the HTML map viewer for world/map models.
+  // Default to slice-nearest to match the M51 HTML model viewer: tail scan
+  // first, then nearest marker inside Nxxx child-offset slices.
   // WEAP_MDL payloads are forced back to tail-scan in the decode paths below:
   // weapon payloads often store helper + primary .tif names in one marker
   // block, and smart marker binding can pick the helper atlas.
-  readonly mapMaterialBinding = signal<'tailScan' | 'smartWorld' | 'sliceNearest' | 'globalNearest'>('smartWorld');
+  readonly mapMaterialBinding = signal<'tailScan' | 'smartWorld' | 'sliceNearest' | 'globalNearest'>('sliceNearest');
   // The raw model bytes for the currently-displayed model, kept so we can
   // re-run the binding pass on dropdown change without re-decoding.
   private currentModelBytes: Uint8Array | null = null;
@@ -1133,6 +1166,13 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
   readonly mapTextureV = signal<'flipV' | 'direct'>('flipV');
   readonly mapUvInterpretation = signal<'autoWorld' | 'norm4096' | 'pixel16' | 'pixel256'>('autoWorld');
   readonly mapTextureFilter = signal<string>('');
+  readonly mapCameraView = signal<ModelCameraView>('auto');
+  readonly activeMapCameraReference = computed<MapCameraReference | null>(() => {
+    const mdl = this.model();
+    if (!mdl) { return null; }
+    const modelBounds = this.boundsFromVertices(mdl.vertices);
+    return this.nearestPackageMapReference(modelBounds);
+  });
 
   // Aggregated thumbnail list for the sidebar texture grid. Built from
   // companionTextures (TXR sibling) plus the current archive's own TXR
@@ -1300,6 +1340,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
         this.palettesRequested = false;
         this.archiveStack.set([]);
         this.packageEntryBytes.clear();
+        this.packageMpsResults.set([]);
         this.directCompanionTextureNamespaces.clear();
         this.companionTextures.set(null);
         this.companionScene.set(null);
@@ -1544,6 +1585,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     const filePath = this.result()?.path;
     if (!filePath) { return; }
     this.packageEntryBytes.clear();
+    this.packageMpsResults.set([]);
     this.companionTextures.set(null);
     this.companionScene.set(null);
     this.palettes.set(null);
@@ -2254,6 +2296,13 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       this.mps.set(null);
       const filePath = this.result()?.path;
       const leaf = entry.name.split(/[\\/]/).pop() ?? entry.name;
+      const inMemory = this.parseMpsBytes(bytes, `${filePath ?? 'package'} / ${leaf}`);
+      if (inMemory) {
+        this.mps.set(inMemory);
+        this.previewMessage.set(`MPS: ${inMemory.foundCount} / ${inMemory.declaredCount} AI maps found.`);
+        this.log(`[MPS] ${leaf}: declared=${inMemory.declaredCount} found=${inMemory.foundCount} (${inMemory.fileSize}B, in-memory)`);
+        return;
+      }
       if (filePath) {
         this.log(`[MPS] inspecting ${leaf}…`);
         // .mps only lives as a sibling on disk; if the loaded archive itself
@@ -2324,7 +2373,6 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     try {
       const alternate = this.resolveAlternateModelPayload(entry.name);
       const modelBytes = alternate?.bytes ?? bytes;
-      const sliceOffsets = alternate?.sliceOffsets ?? this.collectSliceOffsetsForCurrentEntry();
       const bindingMode: 'weaponDescriptor' | 'map' | 'tail' = alternate
         ? 'tail'
         : this.isCurrentWeaponModelLayer()
@@ -2332,6 +2380,9 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
           : this.isCurrentEffectModelLayer()
             ? 'tail'
             : 'map';
+      const sliceOffsets = alternate?.sliceOffsets ?? this.collectSliceOffsetsForCurrentEntry({
+        siblingFallback: bindingMode === 'map',
+      });
       const sourceArchive = alternate?.sourceArchiveName ?? this.currentArchiveLeaf();
       if (alternate) {
         this.log(`[model] ${entry.name}: using ${alternate.sourceName}`);
@@ -2564,7 +2615,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
   // These nodes hold 4-byte payloads = byte offsets into the parent model
   // payload, defining where each material slice begins. Returns [] when no
   // sub-archive context is available (e.g. opened a raw model directly).
-  private collectSliceOffsetsForCurrentEntry(): number[] {
+  private collectSliceOffsetsForCurrentEntry(options: { siblingFallback?: boolean } = {}): number[] {
     const entry = this.selectedEntry();
     const stack = this.archiveStack();
     if (!entry || stack.length === 0) { return []; }
@@ -2577,6 +2628,29 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       if (!childBytes || childBytes.length !== 4) { continue; }
       const view = new DataView(childBytes.buffer, childBytes.byteOffset, 4);
       offsets.push(view.getUint32(0, true));
+    }
+    if (offsets.length > 0 || !options.siblingFallback) { return offsets; }
+
+    // The standalone M51 viewer learned these material slices by scanning
+    // following Nxxx entries in archive order. Some nested archives expose
+    // those stubs as siblings rather than children, so mirror that fallback
+    // for object/map models without changing the weapon descriptor path.
+    const start = archive.entries.findIndex(e => e.index === entry.index);
+    if (start < 0) { return offsets; }
+    for (let i = start + 1; i < archive.entries.length; i++) {
+      const sibling = archive.entries[i];
+      const leaf = sibling.name.split(/[\\/]/).pop() ?? sibling.name;
+      const siblingBytes = archive.entryData.get(sibling.index);
+      const size = siblingBytes?.length ?? sibling.size;
+      if (size === 4 && /^N\d+/i.test(leaf) && siblingBytes) {
+        const view = new DataView(siblingBytes.buffer, siblingBytes.byteOffset, 4);
+        offsets.push(view.getUint32(0, true));
+        continue;
+      }
+      if (size > 64 || (!/^N\d+/i.test(leaf) && size !== 4)) { break; }
+    }
+    if (offsets.length > 0) {
+      this.log(`[model] ${entry.name}: using ${offsets.length} sibling N-slice offset(s)`);
     }
     return offsets;
   }
@@ -2660,6 +2734,10 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     const entry = this.selectedEntry();
     const palettes = this.palettes();
     const sources = this.buildTifByteMap();
+    const isGeoComposedModel =
+      this.currentModelBytes === null &&
+      this.currentModelSourceArchive === null &&
+      mdl.chunks.some(c => !!c.sourceArchiveName);
 
     // PS2 weapon models use a single atlas .tif per weapon - the chunks
     // sample different UV regions of the same sheet. Pick a primary atlas
@@ -2676,6 +2754,12 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
 
     const sourceArchiveForChunk = (chunk: ZedModel['chunks'][number]): string | null =>
       chunk.sourceArchiveName ?? this.currentModelSourceArchive;
+
+    const sourceKeyForChunk = (chunk: ZedModel['chunks'][number]): string =>
+      `${(sourceArchiveForChunk(chunk) ?? '').toLowerCase()}::${sourceNameForChunk(chunk).toLowerCase()}`;
+
+    const sourceLooksWeaponForChunk = (chunk: ZedModel['chunks'][number]): boolean =>
+      namespaceFromArchiveName(sourceArchiveForChunk(chunk)) === 'weap';
 
     const paletteAliasFor = (
       sourceName: string | null | undefined,
@@ -2709,7 +2793,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       return `${source}::${tex}::${paletteAlias.toLowerCase()}`;
     };
 
-    if (entry) {
+    if (entry && !isGeoComposedModel) {
       defaultTif = guessTextureForWeapon(entry.name, sources, mdl);
       if (defaultTif) {
         const bytes = textureBytesFor(
@@ -2743,22 +2827,44 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     }
 
     const hasWeaponPrimaryAtlas = !!(entry && defaultTif && isWeaponPrimaryTexture(entry.name, defaultTif));
+    const sourceDefaultTif = new Map<string, string | null>();
+    const weaponDefaultForComposedChunk = (chunk: ZedModel['chunks'][number]): string | null => {
+      if (!isGeoComposedModel || !sourceLooksWeaponForChunk(chunk)) { return null; }
+      const key = sourceKeyForChunk(chunk);
+      if (!sourceDefaultTif.has(key)) {
+        const groupChunks = mdl.chunks.filter(c => sourceKeyForChunk(c) === key);
+        const textureRefs = [...new Set(groupChunks
+          .map(c => c.textureName)
+          .filter((name): name is string => !!name))];
+        sourceDefaultTif.set(key, guessTextureForWeapon(sourceNameForChunk(chunk), sources, {
+          chunks: groupChunks,
+          textureRefs,
+        }));
+      }
+      return sourceDefaultTif.get(key) ?? null;
+    };
 
     // Per-chunk overrides for chunks that explicitly reference a different tif.
     const effectiveChunkTexture = (chunk: ZedModel['chunks'][number]): string | null => {
       const name = chunk.textureName;
-      if (!name || !defaultTif) { return name; }
+      const chunkDefaultTif = isGeoComposedModel ? weaponDefaultForComposedChunk(chunk) : defaultTif;
+      if (!name || !chunkDefaultTif) { return name; }
       if (chunk.textureBinding === 'descriptor') {
-        return descriptorTextureForWeapon(sourceNameForChunk(chunk), defaultTif, name);
+        return descriptorTextureForWeapon(sourceNameForChunk(chunk), chunkDefaultTif, name);
       }
       // Weapon payloads often keep helper/marker .tif names near the real
       // atlas name in the same tail block (M4: mark03.tif + m4.tif). For
       // known weapon models, the selected weapon atlas is authoritative.
-      if (hasWeaponPrimaryAtlas && name.toLowerCase() !== defaultTif) {
-        return defaultTif;
+      const chunkHasWeaponPrimaryAtlas = isGeoComposedModel
+        ? isWeaponPrimaryTexture(sourceNameForChunk(chunk), chunkDefaultTif)
+        : hasWeaponPrimaryAtlas;
+      if (chunkHasWeaponPrimaryAtlas && name.toLowerCase() !== chunkDefaultTif) {
+        return chunkDefaultTif;
       }
-      if (isHelperTextureRef(name) && !isHelperTextureRef(defaultTif)) {
-        return defaultTif;
+      if ((!isGeoComposedModel || sourceLooksWeaponForChunk(chunk)) &&
+        isHelperTextureRef(name) &&
+        !isHelperTextureRef(chunkDefaultTif)) {
+        return chunkDefaultTif;
       }
       return name;
     };
@@ -2827,6 +2933,15 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     const topDown = renderMode === 'topSolid' || renderMode === 'topWire';
     const unlit = renderMode === 'view3dTextured' || renderMode === 'view3dSolid' || renderMode === 'topSolid';
     const solidColor = renderMode === 'view3dSolid' || renderMode === 'topSolid';
+    const cameraView = this.mapCameraView();
+    const rendererCameraView: ModelCameraView = cameraView === 'auto' && topDown ? 'top' : cameraView;
+    const mapReference = this.activeMapCameraReference();
+    const sourceNamespace = namespaceFromArchiveName(this.currentModelSourceArchive ?? '');
+    const isWorldModel = (entry?.name ?? '').toLowerCase() === 'worldmodel' || sourceNamespace === 'worl';
+    const shouldShowMapBounds = !!mapReference && (isWorldModel || cameraView === 'mapTop' || cameraView === 'mapIso');
+    const referenceBounds = shouldShowMapBounds && mapReference
+      ? { label: mapReference.label, bounds: toRendererBounds(mapReference.bounds) }
+      : null;
     const hasEffectSource = this.isCurrentEffectModelLayer() ||
       mdl.chunks.some(c => namespaceFromArchiveName(c.sourceArchiveName ?? this.currentModelSourceArchive) === 'effe');
 
@@ -2866,6 +2981,9 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       transparentTextures: hasEffectSource,
       wireOverlay: hasEffectSource,
       wireOverlayColor: effectWireOverlayColor(entry?.name ?? ''),
+      cameraView: rendererCameraView,
+      referenceBounds,
+      showBounds: shouldShowMapBounds,
     });
   }
 
@@ -3028,6 +3146,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
   // cached by leaf name so drill-ins don't re-fetch them.
   private applyZdbPackage(nodes: Array<{ index: number; name: string; data: string }>): void {
     this.packageEntryBytes.clear();
+    this.packageMpsResults.set([]);
     const txrArchives: Array<{ name: string; archive: InspectedZedArchive }> = [];
     const palArchives: Array<{ name: string; archive: InspectedZedArchive }> = [];
     const geoArchives: Array<{ name: string; archive: InspectedZedArchive }> = [];
@@ -3056,6 +3175,9 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
         const ar = tryParse(); if (ar) { geoArchives.push({ name: leaf, archive: ar }); }
       }
     }
+
+    const packageMpsResults = this.parsePackageMpsResults();
+    this.packageMpsResults.set(packageMpsResults);
 
     // Build the .tif -> texdat map across every TXR archive in the package.
     const tifMap = new Map<string, Uint8Array>();
@@ -3131,6 +3253,10 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     if (mdlLeaves.length) {
       this.log(`[package] MDL archives: ${mdlLeaves.join(', ')}`);
     }
+    if (packageMpsResults.length) {
+      const totalMaps = packageMpsResults.reduce((sum, r) => sum + r.foundCount, 0);
+      this.log(`[bounds] package MPS bounds loaded: ${totalMaps} map(s) from ${packageMpsResults.map(r => r.sourcePath.split(/[\\/]/).pop()).join(', ')}`);
+    }
 
     // If the user already clicked a preview before the package finished
     // loading, the initial render had no companion textures. Re-trigger
@@ -3157,6 +3283,185 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     } else {
       this.applyModelToRenderer();
     }
+  }
+
+  private parsePackageMpsResults(): MpsResult[] {
+    const results: MpsResult[] = [];
+    const packagePath = this.result()?.path ?? 'package';
+    for (const [leaf, bytes] of this.packageEntryBytes) {
+      if (!/\.mps$/i.test(leaf)) { continue; }
+      const parsed = this.parseMpsBytes(bytes, `${packagePath} / ${leaf}`);
+      if (parsed && parsed.foundCount > 0) { results.push(parsed); }
+    }
+    return results;
+  }
+
+  private parseMpsBytes(bytes: Uint8Array, sourcePath: string): MpsResult | null {
+    if (!bytes || bytes.length < 0x28) { return null; }
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const declaredCount = view.getUint32(0x04, true);
+    const maps: MpsMap[] = [];
+    for (let o = 0x28; o <= bytes.length - 0x80; o += 4) {
+      if (view.getUint32(o, true) !== 0x17) { continue; }
+      if (o + 0x58 > bytes.length) { continue; }
+      const width = view.getUint32(o + 0x1C, true);
+      const height = view.getUint32(o + 0x20, true);
+      const scaleX = view.getFloat32(o + 0x24, true);
+      const scaleZ = view.getFloat32(o + 0x28, true);
+      if (width === 0 || width > 5000 || height === 0 || height > 5000) { continue; }
+      if (!this.isFinitePositive(scaleX) || !this.isFinitePositive(scaleZ)) { continue; }
+      const name = this.readFixedAscii(bytes, o + 0x38, 0x20);
+      if (!name) { continue; }
+      const map: MpsMap = {
+        offset: o,
+        name,
+        width,
+        height,
+        minX: view.getFloat32(o + 0x04, true),
+        minY: view.getFloat32(o + 0x08, true),
+        minZ: view.getFloat32(o + 0x0C, true),
+        maxX: view.getFloat32(o + 0x10, true),
+        maxY: view.getFloat32(o + 0x14, true),
+        maxZ: view.getFloat32(o + 0x18, true),
+        scaleX,
+        scaleZ,
+      };
+      if (!this.boundsAreFinite(map)) { continue; }
+      maps.push(map);
+      if (declaredCount > 0 && maps.length >= declaredCount) { break; }
+    }
+    return {
+      sourcePath,
+      declaredCount,
+      foundCount: maps.length,
+      fileSize: bytes.length,
+      maps,
+    };
+  }
+
+  private readFixedAscii(bytes: Uint8Array, offset: number, maxLen: number): string {
+    const end = Math.min(offset + maxLen, bytes.length);
+    let s = '';
+    for (let i = offset; i < end; i++) {
+      const b = bytes[i];
+      if (b === 0) { break; }
+      if (b < 0x20 || b > 0x7e) { return ''; }
+      s += String.fromCharCode(b);
+    }
+    return s.trim();
+  }
+
+  private isFinitePositive(value: number): boolean {
+    return Number.isFinite(value) && value > 0 && value < 1_000_000;
+  }
+
+  private boundsAreFinite(map: MpsMap): boolean {
+    return [map.minX, map.minY, map.minZ, map.maxX, map.maxY, map.maxZ].every(Number.isFinite);
+  }
+
+  private boundsFromVertices(vertices: ZedModel['vertices']): Bounds3 | null {
+    if (!vertices.length) { return null; }
+    const bounds = this.emptyBounds();
+    for (const v of vertices) { this.includeBoundsPoint(bounds, v.x, v.y, v.z); }
+    return bounds;
+  }
+
+  private boundsFromGeoInstances(instances: GeoInstance[]): Bounds3 | null {
+    if (!instances.length) { return null; }
+    const bounds = this.emptyBounds();
+    for (const inst of instances) {
+      const [x, y, z] = transformPoint(inst.matrix, 0, 0, 0);
+      this.includeBoundsPoint(bounds, x, y, z);
+    }
+    return bounds;
+  }
+
+  private boundsFromMpsMap(map: MpsMap): Bounds3 {
+    return {
+      minX: map.minX,
+      minY: map.minY,
+      minZ: map.minZ,
+      maxX: map.maxX,
+      maxY: map.maxY,
+      maxZ: map.maxZ,
+    };
+  }
+
+  private emptyBounds(): Bounds3 {
+    return {
+      minX: Number.POSITIVE_INFINITY,
+      minY: Number.POSITIVE_INFINITY,
+      minZ: Number.POSITIVE_INFINITY,
+      maxX: Number.NEGATIVE_INFINITY,
+      maxY: Number.NEGATIVE_INFINITY,
+      maxZ: Number.NEGATIVE_INFINITY,
+    };
+  }
+
+  private includeBoundsPoint(bounds: Bounds3, x: number, y: number, z: number): void {
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) { return; }
+    bounds.minX = Math.min(bounds.minX, x);
+    bounds.minY = Math.min(bounds.minY, y);
+    bounds.minZ = Math.min(bounds.minZ, z);
+    bounds.maxX = Math.max(bounds.maxX, x);
+    bounds.maxY = Math.max(bounds.maxY, y);
+    bounds.maxZ = Math.max(bounds.maxZ, z);
+  }
+
+  private formatBounds(bounds: Bounds3): string {
+    const f = (value: number) => Number.isFinite(value) ? value.toFixed(2) : String(value);
+    return `min=(${f(bounds.minX)}, ${f(bounds.minY)}, ${f(bounds.minZ)}) max=(${f(bounds.maxX)}, ${f(bounds.maxY)}, ${f(bounds.maxZ)}) size=(${f(bounds.maxX - bounds.minX)}, ${f(bounds.maxY - bounds.minY)}, ${f(bounds.maxZ - bounds.minZ)})`;
+  }
+
+  private logNearestPackageMapBounds(reference: Bounds3 | null): void {
+    const refs = this.sortedPackageMapReferences(reference);
+    if (!refs.length) {
+      this.log('[bounds] no package MPS bounds loaded');
+      return;
+    }
+    this.log(`[bounds] nearest MPS map bounds (${refs.length} available):`);
+    for (const item of refs.slice(0, 3)) {
+      const leaf = item.source.split(/[\\/]/).pop() ?? item.source;
+      this.log(`  ${item.map.name} (${leaf}) grid=${item.map.width}x${item.map.height} scale=${item.map.scaleX.toFixed(3)}x${item.map.scaleZ.toFixed(3)} ${this.formatBounds(item.bounds)}`);
+    }
+  }
+
+  private nearestPackageMapReference(reference: Bounds3 | null): MapCameraReference | null {
+    return this.sortedPackageMapReferences(reference)[0] ?? null;
+  }
+
+  private sortedPackageMapReferences(reference: Bounds3 | null): MapCameraReference[] {
+    const refs = this.packageMpsResults().flatMap(result =>
+      result.maps.map(map => {
+        const bounds = this.boundsFromMpsMap(map);
+        const leaf = result.sourcePath.split(/[\\/]/).pop() ?? result.sourcePath;
+        return {
+          source: result.sourcePath,
+          map,
+          bounds,
+          label: `${map.name} (${leaf})`,
+          distance: reference ? this.boundsDistanceSquared(reference, bounds) : 0,
+        };
+      }),
+    );
+    return refs.sort((a, b) => a.distance - b.distance);
+  }
+
+  private boundsDistanceSquared(a: Bounds3, b: Bounds3): number {
+    const ac = this.boundsCenter(a);
+    const bc = this.boundsCenter(b);
+    const dx = ac[0] - bc[0];
+    const dy = ac[1] - bc[1];
+    const dz = ac[2] - bc[2];
+    return dx * dx + dy * dy + dz * dz;
+  }
+
+  private boundsCenter(bounds: Bounds3): [number, number, number] {
+    return [
+      (bounds.minX + bounds.maxX) * 0.5,
+      (bounds.minY + bounds.maxY) * 0.5,
+      (bounds.minZ + bounds.maxZ) * 0.5,
+    ];
   }
 
   private autoEnterLooseMapWorldModel(): boolean {
@@ -3223,6 +3528,10 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
   // ------------------------------------------------------------------
   onMapRenderModeChange(event: Event): void {
     this.mapRenderMode.set((event.target as HTMLSelectElement).value as ReturnType<typeof this.mapRenderMode>);
+    this.applyModelToRenderer();
+  }
+  onMapCameraViewChange(event: Event): void {
+    this.mapCameraView.set((event.target as HTMLSelectElement).value as ModelCameraView);
     this.applyModelToRenderer();
   }
   onMapTriStrideChange(event: Event): void {
@@ -3342,7 +3651,8 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     this.log(`Binding mode: ${this.mapMaterialBinding()}, UV interpretation: ${this.mapUvInterpretation()}, V mode: ${this.mapTextureV()}`);
     for (let i = 0; i < mdl.chunks.length; i++) {
       const c = mdl.chunks[i];
-      this.log(`  chunk[${i}] tex=${c.textureName ?? '(none)'}  v=${c.vertexCount} t=${c.decodedTriangleCount}/${c.triangleCount} scale=${c.scale.toFixed(4)}`);
+      const binding = c.textureBinding ? ` ${c.textureBinding}` : '';
+      this.log(`  chunk[${i}] tex=${c.textureName ?? '(none)'}${binding} v=${c.vertexCount} t=${c.decodedTriangleCount}/${c.triangleCount} scale=${c.scale.toFixed(4)}`);
     }
   }
   dumpGeoReport(): void {
@@ -3425,9 +3735,24 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       return null;
     };
 
-    let instances = collectGeoInstances(scene, root);
+    let instances = collectGeoInstances(scene, root, { accumulateTransforms: true });
     const rootHit = root !== scene.root ? resolve(root.name) : null;
-    if (rootHit) {
+    const rootIsWorldModel =
+      root.name.toLowerCase() === 'worldmodel' ||
+      namespaceFromArchiveName(rootHit?.sourceFile) === 'worl';
+    if (rootHit && rootIsWorldModel) {
+      const hasRootInstance = instances.some(inst =>
+        inst.node === root || inst.modelName.toLowerCase() === root.name.toLowerCase());
+      if (!hasRootInstance) {
+        instances.unshift({
+          modelName: root.name,
+          instanceName: root.name,
+          path: root.name,
+          matrix: identityMatrix(),
+          node: root,
+        });
+      }
+    } else if (rootHit) {
       // Weapon GEO roots such as m4Acarbine_203 own visual part children
       // (m4_high/m4_low), while the actual renderable MDL entry is the root.
       // Treat the selected root as the instance so part names don't resolve
@@ -3619,6 +3944,11 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     this.log('--- GEO scene composed ---', true);
     this.log(`Root: ${root.name}, instances=${instances.length}, rendered=${rendered}, missingModels=${uniqueMissing.length}, fallbackDecodes=${fallbackUsed}`);
     this.log(`Composed model: ${composedVertices.length} verts, ${composedIndices.length / 3 | 0} tris, ${composedChunks.length} chunks across ${meshCache.size} unique source model(s)`);
+    const instanceBounds = this.boundsFromGeoInstances(instances);
+    const composedBounds = this.boundsFromVertices(composedVertices);
+    if (instanceBounds) { this.log(`[bounds] GEO instance origins ${this.formatBounds(instanceBounds)}`); }
+    if (composedBounds) { this.log(`[bounds] composed vertices ${this.formatBounds(composedBounds)}`); }
+    this.logNearestPackageMapBounds(composedBounds ?? instanceBounds);
     if (uniqueMissing.length) {
       this.log(`Missing model refs: ${uniqueMissing.slice(0, 60).join(', ')}${uniqueMissing.length > 60 ? '…' : ''}`);
     }
@@ -3799,9 +4129,24 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       return null;
     };
 
-    let instances = collectGeoInstances(scene, root);
+    let instances = collectGeoInstances(scene, root, { accumulateTransforms: true });
     const rootHit = root !== scene.root ? resolve(root.name) : null;
-    if (rootHit) {
+    const rootIsWorldModel =
+      root.name.toLowerCase() === 'worldmodel' ||
+      namespaceFromArchiveName(rootHit?.sourceFile) === 'worl';
+    if (rootHit && rootIsWorldModel) {
+      const hasRootInstance = instances.some(inst =>
+        inst.node === root || inst.modelName.toLowerCase() === root.name.toLowerCase());
+      if (!hasRootInstance) {
+        instances.unshift({
+          modelName: root.name,
+          instanceName: root.name,
+          path: root.name,
+          matrix: identityMatrix(),
+          node: root,
+        });
+      }
+    } else if (rootHit) {
       instances = [{
         modelName: root.name,
         instanceName: root.name,
@@ -3835,6 +4180,9 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     this.log('--- GEO instance dump ---', true);
     this.log(`Root: ${root.name}  instances=${instances.length}  resolved=${resolved}  missing=${missing}`);
     this.log(`Package MDL archives: ${[...this.packageEntryBytes.keys()].filter(k => /_MDL(?:\([^)]+\))?\.zed$/i.test(k)).join(', ')}`);
+    const instanceBounds = this.boundsFromGeoInstances(instances);
+    if (instanceBounds) { this.log(`[bounds] GEO instance origins ${this.formatBounds(instanceBounds)}`); }
+    this.logNearestPackageMapBounds(instanceBounds);
     this.log(`First ${Math.min(resolutionDetails.length, 60)} instance(s):`);
     for (const line of resolutionDetails) { this.log(line); }
     if (missingNames.size > 0) {
@@ -4106,6 +4454,17 @@ function effectWireOverlayColor(modelName: string): number {
   return 0x78beff;
 }
 
+function toRendererBounds(bounds: Bounds3): ModelBounds3 {
+  return {
+    minX: bounds.minX,
+    minY: bounds.minY,
+    minZ: bounds.minZ,
+    maxX: bounds.maxX,
+    maxY: bounds.maxY,
+    maxZ: bounds.maxZ,
+  };
+}
+
 function descriptorTextureForWeapon(weaponName: string, defaultTif: string, descriptorTif: string): string {
   const lower = weaponName.toLowerCase();
   const fallback = defaultTif.toLowerCase();
@@ -4250,21 +4609,125 @@ function parseModelTexture(
     if (aliases.some(a => (a?.toLowerCase() ?? null) === key)) { return; }
     aliases.push(alias);
   };
-  addAlias(primaryAlias);
-  addAlias(fallbackAlias);
+  const namespace = namespaceFromPaletteAlias(primaryAlias) ?? namespaceFromPaletteAlias(fallbackAlias);
+  const strictAliasFirst = namespace === 'weap' || namespace === 'flib';
+  let header: ReturnType<typeof parseTextureHeader> | null = null;
   try {
-    const header = parseTextureHeader(bytes);
-    addAlias(`weap:texpal_${header.paletteId}`);
-    addAlias(`texpal_${header.paletteId}`);
+    header = parseTextureHeader(bytes);
   } catch { /* parseTexture will report the real error below */ }
 
+  if (strictAliasFirst) {
+    addAlias(primaryAlias);
+    addAlias(fallbackAlias);
+    if (header) {
+      addAlias(`weap:texpal_${header.paletteId}`);
+      addAlias(`texpal_${header.paletteId}`);
+    }
+    return parseFirstResolvedTexture(bytes, palettes, aliases, primaryAlias);
+  }
+
+  // M51/map-object textures match the standalone HTML viewer more closely when
+  // the texture header's palette ids are tried before the order-based .tif
+  // aliases. Those aliases are useful for some archives, but when they are
+  // wrong they produce the same black/noisy surfaces we saw on the ammo box.
+  if (header) {
+    for (const id of texturePaletteCandidates(header.paletteId, header.paletteAlt)) {
+      if (namespace) {
+        addAlias(`${namespace}:texpal_${id}`);
+        addAlias(`${namespace}:${id}`);
+      }
+      addAlias(`texpal_${id}`);
+      addAlias(String(id));
+    }
+  }
+  addAlias(primaryAlias);
+  addAlias(fallbackAlias);
+  return parseBestNonBlankTexture(bytes, palettes, aliases, primaryAlias);
+}
+
+function parseFirstResolvedTexture(
+  bytes: Uint8Array,
+  palettes: Map<string, ZedPalette> | null,
+  aliases: Array<string | null>,
+  fallbackAlias: string | null,
+): ZedTexture {
   let last: ZedTexture | null = null;
   for (const alias of aliases) {
     const tex = parseTexture(bytes, palettes, alias);
     if (!tex.header.isIndexed || tex.paletteResolved) { return tex; }
     last = tex;
   }
-  return last ?? parseTexture(bytes, palettes, primaryAlias);
+  return last ?? parseTexture(bytes, palettes, fallbackAlias);
+}
+
+function parseBestNonBlankTexture(
+  bytes: Uint8Array,
+  palettes: Map<string, ZedPalette> | null,
+  aliases: Array<string | null>,
+  fallbackAlias: string | null,
+): ZedTexture {
+  let lastUnresolved: ZedTexture | null = null;
+  let firstResolved: ZedTexture | null = null;
+  let bestResolved: ZedTexture | null = null;
+  let bestScore = -1;
+
+  for (const alias of aliases) {
+    const tex = parseTexture(bytes, palettes, alias);
+    if (!tex.header.isIndexed) { return tex; }
+    if (!tex.paletteResolved) {
+      lastUnresolved = tex;
+      continue;
+    }
+
+    firstResolved ??= tex;
+    const score = textureVisibilityScore(tex);
+    if (score > bestScore) {
+      bestScore = score;
+      bestResolved = tex;
+    }
+    if (score >= 18) { return tex; }
+  }
+
+  return bestResolved ?? firstResolved ?? lastUnresolved ?? parseTexture(bytes, palettes, fallbackAlias);
+}
+
+function texturePaletteCandidates(paletteId: number, paletteAlt: number): number[] {
+  const out: number[] = [];
+  const add = (value: number) => {
+    if (!Number.isFinite(value) || value < 0 || out.includes(value)) { return; }
+    out.push(value);
+  };
+  add(paletteId);
+  add(paletteId + 102);
+  add(paletteAlt);
+  add(paletteAlt + 102);
+  return out;
+}
+
+function namespaceFromPaletteAlias(alias: string | null | undefined): string | null {
+  if (!alias || !alias.includes(':')) { return null; }
+  return alias.split(':', 1)[0].toLowerCase();
+}
+
+function textureVisibilityScore(tex: ZedTexture): number {
+  const rgba = tex.rgba;
+  const pixels = Math.max(1, rgba.length / 4);
+  const step = Math.max(1, Math.floor(pixels / 768));
+  let visible = 0;
+  let lit = 0;
+  let colorEnergy = 0;
+  let sampled = 0;
+  for (let i = 0; i < pixels; i += step) {
+    sampled++;
+    const o = i * 4;
+    if (rgba[o + 3] <= 8) { continue; }
+    visible++;
+    const brightness = (rgba[o] + rgba[o + 1] + rgba[o + 2]) / 3;
+    colorEnergy += brightness;
+    if (brightness > 18) { lit++; }
+  }
+  if (visible === 0) { return 0; }
+  return (visible / sampled) * 10 + (lit / visible) * 20 + (colorEnergy / visible) / 16;
 }
 
 function bytesToBase64(bytes: Uint8Array): string {

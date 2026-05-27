@@ -274,7 +274,7 @@ input {
   position: relative;
   min-width: 0;
   min-height: 220px;
-  background: #1a1a1a;
+  background: #111318;
   border: 1px solid var(--vscode-widget-border, #303031);
   border-radius: 4px;
   overflow: hidden;
@@ -287,8 +287,16 @@ input {
   height: 100%;
 }
 
+.zip-preview-canvas {
+  background-color: #111318;
+  background-image:
+    linear-gradient(rgba(86, 156, 214, 0.11) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(86, 156, 214, 0.11) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
 .zip-preview-pic {
-  background: #1a1a1a;
+  background: #111318;
   image-rendering: pixelated;
   object-fit: contain;
 }
@@ -410,7 +418,7 @@ input {
   justify-content: center;
   width: 100%;
   aspect-ratio: 1;
-  background: #1a1a1a;
+  background: #111318;
   border-radius: 3px;
   overflow: hidden;
 }
@@ -945,7 +953,7 @@ input {
   min-height: 320px;
 }
 .zip-animation-canvas {
-  background: #1e1e1e;
+  background: #111318;
   cursor: grab;
 }
 .zip-animation-canvas:active {

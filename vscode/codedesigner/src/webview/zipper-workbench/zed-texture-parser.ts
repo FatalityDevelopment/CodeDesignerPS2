@@ -6,6 +6,7 @@ export interface ZedTextureHeader {
   width: number;
   height: number;
   paletteId: number;
+  paletteAlt: number;
   formatA: number;
   formatB: number;
   bpp: number;
@@ -49,6 +50,7 @@ export function parseTextureHeader(bytes: Uint8Array): ZedTextureHeader {
   // name id. For example UIBF_TXR uses ids 1..24 while UIBF_PAL names are
   // texpal_563..584. `aliasPalettesForTextureEntries` wires those together.
   const paletteId = view.getUint16(0x08, true);
+  const paletteAlt = view.getUint16(0x0a, true);
   const formatA = view.getUint16(0x0c, true);
   const formatB = view.getUint16(0x0e, true);
 
@@ -69,7 +71,7 @@ export function parseTextureHeader(bytes: Uint8Array): ZedTextureHeader {
     isIndexed = false;
   }
 
-  return { width, height, paletteId, formatA, formatB, bpp, isIndexed };
+  return { width, height, paletteId, paletteAlt, formatA, formatB, bpp, isIndexed };
 }
 
 // Decode a 32-bit RGBA texture. PS2 GS alpha often uses 0..128; expand to PNG.
@@ -204,6 +206,7 @@ export function parsePaletteEntries(
       if (buf.length < 512) { continue; }
       const pal: ZedPalette = { paletteId, rgba: decodeClutBuffer(buf) };
       result.set(node.name.toLowerCase(), pal);
+      result.set(String(paletteId), pal);
 
       // Useful fallback for simple files where the texture header's palette slot
       // is just 1,2,3... instead of the real texpal_NNN name.
@@ -283,6 +286,23 @@ export function parseTexture(
 
   let palette: ZedPalette | undefined;
   if (palettes) {
+    const namespace = paletteAlias?.includes(':')
+      ? paletteAlias.split(':', 1)[0].toLowerCase()
+      : null;
+    const byPaletteId = (id: number): ZedPalette | undefined => {
+      if (!Number.isFinite(id) || id < 0) { return undefined; }
+      const keys = namespace
+        ? [`${namespace}:texpal_${id}`, `${namespace}:${id}`, `texpal_${id}`, String(id)]
+        : [`texpal_${id}`, String(id)];
+      for (const key of keys) {
+        const pal = palettes.get(key.toLowerCase());
+        if (pal) { return pal; }
+      }
+      for (const candidate of palettes.values()) {
+        if (candidate.paletteId === id) { return candidate; }
+      }
+      return undefined;
+    };
     // Alias-first lookup. `aliasPalettesForTextureEntries` wires each .tif
     // name (e.g. "door_wood.tif") to the exact palette that came from the
     // SAME TXR/PAL pair the texture lives in. That pairing is the only
@@ -293,15 +313,18 @@ export function parseTexture(
     if (paletteAlias) {
       palette = palettes.get(paletteAlias.toLowerCase());
     }
-    const expectedName = `texpal_${header.paletteId}`.toLowerCase();
-    palette ??= palettes.get(expectedName);
-    if (!palette) {
-      for (const candidate of palettes.values()) {
-        if (candidate.paletteId === header.paletteId) {
-          palette = candidate;
-          break;
-        }
-      }
+    const candidates: number[] = [];
+    const addCandidate = (value: number) => {
+      if (!Number.isFinite(value) || candidates.includes(value)) { return; }
+      candidates.push(value);
+    };
+    addCandidate(header.paletteId);
+    addCandidate(header.paletteId + 102);
+    addCandidate(header.paletteAlt);
+    addCandidate(header.paletteAlt + 102);
+    for (const id of candidates) {
+      palette ??= byPaletteId(id);
+      if (palette) { break; }
     }
   }
 

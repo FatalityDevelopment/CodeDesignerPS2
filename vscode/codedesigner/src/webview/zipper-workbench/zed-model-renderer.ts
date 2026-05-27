@@ -19,6 +19,12 @@ export interface ModelTextureMap {
 }
 
 export type UvMode = 'direct' | 'flipV' | 'swap' | 'swapFlipV';
+export type ModelCameraView = 'auto' | 'iso' | 'top' | 'front' | 'back' | 'left' | 'right' | 'mapTop' | 'mapIso';
+
+export interface ModelBounds3 {
+  minX: number; minY: number; minZ: number;
+  maxX: number; maxY: number; maxZ: number;
+}
 
 export interface ModelRendererOptions {
   wireframe?: boolean;
@@ -43,6 +49,9 @@ export interface ModelRendererOptions {
   transparentTextures?: boolean;
   wireOverlay?: boolean;
   wireOverlayColor?: number;
+  cameraView?: ModelCameraView;
+  referenceBounds?: { label?: string; bounds: ModelBounds3 } | null;
+  showBounds?: boolean;
 }
 
 export class ZedModelRenderer {
@@ -55,6 +64,7 @@ export class ZedModelRenderer {
   private frameId = 0;
   private mesh: THREE.Mesh | null = null;
   private wireOverlay: THREE.LineSegments | null = null;
+  private boundsGuide: THREE.Group | null = null;
   private materials: THREE.Material[] = [];
   private textures: THREE.DataTexture[] = [];
   private boundingRadius = 1;
@@ -62,6 +72,7 @@ export class ZedModelRenderer {
   private yaw = 0.6;
   private pitch = -0.3;
   private distance = 4;
+  private cameraZoom = 1;
   private wireframe = false;
 
   private readonly drag: DragState = { active: false, lastX: 0, lastY: 0 };
@@ -72,7 +83,9 @@ export class ZedModelRenderer {
 
   constructor(private readonly canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
-    this.renderer.setClearColor(0x222222, 1);
+    // Leave the framebuffer transparent so the canvas' own blueprint-style
+    // background remains visible behind the model.
+    this.renderer.setClearColor(0x111318, 0);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     // PS2 textures are stored in their final display form — no sRGB tag
     // needed. Tell Three.js to treat the framebuffer as linear so the
@@ -254,22 +267,36 @@ export class ZedModelRenderer {
     // where the model authored its world position.
     geometry.computeBoundingBox();
     const box = geometry.boundingBox;
+    const originalCenter = new THREE.Vector3();
     if (box) {
       const cx = (box.min.x + box.max.x) / 2;
       const cy = (box.min.y + box.max.y) / 2;
       const cz = (box.min.z + box.max.z) / 2;
+      originalCenter.set(cx, cy, cz);
       geometry.translate(-cx, -cy, -cz);
     }
     geometry.computeBoundingSphere();
+    geometry.computeBoundingBox();
 
     for (const g of groups) {
       geometry.addGroup(g.start, g.count, g.material);
     }
 
     this.boundingRadius = geometry.boundingSphere?.radius || 1;
-    this.distance = this.boundingRadius * 2.5 || 4;
+    const referenceBox = options.referenceBounds
+      ? boundsToBox3(options.referenceBounds.bounds).translate(originalCenter.clone().multiplyScalar(-1))
+      : null;
+    const modelBox = geometry.boundingBox?.clone() ?? null;
+    const fitRadius = cameraFitRadius(this.boundingRadius, modelBox, referenceBox, options.cameraView);
+    this.distance = fitRadius * 2.75 || 4;
+    this.cameraZoom = 1;
+    this.updateCameraProjection();
 
     this.mesh = new THREE.Mesh(geometry, this.materials);
+    // These payloads often have unusual authoring bounds. A false-positive
+    // frustum cull looks like random model parts disappearing while orbiting,
+    // so keep debug/model payloads explicitly visible.
+    this.mesh.frustumCulled = false;
     if (options.flipY) {
       this.mesh.rotation.x = Math.PI;
     }
@@ -284,20 +311,23 @@ export class ZedModelRenderer {
         depthWrite: false,
       });
       this.wireOverlay = new THREE.LineSegments(wireGeometry, wireMaterial);
+      this.wireOverlay.frustumCulled = false;
       this.root.add(this.wireOverlay);
     }
 
-    // Top-down map view: orient the root so we look down the Y axis. The
-    // mouse-drag handlers still work but feel like pan/orbit-around-Y; for
-    // a debug view that's good enough.
-    if (options.topDown) {
-      this.pitch = -Math.PI / 2 + 0.001;
-      this.yaw = 0;
-    } else {
-      // Reset to the orbit default the user expects for 3D weapon previews.
-      this.pitch = -0.3;
-      this.yaw = 0.6;
+    if (options.showBounds || referenceBox) {
+      this.boundsGuide = new THREE.Group();
+      this.boundsGuide.renderOrder = 20;
+      if (modelBox) {
+        this.boundsGuide.add(createBoxGuide(modelBox, 0x8ea8b8, 0.45));
+      }
+      if (referenceBox) {
+        this.boundsGuide.add(createBoxGuide(referenceBox, 0x4ec9b0, 0.95));
+      }
+      this.root.add(this.boundsGuide);
     }
+
+    this.applyCameraView(options.cameraView ?? (options.topDown ? 'top' : 'auto'), !!referenceBox);
   }
 
   setFlipY(value: boolean): void {
@@ -331,6 +361,7 @@ export class ZedModelRenderer {
     this.frameId = requestAnimationFrame(this.animate);
     this.resize();
     const r = this.distance;
+    this.camera.zoom = this.cameraZoom;
     this.camera.position.set(
       r * Math.cos(this.pitch) * Math.sin(this.yaw),
       r * Math.sin(this.pitch),
@@ -348,7 +379,7 @@ export class ZedModelRenderer {
     if (drawing.x !== Math.floor(width * pixelRatio) || drawing.y !== Math.floor(height * pixelRatio)) {
       this.renderer.setSize(width, height, false);
       this.camera.aspect = width / height;
-      this.camera.updateProjectionMatrix();
+      this.updateCameraProjection();
     }
   }
 
@@ -374,9 +405,21 @@ export class ZedModelRenderer {
 
   private onWheel = (e: WheelEvent): void => {
     e.preventDefault();
-    const factor = e.deltaY > 0 ? 1.1 : 1 / 1.1;
-    this.distance = Math.max(this.boundingRadius * 0.3, Math.min(this.boundingRadius * 30, this.distance * factor));
+    const factor = e.deltaY > 0 ? 1 / 1.1 : 1.1;
+    // Match the standalone HTML viewer's feel: zoom the view without moving
+    // the camera through the object, which avoids near-plane clipping while
+    // orbiting around detailed models.
+    this.cameraZoom = Math.max(0.08, Math.min(40, this.cameraZoom * factor));
+    this.updateCameraProjection();
   };
+
+  private updateCameraProjection(): void {
+    const radius = Math.max(1e-3, this.boundingRadius);
+    this.camera.near = Math.max(0.01, radius / 1000);
+    this.camera.far = Math.max(100, this.distance + radius * 8);
+    this.camera.zoom = this.cameraZoom;
+    this.camera.updateProjectionMatrix();
+  }
 
   private disposeMesh(): void {
     if (this.mesh) {
@@ -399,5 +442,117 @@ export class ZedModelRenderer {
     this.materials = [];
     for (const t of this.textures) { t.dispose(); }
     this.textures = [];
+    if (this.boundsGuide) {
+      this.root.remove(this.boundsGuide);
+      this.boundsGuide.traverse(obj => {
+        if (obj instanceof THREE.LineSegments) {
+          obj.geometry.dispose();
+          const material = obj.material;
+          if (Array.isArray(material)) {
+            for (const m of material) { m.dispose(); }
+          } else {
+            material.dispose();
+          }
+        }
+      });
+      this.boundsGuide = null;
+    }
   }
+
+  private applyCameraView(view: ModelCameraView, hasReferenceBounds: boolean): void {
+    const effective = view === 'auto'
+      ? 'iso'
+      : view === 'mapTop' && !hasReferenceBounds
+        ? 'top'
+        : view === 'mapIso' && !hasReferenceBounds
+          ? 'iso'
+          : view;
+    switch (effective) {
+      case 'top':
+      case 'mapTop':
+        this.pitch = -Math.PI / 2 + 0.001;
+        this.yaw = 0;
+        break;
+      case 'front':
+        this.pitch = 0;
+        this.yaw = 0;
+        break;
+      case 'back':
+        this.pitch = 0;
+        this.yaw = Math.PI;
+        break;
+      case 'left':
+        this.pitch = 0;
+        this.yaw = -Math.PI / 2;
+        break;
+      case 'right':
+        this.pitch = 0;
+        this.yaw = Math.PI / 2;
+        break;
+      case 'mapIso':
+      case 'iso':
+      default:
+        this.pitch = -0.3;
+        this.yaw = 0.6;
+        break;
+    }
+  }
+}
+
+function boundsToBox3(bounds: ModelBounds3): THREE.Box3 {
+  return new THREE.Box3(
+    new THREE.Vector3(bounds.minX, bounds.minY, bounds.minZ),
+    new THREE.Vector3(bounds.maxX, bounds.maxY, bounds.maxZ),
+  );
+}
+
+function radiusFromBox(box: THREE.Box3 | null): number {
+  if (!box) { return 0; }
+  const size = new THREE.Vector3();
+  box.getSize(size);
+  return Math.max(0.001, size.length() * 0.5);
+}
+
+function cameraFitRadius(modelRadius: number, modelBox: THREE.Box3 | null, referenceBox: THREE.Box3 | null, view?: ModelCameraView): number {
+  if (!referenceBox || (view !== 'mapTop' && view !== 'mapIso')) {
+    return Math.max(0.001, modelRadius);
+  }
+  const combined = new THREE.Box3();
+  if (modelBox) { combined.union(modelBox); }
+  combined.union(referenceBox);
+  return Math.max(modelRadius, radiusFromBox(combined));
+}
+
+function createBoxGuide(box: THREE.Box3, color: number, opacity: number): THREE.LineSegments {
+  const min = box.min;
+  const max = box.max;
+  const pts = [
+    min.x, min.y, min.z, max.x, min.y, min.z,
+    max.x, min.y, min.z, max.x, min.y, max.z,
+    max.x, min.y, max.z, min.x, min.y, max.z,
+    min.x, min.y, max.z, min.x, min.y, min.z,
+
+    min.x, max.y, min.z, max.x, max.y, min.z,
+    max.x, max.y, min.z, max.x, max.y, max.z,
+    max.x, max.y, max.z, min.x, max.y, max.z,
+    min.x, max.y, max.z, min.x, max.y, min.z,
+
+    min.x, min.y, min.z, min.x, max.y, min.z,
+    max.x, min.y, min.z, max.x, max.y, min.z,
+    max.x, min.y, max.z, max.x, max.y, max.z,
+    min.x, min.y, max.z, min.x, max.y, max.z,
+  ];
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+  const material = new THREE.LineBasicMaterial({
+    color,
+    transparent: true,
+    opacity,
+    depthTest: false,
+    depthWrite: false,
+  });
+  const lines = new THREE.LineSegments(geometry, material);
+  lines.frustumCulled = false;
+  lines.renderOrder = 20;
+  return lines;
 }
