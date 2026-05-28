@@ -610,56 +610,190 @@ function buildSafeStripTriangles(
   return out;
 }
 
+type CharacterTriPoint = {
+  x: number;
+  y: number;
+  z: number;
+  flags?: number;
+  posW?: number;
+  ctrlW?: number;
+};
+
+interface CharacterPoint extends CharacterTriPoint {
+  nx: number;
+  ny: number;
+  nz: number;
+  flags: number;
+  posW: number;
+  ctrlW: number;
+}
+
+type CharacterTopologyMode = 'plain' | 'adcPos8000' | 'adcCtrl8000' | 'adcEither8000';
+
 function buildCharacterStripTriangles(
-  points: Array<{ x: number; y: number; z: number }>,
+  points: CharacterTriPoint[],
   base: number,
 ): number[] {
-  const out: number[] = [];
-  if (points.length < 3) { return out; }
+  if (points.length < 3) { return []; }
 
   let minX = Infinity, minY = Infinity, minZ = Infinity;
   let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+
   for (const p of points) {
-    if (p.x < minX) { minX = p.x; } if (p.x > maxX) { maxX = p.x; }
-    if (p.y < minY) { minY = p.y; } if (p.y > maxY) { maxY = p.y; }
-    if (p.z < minZ) { minZ = p.z; } if (p.z > maxZ) { maxZ = p.z; }
+    if (p.x < minX) { minX = p.x; }
+    if (p.x > maxX) { maxX = p.x; }
+    if (p.y < minY) { minY = p.y; }
+    if (p.y > maxY) { maxY = p.y; }
+    if (p.z < minZ) { minZ = p.z; }
+    if (p.z > maxZ) { maxZ = p.z; }
   }
+
   const diag = Math.max(1, Math.hypot(maxX - minX, maxY - minY, maxZ - minZ));
-  const consecutive: number[] = [];
-  const dist = (a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }) =>
+
+  const dist = (a: CharacterTriPoint, b: CharacterTriPoint): number =>
     Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+
+  const area = (a: CharacterTriPoint, b: CharacterTriPoint, c: CharacterTriPoint): number => {
+    const abx = b.x - a.x, aby = b.y - a.y, abz = b.z - a.z;
+    const acx = c.x - a.x, acy = c.y - a.y, acz = c.z - a.z;
+
+    return Math.hypot(
+      aby * acz - abz * acy,
+      abz * acx - abx * acz,
+      abx * acy - aby * acx,
+    );
+  };
+
+  const consecutive: number[] = [];
   for (let i = 1; i < points.length; i++) {
     const d = dist(points[i - 1], points[i]);
     if (d > 0.00001) { consecutive.push(d); }
   }
+
   consecutive.sort((a, b) => a - b);
+
   const medianEdge = consecutive[Math.floor(consecutive.length / 2)] || diag;
   const upperEdge = consecutive[Math.floor(consecutive.length * 0.75)] || medianEdge;
-  const maxEdge = Math.min(diag * 0.28, Math.max(medianEdge * 4, upperEdge * 2.5));
-  const minArea = Math.max(0.00001, diag * diag * 0.0000008);
-  const area = (a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }, c: { x: number; y: number; z: number }) => {
-    const abx = b.x - a.x, aby = b.y - a.y, abz = b.z - a.z;
-    const acx = c.x - a.x, acy = c.y - a.y, acz = c.z - a.z;
-    const cx = aby * acz - abz * acy;
-    const cy = abz * acx - abx * acz;
-    const cz = abx * acy - aby * acx;
-    return Math.hypot(cx, cy, cz);
+
+  // Keep this close to v4 because v4 restored the human shape. We only add
+  // ADC triangle suppression below; we do not aggressively split strips.
+  const maxEdge = Math.min(
+    diag * 0.50,
+    Math.max(medianEdge * 6.0, upperEdge * 4.0, 1),
+  );
+
+  const minArea = Math.max(0.000001, diag * diag * 0.00000025);
+  const degenerateDistance = Math.max(0.00001, medianEdge * 0.02);
+
+  const isSamePoint = (a: CharacterTriPoint, b: CharacterTriPoint): boolean =>
+    dist(a, b) <= degenerateDistance;
+
+  const adcDisabled = (p: CharacterTriPoint, mode: CharacterTopologyMode): boolean => {
+    const posW = p.posW ?? 0;
+    const ctrlW = p.ctrlW ?? 0;
+
+    if (mode === 'adcPos8000') { return (posW & 0x8000) !== 0; }
+    if (mode === 'adcCtrl8000') { return (ctrlW & 0x8000) !== 0; }
+    if (mode === 'adcEither8000') { return ((posW | ctrlW) & 0x8000) !== 0; }
+
+    return false;
   };
 
-  for (let i = 2; i < points.length; i++) {
-    const p0 = points[i - 2], p1 = points[i - 1], p2 = points[i];
-    if (dist(p0, p1) > maxEdge || dist(p1, p2) > maxEdge || dist(p2, p0) > maxEdge) { continue; }
-    if (area(p0, p1, p2) < minArea) { continue; }
-    const flip = i & 1;
-    out.push(base + i - 2, base + (flip ? i : i - 1), base + (flip ? i - 1 : i));
+  const buildCandidate = (
+    mode: CharacterTopologyMode,
+    splitOnObviousRestarts: boolean,
+  ): number[] => {
+    const out: number[] = [];
+
+    const emitSegment = (start: number, end: number): void => {
+      if (end - start < 3) { return; }
+
+      for (let local = 2; start + local < end; local++) {
+        const i = start + local;
+
+        const p0 = points[i - 2];
+        const p1 = points[i - 1];
+        const p2 = points[i];
+
+        if (adcDisabled(p2, mode)) {
+          continue;
+        }
+
+        if (isSamePoint(p0, p1) || isSamePoint(p1, p2) || isSamePoint(p0, p2)) {
+          continue;
+        }
+
+        // Skip bad triangles, but do not over-split the whole strip.
+        if (dist(p0, p1) > maxEdge) { continue; }
+        if (dist(p1, p2) > maxEdge) { continue; }
+        if (dist(p2, p0) > maxEdge) { continue; }
+        if (area(p0, p1, p2) < minArea) { continue; }
+
+        const flip = local & 1;
+
+        out.push(
+          base + i - 2,
+          base + (flip ? i : i - 1),
+          base + (flip ? i - 1 : i),
+        );
+      }
+    };
+
+    let segmentStart = 0;
+
+    for (let i = 1; i < points.length; i++) {
+      if (!splitOnObviousRestarts) { continue; }
+
+      const previous = points[i - 1];
+      const current = points[i];
+
+      const restartBreak = isSamePoint(previous, current);
+      const hugeJumpBreak = dist(previous, current) > maxEdge * 1.75;
+
+      if (restartBreak) {
+        emitSegment(segmentStart, i);
+        segmentStart = i + 1;
+        continue;
+      }
+
+      if (hugeJumpBreak) {
+        emitSegment(segmentStart, i);
+        segmentStart = i;
+      }
+    }
+
+    emitSegment(segmentStart, points.length);
+    return out;
+  };
+
+  const plain = buildCandidate('plain', false);
+  const restartSplit = buildCandidate('plain', true);
+
+  let best = restartSplit.length >= plain.length * 0.85 ? restartSplit : plain;
+
+  // Do not split on flags. Try ADC only as "skip this triangle ending at p2".
+  // This is much closer to how GS ADC/restart-style controls behave.
+  const adcCandidates = [
+    buildCandidate('adcPos8000', false),
+    buildCandidate('adcCtrl8000', false),
+    buildCandidate('adcEither8000', false),
+  ];
+
+  for (const candidate of adcCandidates) {
+    // Use ADC suppression only if it keeps most of the currently visible model.
+    // This prevents another v3-style hole regression.
+    if (candidate.length >= best.length * 0.90 && candidate.length < best.length) {
+      best = candidate;
+    }
   }
-  return out;
+
+  return best;
 }
 
 interface CharacterVifStream {
   offset: number;
   matrixId: number;
-  points: Array<{ x: number; y: number; z: number }>;
+  points: CharacterPoint[];
 }
 
 export interface CharacterFallbackOptions {
@@ -669,6 +803,7 @@ export interface CharacterFallbackOptions {
 
 function findCharacterVifStreams(data: Uint8Array): CharacterVifStream[] {
   if (!data || data.length < 0x80 || data.length > 0x80000) { return []; }
+
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
   const streams: CharacterVifStream[] = [];
 
@@ -678,22 +813,26 @@ function findCharacterVifStreams(data: Uint8Array): CharacterVifStream[] {
     const cmd = view.getUint8(o + 3);
     const baseCmd = cmd & 0x7f;
 
-    // CLIB/FLIB character mesh packets use V4_16 at VU address 0x4. Row 0 is
-    // a small strip/control header; rows 1,3,5... are positions and rows
-    // 2,4,6... are normals/flags. The generic fallback used to consume both
-    // halves as XYZ, which is what made characters collapse into a ball.
+    // CLIB/FLIB character mesh packets use V4_16 at VU address 0x4.
+    // Row 0 is a control/header row.
+    // Rows 1,3,5... are vertex positions.
+    // Rows 2,4,6... are paired normal/control/flag rows.
     if (baseCmd !== 0x6d || (imm & 0x03ff) !== 0x4) { continue; }
 
     const num = numRaw === 0 ? 256 : numRaw;
     const dataStart = o + 4;
     const dataEnd = dataStart + num * 8;
+
     if (num < 7 || num > 256 || dataEnd > data.length) { continue; }
 
     const headerX = view.getInt16(dataStart + 0, true);
     const headerY = view.getInt16(dataStart + 2, true);
     const headerZ = view.getInt16(dataStart + 4, true);
     const positionCount = view.getInt16(dataStart + 6, true);
+
     const isPositionStream = headerX === 2 || headerX === 6;
+    const expectedRows = positionCount * 2 + 1;
+
     if (
       !isPositionStream ||
       Math.abs(headerX) > 256 ||
@@ -701,42 +840,102 @@ function findCharacterVifStreams(data: Uint8Array): CharacterVifStream[] {
       Math.abs(headerZ) > 256 ||
       positionCount < 3 ||
       positionCount > 128 ||
-      Math.abs(num - (positionCount * 2 + 1)) > 1
+      Math.abs(num - expectedRows) > 1
     ) {
       continue;
     }
 
-    const points: Array<{ x: number; y: number; z: number }> = [];
+    const points: CharacterPoint[] = [];
+
     let minX = Infinity, minY = Infinity, minZ = Infinity;
     let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
     let bad = 0;
+
     for (let i = 0; i < positionCount; i++) {
-      const p = dataStart + (1 + i * 2) * 8;
-      const x = view.getInt16(p + 0, true);
-      const y = view.getInt16(p + 2, true);
-      const z = view.getInt16(p + 4, true);
-      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) { bad++; continue; }
-      if (Math.abs(x) > 30000 || Math.abs(y) > 30000 || Math.abs(z) > 30000) { bad++; continue; }
-      points.push({ x, y, z });
-      if (x < minX) { minX = x; } if (x > maxX) { maxX = x; }
-      if (y < minY) { minY = y; } if (y > maxY) { maxY = y; }
-      if (z < minZ) { minZ = z; } if (z > maxZ) { maxZ = z; }
+      const pos = dataStart + (1 + i * 2) * 8;
+      const ctrl = dataStart + (2 + i * 2) * 8;
+
+      if (pos + 8 > dataEnd) {
+        bad++;
+        continue;
+      }
+
+      const x = view.getInt16(pos + 0, true);
+      const y = view.getInt16(pos + 2, true);
+      const z = view.getInt16(pos + 4, true);
+      const posW = view.getUint16(pos + 6, true);
+
+      if (Math.abs(x) > 30000 || Math.abs(y) > 30000 || Math.abs(z) > 30000) {
+        bad++;
+        continue;
+      }
+
+      let nx = 0;
+      let ny = 0;
+      let nz = 0;
+      let ctrlW = 0;
+
+      if (ctrl + 8 <= dataEnd) {
+        nx = view.getInt16(ctrl + 0, true);
+        ny = view.getInt16(ctrl + 2, true);
+        nz = view.getInt16(ctrl + 4, true);
+        ctrlW = view.getUint16(ctrl + 6, true);
+      }
+
+      points.push({
+        x,
+        y,
+        z,
+        nx,
+        ny,
+        nz,
+        posW,
+        ctrlW,
+        flags: posW | ctrlW,
+      });
+
+      if (x < minX) { minX = x; }
+      if (x > maxX) { maxX = x; }
+      if (y < minY) { minY = y; }
+      if (y > maxY) { maxY = y; }
+      if (z < minZ) { minZ = z; }
+      if (z > maxZ) { maxZ = z; }
     }
-    if (points.length < 3 || bad > Math.max(1, positionCount * 0.1)) { continue; }
-    const sx = maxX - minX, sy = maxY - minY, sz = maxZ - minZ;
+
+    if (points.length < 3 || bad > Math.max(1, positionCount * 0.1)) {
+      continue;
+    }
+
+    const sx = maxX - minX;
+    const sy = maxY - minY;
+    const sz = maxZ - minZ;
     const span = Math.max(sx, sy, sz);
     const axes = [sx, sy, sz].filter(v => v > 16).length;
-    if (span < 20 || span > 60000 || axes < 2) { continue; }
 
-    streams.push({ offset: o, matrixId: headerZ, points });
+    if (span < 20 || span > 60000 || axes < 2) {
+      continue;
+    }
+
+    streams.push({
+      offset: o,
+      matrixId: headerZ,
+      points,
+    });
+
     o = alignUp(dataEnd, 4) - 4;
+
     if (streams.length >= 256) { break; }
   }
 
   return streams;
 }
 
-function transformCharacterPoint(m: number[], x: number, y: number, z: number): { x: number; y: number; z: number } {
+function transformCharacterPoint(
+  m: number[],
+  x: number,
+  y: number,
+  z: number,
+): { x: number; y: number; z: number } {
   return {
     x: x * m[0] + y * m[4] + z * m[8] + m[12],
     y: x * m[1] + y * m[5] + z * m[9] + m[13],
@@ -744,46 +943,80 @@ function transformCharacterPoint(m: number[], x: number, y: number, z: number): 
   };
 }
 
-export function decodeCharacterFallbackPayload(bytes: Uint8Array, options: CharacterFallbackOptions = {}): ZedModel | null {
+export function decodeCharacterFallbackPayload(
+  bytes: Uint8Array,
+  options: CharacterFallbackOptions = {},
+): ZedModel | null {
   const streams = findCharacterVifStreams(bytes);
   if (streams.length === 0) { return null; }
 
   const vertices: ZedModelVertex[] = [];
   const indices: number[] = [];
   const chunks: ZedModelChunk[] = [];
+
   const positionScale = options.positionScale ?? (options.boneMatrices ? 1 / 4096 : 1);
+
   for (const stream of streams) {
     const base = vertices.length;
     const matrix = options.boneMatrices?.[stream.matrixId];
-    const points = stream.points.map(p => {
+
+    const points: CharacterTriPoint[] = stream.points.map(p => {
       const x = p.x * positionScale;
       const y = p.y * positionScale;
       const z = p.z * positionScale;
-      return matrix ? transformCharacterPoint(matrix, x, y, z) : { x, y, z };
+
+      const transformed = matrix
+        ? transformCharacterPoint(matrix, x, y, z)
+        : { x, y, z };
+
+      return {
+        x: transformed.x,
+        y: transformed.y,
+        z: transformed.z,
+        flags: p.flags,
+        posW: p.posW,
+        ctrlW: p.ctrlW,
+      };
     });
+
     for (const p of points) {
-      vertices.push({ x: p.x, y: p.y, z: p.z, u: 0, v: 0 });
+      vertices.push({
+        x: p.x,
+        y: p.y,
+        z: p.z,
+        u: 0,
+        v: 0,
+      });
     }
+
     const strip = buildCharacterStripTriangles(points, base);
-    for (const i of strip) { indices.push(i); }
+
+    for (const i of strip) {
+      indices.push(i);
+    }
+
     chunks.push({
       offset: stream.offset,
       vertexCount: stream.points.length,
-      triangleCount: strip.length / 3 | 0,
-      decodedTriangleCount: strip.length / 3 | 0,
+      triangleCount: (strip.length / 3) | 0,
+      decodedTriangleCount: (strip.length / 3) | 0,
       scale: 1,
       vertices: vertices.slice(base),
       indices: strip.map(i => i - base),
       textureName: null,
     });
   }
-  if (vertices.length === 0 || indices.length === 0) { return null; }
+
+  if (vertices.length === 0 || indices.length === 0) {
+    return null;
+  }
 
   let r = 0;
   for (const v of vertices) {
     const d = Math.hypot(v.x, v.y, v.z);
     if (d > r) { r = d; }
   }
+
   return {
     chunks,
     vertices,

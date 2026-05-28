@@ -2821,6 +2821,9 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     const isWeaponSource = this.isWeaponModelArchive(sourceArchiveName);
     const isEffectSource = this.isEffectModelArchive(sourceArchiveName);
     const isCharacterSource = this.isCharacterModelArchive(sourceArchiveName);
+    const rootCharacterBones = isCharacterSource
+      ? this.characterBoneMatricesForEntry(rootEntry.name, sourceArchiveName)
+      : null;
     const bindMode = isWeaponSource || isEffectSource ? 'tailScan' : this.mapMaterialBinding();
     let payloadsWithChunks = 0;
     let fallbackPayloads = 0;
@@ -2847,12 +2850,19 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       return /^mesh(?:[_-]|$)/i.test(leaf) || /[_-]mesh(?:[_-]|$)/i.test(leaf);
     };
 
+    type DecodedPayloadModel = {
+      model: ZedModel;
+      bakedByCharacterBones: boolean;
+    };
+
     const decodePayloadModel = (
       bytes: Uint8Array,
       entryForBytes: InspectedZedArchive['entries'][number],
       descriptorOffsets: number[],
-    ): ZedModel | null => {
+    ): DecodedPayloadModel | null => {
       let mdl: ZedModel | null = null;
+      let bakedByCharacterBones = false;
+
       try {
         mdl = isEffectSource
           ? (decodeFallbackPayload(bytes) ?? parseModel(bytes))
@@ -2861,13 +2871,14 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
 
       if ((!mdl || mdl.chunks.length === 0) && canUseFallbackForEntry(entryForBytes)) {
         const characterBones = isCharacterSource
-          ? this.characterBoneMatricesForEntry(entryForBytes.name, sourceArchiveName)
+          ? rootCharacterBones ?? this.characterBoneMatricesForEntry(entryForBytes.name, sourceArchiveName)
           : null;
         const fallback = isCharacterSource
           ? (decodeCharacterFallbackPayload(bytes, characterBones ? { boneMatrices: characterBones } : {}) ?? decodeFallbackPayload(bytes))
           : decodeFallbackPayload(bytes);
         if (fallback && fallback.chunks.length > 0) {
           mdl = fallback;
+          bakedByCharacterBones = !!characterBones;
           fallbackPayloads++;
         }
       }
@@ -2881,7 +2892,10 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
         try { applyMarkerBinding(mdl, bytes, descriptorOffsets, bindMode); }
         catch { /* keep tail-scan names */ }
       }
-      return mdl;
+      return {
+        model: mdl,
+        bakedByCharacterBones,
+      };
     };
 
     const mergePayload = (
@@ -2916,8 +2930,14 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       const matrix = multiplyMatrices(parentMatrix, localMatrix);
 
       if (bytes && bytes.length > 0) {
-        const local = decodePayloadModel(bytes, ent, descriptorOffsetsFor(ent.children));
-        if (local) { mergePayload(local, matrix, ent.name); }
+        const decoded = decodePayloadModel(bytes, ent, descriptorOffsetsFor(ent.children));
+        if (decoded) {
+          mergePayload(
+            decoded.model,
+            decoded.bakedByCharacterBones ? identityMatrix() : matrix,
+            ent.name,
+          );
+        }
       }
 
       for (const childIdx of ent.children) { visit(childIdx, matrix); }
