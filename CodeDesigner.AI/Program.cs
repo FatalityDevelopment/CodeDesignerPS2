@@ -1,83 +1,88 @@
+using System.Reflection;
+using CodeDesigner.AI.Abstractions;
+using CodeDesigner.AI.Bridge;
+using CodeDesigner.AI.Context;
 using CodeDesigner.AI.Mcp;
+using CodeDesigner.AI.Prompts;
+using CodeDesigner.AI.Resources;
 using CodeDesigner.Ps2.Database;
-using CodeDesigner.Ps2.McpServer;
-using CodeDesigner.Ps2.McpServer.Tools;
+using CodeDesigner.Ps2.McpServer;       // linked: SocketBridgeClient, McpDatabaseService
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 
-var builder = Host.CreateApplicationBuilder(args);
+// ── Active profile + connection args ───────────────────────────────────────
+// Profile gating: --profile core|re|packets|patching|assets|admin|all,
+//                 --readonly, --dangerous-tools false
+var profile = ToolProfile.FromArgs(args);
 
-// stdio transport speaks JSON-RPC over stdout, so every log must go to stderr.
-builder.Logging.ClearProviders();
-builder.Logging.SetMinimumLevel(LogLevel.Warning);
-builder.Logging.AddConsole(options => options.LogToStandardErrorThreshold = LogLevel.Trace);
-
-// ── Parse CLI args (mirrors the legacy server) ─────────────────────────────
 string? host = null;
 int? port = null;
 string? connectionString = null;
-bool allTools = false; // --all-tools registers every tool at startup (legacy behavior)
-
 for (int i = 0; i < args.Length; i++)
 {
     switch (args[i])
     {
-        case "--host" when i + 1 < args.Length:
-            host = args[++i];
-            break;
-        case "--port" when i + 1 < args.Length && int.TryParse(args[i + 1], out int p):
-            port = p;
-            i++;
-            break;
-        case "--connection-string" when i + 1 < args.Length:
-            connectionString = args[++i];
-            break;
-        case "--all-tools":
-            allTools = true;
-            break;
+        case "--host" when i + 1 < args.Length: host = args[++i]; break;
+        case "--port" when i + 1 < args.Length && int.TryParse(args[i + 1], out var p): port = p; i++; break;
+        case "--connection-string" when i + 1 < args.Length: connectionString = args[++i]; break;
     }
 }
 
 connectionString ??= DatabasePaths.GetDefaultConnectionString();
 var dbOptions = DatabaseInitialiser.BuildDbOptions(connectionString);
 
-// One shared bridge connection to the emulator socket server (localhost:8765).
-var sharedBridge = new SocketBridgeClient(host, port);
-var dbSvc = new McpDatabaseService(dbOptions, sharedBridge);
-var toolsInstance = new CodeDesignerPs2Tools(sharedBridge, dbSvc);
+// ── Infrastructure (shared bridge + DB-backed context) ─────────────────────
+var socket = new SocketBridgeClient(host, port);
+IEmulatorBridge bridge = new EmulatorBridge(socket);
+ICdContextProvider context = new DbContextProvider(new McpDatabaseService(dbOptions, socket));
 
-// Build every game tool once; only the always-on subset is served initially.
-var registry = ToolFactory.Build(toolsInstance);
+// ── Discover [CdTool] classes and keep only what this profile allows ───────
+var toolAssemblies = new[]
+{
+    typeof(CodeDesigner.AI.Tools.Core.SessionInitTool).Assembly,
+    typeof(CodeDesigner.AI.Tools.Memory.MemoryReadTool).Assembly,
+    typeof(CodeDesigner.AI.Tools.Debug.BreakpointSetTool).Assembly,
+    typeof(CodeDesigner.AI.Tools.Labels.CallGraphScanTool).Assembly,
+    typeof(CodeDesigner.AI.Tools.Network.PacketStatusTool).Assembly,
+    typeof(CodeDesigner.AI.Tools.Patching.AssembleTool).Assembly,
+    typeof(CodeDesigner.AI.Tools.Assets.ArchiveIndexTool).Assembly,
+    typeof(CodeDesigner.AI.Tools.Admin.DbQueryReadonlyTool).Assembly,
+};
 
-// The live collection the server serves. Mutating it raises Changed, which the
-// MCP server turns into a tools/list_changed notification.
-var live = new McpServerPrimitiveCollection<McpServerTool>(StringComparer.Ordinal);
-var manager = new ToolsetManager(live, registry);
+var descriptors = ToolRegistry.Discover(toolAssemblies, profile);
+var catalog = new ToolCatalog(profile.Name, descriptors, ToolProfile.Known.Keys.OrderBy(k => k).ToList());
 
-// Meta-tools (list/enable/disable/describe) are always available.
-foreach (var entry in ToolFactory.Build(new MetaTools(manager)).Values)
-    live.Add(entry.Tool);
+// DI used to construct tool instances (injects bridge/context/profile/catalog).
+var toolServices = new ServiceCollection()
+    .AddSingleton(bridge)
+    .AddSingleton(context)
+    .AddSingleton(profile)
+    .AddSingleton<IToolCatalog>(catalog)
+    .BuildServiceProvider();
 
-// Always-on core game tools (or everything when --all-tools is passed).
-var startupNames = allTools ? registry.Keys : (IEnumerable<string>)ToolsetManifest.Core;
-foreach (var name in startupNames)
-    if (registry.TryGetValue(name, out var entry) && !live.Contains(entry.Tool))
-        live.Add(entry.Tool);
+var tools = new McpServerPrimitiveCollection<McpServerTool>(StringComparer.Ordinal);
+foreach (var descriptor in descriptors)
+    tools.Add(McpToolFactory.Create(descriptor, toolServices));
 
-builder.Services.AddSingleton(sharedBridge);
-builder.Services.AddSingleton(dbOptions);
-builder.Services.AddSingleton(dbSvc);
-builder.Services.AddSingleton(manager);
+// ── Host (stdio transport; logs to stderr to keep stdout clean) ────────────
+var builder = Host.CreateApplicationBuilder(args);
+builder.Logging.ClearProviders();
+builder.Logging.SetMinimumLevel(LogLevel.Warning);
+builder.Logging.AddConsole(options => options.LogToStandardErrorThreshold = LogLevel.Trace);
+
+builder.Services.AddSingleton(socket); // disposed on shutdown
 
 builder.Services
     .AddMcpServer(options =>
     {
-        options.ServerInfo = new Implementation { Name = "CodeDesigner.AI", Version = "0.1.0" };
-        options.ToolCollection = live;
+        options.ServerInfo = new Implementation { Name = "CodeDesigner.AI", Version = "0.2.0" };
+        options.ToolCollection = tools;
     })
-    .WithStdioServerTransport();
+    .WithStdioServerTransport()
+    .WithPrompts<CdPrompts>()
+    .WithResources<CdResources>();
 
 await builder.Build().RunAsync();

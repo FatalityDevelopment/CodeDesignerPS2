@@ -15,37 +15,25 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\CodeDesigner.Ps2.CheatEngine\CodeDesigner.Ps2.CheatEngine.csproj" />
-    <ProjectReference Include="..\CodeDesigner.Ps2.IsoManager\CodeDesigner.Ps2.IsoManager.csproj" />
+    <ProjectReference Include="..\CodeDesigner.AI.Abstractions\CodeDesigner.AI.Abstractions.csproj" />
+    <ProjectReference Include="..\CodeDesigner.AI.Tools.Core\CodeDesigner.AI.Tools.Core.csproj" />
+    <ProjectReference Include="..\CodeDesigner.AI.Tools.Memory\CodeDesigner.AI.Tools.Memory.csproj" />
+    <ProjectReference Include="..\CodeDesigner.AI.Tools.Debug\CodeDesigner.AI.Tools.Debug.csproj" />
+    <ProjectReference Include="..\CodeDesigner.AI.Tools.Labels\CodeDesigner.AI.Tools.Labels.csproj" />
+    <ProjectReference Include="..\CodeDesigner.AI.Tools.Network\CodeDesigner.AI.Tools.Network.csproj" />
+    <ProjectReference Include="..\CodeDesigner.AI.Tools.Patching\CodeDesigner.AI.Tools.Patching.csproj" />
+    <ProjectReference Include="..\CodeDesigner.AI.Tools.Assets\CodeDesigner.AI.Tools.Assets.csproj" />
+    <ProjectReference Include="..\CodeDesigner.AI.Tools.Admin\CodeDesigner.AI.Tools.Admin.csproj" />
     <ProjectReference Include="..\CodeDesigner.Ps2.Database\CodeDesigner.Ps2.Database.csproj" />
   </ItemGroup>
 
-  <!--
-    Reuse the existing server's infrastructure via LINKED source (no fork, single
-    source of truth). These files keep their CodeDesigner.Ps2.McpServer[.Tools]
-    namespaces; the new host just `using`s them. The migrated tool partials in
-    this project (Tools/*.cs) extend the same `CodeDesignerPs2Tools` partial class,
-    so the linked Helpers/Formatters resolve.
-
-    As categories are migrated, copy each Tools/<Category>.cs into this project's
-    Tools/ folder (do NOT link it) so it can be rewritten with terse descriptions.
-  -->
+  <!-- Reuse the legacy bridge + DB service via linked source (single source of truth). -->
   <ItemGroup>
-    <Compile Include="..\CodeDesigner.Ps2.McpServer\CodeDesignerPs2Tools.cs"        Link="Infra\CodeDesignerPs2Tools.cs" />
-    <Compile Include="..\CodeDesigner.Ps2.McpServer\SocketBridgeClient.cs"          Link="Infra\SocketBridgeClient.cs" />
-    <Compile Include="..\CodeDesigner.Ps2.McpServer\McpDatabaseService.cs"          Link="Infra\McpDatabaseService.cs" />
-    <Compile Include="..\CodeDesigner.Ps2.McpServer\DynamicDescriptionAttribute.cs" Link="Infra\DynamicDescriptionAttribute.cs" />
-    <Compile Include="..\CodeDesigner.Ps2.McpServer\Tools\Helpers.cs"               Link="Infra\Helpers.cs" />
-    <Compile Include="..\CodeDesigner.Ps2.McpServer\Tools\Formatters.cs"            Link="Infra\Formatters.cs" />
+    <Compile Include="..\CodeDesigner.Ps2.McpServer\SocketBridgeClient.cs" Link="Infra\SocketBridgeClient.cs" />
+    <Compile Include="..\CodeDesigner.Ps2.McpServer\McpDatabaseService.cs" Link="Infra\McpDatabaseService.cs" />
   </ItemGroup>
 
-  <!--
-    Deploy build output to an 'AI' subdirectory inside the CodeDesigner install
-    directory, kept separate from the legacy 'McpServer' deployment so the two
-    servers can run side-by-side with no DLL contamination.
-      Windows     ->  %LOCALAPPDATA%\CodeDesigner\AI\
-      Linux/macOS ->  $HOME/.local/share/CodeDesigner/AI/
-  -->
+  <!-- Deploy to %LOCALAPPDATA%\CodeDesigner\AI\ so it runs side-by-side with the legacy server. -->
   <Target Name="DeployToInstallDir" AfterTargets="Build">
     <PropertyGroup>
       <_LocalAppData Condition="'$(LOCALAPPDATA)' != ''">$(LOCALAPPDATA)</_LocalAppData>
@@ -56,11 +44,9 @@
     <ItemGroup Condition="'$(_InstallDir)' != ''">
       <_DeployFiles Include="$(OutputPath)**\*" />
     </ItemGroup>
-    <Copy
-      SourceFiles="@(_DeployFiles)"
-      DestinationFiles="@(_DeployFiles->'$(_InstallDir)/%(RecursiveDir)%(Filename)%(Extension)')"
-      SkipUnchangedFiles="true"
-      Condition="'$(_InstallDir)' != ''" />
+    <Copy SourceFiles="@(_DeployFiles)"
+          DestinationFiles="@(_DeployFiles->'$(_InstallDir)/%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" Condition="'$(_InstallDir)' != ''" />
     <Message Text="[CodeDesigner.AI] Deployed to $(_InstallDir)" Importance="high" Condition="'$(_InstallDir)' != ''" />
   </Target>
 

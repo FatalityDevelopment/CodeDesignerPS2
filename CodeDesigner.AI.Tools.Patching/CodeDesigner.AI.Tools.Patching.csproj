@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>CodeDesigner.AI.Tools.Patching</AssemblyName>
+    <RootNamespace>CodeDesigner.AI.Tools.Patching</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CodeDesigner.AI.Abstractions\CodeDesigner.AI.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>
