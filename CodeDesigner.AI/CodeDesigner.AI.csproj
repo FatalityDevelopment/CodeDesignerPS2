@@ -1,0 +1,67 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>CodeDesigner.AI</AssemblyName>
+    <RootNamespace>CodeDesigner.AI</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ModelContextProtocol" Version="1.3.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CodeDesigner.Ps2.CheatEngine\CodeDesigner.Ps2.CheatEngine.csproj" />
+    <ProjectReference Include="..\CodeDesigner.Ps2.IsoManager\CodeDesigner.Ps2.IsoManager.csproj" />
+    <ProjectReference Include="..\CodeDesigner.Ps2.Database\CodeDesigner.Ps2.Database.csproj" />
+  </ItemGroup>
+
+  <!--
+    Reuse the existing server's infrastructure via LINKED source (no fork, single
+    source of truth). These files keep their CodeDesigner.Ps2.McpServer[.Tools]
+    namespaces; the new host just `using`s them. The migrated tool partials in
+    this project (Tools/*.cs) extend the same `CodeDesignerPs2Tools` partial class,
+    so the linked Helpers/Formatters resolve.
+
+    As categories are migrated, copy each Tools/<Category>.cs into this project's
+    Tools/ folder (do NOT link it) so it can be rewritten with terse descriptions.
+  -->
+  <ItemGroup>
+    <Compile Include="..\CodeDesigner.Ps2.McpServer\CodeDesignerPs2Tools.cs"        Link="Infra\CodeDesignerPs2Tools.cs" />
+    <Compile Include="..\CodeDesigner.Ps2.McpServer\SocketBridgeClient.cs"          Link="Infra\SocketBridgeClient.cs" />
+    <Compile Include="..\CodeDesigner.Ps2.McpServer\McpDatabaseService.cs"          Link="Infra\McpDatabaseService.cs" />
+    <Compile Include="..\CodeDesigner.Ps2.McpServer\DynamicDescriptionAttribute.cs" Link="Infra\DynamicDescriptionAttribute.cs" />
+    <Compile Include="..\CodeDesigner.Ps2.McpServer\Tools\Helpers.cs"               Link="Infra\Helpers.cs" />
+    <Compile Include="..\CodeDesigner.Ps2.McpServer\Tools\Formatters.cs"            Link="Infra\Formatters.cs" />
+  </ItemGroup>
+
+  <!--
+    Deploy build output to an 'AI' subdirectory inside the CodeDesigner install
+    directory, kept separate from the legacy 'McpServer' deployment so the two
+    servers can run side-by-side with no DLL contamination.
+      Windows     ->  %LOCALAPPDATA%\CodeDesigner\AI\
+      Linux/macOS ->  $HOME/.local/share/CodeDesigner/AI/
+  -->
+  <Target Name="DeployToInstallDir" AfterTargets="Build">
+    <PropertyGroup>
+      <_LocalAppData Condition="'$(LOCALAPPDATA)' != ''">$(LOCALAPPDATA)</_LocalAppData>
+      <_LocalAppData Condition="'$(LOCALAPPDATA)' == '' AND '$(HOME)' != ''">$(HOME)/.local/share</_LocalAppData>
+      <_InstallDir Condition="'$(_LocalAppData)' != ''">$(_LocalAppData)/CodeDesigner/AI</_InstallDir>
+    </PropertyGroup>
+    <MakeDir Directories="$(_InstallDir)" Condition="'$(_InstallDir)' != ''" />
+    <ItemGroup Condition="'$(_InstallDir)' != ''">
+      <_DeployFiles Include="$(OutputPath)**\*" />
+    </ItemGroup>
+    <Copy
+      SourceFiles="@(_DeployFiles)"
+      DestinationFiles="@(_DeployFiles->'$(_InstallDir)/%(RecursiveDir)%(Filename)%(Extension)')"
+      SkipUnchangedFiles="true"
+      Condition="'$(_InstallDir)' != ''" />
+    <Message Text="[CodeDesigner.AI] Deployed to $(_InstallDir)" Importance="high" Condition="'$(_InstallDir)' != ''" />
+  </Target>
+
+</Project>

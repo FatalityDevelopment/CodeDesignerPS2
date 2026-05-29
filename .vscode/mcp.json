@@ -3,6 +3,10 @@
     "CodeDesigner": {
       "type": "stdio",
       "command": "${env:LOCALAPPDATA}/CodeDesigner/McpServer/CodeDesigner.Ps2.McpServer.exe"
+    },
+    "CodeDesigner-AI": {
+      "type": "stdio",
+      "command": "${env:LOCALAPPDATA}/CodeDesigner/AI/CodeDesigner.AI.exe"
     }
   }
 }
