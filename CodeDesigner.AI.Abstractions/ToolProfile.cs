@@ -26,13 +26,14 @@ public sealed class ToolProfile
     public static readonly IReadOnlyDictionary<string, ToolProfile> Known =
         new Dictionary<string, ToolProfile>(StringComparer.OrdinalIgnoreCase)
         {
-            ["core"]     = new("core",     Array.Empty<ToolDomain>(),                                               ToolRisk.MutatesDatabase),
-            ["re"]       = new("re",       new[] { ToolDomain.Memory, ToolDomain.Debug, ToolDomain.Labels },        ToolRisk.WritesMemory),
-            ["packets"]  = new("packets",  new[] { ToolDomain.Network, ToolDomain.Labels },                         ToolRisk.NetworkInjection),
-            ["patching"] = new("patching", new[] { ToolDomain.Memory, ToolDomain.Debug, ToolDomain.Labels, ToolDomain.Patching }, ToolRisk.WritesMemory),
-            ["assets"]   = new("assets",   new[] { ToolDomain.Assets, ToolDomain.Labels },                          ToolRisk.WritesDisk),
-            ["admin"]    = new("admin",    new[] { ToolDomain.Admin, ToolDomain.Memory, ToolDomain.Debug, ToolDomain.Labels, ToolDomain.Network, ToolDomain.Patching, ToolDomain.Assets }, ToolRisk.Dangerous),
-            ["all"]      = new("all",      Enum.GetValues<ToolDomain>(),                                            ToolRisk.Dangerous),
+            ["core"]     = new("core",     Array.Empty<ToolDomain>(),                                                                                                       ToolRisk.MutatesDatabase),
+            ["re"]       = new("re",       new[] { ToolDomain.Memory, ToolDomain.Debug, ToolDomain.Labels, ToolDomain.Pcsx2, ToolDomain.Pad },                              ToolRisk.WritesMemory),
+            ["packets"]  = new("packets",  new[] { ToolDomain.Network, ToolDomain.Labels },                                                                                 ToolRisk.NetworkInjection),
+            ["patching"] = new("patching", new[] { ToolDomain.Memory, ToolDomain.Debug, ToolDomain.Labels, ToolDomain.Patching, ToolDomain.Cheats, ToolDomain.Pcsx2 },       ToolRisk.WritesMemory),
+            ["media"]    = new("media",    new[] { ToolDomain.Media, ToolDomain.Labels },                                                                                   ToolRisk.WritesDisk),
+            ["pcsx2"]    = new("pcsx2",    new[] { ToolDomain.Pcsx2, ToolDomain.Memory, ToolDomain.Debug, ToolDomain.Labels, ToolDomain.Pad },                              ToolRisk.WritesMemory),
+            ["admin"]    = new("admin",    new[] { ToolDomain.Admin, ToolDomain.Memory, ToolDomain.Debug, ToolDomain.Labels, ToolDomain.Network, ToolDomain.Patching, ToolDomain.Cheats, ToolDomain.Pcsx2, ToolDomain.Pad, ToolDomain.Media }, ToolRisk.Dangerous),
+            ["all"]      = new("all",      Enum.GetValues<ToolDomain>(),                                                                                                    ToolRisk.Dangerous),
         };
 
     public const string DefaultProfile = "core";

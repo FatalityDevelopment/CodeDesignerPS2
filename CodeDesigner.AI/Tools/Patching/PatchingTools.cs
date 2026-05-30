@@ -3,69 +3,59 @@ using CodeDesigner.AI.Abstractions;
 
 namespace CodeDesigner.AI.Tools.Patching;
 
-// Patch authoring/injection tools. Bridge command names are best-effort and may
-// need reconciling with the backend protocol.
+// Assembly + CDS (Code Designer Script) toolchain. Replaces the previous
+// placeholder patch_* tools. Commands match legacy Assembly.cs.
 
-[CdTool("patch_assemble", ToolDomain.Patching, ToolRisk.ReadOnly,
-    "Assemble MIPS/CDS source to bytes without writing memory. Returns hex. Risk: read-only.")]
+[CdTool("assemble", ToolDomain.Patching, ToolRisk.ReadOnly,
+    "Assemble PS2 MIPS64 EE assembly (one instruction per line) into hex opcodes. Risk: read-only.")]
 public sealed class AssembleTool(IEmulatorBridge bridge)
 {
-    [ToolEntryPoint]
-    public async Task<string> InvokeAsync(
-        [Description("Assembly/CDS source text.")] string source,
-        [Description("Base address for relative ops (hex/decimal). Optional.")] string? baseAddress = null,
+    [ToolEntryPoint] public async Task<string> InvokeAsync(
+        [Description("MIPS64 EE assembly, one instruction per line.")] string assembly,
         CancellationToken ct = default)
-        => CdText.Message(await bridge.SendAsync(new { Command = "ASSEMBLE", Source = source, Address = CdText.TryParseAddress(baseAddress ?? "") }, ct));
+        => CdText.Message(await bridge.SendAsync(new { Command = "ASSEMBLE", Data = assembly }, ct));
 }
 
-[CdTool("patch_inject", ToolDomain.Patching, ToolRisk.WritesMemory,
-    "Assemble and write a patch to live memory at an address. Risk: writes memory.")]
-public sealed class InjectPatchTool(IEmulatorBridge bridge)
+[CdTool("disassemble", ToolDomain.Patching, ToolRisk.ReadOnly,
+    "Disassemble PS2 MIPS64 EE hex opcodes (space/newline separated) into assembly. Risk: read-only.")]
+public sealed class DisassembleTool(IEmulatorBridge bridge)
 {
-    [ToolEntryPoint]
-    public async Task<string> InvokeAsync(
-        [Description("Target address (hex/decimal).")] string address,
-        [Description("Assembly/CDS source to apply.")] string source,
+    [ToolEntryPoint] public async Task<string> InvokeAsync(
+        [Description("Space/newline separated 32-bit hex opcodes.")] string opcodes,
+        [Description("Optional virtual start address (hex/decimal) so labels/branches resolve.")] string? address = null,
         CancellationToken ct = default)
     {
-        var a = CdText.TryParseAddress(address);
-        if (a is null) return CdText.Error($"invalid address '{address}'.");
-        return CdText.Message(await bridge.SendAsync(new { Command = "PATCH_INJECT", Address = a.Value, Source = source }, ct));
+        uint? a = address != null ? CdText.TryParseAddress(address) : null;
+        return CdFormat.Disasm(await bridge.SendAsync(new { Command = "DISASSEMBLE", Data = opcodes, Address = a }, ct));
     }
 }
 
-[CdTool("patch_hook", ToolDomain.Patching, ToolRisk.WritesMemory,
-    "Hook a function: assemble a trampoline at a code cave, redirect the target, verify, and label it. Risk: writes memory.")]
-public sealed class HookFunctionTool(IEmulatorBridge bridge)
+[CdTool("compile_cds", ToolDomain.Patching, ToolRisk.ReadOnly,
+    "Compile a Code Designer Script (.cds) into GameShark/AR codes + MIPS memory patches. Risk: read-only.")]
+public sealed class CompileCdsTool(IEmulatorBridge bridge)
 {
-    [ToolEntryPoint]
-    public async Task<string> InvokeAsync(
-        [Description("Function/instruction address to hook (hex/decimal).")] string address,
-        [Description("Code-cave address for the trampoline (hex/decimal).")] string caveAddress,
-        [Description("Assembly to run at the hook.")] string asm,
-        [Description("Hook mode: 'jal' (default) or 'j'.")] string mode = "jal",
+    [ToolEntryPoint] public async Task<string> InvokeAsync(
+        [Description("CDS source code.")] string sourceCode,
         CancellationToken ct = default)
-    {
-        var a = CdText.TryParseAddress(address);
-        var cave = CdText.TryParseAddress(caveAddress);
-        if (a is null || cave is null) return CdText.Error("invalid address or caveAddress.");
-        return CdText.Message(await bridge.SendAsync(
-            new { Command = "PATCH_HOOK", Address = a.Value, Cave = cave.Value, Asm = asm, Mode = mode }, ct));
-    }
+        => CdText.Message(await bridge.SendAsync(new { Command = "COMPILECDS", Data = sourceCode }, ct));
 }
 
-[CdTool("patch_verify", ToolDomain.Patching, ToolRisk.ReadOnly,
-    "Verify that bytes at an address match expected hex (post-patch check). Risk: read-only.")]
-public sealed class PatchVerifyTool(IEmulatorBridge bridge)
+[CdTool("apply_cds_patch", ToolDomain.Patching, ToolRisk.WritesMemory,
+    "Compile a CDS source and atomically apply the resulting patch to live emulator memory (with assert/sidecar checks). Risk: writes memory.")]
+public sealed class ApplyCdsPatchTool(IEmulatorBridge bridge)
 {
-    [ToolEntryPoint]
-    public async Task<string> InvokeAsync(
-        [Description("Address (hex/decimal).")] string address,
-        [Description("Expected hex bytes.")] string expectedHex,
+    [ToolEntryPoint] public async Task<string> InvokeAsync(
+        [Description("CDS source code to compile and apply.")] string sourceCode,
         CancellationToken ct = default)
-    {
-        var a = CdText.TryParseAddress(address);
-        if (a is null) return CdText.Error($"invalid address '{address}'.");
-        return CdText.Message(await bridge.SendAsync(new { Command = "PATCH_VERIFY", Address = a.Value, Expected = expectedHex }, ct));
-    }
+        => CdText.Message(await bridge.SendAsync(new { Command = "CDSPATCH", Data = sourceCode }, ct));
+}
+
+[CdTool("validate_cds", ToolDomain.Patching, ToolRisk.ReadOnly,
+    "Parse a CDS source without emitting; returns diagnostics (errors + warnings). Risk: read-only.")]
+public sealed class ValidateCdsTool(IEmulatorBridge bridge)
+{
+    [ToolEntryPoint] public async Task<string> InvokeAsync(
+        [Description("CDS source code to validate.")] string sourceCode,
+        CancellationToken ct = default)
+        => CdText.Message(await bridge.SendAsync(new { Command = "VALIDATECDS", Data = sourceCode }, ct));
 }

@@ -3,59 +3,81 @@ using CodeDesigner.AI.Abstractions;
 
 namespace CodeDesigner.AI.Tools.Admin;
 
-// Server/admin tools. ToolDomain.Admin keeps these out of every default profile
-// (only the 'admin' profile loads them), and db_execute_mutation is tagged
-// Dangerous so '--dangerous-tools false' hides it. Bridge command names are
-// best-effort and may need reconciling with the backend protocol.
+// Admin-only tools (settings + raw DB queries + navigation history).
+// Commands match legacy CodeDesigner.Ps2.McpServer/Tools/Session.cs.
 
-[CdTool("db_query_readonly", ToolDomain.Admin, ToolRisk.ReadOnly,
-    "Run a read-only SQL SELECT against the CodeDesigner DB. Use cd_context_get(\"db_schema\") first. Risk: read-only.")]
-public sealed class DbQueryReadonlyTool(IEmulatorBridge bridge)
+[CdTool("query_db", ToolDomain.Admin, ToolRisk.Dangerous,
+    "Run an arbitrary SQL statement against the CodeDesigner DB (SELECT / INSERT / UPDATE / DELETE — backend enforces safety). Risk: DANGEROUS.")]
+public sealed class QueryDbTool(IEmulatorBridge bridge)
 {
-    [ToolEntryPoint]
-    public async Task<string> InvokeAsync(
-        [Description("A single SELECT statement.")] string sql,
-        [Description("Max rows (default 100).")] int maxRows = 100,
+    [ToolEntryPoint] public async Task<string> InvokeAsync(
+        [Description("SQL statement. Use cd_context_get(\"db_schema\") to discover tables.")] string sql,
         CancellationToken ct = default)
-    {
-        if (!sql.TrimStart().StartsWith("SELECT", StringComparison.OrdinalIgnoreCase))
-            return CdText.Error("only SELECT statements are allowed; use db_execute_mutation for writes.");
-        return CdText.Message(await bridge.SendAsync(new { Command = "DB_QUERY", Sql = sql, MaxRows = maxRows }, ct));
-    }
+        => CdText.Message(await bridge.SendAsync(new { Command = "QUERYDB", SqlQuery = sql }, ct));
 }
 
-[CdTool("db_execute_mutation", ToolDomain.Admin, ToolRisk.Dangerous,
-    "Run an INSERT/UPDATE/DELETE against the DB. Requires confirm=true. Risk: DANGEROUS.")]
-public sealed class DbExecuteMutationTool(IEmulatorBridge bridge)
+[CdTool("get_setting", ToolDomain.Admin, ToolRisk.ReadOnly,
+    "Read a single CodeDesigner setting by key. Risk: read-only.")]
+public sealed class GetSettingTool(IEmulatorBridge bridge)
 {
-    [ToolEntryPoint]
-    public async Task<string> InvokeAsync(
-        [Description("A single INSERT/UPDATE/DELETE statement.")] string sql,
-        [Description("Must be true to actually run the mutation.")] bool confirm = false,
-        CancellationToken ct = default)
-    {
-        if (!confirm) return CdText.Error("refusing to run mutation without confirm=true.");
-        return CdText.Message(await bridge.SendAsync(new { Command = "DB_EXEC", Sql = sql }, ct));
-    }
+    [ToolEntryPoint] public async Task<string> InvokeAsync(
+        [Description("Setting key.")] string key, CancellationToken ct = default)
+        => CdText.Message(await bridge.SendAsync(new { Command = "GETSETTING", SettingKey = key }, ct));
 }
 
-[CdTool("db_schema_get", ToolDomain.Admin, ToolRisk.ReadOnly,
-    "Return the DB schema (tables/columns) for query building. Risk: read-only.")]
-public sealed class DbSchemaGetTool(IEmulatorBridge bridge)
-{
-    [ToolEntryPoint]
-    public async Task<string> InvokeAsync([Description("Optional area filter (e.g. 'labels').")] string? area = null, CancellationToken ct = default)
-        => CdText.Message(await bridge.SendAsync(new { Command = "DB_SCHEMA", Area = area }, ct));
-}
-
-[CdTool("setting_set", ToolDomain.Admin, ToolRisk.MutatesDatabase,
+[CdTool("set_setting", ToolDomain.Admin, ToolRisk.MutatesDatabase,
     "Set a CodeDesigner setting key/value. Risk: writes database.")]
-public sealed class SettingSetTool(IEmulatorBridge bridge)
+public sealed class SetSettingTool(IEmulatorBridge bridge)
 {
-    [ToolEntryPoint]
-    public async Task<string> InvokeAsync(
+    [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Setting key.")] string key,
-        [Description("Setting value.")] string value,
-        CancellationToken ct = default)
-        => CdText.Message(await bridge.SendAsync(new { Command = "SETTING_SET", Key = key, Value = value }, ct));
+        [Description("Setting value.")] string value, CancellationToken ct = default)
+        => CdText.Message(await bridge.SendAsync(new { Command = "SETSETTING", SettingKey = key, SettingValue = value }, ct));
+}
+
+[CdTool("get_all_settings", ToolDomain.Admin, ToolRisk.ReadOnly,
+    "List all settings, optionally filtered by key prefix. Risk: read-only.")]
+public sealed class GetAllSettingsTool(IEmulatorBridge bridge)
+{
+    [ToolEntryPoint] public async Task<string> InvokeAsync(
+        [Description("Optional key prefix to filter.")] string? prefix = null, CancellationToken ct = default)
+        => CdText.Message(await bridge.SendAsync(new { Command = "GETALLSETTINGS", SettingPrefix = prefix ?? string.Empty }, ct));
+}
+
+[CdTool("delete_setting", ToolDomain.Admin, ToolRisk.MutatesDatabase,
+    "Delete a CodeDesigner setting by key. Risk: writes database.")]
+public sealed class DeleteSettingTool(IEmulatorBridge bridge)
+{
+    [ToolEntryPoint] public async Task<string> InvokeAsync(
+        [Description("Setting key.")] string key, CancellationToken ct = default)
+        => CdText.Message(await bridge.SendAsync(new { Command = "DELETESETTING", SettingKey = key }, ct));
+}
+
+[CdTool("get_nav_history", ToolDomain.Admin, ToolRisk.ReadOnly,
+    "Get the navigation history (addresses visited via navigate_to). Risk: read-only.")]
+public sealed class GetNavHistoryTool(IEmulatorBridge bridge)
+{
+    [ToolEntryPoint] public async Task<string> InvokeAsync(CancellationToken ct = default)
+        => CdText.Message(await bridge.SendAsync(new { Command = "GETNAVHISTORY" }, ct));
+}
+
+[CdTool("clear_nav_history", ToolDomain.Admin, ToolRisk.MutatesDatabase,
+    "Clear the navigation history. Risk: writes database.")]
+public sealed class ClearNavHistoryTool(IEmulatorBridge bridge)
+{
+    [ToolEntryPoint] public async Task<string> InvokeAsync(CancellationToken ct = default)
+        => CdText.Message(await bridge.SendAsync(new { Command = "CLEARNAVHISTORY" }, ct));
+}
+
+[CdTool("navigate_to", ToolDomain.Admin, ToolRisk.MutatesDatabase,
+    "Record a navigation step to an address (for the nav history). Risk: writes database.")]
+public sealed class NavigateToTool(IEmulatorBridge bridge)
+{
+    [ToolEntryPoint] public async Task<string> InvokeAsync(
+        [Description("Virtual address (hex/decimal).")] string address, CancellationToken ct = default)
+    {
+        var a = CdText.TryParseAddress(address);
+        if (a is null) return CdText.Error($"invalid address '{address}'.");
+        return CdText.Message(await bridge.SendAsync(new { Command = "NAVIGATETO", Address = a.Value }, ct));
+    }
 }

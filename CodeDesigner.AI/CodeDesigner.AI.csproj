@@ -17,6 +17,7 @@
   <ItemGroup>
     <ProjectReference Include="..\CodeDesigner.AI.Abstractions\CodeDesigner.AI.Abstractions.csproj" />
     <ProjectReference Include="..\CodeDesigner.Ps2.Database\CodeDesigner.Ps2.Database.csproj" />
+    <ProjectReference Include="..\CodeDesigner.Ps2.CheatEngine\CodeDesigner.Ps2.CheatEngine.csproj" />
   </ItemGroup>
 
   <!-- Reuse the legacy bridge + DB service via linked source (single source of truth). -->

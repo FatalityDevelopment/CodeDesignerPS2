@@ -13,7 +13,10 @@ public enum ToolDomain
     Labels,
     Network,
     Patching,
-    Assets,
-    /// <summary>Server/admin operations (DB mutation, agent/orchestration CRUD, settings). Never in default profiles.</summary>
+    Cheats,
+    Pcsx2,
+    Pad,
+    Media,
+    /// <summary>Server/admin operations (DB queries, agent/orchestration CRUD, settings). Never in default profiles.</summary>
     Admin,
 }
