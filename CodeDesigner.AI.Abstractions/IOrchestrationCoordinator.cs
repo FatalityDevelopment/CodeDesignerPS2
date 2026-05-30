@@ -115,9 +115,13 @@ public static class WorkflowParser
         var exact = steps.FirstOrDefault(s => string.Equals(s.Text, stage, StringComparison.OrdinalIgnoreCase));
         if (exact is not null) return exact;
 
+        // Substring either direction: a short stage label inside a longer step text
+        // (e.g. "Patch" → "Patch with CDS…"), or a longer stage that embeds a step's
+        // text. The reverse direction requires a non-trivial step text so single
+        // words/chars (e.g. "a") don't greedily match arbitrary stage strings.
         return steps.FirstOrDefault(s =>
             s.Text.Contains(stage, StringComparison.OrdinalIgnoreCase) ||
-            stage.Contains(s.Text, StringComparison.OrdinalIgnoreCase));
+            (s.Text.Length >= 4 && stage.Contains(s.Text, StringComparison.OrdinalIgnoreCase)));
     }
 
     private static IReadOnlyList<OrchestrationStep> Number(IReadOnlyList<string> texts)
