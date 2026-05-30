@@ -38,6 +38,7 @@ var dbOptions = DatabaseInitialiser.BuildDbOptions(connectionString);
 var socket = new SocketBridgeClient(host, port);
 IEmulatorBridge bridge = new EmulatorBridge(socket);
 ICdContextProvider context = new DbContextProvider(new McpDatabaseService(dbOptions, socket));
+IAgentCoordinator coordinator = new DbAgentCoordinator(dbOptions);
 
 // ── Discover [CdTool] classes and keep only what this profile allows ───────
 // All [CdTool] classes now live in this assembly under Tools/<Category>/.
@@ -54,6 +55,7 @@ var toolServices = new ServiceCollection()
     .AddSingleton(profile)
     .AddSingleton<IToolCatalog>(catalog)
     .AddSingleton(sessionState)
+    .AddSingleton(coordinator)
     .BuildServiceProvider();
 
 var tools = new McpServerPrimitiveCollection<McpServerTool>(StringComparer.Ordinal);

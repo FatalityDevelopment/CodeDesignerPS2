@@ -35,6 +35,12 @@ public class CodeDesignerDbContext : DbContext
     /// <summary>MCP orchestration profiles that define how multiple agents are coordinated.</summary>
     public DbSet<McpOrchestration> McpOrchestrations { get; set; } = null!;
 
+    /// <summary>Active and completed sub-agent sessions used for runtime coordination.</summary>
+    public DbSet<McpAgentSession> McpAgentSessions { get; set; } = null!;
+
+    /// <summary>Messages exchanged between agent sessions (coordination bus).</summary>
+    public DbSet<McpAgentMessage> McpAgentMessages { get; set; } = null!;
+
     /// <summary>Game metadata (title, description, cover art).</summary>
     public DbSet<Game> Games { get; set; } = null!;
 
@@ -180,6 +186,56 @@ public class CodeDesignerDbContext : DbContext
         {
             entity.HasKey(o => o.Id);
             entity.Property(o => o.Name).HasMaxLength(256).IsRequired();
+        });
+
+        // ── McpAgentSession ────────────────────────────────────────────────────
+        modelBuilder.Entity<McpAgentSession>(entity =>
+        {
+            entity.HasKey(s => s.Id);
+            entity.Property(s => s.Status).HasMaxLength(32).IsRequired();
+            entity.Property(s => s.ExternalId).HasMaxLength(256);
+
+            // Optional FK to the agent persona this session is running.
+            entity.HasOne(s => s.McpAgent)
+                  .WithMany()
+                  .HasForeignKey(s => s.McpAgentId)
+                  .OnDelete(DeleteBehavior.SetNull);
+
+            // Self-referencing parent/child. Client cascade to avoid SQL Server
+            // multiple-cascade-path errors.
+            entity.HasOne(s => s.ParentSession)
+                  .WithMany()
+                  .HasForeignKey(s => s.ParentSessionId)
+                  .OnDelete(DeleteBehavior.ClientCascade);
+
+            // Frequent "active sessions" query.
+            entity.HasIndex(s => s.Status);
+        });
+
+        // ── McpAgentMessage ────────────────────────────────────────────────────
+        modelBuilder.Entity<McpAgentMessage>(entity =>
+        {
+            entity.HasKey(m => m.Id);
+
+            entity.HasOne(m => m.FromSession)
+                  .WithMany()
+                  .HasForeignKey(m => m.FromSessionId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            // Optional targets. Both client-cascade so SQL Server is happy with
+            // multiple paths into McpAgentSessions / McpAgents.
+            entity.HasOne(m => m.ToSession)
+                  .WithMany()
+                  .HasForeignKey(m => m.ToSessionId)
+                  .OnDelete(DeleteBehavior.ClientCascade);
+            entity.HasOne(m => m.ToAgent)
+                  .WithMany()
+                  .HasForeignKey(m => m.ToAgentId)
+                  .OnDelete(DeleteBehavior.ClientSetNull);
+
+            // Inbox-pop performance: index unread messages by recipient.
+            entity.HasIndex(m => new { m.ToSessionId, m.ReadAt });
+            entity.HasIndex(m => new { m.ToAgentId,   m.ReadAt });
         });
 
         // ── GameRegion ─────────────────────────────────────────────────────────
