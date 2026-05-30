@@ -138,34 +138,50 @@ public sealed class ProgressSaveTool(ICdContextProvider ctx)
     }
 }
 
-[CdTool("label_search", ToolDomain.Core, ToolRisk.ReadOnly,
-    "Search labels/symbols by name or address. Risk: read-only.")]
-public sealed class LabelSearchTool(IEmulatorBridge bridge)
+[CdTool("label_list", ToolDomain.Core, ToolRisk.ReadOnly,
+    "List labels from the active label set; optional substring filter on the label name. Risk: read-only.")]
+public sealed class LabelListTool(IEmulatorBridge bridge)
 {
     [ToolEntryPoint]
     public async Task<string> InvokeAsync(
-        [Description("Query: label substring or address (hex/decimal).")] string query,
-        [Description("Max results (default 50).")] int limit = 50,
+        [Description("Optional substring; only labels whose name contains this text are returned.")] string? filter = null,
         CancellationToken ct = default)
-        // NOTE: command name to be reconciled with the backend protocol.
-        => CdText.Message(await bridge.SendAsync(new { Command = "LABEL_SEARCH", Query = query, Limit = limit }, ct));
+    {
+        var json = await bridge.SendAsync(new { Command = "GETLABELS" }, ct);
+        return string.IsNullOrWhiteSpace(filter)
+            ? CdFormat.Labels(json)
+            : CdFormat.LabelsFiltered(json, name => name.Contains(filter, StringComparison.OrdinalIgnoreCase));
+    }
 }
 
-[CdTool("label_upsert", ToolDomain.Core, ToolRisk.MutatesDatabase,
+[CdTool("label_add", ToolDomain.Core, ToolRisk.MutatesDatabase,
     "Create or update a label at an address. Risk: writes database.")]
-public sealed class LabelUpsertTool(IEmulatorBridge bridge)
+public sealed class LabelAddTool(IEmulatorBridge bridge)
 {
     [ToolEntryPoint]
     public async Task<string> InvokeAsync(
+        [Description("Game identifier / ISO serial (e.g. 'SCUS-97275').")] string gameId,
+        [Description("Label set (e.g. 'ai-analysis').")] string labelSet,
         [Description("Virtual address (hex/decimal).")] string address,
-        [Description("Label name.")] string label,
+        [Description("Label name (e.g. 'scePadRead').")] string label,
         [Description("Optional comment.")] string? comment = null,
-        [Description("Label set (default 'ai-analysis').")] string labelSet = "ai-analysis",
+        [Description("Type: Address (default), Pointer, Function, Float, Value, String.")] string? type = null,
         CancellationToken ct = default)
     {
         var addr = CdText.TryParseAddress(address);
         if (addr is null) return CdText.Error($"invalid address '{address}'.");
-        return CdText.Message(await bridge.SendAsync(
-            new { Command = "LABEL_UPSERT", Address = addr.Value, Label = label, Comment = comment, LabelSet = labelSet }, ct));
+        return CdText.Message(await bridge.SendAsync(new
+        {
+            Command = "ADDLABELENTRY",
+            GameId = gameId,
+            SetName = labelSet,
+            LabelEntry = new
+            {
+                address = $"0x{addr.Value:X8}",
+                name = label,
+                comment,
+                type,
+            },
+        }, ct));
     }
 }
