@@ -40,8 +40,38 @@ public sealed class SessionInitTool(
         if (resume)
         {
             var reports = await ctx.ListProgressAsync(ct);
-            sb.AppendLine(reports.Count == 0 ? "Active progress reports: (none)" : "Active progress reports:");
-            foreach (var r in reports.Take(10)) sb.AppendLine($"  - {r}");
+            if (reports.Count == 0)
+            {
+                sb.AppendLine("Active progress reports: (none)");
+            }
+            else
+            {
+                var matches = string.IsNullOrWhiteSpace(gameId)
+                    ? reports
+                    : reports.Where(r => r.Contains(gameId, StringComparison.OrdinalIgnoreCase)).ToList();
+                var listed = matches.Count > 0 ? matches : reports;
+                sb.AppendLine(string.IsNullOrWhiteSpace(gameId) || matches.Count == reports.Count
+                    ? $"Active progress reports ({reports.Count}):"
+                    : matches.Count == 0
+                        ? $"Active progress reports ({reports.Count}; none match '{gameId}'):"
+                        : $"Active progress reports ({reports.Count}, {matches.Count} matching '{gameId}'):");
+                foreach (var r in listed.Take(10)) sb.AppendLine($"  - {r}");
+
+                // When scoped to a game, auto-preview the most relevant prior report so
+                // the session resumes with context already in view (full read: progress_get).
+                if (!string.IsNullOrWhiteSpace(gameId) && matches.Count > 0)
+                {
+                    var pick = matches[^1]; // names sort ascending; last ≈ latest by convention
+                    try
+                    {
+                        var body = await ctx.GetProgressAsync(pick, ct);
+                        sb.AppendLine($"  -- resume preview: {pick} --");
+                        foreach (var line in Preview(body, 12, 800)) sb.AppendLine($"    {line}");
+                        sb.AppendLine($"  (full report: progress_get(\"{pick}\"))");
+                    }
+                    catch { /* preview is best-effort */ }
+                }
+            }
         }
 
         // Auto-surface the active agent persona's onboarding when an id is known
@@ -88,6 +118,23 @@ public sealed class SessionInitTool(
     {
         var t = s.Replace('\r', ' ').Replace('\n', ' ').Trim();
         return t.Length > 160 ? t[..157] + "..." : t;
+    }
+
+    // First non-blank lines of a report, each clipped, bounded by line + char budgets.
+    private static IEnumerable<string> Preview(string body, int maxLines, int maxChars)
+    {
+        var outp = new List<string>();
+        int chars = 0;
+        foreach (var raw in body.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n'))
+        {
+            var line = raw.TrimEnd();
+            if (line.Length == 0) continue;
+            if (outp.Count >= maxLines || chars >= maxChars) { outp.Add("…"); break; }
+            if (line.Length > 120) line = line[..117] + "…";
+            outp.Add(line);
+            chars += line.Length;
+        }
+        return outp;
     }
 }
 

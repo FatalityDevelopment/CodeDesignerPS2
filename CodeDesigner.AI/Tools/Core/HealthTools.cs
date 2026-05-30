@@ -14,6 +14,13 @@ public sealed class CheckSessionHealthTool(SessionState state)
     [ToolEntryPoint] public string InvokeAsync() => state.GetHealthReport();
 }
 
+[CdTool("cd_session_summary", ToolDomain.Core, ToolRisk.ReadOnly,
+    "Recap the session so far: goal, age, labels/saves, and the milestone narrative. The 'where are we?' view. Risk: read-only.")]
+public sealed class SessionSummaryTool(SessionState state)
+{
+    [ToolEntryPoint] public string InvokeAsync() => state.GetSummaryReport();
+}
+
 [CdTool("cd_set_goal", ToolDomain.Core, ToolRisk.ReadOnly,
     "Declare the current session goal (one line). Helps keep the AI on task. Risk: read-only.")]
 public sealed class SetGoalTool(SessionState state)

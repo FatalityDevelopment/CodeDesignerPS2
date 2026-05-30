@@ -74,6 +74,36 @@ public sealed class SessionState
         lock (_gate) return _riskyLog.TakeLast(take).ToArray();
     }
 
+    /// <summary>
+    /// Render a neutral "where are we?" recap — goal + the milestone narrative + key
+    /// counters — distinct from <see cref="GetHealthReport"/>, which leads with warnings.
+    /// </summary>
+    public string GetSummaryReport()
+    {
+        var now = DateTime.UtcNow;
+        var sb = new StringBuilder();
+        sb.AppendLine("Session summary");
+        sb.AppendLine($"  goal:   {Goal ?? "(unset — cd_set_goal)"}");
+        sb.AppendLine($"  age:    {(now - _started).TotalMinutes:F1} min");
+        var lastLabel = LastLabelAdded;
+        sb.AppendLine($"  labels: {LabelsAdded} added{(lastLabel is { } l ? $" (last {(now - l).TotalMinutes:F1}m ago)" : "")}");
+        var lastSave = LastSave;
+        sb.AppendLine($"  saves:  {(lastSave is { } s ? $"last {(now - s).TotalMinutes:F1}m ago" : "none this session")}");
+        if (RiskyOps > 0)
+            sb.AppendLine($"  high-risk ops: {RiskyOps}{(RiskyOpsWithoutReason > 0 ? $" ({RiskyOpsWithoutReason} unexplained)" : "")}");
+
+        var ms = RecentMilestones(10);
+        if (ms.Count == 0)
+            sb.AppendLine("  milestones: (none recorded — cd_milestone_reached)");
+        else
+        {
+            sb.AppendLine($"  milestones ({MilestoneCount}):");
+            foreach (var (at, n, summary) in ms)
+                sb.AppendLine($"    - {at:HH:mm} {n}{(summary is null ? "" : $": {summary}")}");
+        }
+        return sb.ToString().TrimEnd();
+    }
+
     /// <summary>Render a human-readable health report + recommendations.</summary>
     public string GetHealthReport()
     {
