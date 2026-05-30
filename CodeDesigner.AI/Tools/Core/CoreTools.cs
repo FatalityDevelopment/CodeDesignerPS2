@@ -184,7 +184,7 @@ public sealed class ContextGetTool(ICdContextProvider ctx)
 {
     [ToolEntryPoint]
     public Task<string> InvokeAsync(
-        [Description("Context kind: agent_profile | orchestration_plan | progress_report | db_schema | packet_workflow | ...")] string kind,
+        [Description("Context kind (see this tool's summary for valid values).")] string kind,
         [Description("Identifier (e.g. agent id, plan id, report name). Optional for kinds like db_schema.")] string? id = null,
         CancellationToken ct = default)
         => ctx.GetAsync(kind, id, ct);
