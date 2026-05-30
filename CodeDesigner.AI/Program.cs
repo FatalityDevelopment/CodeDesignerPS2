@@ -41,6 +41,7 @@ var socket = new SocketBridgeClient(host, port);
 IEmulatorBridge bridge = new EmulatorBridge(socket);
 ICdContextProvider context = new DbContextProvider(new McpDatabaseService(dbOptions, socket));
 IAgentCoordinator coordinator = new DbAgentCoordinator(dbOptions);
+IOrchestrationCoordinator orchestrator = new DbOrchestrationCoordinator(dbOptions);
 
 // ── Discover [CdTool] classes and keep only what this profile allows ───────
 // All [CdTool] classes now live in this assembly under Tools/<Category>/.
@@ -80,6 +81,7 @@ var toolServices = new ServiceCollection()
     .AddSingleton(sessionState)
     .AddSingleton(agentIdentity)
     .AddSingleton(coordinator)
+    .AddSingleton(orchestrator)
     .AddSingleton(sp => new RuntimeDomainGate(tools, sp, allDescriptors, profile))
     .BuildServiceProvider();
 

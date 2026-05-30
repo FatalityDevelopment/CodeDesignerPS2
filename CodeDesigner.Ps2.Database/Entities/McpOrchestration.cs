@@ -31,6 +31,15 @@ public class McpOrchestration
     /// <summary>Whether this is the currently active orchestration plan. Only one plan may be active at a time.</summary>
     public bool IsActive { get; set; }
 
+    /// <summary>The current workflow stage label (or step number) the team is on, set via cd_orch_advance. Null = not started.</summary>
+    public string? CurrentStage { get; set; }
+
+    /// <summary>One-line summary attached to the current stage by the agent that last advanced it.</summary>
+    public string? CurrentStageSummary { get; set; }
+
+    /// <summary>UTC timestamp when <see cref="CurrentStage"/> was last advanced.</summary>
+    public DateTime? StageUpdatedAt { get; set; }
+
     /// <summary>UTC timestamp when the orchestration profile was created.</summary>
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 

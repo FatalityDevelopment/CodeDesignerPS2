@@ -710,6 +710,12 @@ namespace CodeDesigner.Ps2.Database.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<string>("CurrentStage")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("CurrentStageSummary")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<string>("Description")
                         .HasColumnType("nvarchar(max)");
 
@@ -729,6 +735,9 @@ namespace CodeDesigner.Ps2.Database.Migrations
 
                     b.Property<string>("Rules")
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("StageUpdatedAt")
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("Strategy")
                         .HasColumnType("nvarchar(max)");
