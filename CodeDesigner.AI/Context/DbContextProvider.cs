@@ -32,6 +32,15 @@ internal sealed class DbContextProvider(McpDatabaseService db) : ICdContextProvi
         return $"Game: {gameId ?? "(unset)"}; {reports.Count} progress report(s).";
     }
 
+    public Task<bool> DeleteProgressAsync(string name, CancellationToken ct = default)
+        => db.DeleteMemoryAsync(name, ct);
+
+    public Task<IReadOnlyList<string>> ListAgentMemoriesAsync(int agentId, CancellationToken ct = default)
+        => db.ListAgentMemoriesAsync(agentId, ct);
+
+    public Task<IReadOnlyList<string>> ListSharedMemoriesAsync(CancellationToken ct = default)
+        => db.ListSharedMemoriesAsync(ct);
+
     public async Task<string> GetAsync(string kind, string? id, CancellationToken ct = default)
         => (kind ?? "").ToLowerInvariant() switch
         {

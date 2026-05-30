@@ -94,17 +94,6 @@ public sealed class MemoryDisasmTool(IEmulatorBridge bridge)
     }
 }
 
-[CdTool("memory_snapshot", ToolDomain.Memory, ToolRisk.WritesDisk,
-    "Snapshot memory regions to disk for later diffing. Returns saved paths. Risk: writes disk.")]
-public sealed class MemorySnapshotTool(IEmulatorBridge bridge)
-{
-    [ToolEntryPoint]
-    public async Task<string> InvokeAsync(
-        [Description("Label for the snapshot, e.g. 'before-login'.")] string label,
-        CancellationToken ct = default)
-        => CdText.Message(await bridge.SendAsync(new { Command = "SNAPSHOT", Label = label }, ct));
-}
-
 [CdTool("memory_capture_range", ToolDomain.Memory, ToolRisk.ReadOnly,
     "Capture a large memory range server-side and return a handle + preview instead of dumping raw bytes. Risk: read-only.")]
 public sealed class MemoryCaptureRangeTool(IEmulatorBridge bridge)

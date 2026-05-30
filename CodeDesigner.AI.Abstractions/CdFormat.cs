@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace CodeDesigner.AI.Abstractions;
 
@@ -129,6 +130,85 @@ public static class CdFormat
             if (root.TryGetProperty("COP0_Cause", out var c)) sb.AppendLine($"  Cause  = 0x{c.GetUInt32():X8}");
             if (root.TryGetProperty("COP0_EPC", out var e))   sb.AppendLine($"  EPC    = 0x{e.GetUInt64():X16}");
             return WithRules(sb.Length > 0 ? sb.ToString().TrimEnd() : json);
+        }
+        catch { return json; }
+    }
+
+    // ── DISASSEMBLE → CDS source (decompile_to_cds) ───────────────────────
+    private static readonly Regex _branchHintRegex =
+        new(@"\s*\(([+-]\d+[▼▲])\)", RegexOptions.Compiled);
+    private static readonly Regex _hexAddrRegex =
+        new(@"\$([0-9A-Fa-f]{8})\b", RegexOptions.Compiled);
+
+    public static string DecompileToCds(string json, uint startAddress)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("Error", out var err) && err.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(err.GetString()))
+                return $"Error: {err.GetString()}";
+            if (!root.TryGetProperty("Results", out var results))
+                return CdText.Message(json);
+
+            // Pass 1: collect instructions
+            var instructions = new List<(uint Address, string Assembly, bool Success)>();
+            uint pc = startAddress;
+            foreach (var item in results.EnumerateArray())
+            {
+                bool success = item.TryGetProperty("Success", out var s) && s.GetBoolean();
+                string asm = item.TryGetProperty("Assembly", out var a) ? (a.GetString() ?? "") : "";
+                instructions.Add((pc, asm, success));
+                pc += 4;
+            }
+            uint endAddress = pc;
+
+            // Pass 2: collect branch targets within range
+            var branchTargets = new HashSet<uint>();
+            foreach (var (_, asm, success) in instructions)
+            {
+                if (!success) continue;
+                foreach (Match m in _hexAddrRegex.Matches(asm))
+                {
+                    if (uint.TryParse(m.Groups[1].Value, System.Globalization.NumberStyles.HexNumber, null, out uint target)
+                        && target >= startAddress && target < endAddress && (target & 3) == 0)
+                        branchTargets.Add(target);
+                }
+            }
+
+            // Pass 3: build CDS source
+            var sb = new StringBuilder();
+            sb.AppendLine($"address ${startAddress:X8}");
+            sb.AppendLine();
+            foreach (var (addr, asm, success) in instructions)
+            {
+                if (branchTargets.Contains(addr))
+                    sb.AppendLine($":target_{addr:X8}:");
+                if (!success)
+                {
+                    sb.AppendLine($"// [disassembly error at 0x{addr:X8}]");
+                    continue;
+                }
+                string line = _branchHintRegex.Replace(asm, "");
+                if (line.StartsWith(".word ", StringComparison.OrdinalIgnoreCase))
+                {
+                    string hex = line[".word ".Length..].Trim();
+                    if (hex.StartsWith("0x", StringComparison.OrdinalIgnoreCase)) hex = hex[2..];
+                    int comment = hex.IndexOf(' ');
+                    if (comment > 0) hex = hex[..comment];
+                    sb.AppendLine($"hexcode ${hex.ToUpperInvariant().PadLeft(8, '0')}");
+                    continue;
+                }
+                line = _hexAddrRegex.Replace(line, m =>
+                {
+                    if (uint.TryParse(m.Groups[1].Value, System.Globalization.NumberStyles.HexNumber, null, out uint target)
+                        && branchTargets.Contains(target))
+                        return $":target_{target:X8}";
+                    return m.Value;
+                });
+                sb.AppendLine(line);
+            }
+            return WithRules(sb.ToString().TrimEnd());
         }
         catch { return json; }
     }
