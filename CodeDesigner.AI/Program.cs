@@ -6,7 +6,7 @@ using CodeDesigner.AI.Mcp;
 using CodeDesigner.AI.Prompts;
 using CodeDesigner.AI.Resources;
 using CodeDesigner.Ps2.Database;
-using CodeDesigner.Ps2.McpServer;       // linked: SocketBridgeClient, McpDatabaseService
+using CodeDesigner.Ps2.McpServer;       // McpInfra lib: SocketBridgeClient, McpDatabaseService
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;

@@ -18,6 +18,8 @@
     <ProjectReference Include="..\CodeDesigner.Ps2.CheatEngine\CodeDesigner.Ps2.CheatEngine.csproj" />
     <ProjectReference Include="..\CodeDesigner.Ps2.IsoManager\CodeDesigner.Ps2.IsoManager.csproj" />
     <ProjectReference Include="..\CodeDesigner.Ps2.Database\CodeDesigner.Ps2.Database.csproj" />
+    <!-- SocketBridgeClient + McpDatabaseService now live in the shared infra lib. -->
+    <ProjectReference Include="..\CodeDesigner.Ps2.McpInfra\CodeDesigner.Ps2.McpInfra.csproj" />
   </ItemGroup>
 
   <!--

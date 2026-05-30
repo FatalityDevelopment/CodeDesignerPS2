@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>CodeDesigner.Ps2.McpInfra</AssemblyName>
+    <RootNamespace>CodeDesigner.Ps2.McpServer</RootNamespace>
+  </PropertyGroup>
+
+  <!--
+    Shared MCP infrastructure: the socket bridge client + the EF-backed MCP
+    database service. Extracted from CodeDesigner.Ps2.McpServer so both the
+    legacy server and CodeDesigner.AI reference one implementation instead of
+    compiling the same source twice (the old <Compile Link/> hack).
+
+    Namespace is kept as CodeDesigner.Ps2.McpServer so neither consumer needs a
+    using-statement change. EF Core flows in transitively via the Database ref.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\CodeDesigner.Ps2.Database\CodeDesigner.Ps2.Database.csproj" />
+  </ItemGroup>
+
+</Project>

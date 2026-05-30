@@ -53,6 +53,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.AI.Abstraction
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.AI.Tests", "CodeDesigner.AI.Tests\CodeDesigner.AI.Tests.csproj", "{EB091026-089C-44DC-AE93-63F64F16D808}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.Ps2.McpInfra", "CodeDesigner.Ps2.McpInfra\CodeDesigner.Ps2.McpInfra.csproj", "{2E8A3F5A-12F2-4691-A5C1-1D89D496E9F5}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -353,6 +355,18 @@ Global
 		{EB091026-089C-44DC-AE93-63F64F16D808}.Release|x64.Build.0 = Release|Any CPU
 		{EB091026-089C-44DC-AE93-63F64F16D808}.Release|x86.ActiveCfg = Release|Any CPU
 		{EB091026-089C-44DC-AE93-63F64F16D808}.Release|x86.Build.0 = Release|Any CPU
+		{2E8A3F5A-12F2-4691-A5C1-1D89D496E9F5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2E8A3F5A-12F2-4691-A5C1-1D89D496E9F5}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2E8A3F5A-12F2-4691-A5C1-1D89D496E9F5}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{2E8A3F5A-12F2-4691-A5C1-1D89D496E9F5}.Debug|x64.Build.0 = Debug|Any CPU
+		{2E8A3F5A-12F2-4691-A5C1-1D89D496E9F5}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{2E8A3F5A-12F2-4691-A5C1-1D89D496E9F5}.Debug|x86.Build.0 = Debug|Any CPU
+		{2E8A3F5A-12F2-4691-A5C1-1D89D496E9F5}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2E8A3F5A-12F2-4691-A5C1-1D89D496E9F5}.Release|Any CPU.Build.0 = Release|Any CPU
+		{2E8A3F5A-12F2-4691-A5C1-1D89D496E9F5}.Release|x64.ActiveCfg = Release|Any CPU
+		{2E8A3F5A-12F2-4691-A5C1-1D89D496E9F5}.Release|x64.Build.0 = Release|Any CPU
+		{2E8A3F5A-12F2-4691-A5C1-1D89D496E9F5}.Release|x86.ActiveCfg = Release|Any CPU
+		{2E8A3F5A-12F2-4691-A5C1-1D89D496E9F5}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
