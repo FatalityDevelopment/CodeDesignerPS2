@@ -1,6 +1,8 @@
 using System.ComponentModel;
 using System.Text;
+using System.Text.Json;
 using CodeDesigner.AI.Abstractions;
+using CodeDesigner.AI.Mcp;
 
 namespace CodeDesigner.AI.Tools.Core;
 
@@ -125,7 +127,7 @@ public sealed class ProgressGetTool(ICdContextProvider ctx)
 
 [CdTool("progress_save", ToolDomain.Core, ToolRisk.MutatesDatabase,
     "Create or overwrite a progress report. Use at milestones and before ending a session. Risk: writes database.")]
-public sealed class ProgressSaveTool(ICdContextProvider ctx)
+public sealed class ProgressSaveTool(ICdContextProvider ctx, SessionState state)
 {
     [ToolEntryPoint]
     public async Task<string> InvokeAsync(
@@ -134,6 +136,7 @@ public sealed class ProgressSaveTool(ICdContextProvider ctx)
         CancellationToken ct = default)
     {
         await ctx.SaveProgressAsync(name, content, ct);
+        state.RecordSave();
         return $"Saved progress report '{name}'.";
     }
 }
@@ -156,7 +159,7 @@ public sealed class LabelListTool(IEmulatorBridge bridge)
 
 [CdTool("label_add", ToolDomain.Core, ToolRisk.MutatesDatabase,
     "Create or update a label at an address. Risk: writes database.")]
-public sealed class LabelAddTool(IEmulatorBridge bridge)
+public sealed class LabelAddTool(IEmulatorBridge bridge, SessionState state)
 {
     [ToolEntryPoint]
     public async Task<string> InvokeAsync(
@@ -170,18 +173,23 @@ public sealed class LabelAddTool(IEmulatorBridge bridge)
     {
         var addr = CdText.TryParseAddress(address);
         if (addr is null) return CdText.Error($"invalid address '{address}'.");
-        return CdText.Message(await bridge.SendAsync(new
+        var json = await bridge.SendAsync(new
         {
             Command = "ADDLABELENTRY",
             GameId = gameId,
             SetName = labelSet,
-            LabelEntry = new
-            {
-                address = $"0x{addr.Value:X8}",
-                name = label,
-                comment,
-                type,
-            },
-        }, ct));
+            LabelEntry = new { address = $"0x{addr.Value:X8}", name = label, comment, type },
+        }, ct);
+
+        // Record on a successful response (absence of an Error field).
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty("Error", out _))
+                state.RecordLabelAdded();
+        }
+        catch { /* malformed response; skip recording */ }
+
+        return CdText.Message(json);
     }
 }

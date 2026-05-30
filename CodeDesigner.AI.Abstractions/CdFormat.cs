@@ -39,7 +39,7 @@ public static class CdFormat
                 if (!string.IsNullOrEmpty(cmt)) sb.Append($"  ; {cmt}");
                 sb.AppendLine();
             }
-            return WithRules(sb.Length > 0 ? sb.ToString().TrimEnd() : "(no labels)");
+            return sb.Length > 0 ? sb.ToString().TrimEnd() : "(no labels)";
         }
         catch { return json; }
     }
@@ -66,7 +66,7 @@ public static class CdFormat
                 if (!string.IsNullOrEmpty(cmt)) sb.Append($"  ; {cmt}");
                 sb.AppendLine();
             }
-            return WithRules(sb.Length > 0 ? sb.ToString().TrimEnd() : "(no matching labels)");
+            return sb.Length > 0 ? sb.ToString().TrimEnd() : "(no matching labels)";
         }
         catch { return json; }
     }
@@ -95,7 +95,7 @@ public static class CdFormat
                 uint entry = item.TryGetProperty("entryPc", out var e) ? e.GetUInt32() : 0u;
                 sb.AppendLine($"  Thread {id,-3}  [{status,-9}]  PC=0x{pc:X8}  SP=0x{sp:X8}  Pri={pri,-3}  Entry=0x{entry:X8}");
             }
-            return WithRules(sb.Length > 0 ? sb.ToString().TrimEnd() : "(no threads)");
+            return sb.Length > 0 ? sb.ToString().TrimEnd() : "(no threads)";
         }
         catch { return json; }
     }
@@ -129,7 +129,7 @@ public static class CdFormat
             if (root.TryGetProperty("COP0_Status", out var s))sb.AppendLine($"\n=== COP0 ===\n  Status = 0x{s.GetUInt32():X8}");
             if (root.TryGetProperty("COP0_Cause", out var c)) sb.AppendLine($"  Cause  = 0x{c.GetUInt32():X8}");
             if (root.TryGetProperty("COP0_EPC", out var e))   sb.AppendLine($"  EPC    = 0x{e.GetUInt64():X16}");
-            return WithRules(sb.Length > 0 ? sb.ToString().TrimEnd() : json);
+            return sb.Length > 0 ? sb.ToString().TrimEnd() : json;
         }
         catch { return json; }
     }
@@ -208,7 +208,7 @@ public static class CdFormat
                 });
                 sb.AppendLine(line);
             }
-            return WithRules(sb.ToString().TrimEnd());
+            return sb.ToString().TrimEnd();
         }
         catch { return json; }
     }
@@ -243,7 +243,7 @@ public static class CdFormat
                 if (!string.IsNullOrEmpty(cmt)) line += $"  ; {cmt}";
                 sb.AppendLine(line);
             }
-            return WithRules(sb.Length > 0 ? sb.ToString().TrimEnd() : "(no results)");
+            return sb.Length > 0 ? sb.ToString().TrimEnd() : "(no results)";
         }
         catch { return json; }
     }

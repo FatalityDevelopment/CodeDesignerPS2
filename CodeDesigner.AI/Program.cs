@@ -46,12 +46,14 @@ var toolAssemblies = new[] { Assembly.GetExecutingAssembly() };
 var descriptors = ToolRegistry.Discover(toolAssemblies, profile);
 var catalog = new ToolCatalog(profile.Name, descriptors, ToolProfile.Known.Keys.OrderBy(k => k).ToList());
 
-// DI used to construct tool instances (injects bridge/context/profile/catalog).
+// DI used to construct tool instances (injects bridge/context/profile/catalog/state).
+var sessionState = new SessionState();
 var toolServices = new ServiceCollection()
     .AddSingleton(bridge)
     .AddSingleton(context)
     .AddSingleton(profile)
     .AddSingleton<IToolCatalog>(catalog)
+    .AddSingleton(sessionState)
     .BuildServiceProvider();
 
 var tools = new McpServerPrimitiveCollection<McpServerTool>(StringComparer.Ordinal);
