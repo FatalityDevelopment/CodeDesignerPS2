@@ -41,6 +41,7 @@ public sealed class ToolProfile
     private static readonly string[] LiteTools =
     {
         "cd_session_init", "cd_status", "cd_tool_index", "cd_tool_help", "cd_context_get",
+        "cd_enable_domain", "cd_list_domains",
         "progress_search", "progress_get", "progress_save",
         "cd_set_goal", "cd_get_goal", "cd_check_session_health",
         "label_list", "memory_read", "memory_disasm", "memory_scan", "get_pc",

@@ -44,7 +44,10 @@ IAgentCoordinator coordinator = new DbAgentCoordinator(dbOptions);
 // All [CdTool] classes now live in this assembly under Tools/<Category>/.
 var toolAssemblies = new[] { Assembly.GetExecutingAssembly() };
 
-var descriptors = ToolRegistry.Discover(toolAssemblies, profile);
+var allDescriptors = ToolRegistry.DiscoverAll(toolAssemblies);
+var descriptors = allDescriptors
+    .Where(d => profile.Allows(d.Meta.Name, d.Meta.Domain, d.Meta.Risk))
+    .ToList();
 var catalog = new ToolCatalog(profile.Name, descriptors, ToolProfile.Known.Keys.OrderBy(k => k).ToList());
 
 // ── Diagnostic: print the tools this profile exposes, then exit ────────────
@@ -61,7 +64,11 @@ if (args.Contains("--list-tools"))
     return;
 }
 
-// DI used to construct tool instances (injects bridge/context/profile/catalog/state).
+// Live tool collection — populated below, but captured now by the runtime domain
+// gate so cd_enable_domain can add to it (which fires tools/list_changed).
+var tools = new McpServerPrimitiveCollection<McpServerTool>(StringComparer.Ordinal);
+
+// DI used to construct tool instances (injects bridge/context/profile/catalog/state/gate).
 var sessionState = new SessionState();
 var toolServices = new ServiceCollection()
     .AddSingleton(bridge)
@@ -70,9 +77,9 @@ var toolServices = new ServiceCollection()
     .AddSingleton<IToolCatalog>(catalog)
     .AddSingleton(sessionState)
     .AddSingleton(coordinator)
+    .AddSingleton(sp => new RuntimeDomainGate(tools, sp, allDescriptors, profile))
     .BuildServiceProvider();
 
-var tools = new McpServerPrimitiveCollection<McpServerTool>(StringComparer.Ordinal);
 foreach (var descriptor in descriptors)
     tools.Add(McpToolFactory.Create(descriptor, toolServices));
 
