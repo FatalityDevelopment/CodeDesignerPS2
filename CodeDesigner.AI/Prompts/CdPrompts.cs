@@ -15,7 +15,7 @@ public class CdPrompts
     public static string SessionBootstrap() =>
         "Call cd_session_init first (pass a gameId if known). Then call cd_tool_index to see the tools " +
         "available in the active profile. Read cd://docs/rules for operating rules. Relaunch with a " +
-        "different --profile (core/re/packets/patching/assets/admin) to access other tool domains.";
+        "different --profile (core/lite/re/live-debug/packets/patching/cheats/media/pcsx2/multi-agent/admin) to access other tool domains.";
 
     [McpServerPrompt(Name = "packet_reversing")]
     [Description("Guided SOCOM/Medius packet reverse-engineering workflow.")]

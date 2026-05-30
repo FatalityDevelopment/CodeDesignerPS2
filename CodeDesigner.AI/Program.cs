@@ -14,7 +14,7 @@ using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 
 // ── Active profile + connection args ───────────────────────────────────────
-// Profile gating: --profile core|re|packets|patching|assets|admin|all,
+// Profile gating: --profile core|lite|re|live-debug|packets|patching|cheats|media|pcsx2|multi-agent|admin|all,
 //                 --readonly, --dangerous-tools false
 var profile = ToolProfile.FromArgs(args);
 
@@ -46,6 +46,20 @@ var toolAssemblies = new[] { Assembly.GetExecutingAssembly() };
 
 var descriptors = ToolRegistry.Discover(toolAssemblies, profile);
 var catalog = new ToolCatalog(profile.Name, descriptors, ToolProfile.Known.Keys.OrderBy(k => k).ToList());
+
+// ── Diagnostic: print the tools this profile exposes, then exit ────────────
+// e.g. `CodeDesigner.AI --profile lite --list-tools`. No DB/bridge I/O.
+if (args.Contains("--list-tools"))
+{
+    Console.WriteLine($"profile '{profile.Name}' (maxRisk={profile.MaxRisk}) exposes {descriptors.Count} tools:");
+    foreach (var g in descriptors.GroupBy(d => d.Meta.Domain).OrderBy(g => g.Key.ToString()))
+    {
+        Console.WriteLine($"  [{g.Key}] x{g.Count()}");
+        foreach (var d in g.OrderBy(d => d.Meta.Name))
+            Console.WriteLine($"      {d.Meta.Name} ({d.Meta.Risk})");
+    }
+    return;
+}
 
 // DI used to construct tool instances (injects bridge/context/profile/catalog/state).
 var sessionState = new SessionState();

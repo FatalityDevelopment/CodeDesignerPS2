@@ -23,7 +23,7 @@ internal static class ToolRegistry
             {
                 var meta = type.GetCustomAttribute<CdToolAttribute>();
                 if (meta is null) continue;
-                if (!profile.Allows(meta.Domain, meta.Risk)) continue;
+                if (!profile.Allows(meta.Name, meta.Domain, meta.Risk)) continue;
 
                 var entry = type.GetMethods(BindingFlags.Public | BindingFlags.Instance)
                     .FirstOrDefault(m => m.GetCustomAttribute<ToolEntryPointAttribute>() is not null);
