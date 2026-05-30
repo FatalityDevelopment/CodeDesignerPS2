@@ -14,7 +14,7 @@ internal static class McpToolFactory
     {
         var instance = ActivatorUtilities.CreateInstance(services, descriptor.ImplType);
 
-        return McpServerTool.Create(
+        var tool = McpServerTool.Create(
             descriptor.Entry,
             instance,
             new McpServerToolCreateOptions
@@ -22,5 +22,14 @@ internal static class McpToolFactory
                 Name = descriptor.Meta.Name,
                 Description = descriptor.Meta.ShortDescription,
             });
+
+        // High-risk tools (WritesDisk and up) get a soft "reason" nudge + session logging.
+        if (RiskFrictionTool.AppliesTo(descriptor.Meta.Risk) &&
+            services.GetService<SessionState>() is { } state)
+        {
+            tool = new RiskFrictionTool(tool, state, descriptor.Meta.Name, descriptor.Meta.Risk);
+        }
+
+        return tool;
     }
 }

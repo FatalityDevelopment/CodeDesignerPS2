@@ -1,4 +1,5 @@
 using System.Text;
+using CodeDesigner.AI.Abstractions;
 
 namespace CodeDesigner.AI.Mcp;
 
@@ -15,13 +16,18 @@ public sealed class SessionState
     private DateTime? _lastSave;
     private DateTime? _lastLabel;
     private long _labelsAdded;
+    private long _riskyOps;
+    private long _riskyOpsNoReason;
     private string? _goal;
     private readonly List<(DateTime At, string Name, string? Summary)> _milestones = new();
+    private readonly List<(DateTime At, string Tool, ToolRisk Risk, string? Reason)> _riskyLog = new();
 
     public DateTime Started => _started;
     public DateTime? LastSave { get { lock (_gate) return _lastSave; } }
     public DateTime? LastLabelAdded { get { lock (_gate) return _lastLabel; } }
     public long LabelsAdded => Interlocked.Read(ref _labelsAdded);
+    public long RiskyOps => Interlocked.Read(ref _riskyOps);
+    public long RiskyOpsWithoutReason => Interlocked.Read(ref _riskyOpsNoReason);
     public string? Goal { get { lock (_gate) return _goal; } }
 
     public IReadOnlyList<(DateTime At, string Name, string? Summary)> RecentMilestones(int take = 5)
@@ -45,6 +51,29 @@ public sealed class SessionState
         lock (_gate) _lastLabel = DateTime.UtcNow;
     }
 
+    /// <summary>
+    /// Log a high-risk tool invocation (WritesDisk and up). Returns the running risky-op
+    /// count for this session. <paramref name="reason"/> is the optional one-line
+    /// justification the model supplied; null/blank means it ran unjustified.
+    /// </summary>
+    public long RecordRiskyOp(string tool, ToolRisk risk, string? reason)
+    {
+        var n = Interlocked.Increment(ref _riskyOps);
+        if (string.IsNullOrWhiteSpace(reason))
+            Interlocked.Increment(ref _riskyOpsNoReason);
+        lock (_gate)
+        {
+            _riskyLog.Add((DateTime.UtcNow, tool, risk, reason));
+            if (_riskyLog.Count > 100) _riskyLog.RemoveAt(0); // cap memory
+        }
+        return n;
+    }
+
+    public IReadOnlyList<(DateTime At, string Tool, ToolRisk Risk, string? Reason)> RecentRiskyOps(int take = 5)
+    {
+        lock (_gate) return _riskyLog.TakeLast(take).ToArray();
+    }
+
     /// <summary>Render a human-readable health report + recommendations.</summary>
     public string GetHealthReport()
     {
@@ -53,6 +82,7 @@ public sealed class SessionState
         sb.AppendLine($"Session age:        {(now - _started).TotalMinutes:F1} min");
         sb.AppendLine($"Current goal:       {_goal ?? "(unset — call cd_set_goal)"}");
         sb.AppendLine($"Labels added:       {LabelsAdded}");
+        sb.AppendLine($"High-risk ops:      {RiskyOps}{(RiskyOpsWithoutReason > 0 ? $"  ({RiskyOpsWithoutReason} without a stated reason)" : "")}");
         sb.AppendLine($"Last progress save: {(_lastSave is { } s ? $"{(now - s).TotalMinutes:F1} min ago" : "never")}");
         sb.AppendLine($"Last label added:   {(_lastLabel is { } l ? $"{(now - l).TotalMinutes:F1} min ago" : "never")}");
 
