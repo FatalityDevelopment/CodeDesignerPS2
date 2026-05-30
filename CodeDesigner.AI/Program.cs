@@ -40,17 +40,8 @@ IEmulatorBridge bridge = new EmulatorBridge(socket);
 ICdContextProvider context = new DbContextProvider(new McpDatabaseService(dbOptions, socket));
 
 // ── Discover [CdTool] classes and keep only what this profile allows ───────
-var toolAssemblies = new[]
-{
-    typeof(CodeDesigner.AI.Tools.Core.SessionInitTool).Assembly,
-    typeof(CodeDesigner.AI.Tools.Memory.MemoryReadTool).Assembly,
-    typeof(CodeDesigner.AI.Tools.Debug.BreakpointSetTool).Assembly,
-    typeof(CodeDesigner.AI.Tools.Labels.CallGraphScanTool).Assembly,
-    typeof(CodeDesigner.AI.Tools.Network.PacketStatusTool).Assembly,
-    typeof(CodeDesigner.AI.Tools.Patching.AssembleTool).Assembly,
-    typeof(CodeDesigner.AI.Tools.Assets.ArchiveIndexTool).Assembly,
-    typeof(CodeDesigner.AI.Tools.Admin.DbQueryReadonlyTool).Assembly,
-};
+// All [CdTool] classes now live in this assembly under Tools/<Category>/.
+var toolAssemblies = new[] { Assembly.GetExecutingAssembly() };
 
 var descriptors = ToolRegistry.Discover(toolAssemblies, profile);
 var catalog = new ToolCatalog(profile.Name, descriptors, ToolProfile.Known.Keys.OrderBy(k => k).ToList());

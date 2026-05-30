@@ -16,14 +16,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CodeDesigner.AI.Abstractions\CodeDesigner.AI.Abstractions.csproj" />
-    <ProjectReference Include="..\CodeDesigner.AI.Tools.Core\CodeDesigner.AI.Tools.Core.csproj" />
-    <ProjectReference Include="..\CodeDesigner.AI.Tools.Memory\CodeDesigner.AI.Tools.Memory.csproj" />
-    <ProjectReference Include="..\CodeDesigner.AI.Tools.Debug\CodeDesigner.AI.Tools.Debug.csproj" />
-    <ProjectReference Include="..\CodeDesigner.AI.Tools.Labels\CodeDesigner.AI.Tools.Labels.csproj" />
-    <ProjectReference Include="..\CodeDesigner.AI.Tools.Network\CodeDesigner.AI.Tools.Network.csproj" />
-    <ProjectReference Include="..\CodeDesigner.AI.Tools.Patching\CodeDesigner.AI.Tools.Patching.csproj" />
-    <ProjectReference Include="..\CodeDesigner.AI.Tools.Assets\CodeDesigner.AI.Tools.Assets.csproj" />
-    <ProjectReference Include="..\CodeDesigner.AI.Tools.Admin\CodeDesigner.AI.Tools.Admin.csproj" />
     <ProjectReference Include="..\CodeDesigner.Ps2.Database\CodeDesigner.Ps2.Database.csproj" />
   </ItemGroup>
 
