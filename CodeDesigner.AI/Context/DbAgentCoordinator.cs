@@ -76,6 +76,15 @@ internal sealed class DbAgentCoordinator(DbContextOptions<CodeDesignerDbContext>
         return session is null ? null : Map(session);
     }
 
+    public async Task<AgentPersonaInfo?> GetAgentAsync(int agentId, CancellationToken ct = default)
+    {
+        await using var db = new CodeDesignerDbContext(dbOptions);
+        var a = await db.McpAgents.AsNoTracking().FirstOrDefaultAsync(x => x.Id == agentId, ct);
+        return a is null ? null : new AgentPersonaInfo(
+            a.Id, a.Name, a.IsAgentLead, a.Objective, a.Rules, a.Guidelines,
+            a.SessionBegin, a.ConcurrentTasks, a.SessionEnd);
+    }
+
     public async Task SendMessageAsync(
         int fromSessionId, int? toSessionId, int? toAgentId, string body,
         CancellationToken ct = default)

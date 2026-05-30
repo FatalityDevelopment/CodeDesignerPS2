@@ -16,7 +16,9 @@ using ModelContextProtocol.Server;
 // ── Active profile + connection args ───────────────────────────────────────
 // Profile gating: --profile core|lite|re|live-debug|packets|patching|cheats|media|pcsx2|multi-agent|admin|all,
 //                 --readonly, --dangerous-tools false
+// Agent identity: --agent-id <n> [--parent-session <n>] (cd_session_init auto-surfaces SessionBegin)
 var profile = ToolProfile.FromArgs(args);
+var agentIdentity = AgentIdentity.FromArgs(args);
 
 string? host = null;
 int? port = null;
@@ -76,6 +78,7 @@ var toolServices = new ServiceCollection()
     .AddSingleton(profile)
     .AddSingleton<IToolCatalog>(catalog)
     .AddSingleton(sessionState)
+    .AddSingleton(agentIdentity)
     .AddSingleton(coordinator)
     .AddSingleton(sp => new RuntimeDomainGate(tools, sp, allDescriptors, profile))
     .BuildServiceProvider();

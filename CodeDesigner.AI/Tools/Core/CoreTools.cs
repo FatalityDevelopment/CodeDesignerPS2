@@ -11,14 +11,17 @@ namespace CodeDesigner.AI.Tools.Core;
 // large docs live in MCP Resources (cd://docs/*), fetched via cd_context_get.
 
 [CdTool("cd_session_init", ToolDomain.Core, ToolRisk.ReadOnly,
-    "Start a session: returns a compact summary (profile, game, bridge status, active progress, core rules, suggested next calls). Risk: read-only.")]
-public sealed class SessionInitTool(IEmulatorBridge bridge, ICdContextProvider ctx, ToolProfile profile, IToolCatalog catalog)
+    "Start a session: compact summary (profile, game, bridge, active progress, agent onboarding, core rules, suggested next calls). Risk: read-only.")]
+public sealed class SessionInitTool(
+    IEmulatorBridge bridge, ICdContextProvider ctx, ToolProfile profile,
+    IToolCatalog catalog, IAgentCoordinator coord, AgentIdentity identity)
 {
     [ToolEntryPoint]
     public async Task<string> InvokeAsync(
         [Description("Work-mode hint (informational), e.g. 're', 'packets', 'patching'.")] string? mode = null,
         [Description("Game serial/id, e.g. 'SCUS-97275'. Optional.")] string? gameId = null,
         [Description("One-line objective for this session. Optional.")] string? objective = null,
+        [Description("Agent persona id; omit to use the launch --agent-id, if set.")] int? agentId = null,
         [Description("Resume from existing progress reports if true (default).")] bool resume = true,
         CancellationToken ct = default)
     {
@@ -41,6 +44,19 @@ public sealed class SessionInitTool(IEmulatorBridge bridge, ICdContextProvider c
             foreach (var r in reports.Take(10)) sb.AppendLine($"  - {r}");
         }
 
+        // Auto-surface the active agent persona's onboarding when an id is known
+        // (explicit param wins over the launch-time --agent-id identity).
+        if ((agentId ?? identity.AgentId) is { } aid)
+        {
+            try
+            {
+                var agent = await coord.GetAgentAsync(aid, ct);
+                if (agent is null) sb.AppendLine($"Agent #{aid}: (not found)");
+                else AppendOnboarding(sb, agent);
+            }
+            catch (Exception ex) { sb.AppendLine($"Agent #{aid}: lookup failed ({ex.Message})"); }
+        }
+
         sb.AppendLine("Core rules:");
         sb.AppendLine("  - label addresses/structures once confirmed");
         sb.AppendLine("  - prefer summaries before raw dumps");
@@ -49,6 +65,29 @@ public sealed class SessionInitTool(IEmulatorBridge bridge, ICdContextProvider c
         sb.AppendLine("  - cd_tool_index   (see tools for this profile)");
         sb.AppendLine("  - cd_context_get(\"db_schema\")");
         return sb.ToString().TrimEnd();
+    }
+
+    private static void AppendOnboarding(StringBuilder sb, AgentPersonaInfo a)
+    {
+        sb.AppendLine($"Agent persona: {a.Name}{(a.IsLead ? " (lead)" : "")}  [id {a.Id}]");
+        if (!string.IsNullOrWhiteSpace(a.Objective)) sb.AppendLine($"  objective: {OneLine(a.Objective)}");
+        AppendSection(sb, "SessionBegin — do these now", a.SessionBegin);
+        AppendSection(sb, "ConcurrentTasks — keep doing throughout", a.ConcurrentTasks);
+        sb.AppendLine($"  (full persona: cd_context_get(\"agent_profile\", \"{a.Id}\"))");
+    }
+
+    private static void AppendSection(StringBuilder sb, string heading, string? body)
+    {
+        if (string.IsNullOrWhiteSpace(body)) return;
+        sb.AppendLine($"  -- {heading} --");
+        foreach (var line in body.Replace("\r\n", "\n").Split('\n'))
+            sb.AppendLine($"    {line}");
+    }
+
+    private static string OneLine(string s)
+    {
+        var t = s.Replace('\r', ' ').Replace('\n', ' ').Trim();
+        return t.Length > 160 ? t[..157] + "..." : t;
     }
 }
 
