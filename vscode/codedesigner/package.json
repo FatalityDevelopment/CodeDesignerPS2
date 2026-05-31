@@ -61,7 +61,8 @@
       },
       {
         "command": "codedesigner.openAgentActivity",
-        "title": "CodeDesigner: Open AI Activity Feed"
+        "title": "CodeDesigner: Open AI Activity Feed",
+        "icon": "$(pulse)"
       },
       {
         "command": "codedesigner.openJokerMaker",
@@ -160,6 +161,11 @@
         },
         {
           "command": "codedesigner.openZipperWorkbench",
+          "when": "view == disasm.disasmPanel",
+          "group": "navigation"
+        },
+        {
+          "command": "codedesigner.openAgentActivity",
           "when": "view == disasm.disasmPanel",
           "group": "navigation"
         },
