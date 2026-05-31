@@ -154,16 +154,26 @@ public sealed class StatusTool(IEmulatorBridge bridge, ToolProfile profile)
 }
 
 [CdTool("cd_tool_index", ToolDomain.Core, ToolRisk.ReadOnly,
-    "List the tools available in the current profile with one-line descriptions. Risk: read-only.")]
+    "List the tools in the current profile (names grouped by domain; verbose:true adds one-line descriptions). Risk: read-only.")]
 public sealed class ToolIndexTool(IToolCatalog catalog)
 {
     [ToolEntryPoint]
-    public string InvokeAsync()
+    public string InvokeAsync(
+        [Description("Include each tool's one-line description (default false = compact names by domain).")] bool verbose = false)
     {
         var sb = new StringBuilder();
         sb.AppendLine($"Profile '{catalog.ProfileName}' — {catalog.ActiveTools.Count} tools:");
-        foreach (var t in catalog.ActiveTools.OrderBy(t => t.Domain).ThenBy(t => t.Name))
-            sb.AppendLine($"  [{t.Domain}] {t.Name} — {t.ShortDescription}");
+        if (verbose)
+        {
+            foreach (var t in catalog.ActiveTools.OrderBy(t => t.Domain).ThenBy(t => t.Name))
+                sb.AppendLine($"  [{t.Domain}] {t.Name} — {t.ShortDescription}");
+        }
+        else
+        {
+            foreach (var g in catalog.ActiveTools.GroupBy(t => t.Domain).OrderBy(g => g.Key.ToString()))
+                sb.AppendLine($"  [{g.Key}] {string.Join(", ", g.OrderBy(t => t.Name).Select(t => t.Name))}");
+            sb.AppendLine("  (verbose:true for descriptions, or cd_tool_help \"<name>\")");
+        }
         sb.AppendLine($"\nAvailable profiles (relaunch with --profile <name>): {string.Join(", ", catalog.AllProfileNames)}");
         return sb.ToString().TrimEnd();
     }

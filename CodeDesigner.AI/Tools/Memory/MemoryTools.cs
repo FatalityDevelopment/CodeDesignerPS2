@@ -8,21 +8,26 @@ namespace CodeDesigner.AI.Tools.Memory;
 // as a handle (memory_capture_range) rather than dumped inline.
 
 [CdTool("memory_read", ToolDomain.Memory, ToolRisk.ReadOnly,
-    "Read a small EE/IOP memory range. Use for quick inspection, not large dumps. Returns address, length, hex preview. Risk: read-only.")]
+    "Read an EE/IOP memory range as inline hex; set large=true (or length>4096) to get a capture handle + preview instead. Risk: read-only.")]
 public sealed class MemoryReadTool(IEmulatorBridge bridge)
 {
     [ToolEntryPoint]
     public async Task<string> InvokeAsync(
         [Description("Virtual address (hex 0x.. or decimal).")] string address,
-        [Description("Bytes to read (1-4096, default 256).")] int length = 256,
+        [Description("Bytes to read (default 256; inline hex is capped at 4096).")] int length = 256,
         [Description("'ee' (default) or 'iop'.")] string region = "ee",
+        [Description("Return a server-side capture handle + preview instead of inline hex. Default false.")] bool large = false,
         CancellationToken ct = default)
     {
         var addr = CdText.TryParseAddress(address);
         if (addr is null) return CdText.Error($"invalid address '{address}'.");
-        var json = await bridge.SendAsync(new { Command = "READMEM", Address = addr.Value, Length = Math.Clamp(length, 1, 4096), Region = region }, ct);
+        bool asHandle = large || length > 4096;
+        int readLen = asHandle ? Math.Max(1, length) : Math.Clamp(length, 1, 4096);
+        var json = await bridge.SendAsync(new { Command = "READMEM", Address = addr.Value, Length = readLen, Region = region }, ct);
         var data = CdText.TryGetData(json);
-        return data is null ? CdText.Message(json) : CdText.HexDump(Convert.FromBase64String(data), addr.Value);
+        if (data is null) return CdText.Message(json);
+        var raw = Convert.FromBase64String(data);
+        return asHandle ? MemoryHandles.BuildCaptureHandle(addr.Value, raw, region) : CdText.HexDump(raw, addr.Value);
     }
 }
 
@@ -95,7 +100,7 @@ public sealed class MemoryDisasmTool(IEmulatorBridge bridge)
 }
 
 [CdTool("memory_capture_range", ToolDomain.Memory, ToolRisk.ReadOnly,
-    "Capture a large memory range server-side and return a handle + preview instead of dumping raw bytes. Risk: read-only.")]
+    "Capture a large memory range server-side and return a handle + preview. Alias of memory_read(large:true). Risk: read-only.")]
 public sealed class MemoryCaptureRangeTool(IEmulatorBridge bridge)
 {
     [ToolEntryPoint]
@@ -107,24 +112,30 @@ public sealed class MemoryCaptureRangeTool(IEmulatorBridge bridge)
     {
         var addr = CdText.TryParseAddress(address);
         if (addr is null) return CdText.Error($"invalid address '{address}'.");
-        var json = await bridge.SendAsync(new { Command = "READMEM", Address = addr.Value, Length = length, Region = region }, ct);
+        var json = await bridge.SendAsync(new { Command = "READMEM", Address = addr.Value, Length = Math.Max(1, length), Region = region }, ct);
         var data = CdText.TryGetData(json);
         if (data is null) return CdText.Message(json);
+        return MemoryHandles.BuildCaptureHandle(addr.Value, Convert.FromBase64String(data), region);
+    }
+}
 
-        var raw = Convert.FromBase64String(data);
-        var captureId = $"mem_{DateTime.UtcNow:yyyyMMdd_HHmmss}_{addr.Value:X8}";
+/// <summary>Shared handle-style formatter that keeps big memory payloads out of the token budget.</summary>
+internal static class MemoryHandles
+{
+    public static string BuildCaptureHandle(uint addr, byte[] raw, string region)
+    {
+        var captureId = $"mem_{DateTime.UtcNow:yyyyMMdd_HHmmss}_{addr:X8}";
         var preview = string.Join(' ', raw.Take(16).Select(b => b.ToString("X2")));
-        // Handle-style result: keeps big payloads out of the token budget.
         return JsonSerializer.Serialize(new
         {
             captureId,
-            address = $"0x{addr.Value:X8}",
+            address = $"0x{addr:X8}",
             length = raw.Length,
             preview = preview + (raw.Length > 16 ? " …" : ""),
             suggestedNext = new[]
             {
-                $"memory_read(\"0x{addr.Value:X8}\", 256, \"{region}\")",
-                $"memory_disasm(\"0x{addr.Value:X8}\", 64, \"{region}\")",
+                $"memory_read(\"0x{addr:X8}\", 256, \"{region}\")",
+                $"memory_disasm(\"0x{addr:X8}\", 64, \"{region}\")",
             },
         }, new JsonSerializerOptions { WriteIndented = true });
     }
