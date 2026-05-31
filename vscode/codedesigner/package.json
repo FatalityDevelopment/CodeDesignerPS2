@@ -60,6 +60,10 @@
         "title": "CodeDesigner: Open GS Frame Viewer (Live PCSX2 Display)"
       },
       {
+        "command": "codedesigner.openAgentActivity",
+        "title": "CodeDesigner: Open AI Activity Feed"
+      },
+      {
         "command": "codedesigner.openJokerMaker",
         "title": "CodeDesigner: Open Joker Maker"
       },

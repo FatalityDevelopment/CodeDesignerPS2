@@ -543,6 +543,10 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         p.webview.postMessage({ type: 'labelManagerSets', sets, summaries });
       }
       this._labelManagerPanel?.webview.postMessage({ type: 'labelManagerSets', sets, summaries });
+
+      // Bring the Label Manager forward so the AI-created label is visible, but
+      // only when its panel is already open (don't pop it up unprompted).
+      this._labelManagerPanel?.reveal(undefined, false);
     } catch {
       // Non-fatal — the user can always manually refresh.
     }
