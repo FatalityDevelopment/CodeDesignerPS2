@@ -17,14 +17,22 @@ public sealed class ListOrchestrationPlansTool(IEmulatorBridge bridge)
 }
 
 [CdTool("get_active_orchestration_plan", ToolDomain.Admin, ToolRisk.ReadOnly,
-    "Get the currently active orchestration plan with all its Markdown fields. Risk: read-only.")]
-public sealed class GetActiveOrchestrationPlanTool(IEmulatorBridge bridge)
+    "Get the active orchestration plan: live stage (current/next step) + all its Markdown fields. Risk: read-only.")]
+public sealed class GetActiveOrchestrationPlanTool(IEmulatorBridge bridge, IOrchestrationCoordinator orch)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(CancellationToken ct = default)
     {
         // The bridge has no GETACTIVE command, so list and pick the active plan.
         var json = await bridge.SendAsync(new { Command = "MCPORCHESTRATION_LIST" }, ct);
-        return OrchestrationFormat.ActivePlan(json) ?? CdText.Message(json);
+        var plan = OrchestrationFormat.ActivePlan(json);
+        if (plan is null) return CdText.Message(json); // bridge error / unexpected shape
+
+        // Prepend the live runtime stage (Sprint 3e) — EF-direct, best-effort.
+        string? stage = null;
+        try { if (await orch.GetActiveAsync(ct) is { } info) stage = OrchestrationFormat.StageLine(info); }
+        catch { /* stage is best-effort */ }
+
+        return stage is null ? plan : stage + "\n\n" + plan;
     }
 }
 
@@ -67,6 +75,19 @@ public static class OrchestrationFormat
         sb.AppendLine();
         sb.AppendLine($"## {heading}");
         sb.AppendLine(body);
+    }
+
+    /// <summary>
+    /// One-line live-stage summary (current + next workflow step) for the active plan,
+    /// or <c>null</c> when there is nothing to show (no steps and no stage set).
+    /// </summary>
+    public static string? StageLine(OrchestrationInfo info)
+    {
+        if (info.Steps.Count == 0 && string.IsNullOrWhiteSpace(info.CurrentStage)) return null;
+        var stage = string.IsNullOrWhiteSpace(info.CurrentStage) ? "(not started)" : info.CurrentStage;
+        var cur   = info.CurrentStep is { } c ? $" → {c.Number}. {c.Text}" : "";
+        var next  = info.NextStep   is { } n ? $"   | next: {n.Number}. {n.Text}" : "";
+        return $"Stage: {stage}{cur}{next}";
     }
 }
 

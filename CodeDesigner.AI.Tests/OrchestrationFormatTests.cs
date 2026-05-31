@@ -1,3 +1,4 @@
+using CodeDesigner.AI.Abstractions;
 using CodeDesigner.AI.Tools.Admin;
 
 namespace CodeDesigner.AI.Tests;
@@ -67,4 +68,38 @@ public class OrchestrationFormatTests
         Assert.IsNull(OrchestrationFormat.ActivePlan("""{ "Success": false, "Error": "boom" }"""));
         Assert.IsNull(OrchestrationFormat.ActivePlan("not json at all"));
     }
+
+    // ── StageLine ───────────────────────────────────────────────────────────
+
+    private static OrchestrationInfo Info(string workflow, string? stage)
+        => new(1, "p", workflow, stage, null, null, WorkflowParser.Parse(workflow));
+
+    [TestMethod]
+    public void StageLine_ShowsCurrentAndNext()
+    {
+        var line = OrchestrationFormat.StageLine(Info("1. a\n2. b\n3. c", "2"))!;
+        StringAssert.Contains(line, "Stage: 2");
+        StringAssert.Contains(line, "→ 2. b");
+        StringAssert.Contains(line, "next: 3. c");
+    }
+
+    [TestMethod]
+    public void StageLine_NotStarted_NextIsFirstStep()
+    {
+        var line = OrchestrationFormat.StageLine(Info("1. a\n2. b", null))!;
+        StringAssert.Contains(line, "(not started)");
+        StringAssert.Contains(line, "next: 1. a");
+    }
+
+    [TestMethod]
+    public void StageLine_AtLastStep_NoNext()
+    {
+        var line = OrchestrationFormat.StageLine(Info("1. a\n2. b", "2"))!;
+        StringAssert.Contains(line, "→ 2. b");
+        Assert.IsFalse(line.Contains("next:"));
+    }
+
+    [TestMethod]
+    public void StageLine_NoStepsNoStage_ReturnsNull()
+        => Assert.IsNull(OrchestrationFormat.StageLine(Info("", null)));
 }
