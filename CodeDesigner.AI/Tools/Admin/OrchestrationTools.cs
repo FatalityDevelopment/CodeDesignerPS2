@@ -1,4 +1,6 @@
 using System.ComponentModel;
+using System.Text;
+using System.Text.Json;
 using CodeDesigner.AI.Abstractions;
 
 namespace CodeDesigner.AI.Tools.Admin;
@@ -15,11 +17,57 @@ public sealed class ListOrchestrationPlansTool(IEmulatorBridge bridge)
 }
 
 [CdTool("get_active_orchestration_plan", ToolDomain.Admin, ToolRisk.ReadOnly,
-    "Get the active orchestration plan with all Markdown fields. Risk: read-only.")]
+    "Get the currently active orchestration plan with all its Markdown fields. Risk: read-only.")]
 public sealed class GetActiveOrchestrationPlanTool(IEmulatorBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(CancellationToken ct = default)
-        => CdText.Message(await bridge.SendAsync(new { Command = "MCPORCHESTRATION_LIST" }, ct));
+    {
+        // The bridge has no GETACTIVE command, so list and pick the active plan.
+        var json = await bridge.SendAsync(new { Command = "MCPORCHESTRATION_LIST" }, ct);
+        return OrchestrationFormat.ActivePlan(json) ?? CdText.Message(json);
+    }
+}
+
+/// <summary>Pure formatting helpers for orchestration bridge responses (unit-testable).</summary>
+public static class OrchestrationFormat
+{
+    private sealed record Plan(int Id, bool IsActive, string Name, string? Description,
+        string? Strategy, string? Roles, string? Workflow, string? Rules, string? Notes);
+    private sealed record ListResp(List<Plan>? McpOrchestrations);
+
+    /// <summary>
+    /// From an MCPORCHESTRATION_LIST response, render the active plan with its Markdown
+    /// fields. Returns a "(no active…)" message when the list has none, or <c>null</c>
+    /// when the JSON isn't a recognisable plan list (so the caller can surface it raw).
+    /// </summary>
+    public static string? ActivePlan(string json)
+    {
+        ListResp? resp;
+        try { resp = JsonSerializer.Deserialize<ListResp>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }); }
+        catch { return null; }
+        if (resp?.McpOrchestrations is null) return null;
+
+        var active = resp.McpOrchestrations.FirstOrDefault(p => p.IsActive);
+        if (active is null) return "(no active orchestration plan — set one with set_active_orchestration_plan)";
+
+        var sb = new StringBuilder();
+        sb.AppendLine($"Active plan: {active.Name}  [id {active.Id}]");
+        AppendField(sb, "Description", active.Description);
+        AppendField(sb, "Strategy", active.Strategy);
+        AppendField(sb, "Roles", active.Roles);
+        AppendField(sb, "Workflow", active.Workflow);
+        AppendField(sb, "Rules", active.Rules);
+        AppendField(sb, "Notes", active.Notes);
+        return sb.ToString().TrimEnd();
+    }
+
+    private static void AppendField(StringBuilder sb, string heading, string? body)
+    {
+        if (string.IsNullOrWhiteSpace(body)) return;
+        sb.AppendLine();
+        sb.AppendLine($"## {heading}");
+        sb.AppendLine(body);
+    }
 }
 
 [CdTool("get_orchestration_plan", ToolDomain.Admin, ToolRisk.ReadOnly,
