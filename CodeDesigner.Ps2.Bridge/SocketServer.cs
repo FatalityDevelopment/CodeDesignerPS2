@@ -737,6 +737,18 @@ namespace CodeDesigner.Ps2.Bridge
                         gameId  = command.GameId,
                     });
                 }
+                else if (cmdUpper is "NETCAPTURE" or "NETRECVCAPTURE")
+                {
+                    // Notify subscribers that the AI ran a packet-capture command so the
+                    // packet viewer / activity panel can react (highlight / log).
+                    notificationJson = JsonSerializer.Serialize(new
+                    {
+                        type      = "ai_packet",
+                        command   = command.Command,
+                        direction = command.NetCaptureDirection,
+                        enable    = command.NetCaptureEnable,
+                    });
+                }
 
                 if (notificationJson == null) { return; }
 

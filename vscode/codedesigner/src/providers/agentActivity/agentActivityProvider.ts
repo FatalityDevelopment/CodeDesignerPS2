@@ -4,6 +4,7 @@ import {
     AiActivityEvent,
     AiSessionStartEvent,
     AiLabelUpdateEvent,
+    AiPacketEvent,
 } from '../../socketClient';
 import { getNonce } from '../../utils/nonce';
 
@@ -13,7 +14,7 @@ export interface ActivityGameContext {
     gameDiscId: string;
 }
 
-type ActivityKind = 'activity' | 'session' | 'label';
+type ActivityKind = 'activity' | 'session' | 'label' | 'packet';
 
 interface ActivityEntry {
     at: number;          // epoch ms
@@ -59,6 +60,11 @@ export class AgentActivityProvider {
         _socketClient.onLabelUpdate((e: AiLabelUpdateEvent) => {
             const set = e.setName ? `  set '${e.setName}'` : '';
             this._record({ at: Date.now(), kind: 'label', text: `${e.command}${set}` });
+        });
+        _socketClient.onPacketActivity((e: AiPacketEvent) => {
+            const detail = e.enable !== undefined ? (e.enable ? '  capture on' : '  capture off')
+                         : e.direction !== undefined ? `  dir ${e.direction}` : '';
+            this._record({ at: Date.now(), kind: 'packet', text: `${e.command}${detail}` });
         });
     }
 
@@ -154,6 +160,7 @@ export class AgentActivityProvider {
   .aa-tag.activity { color: #569cd6; }
   .aa-tag.session  { color: #c586c0; }
   .aa-tag.label    { color: #89d185; }
+  .aa-tag.packet   { color: #d7ba7d; }
   .aa-text { white-space: pre-wrap; }
   .aa-empty { color: var(--vscode-descriptionForeground, #888); padding: 16px; font-size: 12px; }
 </style>

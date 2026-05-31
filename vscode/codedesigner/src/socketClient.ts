@@ -1070,6 +1070,18 @@ export interface AiLabelUpdateEvent {
 }
 
 /**
+ * Pushed unsolicited by the server when the MCP client runs a packet-capture
+ * command (NETCAPTURE start/stop, NETRECVCAPTURE drain). Used by the packet
+ * viewer + AI activity panel to surface live AI packet operations.
+ */
+export interface AiPacketEvent {
+    type:       'ai_packet';
+    command:    string;
+    direction?: number;
+    enable?:    boolean;
+}
+
+/**
  * Socket client for communication with C# server
  */
 export class SocketClient {
@@ -1097,6 +1109,11 @@ export class SocketClient {
      * pushes an unsolicited ai_label_update event.
      */
     private _labelUpdateHandlers: Array<(event: AiLabelUpdateEvent) => void> = [];
+    /**
+     * Handlers registered via onPacketActivity() — invoked when the server
+     * pushes an unsolicited ai_packet event.
+     */
+    private _packetHandlers: Array<(event: AiPacketEvent) => void> = [];
     /**
      * FIFO queue of one-time response handlers added by sendCommand().
      * Using a dedicated queue (with shift()) avoids the Array.forEach +
@@ -1206,6 +1223,9 @@ export class SocketClient {
                             } else if (parsed['type'] === 'ai_label_update') {
                                 const evt = parsed as unknown as AiLabelUpdateEvent;
                                 this._labelUpdateHandlers.forEach(h => h(evt));
+                            } else if (parsed['type'] === 'ai_packet') {
+                                const evt = parsed as unknown as AiPacketEvent;
+                                this._packetHandlers.forEach(h => h(evt));
                             }
                             this.messageHandlers.forEach(handler => handler(message));
                             continue;
@@ -1357,6 +1377,15 @@ export class SocketClient {
      */
     public onLabelUpdate(handler: (event: AiLabelUpdateEvent) => void): void {
         this._labelUpdateHandlers.push(handler);
+    }
+
+    /**
+     * Register a handler for server-pushed AI packet-capture notifications
+     * (NETCAPTURE / NETRECVCAPTURE). Delivered only to subscribed streams
+     * (call subscribeActivity()).
+     */
+    public onPacketActivity(handler: (event: AiPacketEvent) => void): void {
+        this._packetHandlers.push(handler);
     }
 
     /**
