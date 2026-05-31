@@ -24,6 +24,22 @@ public sealed class FileLoadElfTool(IEmulatorBridge bridge)
         => CdText.Message(await bridge.SendAsync(new { Command = "LOADELF", InputPath = filePath }, ct));
 }
 
+[CdTool("load_bin", ToolDomain.Memory, ToolRisk.WritesMemory,
+    "Load a raw binary file from disk into live emulator memory at an address (inject code/data). Risk: overwrites RAM.")]
+public sealed class LoadBinTool(IEmulatorBridge bridge)
+{
+    [ToolEntryPoint] public async Task<string> InvokeAsync(
+        [Description("Absolute path to the .bin file.")] string filePath,
+        [Description("Target virtual address (hex/decimal).")] string address,
+        [Description("'ee' (default) or 'iop'.")] string region = "ee",
+        CancellationToken ct = default)
+    {
+        var a = CdText.TryParseAddress(address);
+        if (a is null) return CdText.Error($"invalid address '{address}'.");
+        return CdText.Message(await bridge.SendAsync(new { Command = "LOADBIN", InputPath = filePath, Address = a.Value, Region = region }, ct));
+    }
+}
+
 [CdTool("file_set_pc", ToolDomain.Memory, ToolRisk.WritesMemory,
     "Set the EE PC in the internal emulator (call after file_load_*). Risk: changes run state.")]
 public sealed class FileSetPcTool(IEmulatorBridge bridge)

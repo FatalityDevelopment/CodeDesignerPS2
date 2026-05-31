@@ -125,7 +125,7 @@ public sealed class LabelResolveLinkedListTool(IEmulatorBridge bridge)
 
 // ── Pointer / struct definitions ───────────────────────────────────────
 [CdTool("label_get_pointers", ToolDomain.Labels, ToolRisk.ReadOnly,
-    "List all user-defined PS2 memory pointer (struct) definitions with their member fields. Risk: read-only.")]
+    "List struct definitions (a named base address + its member fields). 'Pointer' = struct here. Risk: read-only.")]
 public sealed class LabelGetPointersTool(IEmulatorBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(CancellationToken ct = default)
@@ -133,7 +133,7 @@ public sealed class LabelGetPointersTool(IEmulatorBridge bridge)
 }
 
 [CdTool("label_add_pointer", ToolDomain.Labels, ToolRisk.MutatesDatabase,
-    "Create or update a named PS2 memory pointer definition (the address holds a 32-bit pointer). Risk: writes database.")]
+    "Define a struct: a named base address whose fields you then map with label_add_pointer_member. Risk: writes database.")]
 public sealed class LabelAddPointerTool(IEmulatorBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
@@ -144,7 +144,7 @@ public sealed class LabelAddPointerTool(IEmulatorBridge bridge)
 }
 
 [CdTool("label_delete_pointer", ToolDomain.Labels, ToolRisk.MutatesDatabase,
-    "Remove a named PS2 memory pointer definition. Risk: writes database.")]
+    "Delete a struct definition by name. Risk: writes database.")]
 public sealed class LabelDeletePointerTool(IEmulatorBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
@@ -153,7 +153,7 @@ public sealed class LabelDeletePointerTool(IEmulatorBridge bridge)
 }
 
 [CdTool("label_add_pointer_member", ToolDomain.Labels, ToolRisk.MutatesDatabase,
-    "Add or update a named field in an existing pointer definition at a byte offset from the dereferenced base. Risk: writes database.")]
+    "Add/update a struct field: a named member at a byte offset from the (dereferenced) base. Risk: writes database.")]
 public sealed class LabelAddPointerMemberTool(IEmulatorBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(

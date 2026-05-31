@@ -58,6 +58,73 @@ public sealed class GroupCreateTool(IEmulatorBridge bridge)
     }
 }
 
+[CdTool("group_list", ToolDomain.Labels, ToolRisk.ReadOnly,
+    "List label groups in a set with their members (for the Structure Visualizer). Risk: read-only.")]
+public sealed class GroupListTool(IEmulatorBridge bridge)
+{
+    [ToolEntryPoint]
+    public async Task<string> InvokeAsync(
+        [Description("Game identifier / ISO serial.")] string gameId,
+        [Description("Label set name.")] string setName,
+        CancellationToken ct = default)
+    {
+        var payload = JsonSerializer.Serialize(new { gameId, setName });
+        return CdText.Message(await bridge.SendAsync(new { Command = "GETLABELGROUPS", Data = payload }, ct));
+    }
+}
+
+[CdTool("group_add_member", ToolDomain.Labels, ToolRisk.MutatesDatabase,
+    "Add the label at an address to a group (the label must already exist in the set). Risk: writes database.")]
+public sealed class GroupAddMemberTool(IEmulatorBridge bridge)
+{
+    [ToolEntryPoint]
+    public async Task<string> InvokeAsync(
+        [Description("Game identifier / ISO serial.")] string gameId,
+        [Description("Label set name.")] string setName,
+        [Description("Group name.")] string groupName,
+        [Description("Address of an existing label to add (hex/decimal).")] string labelAddress,
+        [Description("Optional member role (e.g. 'field', 'method').")] string? role = null,
+        [Description("Optional sort order within the group.")] int sortOrder = 0,
+        CancellationToken ct = default)
+    {
+        var payload = JsonSerializer.Serialize(new { gameId, setName, name = groupName, labelAddress, role, sortOrder });
+        return CdText.Message(await bridge.SendAsync(new { Command = "ADDLABELGROUPMEMBER", Data = payload }, ct));
+    }
+}
+
+[CdTool("group_remove_member", ToolDomain.Labels, ToolRisk.MutatesDatabase,
+    "Remove the member at an address from a label group. Risk: writes database.")]
+public sealed class GroupRemoveMemberTool(IEmulatorBridge bridge)
+{
+    [ToolEntryPoint]
+    public async Task<string> InvokeAsync(
+        [Description("Game identifier / ISO serial.")] string gameId,
+        [Description("Label set name.")] string setName,
+        [Description("Group name.")] string groupName,
+        [Description("Member label address to remove (hex/decimal).")] string labelAddress,
+        CancellationToken ct = default)
+    {
+        var payload = JsonSerializer.Serialize(new { gameId, setName, name = groupName, labelAddress });
+        return CdText.Message(await bridge.SendAsync(new { Command = "DELETELABELGROUPMEMBER", Data = payload }, ct));
+    }
+}
+
+[CdTool("group_delete", ToolDomain.Labels, ToolRisk.MutatesDatabase,
+    "Delete a label group (its members are detached, not deleted). Risk: writes database.")]
+public sealed class GroupDeleteTool(IEmulatorBridge bridge)
+{
+    [ToolEntryPoint]
+    public async Task<string> InvokeAsync(
+        [Description("Game identifier / ISO serial.")] string gameId,
+        [Description("Label set name.")] string setName,
+        [Description("Group name to delete.")] string groupName,
+        CancellationToken ct = default)
+    {
+        var payload = JsonSerializer.Serialize(new { gameId, setName, name = groupName });
+        return CdText.Message(await bridge.SendAsync(new { Command = "DELETELABELGROUP", Data = payload }, ct));
+    }
+}
+
 [CdTool("callgraph_scan", ToolDomain.Labels, ToolRisk.ReadOnly,
     "Scan a code region for JAL/JALR call edges and persist them. Run once before callgraph_query. Risk: read-only.")]
 public sealed class CallGraphScanTool(IEmulatorBridge bridge)
