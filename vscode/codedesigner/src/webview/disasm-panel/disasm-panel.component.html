@@ -55,15 +55,21 @@
 }
 
 <div class="mcp-status" [class.mcp-online]="mcpOnline"
-     [title]="mcpOnline ? 'CodeDesigner MCP server is running' : 'CodeDesigner MCP server is not running'">
+     [title]="(mcpLegacyMode ? 'Legacy CodeDesigner MCP server' : 'CodeDesigner.AI server') + (mcpOnline ? ' is running' : ' is not running')">
   <app-icon class="mcp-ico" name="bot" [size]="14" />
   <span class="mcp-label">MCP</span>
   <span class="mcp-state">
     <span class="mcp-dot"></span>
     {{ mcpOnline ? 'Online' : 'Offline' }}
   </span>
+  <label class="mcp-legacy"
+         title="Use the legacy CodeDesigner.Ps2.McpServer instead of the new CodeDesigner.AI server">
+    <input type="checkbox" [checked]="mcpLegacyMode" (change)="toggleMcpLegacy($event)" />
+    Legacy
+  </label>
   @if (!mcpOnline) {
-    <button class="mcp-run-btn" (click)="runMcpServer()" title="Run CodeDesigner MCP server">
+    <button class="mcp-run-btn" (click)="runMcpServer()"
+            [title]="mcpLegacyMode ? 'Run legacy CodeDesigner MCP server' : 'Run CodeDesigner.AI MCP server'">
       <app-icon name="play" [size]="12" />
       <span>Run</span>
     </button>
