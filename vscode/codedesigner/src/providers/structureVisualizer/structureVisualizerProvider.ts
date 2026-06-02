@@ -3,6 +3,7 @@ import { getOutputChannel } from '../../extension';
 import { SocketClient } from '../../socketClient';
 import { DisasmEditorProvider } from '../disasmEditor/disasmEditorProvider';
 import { getNonce, getWebviewErrorHandlerScript } from '../../utils/nonce';
+import { applyCodeDesignerPanelIcon } from '../../utils/webviewPanel';
 
 /**
  * Provider for the Structure Visualizer standalone webview.
@@ -31,7 +32,7 @@ export class StructureVisualizerProvider {
 
         const panel = vscode.window.createWebviewPanel(
             'codedesigner.structureVisualizer',
-            '🧬 Structure Visualizer',
+            'Structure Visualizer',
             vscode.ViewColumn.One,
             {
                 enableScripts:           true,
@@ -39,6 +40,7 @@ export class StructureVisualizerProvider {
                 localResourceRoots:      [this.extensionUri],
             }
         );
+        applyCodeDesignerPanelIcon(panel, this.extensionUri);
         this._panel = panel;
         panel.onDidDispose(() => { this._panel = undefined; });
 

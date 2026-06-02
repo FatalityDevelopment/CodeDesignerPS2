@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { getOutputChannel, getPadStateChannel } from '../../extension';
 import { SocketClient, PadStateInfo } from '../../socketClient';
 import { getNonce, getWebviewErrorHandlerScript } from '../../utils/nonce';
+import { applyCodeDesignerPanelIcon } from '../../utils/webviewPanel';
 
 /**
  * Mask layout used by PADGETSTATE responses (PS2 active-low: bit clear means
@@ -85,6 +86,7 @@ export class JokerMakerProvider {
                 localResourceRoots:      [this._extensionUri],
             },
         );
+        applyCodeDesignerPanelIcon(panel, this._extensionUri);
         this._panel = panel;
 
         panel.onDidDispose(() => {

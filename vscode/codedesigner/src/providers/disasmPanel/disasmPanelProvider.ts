@@ -263,7 +263,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         private readonly editorProvider: DisasmEditorProvider,
         private readonly _extensionUri: vscode.Uri
     ) {
-        this._mcpProgressReportEditorProvider = new McpProgressReportEditorProvider(socketClient);
+        this._mcpProgressReportEditorProvider = new McpProgressReportEditorProvider(socketClient, _extensionUri);
         this._agentCtrlPanelProvider = new AgentCtrlPanelProvider(
             _extensionUri, socketClient,
             () => DisasmPanelProvider.detectMcpServerRunning(this.mcpImageName()),
