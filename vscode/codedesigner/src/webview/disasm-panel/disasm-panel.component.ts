@@ -639,7 +639,7 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
     this.bridge.postMessage({ command: 'setAgentLead', agentId });
   }
 
-  /** Open the AI Config agents tab, optionally focused on a specific agent. */
+  /** Open the AI agents tab, optionally focused on a specific agent. */
   onOpenAiConfigAgents(agentId: number | undefined): void {
     this.bridge.postMessage({ command: 'openAiConfigAgents', agentId });
   }
@@ -658,7 +658,7 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
     this.bridge.postMessage({ command: 'setMultiAgentMode', enabled });
   }
 
-  /** Open the AI Config orchestration tab, optionally focused on a plan. */
+  /** Open the AI orchestration tab, optionally focused on a plan. */
   onOpenAiConfigOrchestration(id: number | undefined): void {
     this.bridge.postMessage({ command: 'openAiConfigOrchestration', id });
   }

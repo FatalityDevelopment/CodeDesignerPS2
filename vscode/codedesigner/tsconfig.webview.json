@@ -18,7 +18,7 @@
     "src/webview/disasm-editor/main.ts",
     "src/webview/disasm-panel/main.ts",
     "src/webview/label-manager/main.ts",
-    "src/webview/ai-config/main.ts",
+    "src/webview/agent-ctrl-panel/main.ts",
     "src/webview/compat-browser/main.ts",
     "src/webview/cheats-editor/main.ts",
     "src/webview/packet-viewer/main.ts",
