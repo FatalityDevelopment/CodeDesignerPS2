@@ -1,17 +1,18 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import { promises as fs } from 'fs';
 import { getOutputChannel } from '../../extension';
-import { SocketClient, McpAgentInfo, McpMemoryInfo, McpOrchestrationInfo } from '../../socketClient';
+import { AiActivityEvent, AiLabelUpdateEvent, AiPacketEvent, AiSessionStartEvent, AiToolCallEvent, SocketClient, McpAgentInfo, McpMemoryInfo, McpOrchestrationInfo } from '../../socketClient';
 import { getNonce, getWebviewErrorHandlerScript } from '../../utils/nonce';
 import { McpProgressReportEditorProvider } from '../mcpProgressReportEditor/mcpProgressReportEditorProvider';
 
 /**
- * Provider for the AI Configuration standalone webview tab.
+ * Provider for the AI agent control panel standalone webview tab.
  * Manages agent profiles (add / edit / delete / import / export)
  * and shows the agent's associated progress reports.
  */
-/** Optional view to focus when opening the AI Configuration panel. */
-export interface AiConfigFocus {
+/** Optional view to focus when opening the AI agent control panel. */
+export interface AgentCtrlPanelFocus {
     /** Tab to switch to (e.g. 'agents', 'orchestration'). */
     tab?: string;
     /** Agent profile id to select once the agents tab is shown. */
@@ -20,26 +21,39 @@ export interface AiConfigFocus {
     orchestrationId?: number;
 }
 
-export class AiConfigProvider {
+type ActivityKind = 'activity' | 'session' | 'label' | 'packet' | 'tool';
+interface ActivityEntry { at: number; kind: ActivityKind; text: string; address?: number; region?: string; args?: string; result?: string; ok?: boolean; }
+
+export class AgentCtrlPanelProvider {
     private _panel: vscode.WebviewPanel | undefined;
     private readonly _mcpProgressReportEditor: McpProgressReportEditorProvider;
+    private readonly _activityLog: ActivityEntry[] = [];
+    private static readonly MAX_ACTIVITY = 2000;
     /** Focus request applied once the freshly created webview signals 'ready'. */
-    private _pendingFocus: AiConfigFocus | undefined;
+    private _pendingFocus: AgentCtrlPanelFocus | undefined;
 
     constructor(
         private readonly extensionUri: vscode.Uri,
         private readonly socketClient: SocketClient,
+        private readonly requestMcpStatus: () => Promise<boolean>,
+        private readonly runMcpServer: () => Promise<void>,
     ) {
         this._mcpProgressReportEditor = new McpProgressReportEditorProvider(socketClient);
+        socketClient.onConnected(() => { void socketClient.subscribeActivity(); });
+        socketClient.onActivityNotification((event: AiActivityEvent) => this._recordActivity({ at: Date.now(), kind: 'activity', address: event.address, region: event.region, text: `${event.command} @ ${this._hex(event.address)}${event.region ? `  (${event.region})` : ''}` }));
+        socketClient.onSessionStart((_event: AiSessionStartEvent) => this._recordActivity({ at: Date.now(), kind: 'session', text: 'AI session started' }));
+        socketClient.onLabelUpdate((event: AiLabelUpdateEvent) => this._recordActivity({ at: Date.now(), kind: 'label', text: `${event.command}${event.setName ? `  set '${event.setName}'` : ''}` }));
+        socketClient.onPacketActivity((event: AiPacketEvent) => this._recordActivity({ at: Date.now(), kind: 'packet', text: `${event.command}${event.enable !== undefined ? (event.enable ? '  capture on' : '  capture off') : event.direction !== undefined ? `  dir ${event.direction}` : ''}` }));
+        socketClient.onToolCall((event: AiToolCallEvent) => { const payload = event.payload; if (payload) { this._recordActivity({ at: Date.now(), kind: 'tool', text: `${payload.tool}${payload.ok ? '' : '  ✗'}${typeof payload.elapsedMs === 'number' ? `  ${payload.elapsedMs}ms` : ''}`, args: payload.args, result: payload.result, ok: payload.ok }); } });
     }
 
     /**
-     * Open (or reveal) the AI Configuration panel. When `focus` is given the
+     * Open (or reveal) the AI agent control panel. When `focus` is given the
      * panel switches to that tab and selects the requested agent — applied
      * immediately if the panel already exists, or after the webview's first
      * 'ready' message when it is freshly created.
      */
-    public open(focus?: AiConfigFocus): void {
+    public open(focus?: AgentCtrlPanelFocus): void {
         if (this._panel) {
             this._panel.reveal(vscode.ViewColumn.One);
             if (focus) {
@@ -56,8 +70,8 @@ export class AiConfigProvider {
         this._pendingFocus = focus;
 
         const panel = vscode.window.createWebviewPanel(
-            'codedesigner.aiConfig',
-            '🤖 AI Configuration',
+            'codedesigner.agentCtrlPanel',
+            'AI',
             vscode.ViewColumn.One,
             {
                 enableScripts:           true,
@@ -66,6 +80,8 @@ export class AiConfigProvider {
             }
         );
         this._panel = panel;
+        void this._sendMcpStatus(panel.webview);
+        void this.socketClient.subscribeActivity();
 
         panel.onDidDispose(() => { this._panel = undefined; });
 
@@ -83,6 +99,8 @@ export class AiConfigProvider {
 
         switch (type) {
             case 'ready':
+                await this._sendMcpStatus(webview);
+                webview.postMessage({ type: 'activityInit', entries: this._activityLog });
                 // Initial load — send agent list and orchestration list
                 await this._sendAgentList(webview);
                 await this._sendOrchestrationList(webview);
@@ -97,6 +115,10 @@ export class AiConfigProvider {
                     this._pendingFocus = undefined;
                 }
                 break;
+
+            case 'requestMcpStatus': await this._sendMcpStatus(webview); break;
+            case 'runMcpServer': await this.runMcpServer(); await this._sendMcpStatus(webview); break;
+            case 'activityClear': this._activityLog.length = 0; webview.postMessage({ type: 'activityInit', entries: [] }); break;
 
             // ── Agent CRUD ────────────────────────────────────────────────────
             case 'agentList':
@@ -217,17 +239,26 @@ export class AiConfigProvider {
                 await this._sendHistoryList(webview);
                 break;
 
+            // ── Workspace skill recipes ───────────────────────────────────────
+            case 'skillList': await this._sendSkillList(webview); break;
+            case 'skillSave': await this._handleSkillSave(msg, webview); break;
+            case 'skillDelete': await this._handleSkillDelete(msg['path'] as string, webview); break;
+
             default:
-                getOutputChannel().warn(`[AiConfig] Unknown message type: ${type}`);
+                getOutputChannel().warn(`[AgentCtrlPanel] Unknown message type: ${type}`);
                 break;
         }
     }
+
+    private _hex(value: number): string { return `0x${value.toString(16).toUpperCase().padStart(8, '0')}`; }
+    private _recordActivity(entry: ActivityEntry): void { this._activityLog.push(entry); if (this._activityLog.length > AgentCtrlPanelProvider.MAX_ACTIVITY) { this._activityLog.shift(); } this._panel?.webview.postMessage({ type: 'activityAppend', entry }); }
+    private async _sendMcpStatus(webview: vscode.Webview): Promise<void> { webview.postMessage({ type: 'mcpStatus', online: await this.requestMcpStatus() }); }
 
     // ── Agent handlers ────────────────────────────────────────────────────────
 
     private async _sendAgentList(webview: vscode.Webview): Promise<void> {
         try {
-            const agents = await this.socketClient.mcpAgentList();
+            const agents = (await this.socketClient.mcpAgentList()).map(agent => ({ ...agent, imageUri: this.resolveAgentImageUri(agent.name, webview) }));
             webview.postMessage({ type: 'agentListResult', agents });
         } catch (err: any) {
             webview.postMessage({ type: 'agentListResult', agents: [], error: err?.message ?? String(err) });
@@ -606,11 +637,54 @@ export class AiConfigProvider {
         }
     }
 
+    // ── Workspace skill handlers ─────────────────────────────────────────────
+
+    private getWorkspaceRoot(): string | undefined { return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath; }
+    private getSkillsRoot(): string | undefined { const root = this.getWorkspaceRoot(); return root ? path.join(root, '.github', 'skills') : undefined; }
+
+    private async _sendSkillList(webview: vscode.Webview): Promise<void> {
+        try {
+            const root = this.getSkillsRoot(); if (!root) { throw new Error('Open a workspace to manage skills.'); }
+            await fs.mkdir(root, { recursive: true });
+            const entries = await fs.readdir(root, { withFileTypes: true });
+            const skills = await Promise.all(entries.filter(entry => entry.isDirectory()).map(async entry => {
+                const skillPath = path.join(root, entry.name, 'SKILL.md');
+                try { const [content, stat] = await Promise.all([fs.readFile(skillPath, 'utf8'), fs.stat(skillPath)]); return { name: entry.name, path: path.relative(this.getWorkspaceRoot()!, skillPath), content, updatedAt: stat.mtime.toISOString() }; } catch { return undefined; }
+            }));
+            webview.postMessage({ type: 'skillListResult', skills: skills.filter(Boolean).sort((a, b) => a!.name.localeCompare(b!.name)) });
+        } catch (err: any) { webview.postMessage({ type: 'skillListResult', skills: [], error: err?.message ?? String(err) }); }
+    }
+
+    private async _handleSkillSave(msg: Record<string, unknown>, webview: vscode.Webview): Promise<void> {
+        try {
+            const root = this.getSkillsRoot(), workspaceRoot = this.getWorkspaceRoot(); if (!root || !workspaceRoot) { throw new Error('Open a workspace to manage skills.'); }
+            const skill = msg['skill'] as { name?: string; path?: string; content?: string }; const name = (skill?.name ?? '').trim();
+            if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) { throw new Error('Skill names must use lowercase letters, numbers, and hyphens.'); }
+            const skillPath = path.join(root, name, 'SKILL.md'); if (!skillPath.startsWith(`${root}${path.sep}`)) { throw new Error('Invalid skill path.'); }
+            if (!msg['isNew'] && skill?.path) { const oldPath = path.resolve(workspaceRoot, skill.path); if (oldPath !== skillPath && oldPath.startsWith(`${root}${path.sep}`)) { await fs.rm(path.dirname(oldPath), { recursive: true, force: true }); } }
+            await fs.mkdir(path.dirname(skillPath), { recursive: true }); await fs.writeFile(skillPath, skill?.content ?? '', 'utf8'); const stat = await fs.stat(skillPath);
+            webview.postMessage({ type: 'skillActionResult', skill: { name, path: path.relative(workspaceRoot, skillPath), content: skill?.content ?? '', updatedAt: stat.mtime.toISOString() }, message: `Saved '${name}'.` });
+        } catch (err: any) { webview.postMessage({ type: 'skillActionResult', error: err?.message ?? String(err) }); }
+    }
+
+    private async _handleSkillDelete(relativePath: string, webview: vscode.Webview): Promise<void> {
+        try {
+            const root = this.getSkillsRoot(), workspaceRoot = this.getWorkspaceRoot(); if (!root || !workspaceRoot) { throw new Error('Open a workspace to manage skills.'); }
+            const skillPath = path.resolve(workspaceRoot, relativePath); if (!skillPath.startsWith(`${root}${path.sep}`) || path.basename(skillPath) !== 'SKILL.md') { throw new Error('Invalid skill path.'); }
+            await fs.rm(path.dirname(skillPath), { recursive: true, force: true }); webview.postMessage({ type: 'skillActionResult', message: 'Deleted skill.' });
+        } catch (err: any) { webview.postMessage({ type: 'skillActionResult', error: err?.message ?? String(err) }); }
+    }
+
+    private static readonly AGENT_IMAGE_MAP = [
+        { file: 'scorpion.png', keywords: ['scorpion'] }, { file: 'sub-zero.png', keywords: ['subzero'] }, { file: 'raiden.png', keywords: ['raiden'] }, { file: 'liu-kang.png', keywords: ['liukang', 'liu'] }, { file: 'johnny-cage.png', keywords: ['johnnycage', 'johnny', 'cage'] }, { file: 'sonya-blade.png', keywords: ['sonyablade', 'sonya'] }, { file: 'kano.png', keywords: ['kano'] }, { file: 'kitana.png', keywords: ['kitana'] }, { file: 'mileena.png', keywords: ['mileena'] },
+    ];
+    private resolveAgentImageUri(name: string, webview: vscode.Webview): string { const normalized = (name ?? '').toLowerCase().replace(/[^a-z0-9]/g, ''); const match = AgentCtrlPanelProvider.AGENT_IMAGE_MAP.find(item => item.keywords.some(keyword => normalized.includes(keyword))); return match ? webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'agents', match.file)).toString() : ''; }
+
     // ── HTML builder ──────────────────────────────────────────────────────────
 
     private _buildHtml(webview: vscode.Webview): string {
         const scriptUri = webview.asWebviewUri(
-            vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview', 'ai-config.js')
+            vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview', 'agent-ctrl-panel.js')
         );
         const nonce = getNonce();
         return `<!DOCTYPE html>
@@ -620,11 +694,12 @@ export class AiConfigProvider {
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
                style-src 'unsafe-inline';
+               img-src ${webview.cspSource} data:;
                script-src ${webview.cspSource} 'nonce-${nonce}';">
 <script nonce="${nonce}">${getWebviewErrorHandlerScript()}</script>
 </head>
 <body>
-<app-ai-config-page><p style="color:#888;font-family:sans-serif;padding:16px;font-size:13px;">Loading AI Configuration…</p></app-ai-config-page>
+<app-agent-ctrl-panel-page><p style="color:#888;font-family:sans-serif;padding:16px;font-size:13px;">Loading AI…</p></app-agent-ctrl-panel-page>
 <script src="${scriptUri}"></script>
 </body>
 </html>`;

@@ -28,7 +28,7 @@ const NET_POLL_MS = 4000;
  *  - Actions (default collapsed): Run, Restart, Import, Snapshot, Screenshot
  *  - Network (default collapsed): Server, DNS Mapping, Config
  *  - Snapshots (default open): scrollable snapshot list with show-more toggle
- *  - Tools (default collapsed): AI Config, Packet Viewer
+ *  - Tools (default collapsed): AI, Packet Viewer
  *  - Memories (default collapsed): MCP Memory overlay (preserved in DOM when collapsed)
  *
  * All mutable state is owned by the parent; this component is purely
@@ -350,8 +350,8 @@ const NET_POLL_MS = 4000;
           <div class="acc-body">
             <div class="btn-grid">
               <button (click)="openAiConfigClick.emit()"
-                      title="Open the AI Configuration panel to manage agent profiles">
-                <app-icon name="bot" [size]="14" /><span>AI Config</span>
+                      title="Open the AI agent control panel">
+                <app-icon name="bot" [size]="14" /><span>AI</span>
               </button>
               <button (click)="openLabelManagerClick.emit()"
                       title="Open the Label Manager to manage address labels">
@@ -407,8 +407,8 @@ const NET_POLL_MS = 4000;
                 <app-icon name="refreshcw" [size]="12" /><span>Refresh</span>
               </button>
               <button class="list-action-btn" (click)="openAiConfigAgents.emit(undefined)"
-                      title="Open the AI Config agents tab">
-                <app-icon name="bot" [size]="12" /><span>AI Config</span>
+                      title="Open the AI agents tab">
+                <app-icon name="bot" [size]="12" /><span>AI</span>
               </button>
             </div>
             @if (agentsError()) {
@@ -425,7 +425,7 @@ const NET_POLL_MS = 4000;
                       <app-icon name="star" [size]="14" />
                     </button>
                     <button class="agent-info" (click)="openAiConfigAgents.emit(a.id)"
-                            title="Open this agent in AI Config">
+                            title="Open this agent in AI">
                       @if (a.imageUri) {
                         <img class="agent-avatar" [src]="a.imageUri" [alt]="a.name" />
                       } @else {
@@ -470,8 +470,8 @@ const NET_POLL_MS = 4000;
                 <app-icon name="refreshcw" [size]="12" /><span>Refresh</span>
               </button>
               <button class="list-action-btn" (click)="openAiConfigOrchestration.emit(undefined)"
-                      title="Open the AI Config orchestration tab">
-                <app-icon name="bot" [size]="12" /><span>AI Config</span>
+                      title="Open the AI orchestration tab">
+                <app-icon name="bot" [size]="12" /><span>AI</span>
               </button>
             </div>
             @if (orchestrationsError()) {
@@ -487,7 +487,7 @@ const NET_POLL_MS = 4000;
                       <app-icon [name]="o.isActive ? 'circlecheck' : 'circle'" [size]="15" />
                     </button>
                     <button class="agent-info" (click)="openAiConfigOrchestration.emit(o.id)"
-                            title="Open this plan in AI Config">
+                            title="Open this plan in AI">
                       <span class="agent-text">
                         <span class="agent-name">{{o.name}}</span>
                         @if (o.description) { <span class="agent-desc">{{o.description}}</span> }

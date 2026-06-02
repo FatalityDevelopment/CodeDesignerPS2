@@ -4,7 +4,6 @@ import * as vscode from 'vscode';
 import { DisasmEditorProvider } from './providers/disasmEditor/disasmEditorProvider';
 import { DisasmPanelProvider } from './providers/disasmPanel/disasmPanelProvider';
 import { GsViewerProvider } from './providers/gsViewer/gsViewerProvider';
-import { AgentActivityProvider } from './providers/agentActivity/agentActivityProvider';
 import { JokerMakerProvider } from './providers/jokerMaker/jokerMakerProvider';
 import { Ps2FileEditorProvider } from './providers/ps2FileEditor/ps2FileEditorProvider';
 import { CompatBrowserProvider } from './providers/compatBrowser/compatBrowserProvider';
@@ -325,21 +324,11 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(openGsFrameViewerCommand);
 
 	// ── AI activity feed ────────────────────────────────────────────────────────
-	// Live log of ai_activity / ai_session_start / ai_label_update pushes — a
-	// debugging view of what the AI is doing. Constructed at activation so it
-	// buffers events even before the panel is opened; game context is auto-resolved
-	// from the disasm editor so the panel never needs a manual serial field.
-	const agentActivityProvider = new AgentActivityProvider(
-		context.extensionUri,
-		socketClient,
-		() => {
-			const c = editorProvider.getLabelManagerContext();
-			return c ? { gameName: c.gameName, gameDiscId: c.gameDiscId } : null;
-		},
-	);
+	// AI activity now lives inside the shared AI agent control panel. Keep the
+	// existing command so command-palette and toolbar entry points remain valid.
 	const openAgentActivityCommand = vscode.commands.registerCommand(
 		'codedesigner.openAgentActivity',
-		() => agentActivityProvider.open(),
+		() => disasmPanelProvider.openAgentCtrlPanel({ tab: 'activity' }),
 	);
 	context.subscriptions.push(openAgentActivityCommand);
 

@@ -1,7 +1,7 @@
 import { bootstrapApplication } from '@angular/platform-browser';
 import { provideExperimentalZonelessChangeDetection } from '@angular/core';
-import { AiConfigPageComponent } from './ai-config-page.component';
+import { AgentCtrlPanelPageComponent } from './agent-ctrl-panel-page.component';
 
-bootstrapApplication(AiConfigPageComponent, {
+bootstrapApplication(AgentCtrlPanelPageComponent, {
   providers: [provideExperimentalZonelessChangeDetection()],
 }).catch(err => console.error('Bootstrap error:', err));

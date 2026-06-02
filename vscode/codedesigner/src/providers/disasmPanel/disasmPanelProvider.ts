@@ -8,7 +8,7 @@ import { getOutputChannel, getDebugChannel } from '../../extension';
 import { SocketClient, LabelEntry, DiscElfEntry, CdsSidecarResult, CdsDiagnostic } from '../../socketClient';
 import { getNonce, getWebviewErrorHandlerScript } from '../../utils/nonce';
 import { DisasmEditorProvider } from '../disasmEditor/disasmEditorProvider';
-import { AiConfigProvider } from '../aiConfig/aiConfigProvider';
+import { AgentCtrlPanelProvider } from '../agentCtrlPanel/agentCtrlPanelProvider';
 import { McpProgressReportEditorProvider } from '../mcpProgressReportEditor/mcpProgressReportEditorProvider';
 import { PacketViewerProvider, loadMediusPorts } from '../packetViewer/packetViewerProvider';
 import { SnapshotManagerProvider, SnapshotDataDelegate } from '../snapshotManager/snapshotManagerProvider';
@@ -255,13 +255,20 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
      */
     public getPointerLabels?: () => Promise<LabelEntry[]>;
 
+    /** Opens the shared AI agent control panel, optionally focused on a specific tab. */
+    public openAgentCtrlPanel(focus?: { tab?: string; agentId?: number; orchestrationId?: number }): void { this._agentCtrlPanelProvider.open(focus); }
+
     constructor(
         private readonly socketClient: SocketClient,
         private readonly editorProvider: DisasmEditorProvider,
         private readonly _extensionUri: vscode.Uri
     ) {
         this._mcpProgressReportEditorProvider = new McpProgressReportEditorProvider(socketClient);
-        this._aiConfigProvider        = new AiConfigProvider(_extensionUri, socketClient);
+        this._agentCtrlPanelProvider = new AgentCtrlPanelProvider(
+            _extensionUri, socketClient,
+            () => DisasmPanelProvider.detectMcpServerRunning(this.mcpImageName()),
+            () => this.handleRunMcpServer(),
+        );
         this._compatBrowserProvider   = new CompatBrowserProvider(_extensionUri, socketClient);
         this._packetViewerProvider    = new PacketViewerProvider(_extensionUri, socketClient);
 
@@ -275,7 +282,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     }
 
     private readonly _mcpProgressReportEditorProvider: McpProgressReportEditorProvider;
-    private readonly _aiConfigProvider: AiConfigProvider;
+    private readonly _agentCtrlPanelProvider: AgentCtrlPanelProvider;
     private readonly _compatBrowserProvider: CompatBrowserProvider;
     private readonly _packetViewerProvider: PacketViewerProvider;
     private readonly _snapshotManagerProvider: SnapshotManagerProvider;
@@ -565,9 +572,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 case 'mcpMemoryDelete':
                     await this.handleMcpMemoryDelete(msg.id as number);
                     break;
-                // ── AI Configuration ──────────────────────────────────────
+                // ── AI agent control panel ──────────────────────────────────────
                 case 'openAiConfig':
-                    this._aiConfigProvider.open();
+                    this._agentCtrlPanelProvider.open();
                     break;
                 // ── PS2 Game Compatibility browser ────────────────────────
                 case 'openCompatBrowser':
@@ -634,7 +641,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                     await this.handleSetAgentLead(msg.agentId as number);
                     break;
                 case 'openAiConfigAgents':
-                    this._aiConfigProvider.open({
+                    this._agentCtrlPanelProvider.open({
                         tab:     'agents',
                         agentId: typeof msg.agentId === 'number' ? msg.agentId : undefined,
                     });
@@ -650,7 +657,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                     await this.handleSetMultiAgentMode(!!msg.enabled);
                     break;
                 case 'openAiConfigOrchestration':
-                    this._aiConfigProvider.open({
+                    this._agentCtrlPanelProvider.open({
                         tab:             'orchestration',
                         orchestrationId: typeof msg.id === 'number' ? msg.id : undefined,
                     });

@@ -91,7 +91,7 @@ const webviewConfig = {
     'disasm-panel':    './src/webview/disasm-panel/main.ts',
     'disasm-editor':   './src/webview/disasm-editor/main.ts',
     'label-manager':   './src/webview/label-manager/main.ts',
-    'ai-config':       './src/webview/ai-config/main.ts',
+    'agent-ctrl-panel': './src/webview/agent-ctrl-panel/main.ts',
     'compat-browser':  './src/webview/compat-browser/main.ts',
     'cheats-editor':   './src/webview/cheats-editor/main.ts',
     'packet-viewer':      './src/webview/packet-viewer/main.ts',
