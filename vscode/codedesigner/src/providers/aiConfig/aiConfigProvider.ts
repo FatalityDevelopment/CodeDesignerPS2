@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import { promises as fs } from 'fs';
 import { getOutputChannel } from '../../extension';
 import { SocketClient, McpAgentInfo, McpMemoryInfo, McpOrchestrationInfo } from '../../socketClient';
 import { getNonce, getWebviewErrorHandlerScript } from '../../utils/nonce';
@@ -217,6 +218,11 @@ export class AiConfigProvider {
                 await this._sendHistoryList(webview);
                 break;
 
+            // ── Workspace skill recipes ───────────────────────────────────────
+            case 'skillList': await this._sendSkillList(webview); break;
+            case 'skillSave': await this._handleSkillSave(msg, webview); break;
+            case 'skillDelete': await this._handleSkillDelete(msg['path'] as string, webview); break;
+
             default:
                 getOutputChannel().warn(`[AiConfig] Unknown message type: ${type}`);
                 break;
@@ -227,7 +233,7 @@ export class AiConfigProvider {
 
     private async _sendAgentList(webview: vscode.Webview): Promise<void> {
         try {
-            const agents = await this.socketClient.mcpAgentList();
+            const agents = (await this.socketClient.mcpAgentList()).map(agent => ({ ...agent, imageUri: this.resolveAgentImageUri(agent.name, webview) }));
             webview.postMessage({ type: 'agentListResult', agents });
         } catch (err: any) {
             webview.postMessage({ type: 'agentListResult', agents: [], error: err?.message ?? String(err) });
@@ -606,6 +612,49 @@ export class AiConfigProvider {
         }
     }
 
+    // ── Workspace skill handlers ─────────────────────────────────────────────
+
+    private getWorkspaceRoot(): string | undefined { return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath; }
+    private getSkillsRoot(): string | undefined { const root = this.getWorkspaceRoot(); return root ? path.join(root, '.github', 'skills') : undefined; }
+
+    private async _sendSkillList(webview: vscode.Webview): Promise<void> {
+        try {
+            const root = this.getSkillsRoot(); if (!root) { throw new Error('Open a workspace to manage skills.'); }
+            await fs.mkdir(root, { recursive: true });
+            const entries = await fs.readdir(root, { withFileTypes: true });
+            const skills = await Promise.all(entries.filter(entry => entry.isDirectory()).map(async entry => {
+                const skillPath = path.join(root, entry.name, 'SKILL.md');
+                try { const [content, stat] = await Promise.all([fs.readFile(skillPath, 'utf8'), fs.stat(skillPath)]); return { name: entry.name, path: path.relative(this.getWorkspaceRoot()!, skillPath), content, updatedAt: stat.mtime.toISOString() }; } catch { return undefined; }
+            }));
+            webview.postMessage({ type: 'skillListResult', skills: skills.filter(Boolean).sort((a, b) => a!.name.localeCompare(b!.name)) });
+        } catch (err: any) { webview.postMessage({ type: 'skillListResult', skills: [], error: err?.message ?? String(err) }); }
+    }
+
+    private async _handleSkillSave(msg: Record<string, unknown>, webview: vscode.Webview): Promise<void> {
+        try {
+            const root = this.getSkillsRoot(), workspaceRoot = this.getWorkspaceRoot(); if (!root || !workspaceRoot) { throw new Error('Open a workspace to manage skills.'); }
+            const skill = msg['skill'] as { name?: string; path?: string; content?: string }; const name = (skill?.name ?? '').trim();
+            if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) { throw new Error('Skill names must use lowercase letters, numbers, and hyphens.'); }
+            const skillPath = path.join(root, name, 'SKILL.md'); if (!skillPath.startsWith(`${root}${path.sep}`)) { throw new Error('Invalid skill path.'); }
+            if (!msg['isNew'] && skill?.path) { const oldPath = path.resolve(workspaceRoot, skill.path); if (oldPath !== skillPath && oldPath.startsWith(`${root}${path.sep}`)) { await fs.rm(path.dirname(oldPath), { recursive: true, force: true }); } }
+            await fs.mkdir(path.dirname(skillPath), { recursive: true }); await fs.writeFile(skillPath, skill?.content ?? '', 'utf8'); const stat = await fs.stat(skillPath);
+            webview.postMessage({ type: 'skillActionResult', skill: { name, path: path.relative(workspaceRoot, skillPath), content: skill?.content ?? '', updatedAt: stat.mtime.toISOString() }, message: `Saved '${name}'.` });
+        } catch (err: any) { webview.postMessage({ type: 'skillActionResult', error: err?.message ?? String(err) }); }
+    }
+
+    private async _handleSkillDelete(relativePath: string, webview: vscode.Webview): Promise<void> {
+        try {
+            const root = this.getSkillsRoot(), workspaceRoot = this.getWorkspaceRoot(); if (!root || !workspaceRoot) { throw new Error('Open a workspace to manage skills.'); }
+            const skillPath = path.resolve(workspaceRoot, relativePath); if (!skillPath.startsWith(`${root}${path.sep}`) || path.basename(skillPath) !== 'SKILL.md') { throw new Error('Invalid skill path.'); }
+            await fs.rm(path.dirname(skillPath), { recursive: true, force: true }); webview.postMessage({ type: 'skillActionResult', message: 'Deleted skill.' });
+        } catch (err: any) { webview.postMessage({ type: 'skillActionResult', error: err?.message ?? String(err) }); }
+    }
+
+    private static readonly AGENT_IMAGE_MAP = [
+        { file: 'scorpion.png', keywords: ['scorpion'] }, { file: 'sub-zero.png', keywords: ['subzero'] }, { file: 'raiden.png', keywords: ['raiden'] }, { file: 'liu-kang.png', keywords: ['liukang', 'liu'] }, { file: 'johnny-cage.png', keywords: ['johnnycage', 'johnny', 'cage'] }, { file: 'sonya-blade.png', keywords: ['sonyablade', 'sonya'] }, { file: 'kano.png', keywords: ['kano'] }, { file: 'kitana.png', keywords: ['kitana'] }, { file: 'mileena.png', keywords: ['mileena'] },
+    ];
+    private resolveAgentImageUri(name: string, webview: vscode.Webview): string { const normalized = (name ?? '').toLowerCase().replace(/[^a-z0-9]/g, ''); const match = AiConfigProvider.AGENT_IMAGE_MAP.find(item => item.keywords.some(keyword => normalized.includes(keyword))); return match ? webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'agents', match.file)).toString() : ''; }
+
     // ── HTML builder ──────────────────────────────────────────────────────────
 
     private _buildHtml(webview: vscode.Webview): string {
@@ -620,6 +669,7 @@ export class AiConfigProvider {
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
                style-src 'unsafe-inline';
+               img-src ${webview.cspSource} data:;
                script-src ${webview.cspSource} 'nonce-${nonce}';">
 <script nonce="${nonce}">${getWebviewErrorHandlerScript()}</script>
 </head>
