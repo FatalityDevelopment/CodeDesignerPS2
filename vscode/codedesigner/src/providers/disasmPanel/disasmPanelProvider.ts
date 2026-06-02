@@ -176,7 +176,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
      * onDidCloseTerminal hook so a subsequent Run respawns the process.
      */
     private emulatorProcessTerminal?: vscode.Terminal;
-    /** Terminal hosting the MCP stdio server when launched from the panel. */
+    /** Terminal hosting the CodeDesigner.AI MCP stdio server when launched from the panel. */
     private mcpServerTerminal?: vscode.Terminal;
     private settings: EmuSettings = {};
     private workspaceRoot: string = '';
@@ -745,16 +745,21 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     }
 
     /**
-     * Returns the deployed CodeDesigner.Ps2.McpServer executable path, or null
-     * when the MCP server project has not been built/deployed yet.
+     * Returns the deployed CodeDesigner.AI executable path (the profile-driven
+     * MCP server), or null when it has not been built/deployed yet.
      */
-    private static findMcpServerExe(): string | null {
-        const installDir = path.join(DisasmPanelProvider.getInstallDirectory(), 'McpServer');
+    private static findAiMcpServerExe(): string | null {
+        const installDir = path.join(DisasmPanelProvider.getInstallDirectory(), 'AI');
         const exeName = process.platform === 'win32'
-            ? 'CodeDesigner.Ps2.McpServer.exe'
-            : 'CodeDesigner.Ps2.McpServer';
+            ? 'CodeDesigner.AI.exe'
+            : 'CodeDesigner.AI';
         const candidate = path.join(installDir, exeName);
         return fs.existsSync(candidate) ? candidate : null;
+    }
+
+    /** The process image name for the CodeDesigner.AI MCP server. */
+    private mcpImageName(): string {
+        return 'CodeDesigner.AI';
     }
 
     /**
@@ -4041,18 +4046,19 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
      * Copilot); "running" means a client currently has it loaded. It has no
      * network port, so the OS process list is the only way to probe it.
      */
-    private static detectMcpServerRunning(): Promise<boolean> {
+    private static detectMcpServerRunning(imageName: string): Promise<boolean> {
         const isWin = process.platform === 'win32';
         const cmd = isWin
-            ? 'tasklist /FI "IMAGENAME eq CodeDesigner.Ps2.McpServer.exe" /NH /FO CSV'
-            : 'pgrep -f CodeDesigner.Ps2.McpServer';
+            ? `tasklist /FI "IMAGENAME eq ${imageName}.exe" /NH /FO CSV`
+            : `pgrep -f ${imageName}`;
         return new Promise<boolean>(resolve => {
             child_process.exec(cmd, { timeout: 4000, windowsHide: true }, (err, stdout) => {
                 // tasklist exits 0 with an "INFO: No tasks…" line when nothing
                 // matches, so test the output text. pgrep exits non-zero when
                 // nothing matches.
                 if (isWin) {
-                    resolve(/CodeDesigner\.Ps2\.McpServer/i.test(stdout ?? ''));
+                    const rx = new RegExp(imageName.replace(/[.]/g, '\\.'), 'i');
+                    resolve(rx.test(stdout ?? ''));
                 } else {
                     resolve(!err && (stdout ?? '').trim().length > 0);
                 }
@@ -4060,17 +4066,17 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         });
     }
 
-    /** Probe the MCP server process and push its status to the panel. */
+    /** Probe the CodeDesigner.AI MCP server process and push its status to the panel. */
     private async handleRequestMcpStatus(): Promise<void> {
-        const online = await DisasmPanelProvider.detectMcpServerRunning();
+        const online = await DisasmPanelProvider.detectMcpServerRunning(this.mcpImageName());
         this.webview?.postMessage({ command: 'mcpStatus', online });
     }
 
-    /** Launch the deployed MCP server executable from the panel status badge. */
+    /** Launch the deployed CodeDesigner.AI MCP server executable from the panel. */
     private async handleRunMcpServer(): Promise<void> {
         const out = getOutputChannel();
 
-        if (await DisasmPanelProvider.detectMcpServerRunning()) {
+        if (await DisasmPanelProvider.detectMcpServerRunning(this.mcpImageName())) {
             this.webview?.postMessage({ command: 'mcpStatus', online: true });
             return;
         }
@@ -4080,21 +4086,23 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             this.mcpServerTerminal = undefined;
         }
 
-        const exe = DisasmPanelProvider.findMcpServerExe();
+        // Run with --profile all (full tool surface) from the panel.
+        const exe = DisasmPanelProvider.findAiMcpServerExe();
+        const args = ['--profile', 'all'];
         if (!exe) {
-            const mcpDir = path.join(DisasmPanelProvider.getInstallDirectory(), 'McpServer');
-            const msg = `CodeDesigner.Ps2.McpServer not found in ${mcpDir}. Build the MCP server project first to deploy it.`;
+            const dir = path.join(DisasmPanelProvider.getInstallDirectory(), 'AI');
+            const msg = `CodeDesigner.AI not found in ${dir}. Build/deploy the CodeDesigner.AI project first.`;
             out.error(msg);
             vscode.window.showErrorMessage(msg);
             this.webview?.postMessage({ command: 'mcpStatus', online: false });
             return;
         }
 
-        out.info(`Starting CodeDesigner MCP server: ${exe}`);
+        out.info(`Starting CodeDesigner.AI MCP server: ${exe} ${args.join(' ')}`.trim());
         const terminal = vscode.window.createTerminal({
-            name: 'CodeDesigner MCP',
+            name: 'CodeDesigner.AI MCP',
             shellPath: exe,
-            shellArgs: [],
+            shellArgs: args,
         });
         terminal.show(true);
         this.mcpServerTerminal = terminal;

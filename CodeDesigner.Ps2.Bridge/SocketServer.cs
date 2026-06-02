@@ -737,6 +737,30 @@ namespace CodeDesigner.Ps2.Bridge
                         gameId  = command.GameId,
                     });
                 }
+                else if (cmdUpper is "NETCAPTURE" or "NETRECVCAPTURE")
+                {
+                    // Notify subscribers that the AI ran a packet-capture command so the
+                    // packet viewer / activity panel can react (highlight / log).
+                    notificationJson = JsonSerializer.Serialize(new
+                    {
+                        type      = "ai_packet",
+                        command   = command.Command,
+                        direction = command.NetCaptureDirection,
+                        enable    = command.NetCaptureEnable,
+                    });
+                }
+                else if (cmdUpper == "AI_TOOL_CALL")
+                {
+                    // The CodeDesigner.AI MCP server pushes one of these for every
+                    // tool it runs. command.Data holds a compact JSON object
+                    // { tool, args, result, ok, elapsedMs }. Forward it verbatim
+                    // inside an ai_tool_call envelope so the AI Activity panel can
+                    // render the full call log (every tool, with args + result).
+                    notificationJson =
+                        "{\"type\":\"ai_tool_call\",\"payload\":" +
+                        (string.IsNullOrEmpty(command.Data) ? "null" : command.Data) +
+                        "}";
+                }
 
                 if (notificationJson == null) { return; }
 
@@ -967,6 +991,12 @@ namespace CodeDesigner.Ps2.Bridge
                     // ── AI session lifecycle ───────────────────────────────────────────
                     case "SESSION_START":
                         return CreateSuccessResponse("AI session started");
+
+                    case "AI_TOOL_CALL":
+                        // Pure notification relay — TryPushActivityNotification
+                        // broadcasts the ai_tool_call event to subscribers. The
+                        // command itself just needs a trivial ack.
+                        return CreateSuccessResponse("logged");
 
                     // ADDLABELENTRIES → LabelManagerService (migrated)
 

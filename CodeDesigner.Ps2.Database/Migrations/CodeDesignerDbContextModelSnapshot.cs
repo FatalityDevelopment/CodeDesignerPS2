@@ -517,6 +517,90 @@ namespace CodeDesigner.Ps2.Database.Migrations
                     b.ToTable("McpAgents");
                 });
 
+            modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.McpAgentMessage", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Body")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("FromSessionId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("ReadAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int?>("ToAgentId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ToSessionId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FromSessionId");
+
+                    b.HasIndex("ToAgentId", "ReadAt");
+
+                    b.HasIndex("ToSessionId", "ReadAt");
+
+                    b.ToTable("McpAgentMessages");
+                });
+
+            modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.McpAgentSession", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("CurrentTask")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("EndedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("ExternalId")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<int?>("McpAgentId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Notes")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int?>("ParentSessionId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("StartedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("McpAgentId");
+
+                    b.HasIndex("ParentSessionId");
+
+                    b.HasIndex("Status");
+
+                    b.ToTable("McpAgentSessions");
+                });
+
             modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.McpAgentTask", b =>
                 {
                     b.Property<int>("Id")
@@ -626,6 +710,12 @@ namespace CodeDesigner.Ps2.Database.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<string>("CurrentStage")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("CurrentStageSummary")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<string>("Description")
                         .HasColumnType("nvarchar(max)");
 
@@ -645,6 +735,9 @@ namespace CodeDesigner.Ps2.Database.Migrations
 
                     b.Property<string>("Rules")
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("StageUpdatedAt")
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("Strategy")
                         .HasColumnType("nvarchar(max)");
@@ -847,6 +940,47 @@ namespace CodeDesigner.Ps2.Database.Migrations
                         .OnDelete(DeleteBehavior.Cascade);
 
                     b.Navigation("GameDisc");
+                });
+
+            modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.McpAgentMessage", b =>
+                {
+                    b.HasOne("CodeDesigner.Ps2.Database.Entities.McpAgentSession", "FromSession")
+                        .WithMany()
+                        .HasForeignKey("FromSessionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("CodeDesigner.Ps2.Database.Entities.McpAgent", "ToAgent")
+                        .WithMany()
+                        .HasForeignKey("ToAgentId");
+
+                    b.HasOne("CodeDesigner.Ps2.Database.Entities.McpAgentSession", "ToSession")
+                        .WithMany()
+                        .HasForeignKey("ToSessionId")
+                        .OnDelete(DeleteBehavior.ClientCascade);
+
+                    b.Navigation("FromSession");
+
+                    b.Navigation("ToAgent");
+
+                    b.Navigation("ToSession");
+                });
+
+            modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.McpAgentSession", b =>
+                {
+                    b.HasOne("CodeDesigner.Ps2.Database.Entities.McpAgent", "McpAgent")
+                        .WithMany()
+                        .HasForeignKey("McpAgentId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("CodeDesigner.Ps2.Database.Entities.McpAgentSession", "ParentSession")
+                        .WithMany()
+                        .HasForeignKey("ParentSessionId")
+                        .OnDelete(DeleteBehavior.ClientCascade);
+
+                    b.Navigation("McpAgent");
+
+                    b.Navigation("ParentSession");
                 });
 
             modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.McpAgentTask", b =>

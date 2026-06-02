@@ -42,6 +42,7 @@ Welcome to the CodeDesigner documentation catalog. Each link below opens a focus
 
 | Document | Description |
 |---|---|
+| [Architecture](ARCHITECTURE.md) | System map: processes, data flow, and the AI / agent / skills layer |
 | [Projects](projects.md) | Overview of all projects in the solution |
 | [Common Library](common.md) | Core PS2 ISA implementation, assembler, disassembler, encoder/decoder |
 | [Emulator](emulator.md) | Complete PS2 hardware emulation (EE, IOP, peripherals) |

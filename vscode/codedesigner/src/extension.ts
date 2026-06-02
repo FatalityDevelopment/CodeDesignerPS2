@@ -4,6 +4,7 @@ import * as vscode from 'vscode';
 import { DisasmEditorProvider } from './providers/disasmEditor/disasmEditorProvider';
 import { DisasmPanelProvider } from './providers/disasmPanel/disasmPanelProvider';
 import { GsViewerProvider } from './providers/gsViewer/gsViewerProvider';
+import { AgentActivityProvider } from './providers/agentActivity/agentActivityProvider';
 import { JokerMakerProvider } from './providers/jokerMaker/jokerMakerProvider';
 import { Ps2FileEditorProvider } from './providers/ps2FileEditor/ps2FileEditorProvider';
 import { CompatBrowserProvider } from './providers/compatBrowser/compatBrowserProvider';
@@ -322,6 +323,25 @@ export function activate(context: vscode.ExtensionContext) {
 		() => gsViewerProvider.open(),
 	);
 	context.subscriptions.push(openGsFrameViewerCommand);
+
+	// ── AI activity feed ────────────────────────────────────────────────────────
+	// Live log of ai_activity / ai_session_start / ai_label_update pushes — a
+	// debugging view of what the AI is doing. Constructed at activation so it
+	// buffers events even before the panel is opened; game context is auto-resolved
+	// from the disasm editor so the panel never needs a manual serial field.
+	const agentActivityProvider = new AgentActivityProvider(
+		context.extensionUri,
+		socketClient,
+		() => {
+			const c = editorProvider.getLabelManagerContext();
+			return c ? { gameName: c.gameName, gameDiscId: c.gameDiscId } : null;
+		},
+	);
+	const openAgentActivityCommand = vscode.commands.registerCommand(
+		'codedesigner.openAgentActivity',
+		() => agentActivityProvider.open(),
+	);
+	context.subscriptions.push(openAgentActivityCommand);
 
 	// Save a PCSX2 screenshot — surfaced as a command so the GS frame viewer's
 	// in-webview Screenshot button can trigger it without a panel round-trip.

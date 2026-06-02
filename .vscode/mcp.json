@@ -2,7 +2,32 @@
   "servers": {
     "CodeDesigner": {
       "type": "stdio",
-      "command": "${env:LOCALAPPDATA}/CodeDesigner/McpServer/CodeDesigner.Ps2.McpServer.exe"
+      "command": "${env:LOCALAPPDATA}/CodeDesigner/AI/CodeDesigner.AI.exe",
+      "args": ["--profile", "all"]
+    },
+
+    "CodeDesigner-AI-core": {
+      "type": "stdio",
+      "command": "${env:LOCALAPPDATA}/CodeDesigner/AI/CodeDesigner.AI.exe",
+      "args": ["--profile", "core"]
+    },
+
+    "CodeDesigner-AI-re": {
+      "type": "stdio",
+      "command": "${env:LOCALAPPDATA}/CodeDesigner/AI/CodeDesigner.AI.exe",
+      "args": ["--profile", "re"]
+    },
+
+    "CodeDesigner-AI-multi-agent": {
+      "type": "stdio",
+      "command": "${env:LOCALAPPDATA}/CodeDesigner/AI/CodeDesigner.AI.exe",
+      "args": ["--profile", "multi-agent"]
+    },
+
+    "CodeDesigner-AI-readonly": {
+      "type": "stdio",
+      "command": "${env:LOCALAPPDATA}/CodeDesigner/AI/CodeDesigner.AI.exe",
+      "args": ["--profile", "re", "--readonly"]
     }
   }
 }

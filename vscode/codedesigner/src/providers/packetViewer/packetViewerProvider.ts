@@ -350,7 +350,19 @@ export class PacketViewerProvider {
     constructor(
         private readonly extensionUri: vscode.Uri,
         private readonly socketClient: SocketClient,
-    ) {}
+    ) {
+        // Surface AI packet-capture activity in the viewer when it's open: the AI
+        // drains its own packets off the queue, so we can't redraw them here — show
+        // a transient status line and bring the panel forward (without stealing focus).
+        socketClient.onPacketActivity((e) => {
+            if (!this._panel) { return; }
+            const detail = e.command === 'NETCAPTURE'
+                ? `AI ${e.enable ? 'started' : 'stopped'} packet capture`
+                : 'AI drained captured packets';
+            this._panel.webview.postMessage({ type: 'packetViewerMessage', message: `🤖 ${detail}` });
+            this._panel.reveal(this._panel.viewColumn, true);
+        });
+    }
 
     /** Whether a live packet capture is currently active. */
     public isCapturing(): boolean {

@@ -55,7 +55,7 @@
 }
 
 <div class="mcp-status" [class.mcp-online]="mcpOnline"
-     [title]="mcpOnline ? 'CodeDesigner MCP server is running' : 'CodeDesigner MCP server is not running'">
+     [title]="'CodeDesigner.AI server' + (mcpOnline ? ' is running' : ' is not running')">
   <app-icon class="mcp-ico" name="bot" [size]="14" />
   <span class="mcp-label">MCP</span>
   <span class="mcp-state">
@@ -63,7 +63,8 @@
     {{ mcpOnline ? 'Online' : 'Offline' }}
   </span>
   @if (!mcpOnline) {
-    <button class="mcp-run-btn" (click)="runMcpServer()" title="Run CodeDesigner MCP server">
+    <button class="mcp-run-btn" (click)="runMcpServer()"
+            title="Run CodeDesigner.AI MCP server">
       <app-icon name="play" [size]="12" />
       <span>Run</span>
     </button>

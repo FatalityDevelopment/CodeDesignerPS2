@@ -198,7 +198,7 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
   recentLabelsError = '';
   /** Multiplayer server reachability + capture state for the Network section. */
   networkStatus: NetworkStatus | null = null;
-  /** True when the CodeDesigner MCP server process is running. */
+  /** True when the CodeDesigner.AI MCP server process is running. */
   mcpOnline = false;
   /** True when the selected emulator process is running. */
   emulatorProcessRunning = false;
@@ -342,12 +342,12 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
     if (this.emulatorProcessPollTimer !== undefined) { clearInterval(this.emulatorProcessPollTimer); }
   }
 
-  /** Ask the provider whether the MCP server process is running. */
+  /** Ask the provider whether the CodeDesigner.AI MCP server process is running. */
   requestMcpStatus(): void {
     this.bridge.postMessage({ command: 'requestMcpStatus' });
   }
 
-  /** Ask the provider to launch the deployed MCP server executable. */
+  /** Ask the provider to launch the CodeDesigner.AI MCP server executable. */
   runMcpServer(): void {
     this.bridge.postMessage({ command: 'runMcpServer' });
   }
