@@ -1,12 +1,12 @@
 using System.Text;
 using CodeDesigner.AI.Abstractions;
-using CodeDesigner.Ps2.McpServer;
+using CodeDesigner.AI.Infra;
 
 namespace CodeDesigner.AI.Context;
 
 /// <summary>
-/// <see cref="ICdContextProvider"/> backed by the legacy <see cref="McpDatabaseService"/>
-/// (reused via linked source). Supplies lazy context so cd_session_init stays compact.
+/// <see cref="ICdContextProvider"/> backed by <see cref="McpDatabaseService"/>.
+/// Supplies lazy context so cd_session_init stays compact.
 /// </summary>
 internal sealed class DbContextProvider(McpDatabaseService db) : ICdContextProvider
 {

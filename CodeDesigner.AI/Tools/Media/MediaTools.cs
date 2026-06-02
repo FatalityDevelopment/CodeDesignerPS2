@@ -188,7 +188,9 @@ public sealed class IsoGetInfoTool(IEmulatorBridge bridge)
 
 // ── GS frame streaming ─────────────────────────────────────────────────
 [CdTool("get_gs_frame", ToolDomain.Media, ToolRisk.ReadOnly,
-    "Get the latest PCSX2 GS frame as base64 JPEG (in-memory snapshot, no PCSX2 round-trip). Use sparingly. Risk: read-only.")]
+    "Get the latest PCSX2 GS frame as base64 JPEG (in-memory snapshot). For a quick visual " +
+    "check prefer pcsx2_save_screenshot; reserve this for deeper frame analysis / streaming. " +
+    "Risk: read-only.")]
 public sealed class GetGsFrameTool(IEmulatorBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(CancellationToken ct = default)

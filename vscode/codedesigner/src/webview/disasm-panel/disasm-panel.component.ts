@@ -130,8 +130,6 @@ interface NetworkStatusResultMsg {
 interface McpStatusMsg {
   command: 'mcpStatus';
   online: boolean;
-  /** True when the status reflects the legacy server rather than CodeDesigner.AI. */
-  legacy?: boolean;
 }
 
 /** Message sent by the provider with the AI agent profiles. */
@@ -200,10 +198,8 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
   recentLabelsError = '';
   /** Multiplayer server reachability + capture state for the Network section. */
   networkStatus: NetworkStatus | null = null;
-  /** True when the CodeDesigner MCP server process is running. */
+  /** True when the CodeDesigner.AI MCP server process is running. */
   mcpOnline = false;
-  /** When true, the MCP badge/Run target the legacy server instead of CodeDesigner.AI. */
-  mcpLegacyMode = false;
   /** True when the selected emulator process is running. */
   emulatorProcessRunning = false;
   /** AI agent profiles shown in the Agents section. */
@@ -346,20 +342,14 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
     if (this.emulatorProcessPollTimer !== undefined) { clearInterval(this.emulatorProcessPollTimer); }
   }
 
-  /** Ask the provider whether the selected MCP server process is running. */
+  /** Ask the provider whether the CodeDesigner.AI MCP server process is running. */
   requestMcpStatus(): void {
-    this.bridge.postMessage({ command: 'requestMcpStatus', legacy: this.mcpLegacyMode });
+    this.bridge.postMessage({ command: 'requestMcpStatus' });
   }
 
-  /** Ask the provider to launch the selected MCP server executable (new AI, or legacy). */
+  /** Ask the provider to launch the CodeDesigner.AI MCP server executable. */
   runMcpServer(): void {
-    this.bridge.postMessage({ command: 'runMcpServer', legacy: this.mcpLegacyMode });
-  }
-
-  /** Toggle between the new CodeDesigner.AI server and the legacy one, then re-check status. */
-  toggleMcpLegacy(event: Event): void {
-    this.mcpLegacyMode = (event.target as HTMLInputElement).checked;
-    this.requestMcpStatus();
+    this.bridge.postMessage({ command: 'runMcpServer' });
   }
 
   /** Ask the provider whether the selected emulator process is currently running. */

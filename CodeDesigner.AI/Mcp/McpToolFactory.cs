@@ -1,3 +1,4 @@
+using CodeDesigner.AI.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Server;
 
@@ -28,6 +29,15 @@ internal static class McpToolFactory
             services.GetService<SessionState>() is { } state)
         {
             tool = new RiskFrictionTool(tool, state, descriptor.Meta.Name, descriptor.Meta.Risk);
+        }
+
+        // Outermost wrapper: log every invocation (name + args + result preview)
+        // to the AI Activity panel via the bridge. Applied last so it captures
+        // the final result, including any risk-friction footer. Best-effort — a
+        // missing bridge just means no logging.
+        if (services.GetService<IEmulatorBridge>() is { } bridge)
+        {
+            tool = new ActivityLoggingTool(tool, bridge, descriptor.Meta.Name);
         }
 
         return tool;

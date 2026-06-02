@@ -41,7 +41,9 @@ public sealed class CompileCdsTool(IEmulatorBridge bridge)
 }
 
 [CdTool("apply_cds_patch", ToolDomain.Patching, ToolRisk.WritesMemory,
-    "Compile a CDS source and atomically apply the resulting patch to live emulator memory (with assert/sidecar checks). Risk: writes memory.")]
+    "Compile a CDS source and atomically apply the resulting patch to live emulator memory " +
+    "(with assert/sidecar checks). After it runs, show the user the applied code + result. " +
+    "Risk: writes memory.")]
 public sealed class ApplyCdsPatchTool(IEmulatorBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(

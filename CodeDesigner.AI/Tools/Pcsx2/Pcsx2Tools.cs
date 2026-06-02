@@ -27,7 +27,8 @@ public sealed class Pcsx2GetSymbolByNameTool(IEmulatorBridge bridge)
 }
 
 [CdTool("pcsx2_get_call_stack", ToolDomain.Pcsx2, ToolRisk.ReadOnly,
-    "Walk the EE call stack and return each frame (entry, PC, SP, symbol). Risk: read-only.")]
+    "Walk the EE call stack and return each frame (entry, PC, SP, symbol). Requires the emulator " +
+    "PAUSED (hit a breakpoint first) — meaningless on a running game. Risk: read-only.")]
 public sealed class Pcsx2GetCallStackTool(IEmulatorBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(CancellationToken ct = default)
@@ -225,7 +226,9 @@ public sealed class Pcsx2ClearAllWatchesTool(IEmulatorBridge bridge)
 }
 
 [CdTool("pcsx2_save_screenshot", ToolDomain.Pcsx2, ToolRisk.WritesDisk,
-    "Take a screenshot via PINE (saved to PCSX2's screenshot directory). Risk: writes disk.")]
+    "Preferred way to preview the screen: take a screenshot via PINE (saved to PCSX2's " +
+    "configured screenshot directory). Use this over get_gs_frame for routine 'what's on " +
+    "screen' checks. Risk: writes disk.")]
 public sealed class Pcsx2SaveScreenshotTool(IEmulatorBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(CancellationToken ct = default)

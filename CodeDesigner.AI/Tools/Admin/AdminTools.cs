@@ -7,7 +7,9 @@ namespace CodeDesigner.AI.Tools.Admin;
 // Commands match legacy CodeDesigner.Ps2.McpServer/Tools/Session.cs.
 
 [CdTool("query_db", ToolDomain.Admin, ToolRisk.Dangerous,
-    "Run an arbitrary SQL statement against the CodeDesigner DB (SELECT / INSERT / UPDATE / DELETE — backend enforces safety). Risk: DANGEROUS.")]
+    "Run arbitrary SQL against the CodeDesigner DB. For LABELS prefer the label tools " +
+    "(label_list / label_resolve_strings / get_functions) — they are cheaper and indexed; use " +
+    "query_db only for data with no dedicated tool. Risk: DANGEROUS.")]
 public sealed class QueryDbTool(IEmulatorBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(

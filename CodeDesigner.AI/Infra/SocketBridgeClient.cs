@@ -2,7 +2,7 @@ using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 
-namespace CodeDesigner.Ps2.McpServer;
+namespace CodeDesigner.AI.Infra;
 
 /// <summary>
 /// Thin TCP client that forwards JSON commands to the CodeDesigner.Ps2

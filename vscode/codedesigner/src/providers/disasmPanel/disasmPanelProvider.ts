@@ -176,11 +176,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
      * onDidCloseTerminal hook so a subsequent Run respawns the process.
      */
     private emulatorProcessTerminal?: vscode.Terminal;
-    /** Terminal hosting the MCP stdio server when launched from the panel. */
+    /** Terminal hosting the CodeDesigner.AI MCP stdio server when launched from the panel. */
     private mcpServerTerminal?: vscode.Terminal;
-    /** When true, the MCP status badge / Run target the legacy CodeDesigner.Ps2.McpServer
-     *  instead of the new CodeDesigner.AI server. Set from the panel's Legacy toggle. */
-    private _mcpLegacyMode = false;
     private settings: EmuSettings = {};
     private workspaceRoot: string = '';
     private snapshots: SnapshotEntry[] = [];
@@ -621,11 +618,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                     break;
                 // ── MCP server process status ─────────────────────────────
                 case 'requestMcpStatus':
-                    this._mcpLegacyMode = !!msg.legacy;
                     await this.handleRequestMcpStatus();
                     break;
                 case 'runMcpServer':
-                    this._mcpLegacyMode = !!msg.legacy;
                     await this.handleRunMcpServer();
                     break;
                 case 'requestEmulatorProcessStatus':
@@ -750,20 +745,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     }
 
     /**
-     * Returns the deployed CodeDesigner.Ps2.McpServer executable path, or null
-     * when the MCP server project has not been built/deployed yet.
-     */
-    private static findMcpServerExe(): string | null {
-        const installDir = path.join(DisasmPanelProvider.getInstallDirectory(), 'McpServer');
-        const exeName = process.platform === 'win32'
-            ? 'CodeDesigner.Ps2.McpServer.exe'
-            : 'CodeDesigner.Ps2.McpServer';
-        const candidate = path.join(installDir, exeName);
-        return fs.existsSync(candidate) ? candidate : null;
-    }
-
-    /**
-     * Returns the deployed CodeDesigner.AI executable path (the new profile-driven
+     * Returns the deployed CodeDesigner.AI executable path (the profile-driven
      * MCP server), or null when it has not been built/deployed yet.
      */
     private static findAiMcpServerExe(): string | null {
@@ -775,9 +757,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         return fs.existsSync(candidate) ? candidate : null;
     }
 
-    /** The image name (process) for the currently selected MCP server. */
+    /** The process image name for the CodeDesigner.AI MCP server. */
     private mcpImageName(): string {
-        return this._mcpLegacyMode ? 'CodeDesigner.Ps2.McpServer' : 'CodeDesigner.AI';
+        return 'CodeDesigner.AI';
     }
 
     /**
@@ -4084,19 +4066,18 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         });
     }
 
-    /** Probe the selected MCP server process and push its status to the panel. */
+    /** Probe the CodeDesigner.AI MCP server process and push its status to the panel. */
     private async handleRequestMcpStatus(): Promise<void> {
         const online = await DisasmPanelProvider.detectMcpServerRunning(this.mcpImageName());
-        this.webview?.postMessage({ command: 'mcpStatus', online, legacy: this._mcpLegacyMode });
+        this.webview?.postMessage({ command: 'mcpStatus', online });
     }
 
-    /** Launch the deployed MCP server executable (new CodeDesigner.AI, or legacy) from the panel. */
+    /** Launch the deployed CodeDesigner.AI MCP server executable from the panel. */
     private async handleRunMcpServer(): Promise<void> {
         const out = getOutputChannel();
-        const legacy = this._mcpLegacyMode;
 
         if (await DisasmPanelProvider.detectMcpServerRunning(this.mcpImageName())) {
-            this.webview?.postMessage({ command: 'mcpStatus', online: true, legacy });
+            this.webview?.postMessage({ command: 'mcpStatus', online: true });
             return;
         }
 
@@ -4105,23 +4086,21 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             this.mcpServerTerminal = undefined;
         }
 
-        // New server runs with --profile all (full parity) until it supersedes the legacy one.
-        const exe = legacy ? DisasmPanelProvider.findMcpServerExe() : DisasmPanelProvider.findAiMcpServerExe();
-        const args = legacy ? [] : ['--profile', 'all'];
+        // Run with --profile all (full tool surface) from the panel.
+        const exe = DisasmPanelProvider.findAiMcpServerExe();
+        const args = ['--profile', 'all'];
         if (!exe) {
-            const sub = legacy ? 'McpServer' : 'AI';
-            const name = legacy ? 'CodeDesigner.Ps2.McpServer' : 'CodeDesigner.AI';
-            const dir = path.join(DisasmPanelProvider.getInstallDirectory(), sub);
-            const msg = `${name} not found in ${dir}. Build/deploy the ${legacy ? 'legacy MCP server' : 'CodeDesigner.AI'} project first.`;
+            const dir = path.join(DisasmPanelProvider.getInstallDirectory(), 'AI');
+            const msg = `CodeDesigner.AI not found in ${dir}. Build/deploy the CodeDesigner.AI project first.`;
             out.error(msg);
             vscode.window.showErrorMessage(msg);
-            this.webview?.postMessage({ command: 'mcpStatus', online: false, legacy });
+            this.webview?.postMessage({ command: 'mcpStatus', online: false });
             return;
         }
 
-        out.info(`Starting ${legacy ? 'legacy CodeDesigner MCP server' : 'CodeDesigner.AI MCP server'}: ${exe} ${args.join(' ')}`.trim());
+        out.info(`Starting CodeDesigner.AI MCP server: ${exe} ${args.join(' ')}`.trim());
         const terminal = vscode.window.createTerminal({
-            name: legacy ? 'CodeDesigner MCP (legacy)' : 'CodeDesigner.AI MCP',
+            name: 'CodeDesigner.AI MCP',
             shellPath: exe,
             shellArgs: args,
         });

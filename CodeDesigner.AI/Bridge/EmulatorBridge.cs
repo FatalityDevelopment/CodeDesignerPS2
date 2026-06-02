@@ -1,5 +1,5 @@
 using CodeDesigner.AI.Abstractions;
-using CodeDesigner.Ps2.McpServer;
+using CodeDesigner.AI.Infra;
 
 namespace CodeDesigner.AI.Bridge;
 

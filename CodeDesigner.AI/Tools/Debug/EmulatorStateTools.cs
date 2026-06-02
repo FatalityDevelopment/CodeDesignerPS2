@@ -31,7 +31,8 @@ public sealed class GetPcTool(IEmulatorBridge bridge)
 }
 
 [CdTool("get_registers", ToolDomain.Debug, ToolRisk.ReadOnly,
-    "Full EE CPU register dump (GPRs, HI/LO, COP0, COP1 FPU, VU0). Risk: read-only.")]
+    "Full EE CPU register dump (GPRs, HI/LO, COP0, COP1 FPU, VU0). Meaningful only when the " +
+    "emulator is PAUSED (hit a breakpoint or pause first). Risk: read-only.")]
 public sealed class GetRegistersTool(IEmulatorBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(CancellationToken ct = default)

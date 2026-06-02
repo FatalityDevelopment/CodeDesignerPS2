@@ -19,11 +19,9 @@
     <ProjectReference Include="..\CodeDesigner.Ps2.Database\CodeDesigner.Ps2.Database.csproj" />
     <ProjectReference Include="..\CodeDesigner.Ps2.CheatEngine\CodeDesigner.Ps2.CheatEngine.csproj" />
     <ProjectReference Include="..\CodeDesigner.Ps2.CdsLanguage\CodeDesigner.Ps2.CdsLanguage.csproj" />
-    <!-- Shared bridge + DB service (SocketBridgeClient, McpDatabaseService). -->
-    <ProjectReference Include="..\CodeDesigner.Ps2.McpInfra\CodeDesigner.Ps2.McpInfra.csproj" />
   </ItemGroup>
 
-  <!-- Deploy to %LOCALAPPDATA%\CodeDesigner\AI\ so it runs side-by-side with the legacy server. -->
+  <!-- Deploy to %LOCALAPPDATA%\CodeDesigner\AI\ (the sole MCP server). -->
   <Target Name="DeployToInstallDir" AfterTargets="Build">
     <PropertyGroup>
       <_LocalAppData Condition="'$(LOCALAPPDATA)' != ''">$(LOCALAPPDATA)</_LocalAppData>

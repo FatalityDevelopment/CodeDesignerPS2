@@ -5,6 +5,7 @@ import {
     AiSessionStartEvent,
     AiLabelUpdateEvent,
     AiPacketEvent,
+    AiToolCallEvent,
 } from '../../socketClient';
 import { getNonce } from '../../utils/nonce';
 
@@ -14,7 +15,7 @@ export interface ActivityGameContext {
     gameDiscId: string;
 }
 
-type ActivityKind = 'activity' | 'session' | 'label' | 'packet';
+type ActivityKind = 'activity' | 'session' | 'label' | 'packet' | 'tool';
 
 interface ActivityEntry {
     at: number;          // epoch ms
@@ -22,6 +23,11 @@ interface ActivityEntry {
     text: string;        // human summary
     address?: number;    // for kind === 'activity'
     region?: string;
+    // For kind === 'tool': the full arguments + result so the panel can show an
+    // expandable detail block (debugging + later automation).
+    args?: string;
+    result?: string;
+    ok?: boolean;
 }
 
 /**
@@ -37,7 +43,9 @@ interface ActivityEntry {
 export class AgentActivityProvider {
     private _panel: vscode.WebviewPanel | undefined;
     private readonly _log: ActivityEntry[] = [];
-    private static readonly MAX = 200;
+    // Tool-call logging is much higher volume than the old address-command feed,
+    // so keep a larger rolling window for meaningful debugging history.
+    private static readonly MAX = 2000;
 
     constructor(
         private readonly _extensionUri: vscode.Uri,
@@ -65,6 +73,19 @@ export class AgentActivityProvider {
             const detail = e.enable !== undefined ? (e.enable ? '  capture on' : '  capture off')
                          : e.direction !== undefined ? `  dir ${e.direction}` : '';
             this._record({ at: Date.now(), kind: 'packet', text: `${e.command}${detail}` });
+        });
+        // Every MCP tool the AI runs lands here — the full call log with args
+        // and a result preview. This is the primary debugging feed.
+        _socketClient.onToolCall((e: AiToolCallEvent) => {
+            const p = e.payload;
+            if (!p) { return; }
+            const ms = typeof p.elapsedMs === 'number' ? `  ${p.elapsedMs}ms` : '';
+            const mark = p.ok ? '' : '  ✗';
+            this._record({
+                at: Date.now(), kind: 'tool',
+                text: `${p.tool}${mark}${ms}`,
+                args: p.args, result: p.result, ok: p.ok,
+            });
         });
     }
 
@@ -161,7 +182,21 @@ export class AgentActivityProvider {
   .aa-tag.session  { color: #c586c0; }
   .aa-tag.label    { color: #89d185; }
   .aa-tag.packet   { color: #d7ba7d; }
+  .aa-tag.tool     { color: #4ec9b0; }
   .aa-text { white-space: pre-wrap; }
+  .aa-row.tool { flex-direction: column; gap: 2px; }
+  .aa-row.tool .aa-head { display: flex; gap: 8px; align-items: baseline; cursor: pointer; width: 100%; }
+  .aa-row.tool.err .aa-text { color: #f48771; }
+  .aa-detail {
+    display: none; margin: 2px 0 4px 72px; padding: 6px 8px;
+    background: var(--vscode-textCodeBlock-background, #0a0a0a);
+    border: 1px solid var(--vscode-panel-border, #333); border-radius: 4px;
+    font-family: var(--vscode-editor-font-family, monospace); font-size: 11px;
+    white-space: pre-wrap; word-break: break-word; max-height: 360px; overflow: auto;
+  }
+  .aa-row.tool.open .aa-detail { display: block; }
+  .aa-detail .aa-k { color: var(--vscode-descriptionForeground, #888); text-transform: uppercase; font-size: 10px; }
+  .aa-caret { color: var(--vscode-descriptionForeground, #888); font-size: 10px; min-width: 10px; }
   .aa-empty { color: var(--vscode-descriptionForeground, #888); padding: 16px; font-size: 12px; }
 </style>
 </head>
@@ -191,10 +226,35 @@ export class AgentActivityProvider {
     if (empty) { empty.style.display = 'none'; }
     const atBottom = (window.innerHeight + window.scrollY) >= (document.body.scrollHeight - 4);
     const row = document.createElement('div'); row.className = 'aa-row';
-    row.innerHTML =
-      '<span class="aa-time">' + esc(fmtTime(e.at)) + '</span>' +
-      '<span class="aa-tag ' + esc(e.kind) + '">' + esc(e.kind) + '</span>' +
-      '<span class="aa-text">' + esc(e.text) + '</span>';
+
+    if (e.kind === 'tool') {
+      // Expandable: header row toggles a detail block with args + result.
+      row.className = 'aa-row tool' + (e.ok === false ? ' err' : '');
+      const head =
+        '<div class="aa-head">' +
+          '<span class="aa-caret">▸</span>' +
+          '<span class="aa-time">' + esc(fmtTime(e.at)) + '</span>' +
+          '<span class="aa-tag tool">tool</span>' +
+          '<span class="aa-text">' + esc(e.text) + '</span>' +
+        '</div>';
+      const detail =
+        '<div class="aa-detail">' +
+          '<div class="aa-k">args</div>' + esc(e.args || '{}') +
+          '<div class="aa-k" style="margin-top:6px">result</div>' + esc(e.result || '') +
+        '</div>';
+      row.innerHTML = head + detail;
+      const caret = row.querySelector('.aa-caret');
+      row.querySelector('.aa-head').addEventListener('click', function () {
+        row.classList.toggle('open');
+        if (caret) { caret.textContent = row.classList.contains('open') ? '▾' : '▸'; }
+      });
+    } else {
+      row.innerHTML =
+        '<span class="aa-time">' + esc(fmtTime(e.at)) + '</span>' +
+        '<span class="aa-tag ' + esc(e.kind) + '">' + esc(e.kind) + '</span>' +
+        '<span class="aa-text">' + esc(e.text) + '</span>';
+    }
+
     list.appendChild(row);
     if (atBottom) { window.scrollTo(0, document.body.scrollHeight); }
   }

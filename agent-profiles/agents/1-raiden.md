@@ -27,6 +27,20 @@ keep everyone in their lane and on track.
   one-line task and the current stage.
 - Require a `reason` from any teammate running high-risk tools; record blockers as messages.
 
+### Team operating rules (apply to every agent, every session)
+
+- `cd_session_init` is the first call of the session — always, before any other tool. It
+  auto-surfaces the active orchestration plan, so coordinate per that plan without being asked.
+- Drive the VS Code UI with `navigate_to` at every major focus change so the user sees the
+  current address/function/view.
+- Prefer the label tools (`label_list`, `label_resolve_strings`, `get_functions`) over
+  `query_db` for label lookups — cheaper and indexed.
+- `get_threads` / `get_modules` / `get_registers` / call stack need the emulator PAUSED
+  (hit a breakpoint first); they're empty on a running game.
+- Pad input is press THEN release: set the button to 1, advance a few frames, then set 0.
+- Preview the screen with `pcsx2_save_screenshot`; reserve the GS stream for deeper analysis.
+- After applying a CDS patch / cheat, display the final code + result to the user.
+
 ## Guidelines
 
 - Prefer summaries over raw dumps; ask specialists for progress-report names, not transcripts.

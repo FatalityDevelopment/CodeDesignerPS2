@@ -17,13 +17,15 @@ public sealed class PadGetStateTool(IEmulatorBridge bridge)
 }
 
 [CdTool("pad_set_button", ToolDomain.Pad, ToolRisk.WritesMemory,
-    "Set a single button/axis to a normalized value (deadzone-aware). Risk: writes pad state.")]
+    "Set a single button/axis to a normalized value. PRESS THEN RELEASE: set 1, advance a few " +
+    "frames, then set 0 — a held value with no release never fires as a button event in-game. " +
+    "Risk: writes pad state.")]
 public sealed class PadSetButtonTool(IEmulatorBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Pad slot (0-7).")] int padSlot,
         [Description("Button index 0-25 (see legacy PadDualshock2::Inputs enum).")] int buttonIndex,
-        [Description("Normalized value 0.0 (released) to 1.0 (fully pressed).")] float value,
+        [Description("Normalized value 0.0 (released) to 1.0 (fully pressed). Send 1 to press, then 0 to release after a few frames.")] float value,
         CancellationToken ct = default)
         => CdText.Message(await bridge.SendAsync(new { Command = "PADSETBUTTON", PadSlot = (byte)padSlot, PadButtonIndex = (byte)buttonIndex, PadButtonValue = value }, ct));
 }

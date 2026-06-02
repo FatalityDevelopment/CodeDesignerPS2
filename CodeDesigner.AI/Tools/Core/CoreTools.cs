@@ -14,7 +14,8 @@ namespace CodeDesigner.AI.Tools.Core;
     "Start a session: compact summary (profile, game, bridge, active progress, agent onboarding, core rules, suggested next calls). Risk: read-only.")]
 public sealed class SessionInitTool(
     IEmulatorBridge bridge, ICdContextProvider ctx, ToolProfile profile,
-    IToolCatalog catalog, IAgentCoordinator coord, AgentIdentity identity)
+    IToolCatalog catalog, IAgentCoordinator coord, AgentIdentity identity,
+    IOrchestrationCoordinator orchestration)
 {
     [ToolEntryPoint]
     public async Task<string> InvokeAsync(
@@ -87,10 +88,37 @@ public sealed class SessionInitTool(
             catch (Exception ex) { sb.AppendLine($"Agent #{aid}: lookup failed ({ex.Message})"); }
         }
 
+        // Auto-surface the active orchestration plan so the model coordinates
+        // correctly WITHOUT being told to "check orchestration mode". When a
+        // multi-agent plan is active, the model should delegate; when none is
+        // active it runs solo. This removes the manual step entirely.
+        try
+        {
+            var orch = await orchestration.GetActiveAsync(ct);
+            if (orch is null)
+            {
+                sb.AppendLine("Orchestration: none active (run solo; single-threaded).");
+            }
+            else
+            {
+                sb.AppendLine($"Orchestration ACTIVE: {orch.Name}  → coordinate per this plan.");
+                if (orch.CurrentStep is { } cur) sb.AppendLine($"  current stage: {cur.Number}. {OneLine(cur.Text)}");
+                if (orch.NextStep is { } next) sb.AppendLine($"  next stage:    {next.Number}. {OneLine(next.Text)}");
+                sb.AppendLine("  advance stages with cd_orch_advance; full plan: cd_context_get(\"orchestration_plan\").");
+            }
+        }
+        catch { /* orchestration display is best-effort */ }
+
         sb.AppendLine("Core rules:");
-        sb.AppendLine("  - label addresses/structures once confirmed");
-        sb.AppendLine("  - prefer summaries before raw dumps");
-        sb.AppendLine("  - save a progress report before ending the session");
+        sb.AppendLine("  - this IS session_start — always call it first, every session, before any other tool");
+        sb.AppendLine("  - navigate the VS Code UI with navigate_to so the user always sees the current focus");
+        sb.AppendLine("  - prefer label tools (label_list / label_resolve_strings / get_functions) over query_db for label lookups");
+        sb.AppendLine("  - get_threads / get_modules / get_registers / call stack need the emulator PAUSED (hit a breakpoint first)");
+        sb.AppendLine("  - pad input is press THEN release: set the button to 1, advance frames, then set it back to 0");
+        sb.AppendLine("  - preview the screen with pcsx2_save_screenshot; reserve the GS stream for deeper analysis");
+        sb.AppendLine("  - after applying a CDS patch / cheat, display the final code + result so the user can see it");
+        sb.AppendLine("  - label addresses/structures once confirmed; prefer summaries before raw dumps");
+        sb.AppendLine("  - save a progress report at milestones and before ending the session");
         sb.AppendLine("Suggested next calls:");
         sb.AppendLine("  - cd_tool_index   (see tools for this profile)");
         sb.AppendLine("  - cd_context_get(\"db_schema\")");

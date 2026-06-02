@@ -2,10 +2,6 @@
   "servers": {
     "CodeDesigner": {
       "type": "stdio",
-      "command": "%LOCALAPPDATA%\\CodeDesigner\\McpServer\\CodeDesigner.Ps2.McpServer.exe"
-    },
-    "CodeDesigner-AI": {
-      "type": "stdio",
       "command": "%LOCALAPPDATA%\\CodeDesigner\\AI\\CodeDesigner.AI.exe",
       "args": ["--profile", "all"]
     }

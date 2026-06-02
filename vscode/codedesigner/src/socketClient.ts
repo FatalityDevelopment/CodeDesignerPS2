@@ -1082,6 +1082,24 @@ export interface AiPacketEvent {
 }
 
 /**
+ * Pushed unsolicited by the server for EVERY MCP tool the AI runs. The
+ * CodeDesigner.AI server emits one AI_TOOL_CALL per invocation; the bridge
+ * re-broadcasts it inside this envelope. Drives the full call log in the AI
+ * Activity panel (tool name + arguments + result preview), which the user
+ * uses for debugging and later automation.
+ */
+export interface AiToolCallEvent {
+    type:    'ai_tool_call';
+    payload: {
+        tool:       string;
+        args:       string;   // JSON string of the tool arguments
+        result:     string;   // truncated result preview
+        ok:         boolean;
+        elapsedMs?: number;
+    } | null;
+}
+
+/**
  * Socket client for communication with C# server
  */
 export class SocketClient {
@@ -1114,6 +1132,11 @@ export class SocketClient {
      * pushes an unsolicited ai_packet event.
      */
     private _packetHandlers: Array<(event: AiPacketEvent) => void> = [];
+    /**
+     * Handlers registered via onToolCall() — invoked when the server pushes an
+     * unsolicited ai_tool_call event (one per MCP tool the AI runs).
+     */
+    private _toolCallHandlers: Array<(event: AiToolCallEvent) => void> = [];
     /**
      * FIFO queue of one-time response handlers added by sendCommand().
      * Using a dedicated queue (with shift()) avoids the Array.forEach +
@@ -1226,6 +1249,9 @@ export class SocketClient {
                             } else if (parsed['type'] === 'ai_packet') {
                                 const evt = parsed as unknown as AiPacketEvent;
                                 this._packetHandlers.forEach(h => h(evt));
+                            } else if (parsed['type'] === 'ai_tool_call') {
+                                const evt = parsed as unknown as AiToolCallEvent;
+                                this._toolCallHandlers.forEach(h => h(evt));
                             }
                             this.messageHandlers.forEach(handler => handler(message));
                             continue;
@@ -1386,6 +1412,15 @@ export class SocketClient {
      */
     public onPacketActivity(handler: (event: AiPacketEvent) => void): void {
         this._packetHandlers.push(handler);
+    }
+
+    /**
+     * Register a handler for server-pushed AI tool-call notifications — one per
+     * MCP tool the AI runs, carrying the tool name, arguments, and a result
+     * preview. Delivered only to subscribed streams (call subscribeActivity()).
+     */
+    public onToolCall(handler: (event: AiToolCallEvent) => void): void {
+        this._toolCallHandlers.push(handler);
     }
 
     /**

@@ -101,7 +101,8 @@ public sealed class DebugBreakpointClearAllTool(IEmulatorBridge bridge)
 }
 
 [CdTool("debug_thread_list", ToolDomain.Debug, ToolRisk.ReadOnly,
-    "List EE threads with status, PC, SP, priority, entry. Risk: read-only.")]
+    "List EE threads with status, PC, SP, priority, entry. Requires the emulator PAUSED " +
+    "(hit a breakpoint or pause first) — empty on a running game. Risk: read-only.")]
 public sealed class DebugThreadListTool(IEmulatorBridge bridge)
 {
     [ToolEntryPoint]

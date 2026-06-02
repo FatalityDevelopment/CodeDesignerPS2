@@ -11,8 +11,6 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.Ps2.Common", "
 EndProject
 Project("{54A90642-561A-4BB1-A94E-469ADEE60C69}") = "codedesigner", "vscode\codedesigner\codedesigner.esproj", "{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.Ps2.McpServer", "CodeDesigner.Ps2.McpServer\CodeDesigner.Ps2.McpServer.csproj", "{9ED8A8E9-CABC-426B-B334-3182D2DED25C}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.Ps2.Recompiler", "CodeDesigner.Ps2.Recompiler\CodeDesigner.Ps2.Recompiler.csproj", "{B1C2D3E4-F5A6-7890-BCDE-F01234567891}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.Ps2.EmulatorCore", "CodeDesigner.Ps2.EmulatorCore\CodeDesigner.Ps2.EmulatorCore.csproj", "{D3E4F5A6-B7C8-9012-DEF0-123456789013}"
@@ -52,8 +50,6 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.AI.Abstractions", "CodeDesigner.AI.Abstractions\CodeDesigner.AI.Abstractions.csproj", "{77A8DB3E-026E-444D-B3E0-ACE16D98C3EC}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.AI.Tests", "CodeDesigner.AI.Tests\CodeDesigner.AI.Tests.csproj", "{EB091026-089C-44DC-AE93-63F64F16D808}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.Ps2.McpInfra", "CodeDesigner.Ps2.McpInfra\CodeDesigner.Ps2.McpInfra.csproj", "{2E8A3F5A-12F2-4691-A5C1-1D89D496E9F5}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -109,18 +105,6 @@ Global
 		{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}.Release|Any CPU.Build.0 = Release|Any CPU
 		{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}.Release|x64.ActiveCfg = Release|x64
 		{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}.Release|x86.ActiveCfg = Release|x86
-		{9ED8A8E9-CABC-426B-B334-3182D2DED25C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{9ED8A8E9-CABC-426B-B334-3182D2DED25C}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{9ED8A8E9-CABC-426B-B334-3182D2DED25C}.Debug|x64.ActiveCfg = Debug|Any CPU
-		{9ED8A8E9-CABC-426B-B334-3182D2DED25C}.Debug|x64.Build.0 = Debug|Any CPU
-		{9ED8A8E9-CABC-426B-B334-3182D2DED25C}.Debug|x86.ActiveCfg = Debug|Any CPU
-		{9ED8A8E9-CABC-426B-B334-3182D2DED25C}.Debug|x86.Build.0 = Debug|Any CPU
-		{9ED8A8E9-CABC-426B-B334-3182D2DED25C}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{9ED8A8E9-CABC-426B-B334-3182D2DED25C}.Release|Any CPU.Build.0 = Release|Any CPU
-		{9ED8A8E9-CABC-426B-B334-3182D2DED25C}.Release|x64.ActiveCfg = Release|Any CPU
-		{9ED8A8E9-CABC-426B-B334-3182D2DED25C}.Release|x64.Build.0 = Release|Any CPU
-		{9ED8A8E9-CABC-426B-B334-3182D2DED25C}.Release|x86.ActiveCfg = Release|Any CPU
-		{9ED8A8E9-CABC-426B-B334-3182D2DED25C}.Release|x86.Build.0 = Release|Any CPU
 		{B1C2D3E4-F5A6-7890-BCDE-F01234567891}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{B1C2D3E4-F5A6-7890-BCDE-F01234567891}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{B1C2D3E4-F5A6-7890-BCDE-F01234567891}.Debug|x64.ActiveCfg = Debug|Any CPU
@@ -355,18 +339,6 @@ Global
 		{EB091026-089C-44DC-AE93-63F64F16D808}.Release|x64.Build.0 = Release|Any CPU
 		{EB091026-089C-44DC-AE93-63F64F16D808}.Release|x86.ActiveCfg = Release|Any CPU
 		{EB091026-089C-44DC-AE93-63F64F16D808}.Release|x86.Build.0 = Release|Any CPU
-		{2E8A3F5A-12F2-4691-A5C1-1D89D496E9F5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{2E8A3F5A-12F2-4691-A5C1-1D89D496E9F5}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{2E8A3F5A-12F2-4691-A5C1-1D89D496E9F5}.Debug|x64.ActiveCfg = Debug|Any CPU
-		{2E8A3F5A-12F2-4691-A5C1-1D89D496E9F5}.Debug|x64.Build.0 = Debug|Any CPU
-		{2E8A3F5A-12F2-4691-A5C1-1D89D496E9F5}.Debug|x86.ActiveCfg = Debug|Any CPU
-		{2E8A3F5A-12F2-4691-A5C1-1D89D496E9F5}.Debug|x86.Build.0 = Debug|Any CPU
-		{2E8A3F5A-12F2-4691-A5C1-1D89D496E9F5}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{2E8A3F5A-12F2-4691-A5C1-1D89D496E9F5}.Release|Any CPU.Build.0 = Release|Any CPU
-		{2E8A3F5A-12F2-4691-A5C1-1D89D496E9F5}.Release|x64.ActiveCfg = Release|Any CPU
-		{2E8A3F5A-12F2-4691-A5C1-1D89D496E9F5}.Release|x64.Build.0 = Release|Any CPU
-		{2E8A3F5A-12F2-4691-A5C1-1D89D496E9F5}.Release|x86.ActiveCfg = Release|Any CPU
-		{2E8A3F5A-12F2-4691-A5C1-1D89D496E9F5}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

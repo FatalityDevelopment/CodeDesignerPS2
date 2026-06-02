@@ -4,12 +4,11 @@ using CodeDesigner.Ps2.Database;
 using CodeDesigner.Ps2.Database.Entities;
 using Microsoft.EntityFrameworkCore;
 
-namespace CodeDesigner.Ps2.McpServer;
+namespace CodeDesigner.AI.Infra;
 
 /// <summary>
 /// Database-backed service for MCP agent data: persistent memories (progress reports),
-/// agent configuration, and settings.  Replaces the flat Markdown files previously
-/// managed by <see cref="McpMemoryService"/>.
+/// agent configuration, and settings.  Backed by SQL Server via EF Core.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -241,9 +240,9 @@ public sealed class McpDatabaseService
     // ── McpOrchestration ──────────────────────────────────────────────────────
 
     /// <summary>
-    /// Returns all <see cref="Database.Entities.McpOrchestration"/> records ordered by name.
+    /// Returns all <see cref="CodeDesigner.Ps2.Database.Entities.McpOrchestration"/> records ordered by name.
     /// </summary>
-    public async Task<IReadOnlyList<Database.Entities.McpOrchestration>> GetAllOrchestrationsAsync(CancellationToken ct = default)
+    public async Task<IReadOnlyList<CodeDesigner.Ps2.Database.Entities.McpOrchestration>> GetAllOrchestrationsAsync(CancellationToken ct = default)
     {
         await using var db = new CodeDesignerDbContext(_dbOptions);
         return await db.McpOrchestrations
