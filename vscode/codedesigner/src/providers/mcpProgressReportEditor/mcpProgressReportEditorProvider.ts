@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { SocketClient } from '../../socketClient';
 import { getOutputChannel } from '../../extension';
+import { applyCodeDesignerPanelIcon } from '../../utils/webviewPanel';
 
 /**
  * Opens a VS Code WebView panel for editing a single progress report entry.
@@ -10,7 +11,7 @@ import { getOutputChannel } from '../../extension';
 export class McpProgressReportEditorProvider {
     private readonly _panels = new Map<number, vscode.WebviewPanel>();
 
-    constructor(private readonly socketClient: SocketClient) {}
+    constructor(private readonly socketClient: SocketClient, private readonly extensionUri: vscode.Uri) {}
 
     /**
      * Opens (or re-focuses) the editor panel for the given progress report entry.
@@ -29,6 +30,7 @@ export class McpProgressReportEditorProvider {
             { enableScripts: true }
         );
 
+        applyCodeDesignerPanelIcon(panel, this.extensionUri);
         this._panels.set(id, panel);
 
         panel.onDidDispose(() => {

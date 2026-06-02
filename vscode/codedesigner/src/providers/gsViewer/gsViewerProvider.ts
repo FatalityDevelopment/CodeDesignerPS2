@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as net from 'net';
 import { getOutputChannel } from '../../extension';
 import { getNonce } from '../../utils/nonce';
+import { applyCodeDesignerPanelIcon } from '../../utils/webviewPanel';
 
 /**
  * GS framebuffer viewer.
@@ -64,7 +65,7 @@ export class GsViewerProvider {
 
         this._panel = vscode.window.createWebviewPanel(
             GsViewerProvider.viewType,
-            'PCSX2 GS Frame',
+            'GS Stream Viewer',
             vscode.ViewColumn.Active,
             {
                 enableScripts: true,
@@ -72,6 +73,7 @@ export class GsViewerProvider {
                 localResourceRoots: [],
             },
         );
+        applyCodeDesignerPanelIcon(this._panel, this._extensionUri);
 
         this._panel.webview.html = this._buildHtml(this._panel.webview);
 
@@ -233,69 +235,40 @@ export class GsViewerProvider {
 <head>
     <meta charset="UTF-8" />
     <meta http-equiv="Content-Security-Policy" content="${csp}" />
-    <title>PCSX2 GS Frame</title>
+    <title>GS Stream Viewer</title>
     <style>
-        :root { color-scheme: dark; }
-        html, body { margin: 0; padding: 0; height: 100%; background: #0a0a0a; color: #ddd;
-                     font-family: var(--vscode-font-family, sans-serif); font-size: 12px; }
-        body { display: flex; flex-direction: column; }
-        #status {
-            padding: 4px 8px; border-bottom: 1px solid #2a2a2a;
-            display: flex; gap: 16px; align-items: center;
-            background: var(--vscode-titleBar-activeBackground, #1a1a1a);
-        }
-        #status .dot { width: 10px; height: 10px; border-radius: 50%; background: #555; }
-        #status .dot.live { background: #4caf50; }       /* green: connected + receiving */
-        #status .dot.idle { background: #f9a825; }       /* yellow: connected, no recent frames */
-        #status .dot.dead { background: #d32f2f; }       /* red: disconnected */
-        #status button {
-            background: var(--vscode-button-background, #303030);
-            color: var(--vscode-button-foreground, #ddd);
-            border: 1px solid var(--vscode-button-border, transparent);
-            padding: 2px 8px; cursor: pointer; font: inherit;
-        }
-        #status button:hover { background: var(--vscode-button-hoverBackground, #404040); }
-        #status .actions { display: flex; gap: 6px; }
-        #stage {
-            position: relative;
-            flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center;
-            overflow: hidden;
-        }
-        canvas { max-width: 100%; max-height: 100%; image-rendering: pixelated; background: #000; }
-        #overlay {
-            position: absolute; inset: 0;
-            display: flex; align-items: center; justify-content: center;
-            color: #ddd; pointer-events: none;
-            font-family: var(--vscode-font-family, sans-serif);
-            text-align: center; padding: 16px;
-        }
-        #overlay .box {
-            background: rgba(20, 20, 20, 0.85);
-            padding: 14px 18px;
-            border-radius: 6px;
-            border: 1px solid #2a2a2a;
-            max-width: 420px;
-            line-height: 1.4;
-        }
-        #overlay .hint { color: #888; font-size: 11px; margin-top: 6px; }
+        :root { color-scheme: dark; --bg:#181818; --panel:#1f1f1f; --panel-hi:#252526; --border:var(--vscode-panel-border,#313131); --text:var(--vscode-foreground,#d4d4d4); --muted:var(--vscode-descriptionForeground,#8f8f8f); --accent:#007acc; --live:#4ec94e; --idle:#cca700; --dead:#f48771; }
+        * { box-sizing: border-box; } html, body { margin:0; padding:0; height:100%; background:var(--bg); color:var(--text); font-family:var(--vscode-font-family,'Segoe UI',sans-serif); font-size:12px; }
+        body { display:flex; flex-direction:column; overflow:hidden; }
+        #toolbar { min-height:50px; padding:7px 12px; border-bottom:1px solid var(--border); display:flex; gap:14px; align-items:center; background:var(--panel-hi); }
+        .brand { display:flex; align-items:center; gap:9px; min-width:205px; } .brand-mark { width:28px; height:28px; display:grid; place-items:center; border-radius:6px; background:linear-gradient(145deg,#0e639c,#174b70); color:#fff; font-weight:800; font-size:10px; }
+        .brand-title { font-weight:650; letter-spacing:.01em; } .brand-subtitle { color:var(--muted); font-size:10px; margin-top:2px; }
+        #status { display:inline-flex; align-items:center; gap:7px; min-width:0; color:var(--muted); } .dot { width:8px; height:8px; border-radius:50%; flex:none; background:#555; }
+        .dot.live { background:var(--live); box-shadow:0 0 7px rgba(78,201,78,.65); } .dot.idle { background:var(--idle); box-shadow:0 0 7px rgba(204,167,0,.45); } .dot.dead { background:var(--dead); }
+        #text { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .actions { display:flex; gap:6px; margin-left:auto; }
+        button { display:inline-flex; align-items:center; gap:5px; background:#333; color:var(--text); border:1px solid #4a4a4a; border-radius:3px; padding:5px 9px; cursor:pointer; font:inherit; }
+        button:hover { background:#414141; border-color:#666; } button:active { background:#0e639c; } button.primary { background:#0e639c; border-color:#1177bb; color:#fff; } button.primary:hover { background:#1177bb; }
+        #stage { position:relative; flex:1; min-height:0; display:flex; align-items:center; justify-content:center; overflow:hidden; padding:20px; background-color:#101010; background-image:linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px); background-size:18px 18px; }
+        .frame-shell { position:relative; max-width:100%; max-height:100%; display:flex; border:1px solid #333; box-shadow:0 12px 35px rgba(0,0,0,.35); background:#000; }
+        canvas { max-width:100%; max-height:calc(100vh - 114px); image-rendering:pixelated; background:#000; } body.smooth canvas { image-rendering:auto; }
+        #resolution { position:absolute; right:8px; bottom:8px; padding:3px 6px; border-radius:3px; color:#ccc; background:rgba(0,0,0,.68); font-family:var(--vscode-editor-font-family,monospace); font-size:10px; }
+        #overlay { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--text); pointer-events:none; text-align:center; padding:18px; }
+        #overlay .box { max-width:500px; padding:18px 20px; border-radius:7px; border:1px solid #3a3a3a; background:rgba(30,30,30,.94); box-shadow:0 12px 35px rgba(0,0,0,.25); line-height:1.45; } #overlay .hint { color:var(--muted); font-size:11px; margin-top:7px; }
+        #footer { min-height:25px; display:flex; align-items:center; gap:16px; padding:0 10px; background:var(--accent); color:#fff; font-size:11px; } #meta { margin-left:auto; font-family:var(--vscode-editor-font-family,monospace); white-space:nowrap; }
+        @media (max-width:760px) { .brand{min-width:auto}.brand-subtitle{display:none}#text{display:none}button span{display:none}#toolbar{gap:9px} }
     </style>
 </head>
 <body>
-    <div id="status">
-        <span class="dot" id="dot"></span>
-        <span id="text">connecting…</span>
-        <span style="flex: 1"></span>
-        <span id="meta"></span>
-        <span class="actions">
-            <button id="screenshot" title="Save a screenshot in PCSX2">Screenshot</button>
-            <button id="controller" title="Open the virtual controller">Controller</button>
-            <button id="reconnect">Reconnect</button>
-        </span>
-    </div>
-    <div id="stage">
-        <canvas id="canvas" width="640" height="480"></canvas>
-        <div id="overlay"><div class="box" id="overlayBox">Waiting for connection to bridge…</div></div>
-    </div>
+    <header id="toolbar">
+        <div class="brand"><div class="brand-mark">GS</div><div><div class="brand-title">GS Stream Viewer</div><div class="brand-subtitle">Live PCSX2 framebuffer monitor</div></div></div>
+        <div id="status"><span class="dot" id="dot"></span><span id="text">connecting…</span></div>
+        <div class="actions">
+            <button id="smoothing" title="Toggle pixel smoothing"><span>Smoothing</span></button><button id="fullscreen" title="Toggle fullscreen stage"><span>Fullscreen</span></button>
+            <button id="screenshot" class="primary" title="Save a screenshot in PCSX2"><span>Screenshot</span></button><button id="controller" title="Open the virtual controller"><span>Controller</span></button><button id="reconnect" title="Reconnect to the GS bridge"><span>Reconnect</span></button>
+        </div>
+    </header>
+    <main id="stage"><div class="frame-shell"><canvas id="canvas" width="640" height="480"></canvas><div id="resolution">640 × 480</div></div><div id="overlay"><div class="box" id="overlayBox">Waiting for connection to bridge…</div></div></main>
+    <footer id="footer"><span>GS stream :8766</span><span>MJPEG decoder</span><span id="meta">waiting for frames</span></footer>
 
     <script nonce="${nonce}">
         const vscode = acquireVsCodeApi();
@@ -306,6 +279,7 @@ export class GsViewerProvider {
         const ctx = canvas.getContext('2d', { alpha: false });
         const overlay = document.getElementById('overlay');
         const overlayBox = document.getElementById('overlayBox');
+        const resolution = document.getElementById('resolution');
 
         // Bridge socket state, separate from frame-flow state below.
         let connected = false;
@@ -361,7 +335,8 @@ export class GsViewerProvider {
             const dims = lastWidth ? (lastWidth + 'x' + lastHeight) : '–';
             const ageStr = lastFrameAt ? ('  age: ' + (ageMs < 1000 ? Math.round(ageMs) + 'ms' : (ageMs / 1000).toFixed(1) + 's')) : '';
             const errStr = decodeErrors ? ('   decode errors: ' + decodeErrors) : '';
-            meta.textContent = dims + '   ~' + recentFps + ' fps   #' + framesShown + ageStr + errStr;
+            meta.textContent = dims + '   ~' + recentFps + ' fps   frame #' + framesShown + ageStr + errStr;
+            resolution.textContent = lastWidth ? (lastWidth + ' × ' + lastHeight) : 'waiting';
 
             // Overlay
             if (!connected) {
@@ -445,6 +420,9 @@ export class GsViewerProvider {
                 drawFrame(payload, msg.width, msg.height, msg.codec);
             }
         });
+
+        document.getElementById('smoothing').addEventListener('click', () => { document.body.classList.toggle('smooth'); });
+        document.getElementById('fullscreen').addEventListener('click', () => { if (document.fullscreenElement) document.exitFullscreen(); else document.getElementById('stage').requestFullscreen(); });
 
         document.getElementById('reconnect').addEventListener('click', () => {
             vscode.postMessage({ type: 'reconnect' });

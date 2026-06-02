@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { getOutputChannel } from '../../extension';
 import { SocketClient } from '../../socketClient';
 import { getNonce, getWebviewErrorHandlerScript } from '../../utils/nonce';
+import { applyCodeDesignerPanelIcon } from '../../utils/webviewPanel';
 
 /**
  * Provider for the PS2 Cheats editor standalone webview tab.
@@ -34,7 +35,7 @@ export class CheatsEditorProvider {
 
         const panel = vscode.window.createWebviewPanel(
             'codedesigner.cheatsEditor',
-            '🎮 PS2 Cheats Editor',
+            'PS2 Cheats Editor',
             vscode.ViewColumn.One,
             {
                 enableScripts:           true,
@@ -42,6 +43,7 @@ export class CheatsEditorProvider {
                 localResourceRoots:      [this.extensionUri],
             }
         );
+        applyCodeDesignerPanelIcon(panel, this.extensionUri);
         this._panel = panel;
         panel.onDidDispose(() => { this._panel = undefined; });
 

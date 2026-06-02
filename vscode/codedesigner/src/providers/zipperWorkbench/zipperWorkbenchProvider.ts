@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import { SocketClient, ZipperOperationResult } from '../../socketClient';
 import { getOutputChannel, getZdbChannel } from '../../extension';
 import { getNonce, getWebviewErrorHandlerScript } from '../../utils/nonce';
+import { applyCodeDesignerPanelIcon } from '../../utils/webviewPanel';
 
 export class ZipperWorkbenchProvider {
     public static readonly viewType = 'codedesigner.zipperWorkbench';
@@ -49,6 +50,7 @@ export class ZipperWorkbenchProvider {
             },
         );
 
+        applyCodeDesignerPanelIcon(panel, this._extensionUri);
         this._panel = panel;
         panel.onDidDispose(() => { this._panel = undefined; });
         panel.webview.onDidReceiveMessage(async msg => {

@@ -57,7 +57,7 @@
       },
       {
         "command": "codedesigner.openGsFrameViewer",
-        "title": "CodeDesigner: Open GS Frame Viewer (Live PCSX2 Display)"
+        "title": "CodeDesigner: Open GS Stream Viewer (Live PCSX2 Display)"
       },
       {
         "command": "codedesigner.openAgentActivity",

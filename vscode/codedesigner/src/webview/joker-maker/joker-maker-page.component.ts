@@ -132,10 +132,9 @@ type IncomingMsg = InitMsg | ConnectionMsg | LivePadStateMsg | LivePollStoppedMs
 <div class="jm-host">
 
   <div class="jm-titlebar">
-    <span class="jm-title">Joker Maker - virtual PS2 controller</span>
-    <span class="jm-connection" [class.jm-connection-on]="connected()">
-      {{ connected() ? 'connected' : 'offline' }}
-    </span>
+    <div class="jm-mark">JM</div>
+    <div><div class="jm-title">Joker Maker</div><div class="jm-subtitle">Virtual PS2 controller and active-low cheat mask builder</div></div>
+    <span class="jm-connection" [class.jm-connection-on]="connected()">{{ connected() ? 'connected' : 'offline' }}</span>
   </div>
 
   <div class="jm-main">
@@ -153,6 +152,12 @@ type IncomingMsg = InitMsg | ConnectionMsg | LivePadStateMsg | LivePollStoppedMs
     </div>
 
     <aside class="jm-side">
+
+      <div class="jm-metrics">
+        <div class="jm-metric"><div class="jm-metric-label">Joker code</div><div class="jm-metric-value">{{ hexCode() }}</div></div>
+        <div class="jm-metric"><div class="jm-metric-label">Raw mask</div><div class="jm-metric-value">{{ buttonsRaw() }}</div></div>
+        <div class="jm-metric"><div class="jm-metric-label">Pressed</div><div class="jm-metric-value">{{ pressed().length }} buttons</div></div>
+      </div>
 
       <div class="jm-toggles">
         <label class="jm-toggle" title="Click multiple buttons to build a combined code.">
@@ -195,7 +200,8 @@ type IncomingMsg = InitMsg | ConnectionMsg | LivePadStateMsg | LivePollStoppedMs
       </div>
 
       <div class="jm-actions">
-        <button (click)="resetAll()">Reset</button>
+        <button (click)="resetAll()">Reset input</button>
+        <button class="primary" (click)="copyCode()">{{ copyCodeLabel() }}</button>
         <button (click)="copyJson()">{{ copyLabel() }}</button>
       </div>
 
@@ -232,6 +238,7 @@ export class JokerMakerPageComponent implements AfterViewInit, OnDestroy {
     /** Live pad-button mask (0xFFFF = nothing pressed) - only valid while liveActive. */
     readonly livePadButtons = signal(0xFFFF);
     readonly copyLabel     = signal('Copy JSON');
+    readonly copyCodeLabel = signal('Copy code');
 
     /** Hex value computed from currently-pressed buttons (excluding 'ps'). */
     readonly hexCode = computed(() => {
@@ -398,6 +405,16 @@ export class JokerMakerPageComponent implements AfterViewInit, OnDestroy {
         this.rightStick.set({ x: 0, y: 0 });
         this.logEntries.set([]);
         this.activePointers.clear();
+    }
+
+    copyCode(): void {
+        navigator.clipboard.writeText(this.hexCode()).then(
+            () => {
+                this.copyCodeLabel.set('Copied!');
+                setTimeout(() => this.copyCodeLabel.set('Copy code'), 1500);
+            },
+            () => this.copyCodeLabel.set('Copy code'),
+        );
     }
 
     copyJson(): void {
