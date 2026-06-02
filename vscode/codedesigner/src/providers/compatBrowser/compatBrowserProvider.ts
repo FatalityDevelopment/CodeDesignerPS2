@@ -5,6 +5,7 @@ import { getOutputChannel } from '../../extension';
 import { SocketClient } from '../../socketClient';
 import { getNonce, getWebviewErrorHandlerScript } from '../../utils/nonce';
 import { resolveVimmDownload, downloadVimmRom } from './vimm';
+import { applyCodeDesignerPanelIcon } from '../../utils/webviewPanel';
 
 /**
  * Provider for the PS2 Game Compatibility standalone webview tab.
@@ -38,6 +39,7 @@ export class CompatBrowserProvider {
                 localResourceRoots:      [this.extensionUri],
             }
         );
+        applyCodeDesignerPanelIcon(panel, this.extensionUri);
         this._panel = panel;
         panel.onDidDispose(() => { this._panel = undefined; });
 

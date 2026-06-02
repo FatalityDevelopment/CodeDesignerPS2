@@ -4,6 +4,7 @@ import * as os from 'os';
 import { SocketClient, McSaveInfo } from '../../socketClient';
 import { getOutputChannel } from '../../extension';
 import { getNonce, getWebviewErrorHandlerScript } from '../../utils/nonce';
+import { applyCodeDesignerPanelIcon } from '../../utils/webviewPanel';
 
 /**
  * Standalone PS2 memory-card browser webview.
@@ -39,6 +40,7 @@ export class MemoryCardBrowserProvider {
             },
         );
 
+        applyCodeDesignerPanelIcon(panel, this.extensionUri);
         this._panel = panel;
         panel.onDidDispose(() => { this._panel = undefined; });
         panel.webview.onDidReceiveMessage(async msg => {

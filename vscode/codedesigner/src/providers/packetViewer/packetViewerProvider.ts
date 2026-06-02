@@ -5,6 +5,7 @@ import * as os from 'os';
 import { getOutputChannel } from '../../extension';
 import { SocketClient } from '../../socketClient';
 import { getNonce, getWebviewErrorHandlerScript } from '../../utils/nonce';
+import { applyCodeDesignerPanelIcon } from '../../utils/webviewPanel';
 
 // ── Multiplayer server config ─────────────────────────────────────────────────
 
@@ -378,7 +379,7 @@ export class PacketViewerProvider {
 
         const panel = vscode.window.createWebviewPanel(
             'codedesigner.packetViewer',
-            '📡 Packet Viewer',
+            'Packet Viewer',
             vscode.ViewColumn.One,
             {
                 enableScripts:           true,
@@ -386,6 +387,7 @@ export class PacketViewerProvider {
                 localResourceRoots:      [this.extensionUri],
             }
         );
+        applyCodeDesignerPanelIcon(panel, this.extensionUri);
         this._panel = panel;
 
         panel.onDidDispose(() => { this._panel = undefined; this._capturing = false; });
