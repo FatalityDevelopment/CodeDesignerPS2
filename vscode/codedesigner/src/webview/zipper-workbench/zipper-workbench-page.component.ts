@@ -9,6 +9,7 @@ import {
   computed,
   effect,
   signal,
+  untracked,
 } from '@angular/core';
 import { IconComponent } from '../shared/icon.component';
 import { getVsCodeApi } from '../shared/vscode-api';
@@ -592,6 +593,25 @@ interface RdrTreeNode {
                   @if (rdr(); as r) {
                     @if (r.fallback) {
                       @if (rdrFallbackLists(); as f) {
+                        <!-- Texture thumbnail grid: shows decoded .tif images
+                             for every textureRef found in this screen's string
+                             pool when companion textures are already loaded.
+                             Open the sibling _TXR.ZED first (or load via the
+                             "Load Textures" button) to populate this grid. -->
+                        @if (rdrTextureThumbnails().length > 0) {
+                          <div class="zip-rdr-fallback-section">
+                            <h4>Matched textures ({{ rdrTextureThumbnails().length }})</h4>
+                            <div class="zip-rdr-tex-grid">
+                              @for (t of rdrTextureThumbnails(); track t.name) {
+                                <div class="zip-rdr-tex-card">
+                                  <div class="zip-rdr-tex-img"><img [src]="t.dataUrl" [alt]="t.name" loading="lazy" /></div>
+                                  <div class="zip-rdr-tex-name">{{ t.name }}</div>
+                                  <div class="zip-rdr-tex-meta">{{ t.width }}×{{ t.height }}</div>
+                                </div>
+                              }
+                            </div>
+                          </div>
+                        }
                         <div class="zip-rdr-fallback-section">
                           <h4>Texture refs ({{ f.textureRefs.length }})</h4>
                           <ul>
@@ -656,6 +676,9 @@ interface RdrTreeNode {
                     }
                     <div class="zip-dump-buttons">
                       <button class="zip-btn" (click)="dumpRdrReport()">Dump RDR report</button>
+                      @if (r.fallback && rdrTextureThumbnails().length === 0 && companionTextures() === null) {
+                        <button class="zip-btn" (click)="loadRdrCompanionTextures()" title="Load the sibling _TXR.ZED / _PAL.ZED so texture thumbnails appear above the ref list.">Load Textures</button>
+                      }
                     </div>
                   } @else {
                     <div><span>Status</span><strong>{{ previewMessage() || 'Loading...' }}</strong></div>
@@ -712,6 +735,8 @@ interface RdrTreeNode {
                 </div>
               </div>
             }
+
+
 
             @if (pendingArchiveEntry(); as pending) {
               <div class="zip-preview">
@@ -1096,6 +1121,30 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
   // AIMAPS.MPS preview state.
   readonly mps = signal<MpsResult | null>(null);
   private readonly packageMpsResults = signal<MpsResult[]>([]);
+
+  // Texture thumbnails for the RDR fallback view. Resolves each .tif name
+  // from the screen's string-scan ref list against the currently loaded
+  // companion textures. Only populates when companion textures are available
+  // (open the sibling _TXR.ZED first, or use "Load Textures" in the RDR pane).
+  // Capped at 24 items so decoding never blocks the UI thread.
+  readonly rdrTextureThumbnails = computed<Array<{ name: string; dataUrl: string; width: number; height: number }>>(() => {
+    const lists = this.rdrFallbackLists();
+    if (!lists || lists.textureRefs.length === 0) { return []; }
+    const sources = this.companionTextures();
+    if (!sources || sources.size === 0) { return []; }
+    const palettes = this.palettes();
+    const out: Array<{ name: string; dataUrl: string; width: number; height: number }> = [];
+    for (const ref of lists.textureRefs.slice(0, 24)) {
+      const key = ref.toLowerCase();
+      const bytes = sources.get(key);
+      if (!bytes) { continue; }
+      try {
+        const tex = parseTexture(bytes, palettes, key);
+        out.push({ name: ref, dataUrl: textureToDataUrl(tex), width: tex.header.width, height: tex.header.height });
+      } catch { /* skip undecodable */ }
+    }
+    return out;
+  });
   readonly animationClip = signal<RdrAnimationClip | null>(null);
   readonly animationPlaying = signal(true);
   readonly animationFrame = signal(0);
@@ -1179,6 +1228,13 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
   // Aggregated thumbnail list for the sidebar texture grid. Built from
   // companionTextures (TXR sibling) plus the current archive's own TXR
   // entries when applicable. Cached to avoid re-decoding on every render.
+  //
+  // The decode step is bounded to keep the UI responsive when the user
+  // loads a large bundle (e.g. SOCOM UI bundle has 200+ textures × ~2
+  // namespaced aliases = 400+ map entries). Skipping namespaced duplicates
+  // alone halves the work; the SIDEBAR_TEXTURE_LIMIT then caps the
+  // synchronous slice at 80 — the rest still go through the regular
+  // texture-tab flow when needed.
   readonly sidebarTextures = computed<Array<{ name: string; dataUrl: string }>>(() => {
     const sources = this.companionTextures();
     if (!sources || sources.size === 0) { return []; }
@@ -1191,6 +1247,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
         const tex = parseTexture(bytes, palettes, name);
         out.push({ name, dataUrl: textureToDataUrl(tex) });
       } catch { /* skip undecodable */ }
+      if (out.length >= SIDEBAR_TEXTURE_LIMIT) { break; }
     }
     out.sort((a, b) => a.name.localeCompare(b.name));
     return out;
@@ -1330,6 +1387,10 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
         break;
       case 'zipperError':
         this.setStatus((data['message'] as string) ?? 'Zipper operation failed', true, false);
+        break;
+      case 'zdbPackageLoading':
+        this.packageLoading.set(true);
+        this.packageMessage.set((data['message'] as string) ?? 'Loading package...');
         break;
       case 'zipperLoaded':
         this.result.set((data['result'] as ZipperInspectResult) ?? null);
@@ -1552,10 +1613,15 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
 
   constructor() {
     effect(() => {
-      // Auto-load when the selected entry changes.
+      // Track ONLY selectedEntry. Everything else runs through untracked()
+      // to prevent Angular from treating signal writes inside
+      // beginPreviewForEntry (e.g. previewMode.set('model')) as deps of
+      // this effect and causing an infinite re-run loop.
       const entry = this.selectedEntry();
-      if (!entry) { this.resetPreview(); return; }
-      this.beginPreviewForEntry(entry.index, entry.name);
+      untracked(() => {
+        if (!entry) { this.resetPreview(); return; }
+        this.beginPreviewForEntry(entry.index, entry.name);
+      });
     });
   }
 
@@ -3007,6 +3073,22 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
   }
 
   private applyModelToRenderer(): void {
+    try {
+      this.applyModelToRendererUnsafe();
+    } catch (err) {
+      // Surface renderer crashes instead of letting them tear down the
+      // entire webview. Users were reporting "the whole panel locks up
+      // and nothing displays" when opening UI_MDL.ZED entries; a thrown
+      // exception inside setModel will at minimum show this message and
+      // keep the entries list responsive.
+      const msg = err instanceof Error ? err.message : String(err);
+      this.previewMessage.set('Model render failed: ' + msg);
+      this.log('[model] render error: ' + msg, true);
+      this.modelRenderer?.setModel(null);
+    }
+  }
+
+  private applyModelToRendererUnsafe(): void {
     this.ensureModelRenderer();
     const mdl = this.model();
     if (!this.modelRenderer || !mdl) { return; }
@@ -3371,11 +3453,11 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     const filePath = this.result()?.path;
     if (!filePath || this.palettesRequested) { return; }
     const name = filePath.split(/[\\/]/).pop() ?? '';
-    if (!/\.ZED$/i.test(name)) { return; }
+    // Fire for both .ZED siblings and for reader .ZAR archives (READERC/READERX).
+    // The provider's _findCompanionFiles handles both cases and returns the
+    // appropriate UI_TXR / UI_PAL companions so RDR screens show thumbnails.
+    if (!/\.(ZED|ZAR)$/i.test(name)) { return; }
     this.palettesRequested = true;
-    // Single combined call: provider returns _TXR / _PAL / _GEO companions in
-    // one round trip so the preview can wire textures and chunk names without
-    // chasing the file system multiple times.
     this.vscode.postMessage({ type: 'readCompanionFiles', path: filePath });
   }
 
@@ -3907,6 +3989,16 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       fileRefs: grab('fileRefs'),
       modelRefs: grab('modelRefs'),
     };
+  }
+
+  // Loads companion textures for the currently open .rdr entry. When the user
+  // opens READERC.ZAR or READERX.ZAR, this finds the sibling _TXR / _PAL files
+  // and sends them to the provider, which responds via the existing
+  // `companionFiles` message. The RDR texture thumbnail grid then populates.
+  loadRdrCompanionTextures(): void {
+    const filePath = this.result()?.path;
+    if (!filePath) { return; }
+    this.vscode.postMessage({ type: 'readCompanionFiles', path: filePath });
   }
 
   // ------------------------------------------------------------------
@@ -5087,14 +5179,41 @@ function describeMagic(bytes: Uint8Array): string {
     .join(' ');
 }
 
+// Reused canvas so we don't allocate a new <canvas> + 2D context for every
+// texture decode. Hundreds of decodes happen during a single sidebar /
+// gallery refresh; per-call element allocation was a measurable chunk of
+// the lockup the user reported when opening UI bundles.
+let __sharedTexCanvas: HTMLCanvasElement | null = null;
+let __sharedTexCtx: CanvasRenderingContext2D | null = null;
 function textureToDataUrl(tex: ZedTexture): string {
-  const canvas = document.createElement('canvas');
+  if (!__sharedTexCanvas) {
+    __sharedTexCanvas = document.createElement('canvas');
+    __sharedTexCtx = __sharedTexCanvas.getContext('2d', { willReadFrequently: false });
+  }
+  const canvas = __sharedTexCanvas;
+  const ctx = __sharedTexCtx;
+  if (!ctx) { return ''; }
   canvas.width = tex.header.width;
   canvas.height = tex.header.height;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) { return ''; }
   const image = ctx.createImageData(tex.header.width, tex.header.height);
   image.data.set(tex.rgba);
   ctx.putImageData(image, 0, 0);
   return canvas.toDataURL('image/png');
 }
+
+function uniqueLower(values: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const v of values) {
+    const key = v.toLowerCase();
+    if (seen.has(key)) { continue; }
+    seen.add(key);
+    out.push(v);
+  }
+  return out;
+}
+
+// Cap on the sidebar texture quick-grid. The existing weapon/map TXR
+// companions have a few dozen textures; beyond 64 we skip the grid so
+// large UI archives don't decode hundreds of PNGs synchronously.
+const SIDEBAR_TEXTURE_LIMIT = 64;

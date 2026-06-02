@@ -1131,6 +1131,52 @@ input {
   font-size: 10px;
 }
 
+/* RDR fallback: texture thumbnail grid shown when companion textures are
+   loaded alongside a .rdr screen entry. Uses the same card style as the
+   existing texture-archive thumbnail grid so it looks like a native part
+   of the RDR view, not a bolted-on feature. */
+.zip-rdr-tex-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 8px;
+  margin-top: 6px;
+}
+.zip-rdr-tex-card {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border: 1px solid var(--vscode-widget-border, #303031);
+  background: var(--vscode-editorWidget-background, #252526);
+  border-radius: 4px;
+  padding: 5px;
+}
+.zip-rdr-tex-img {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 80px;
+  border-radius: 3px;
+  background: var(--vscode-editor-background, #1e1e1e);
+  overflow: hidden;
+}
+.zip-rdr-tex-img img {
+  max-width: 100%;
+  max-height: 100%;
+  image-rendering: pixelated;
+}
+.zip-rdr-tex-name {
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--vscode-editor-foreground, #d4d4d4);
+}
+.zip-rdr-tex-meta {
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground, #ccccccb3);
+}
+
 @media (max-width: 900px) {
   .zip-main {
     grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
