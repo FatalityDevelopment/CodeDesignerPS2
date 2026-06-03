@@ -12,6 +12,7 @@ import {
   untracked,
 } from '@angular/core';
 import { IconComponent } from '../shared/icon.component';
+import { PageHeaderComponent } from '../shared/page-header.component';
 import { getVsCodeApi } from '../shared/vscode-api';
 import {
   aliasPalettesForTextureEntries,
@@ -179,10 +180,11 @@ interface RdrTreeNode {
 @Component({
   selector: 'app-zipper-workbench-page',
   standalone: true,
-  imports: [IconComponent],
+  imports: [IconComponent, PageHeaderComponent],
   encapsulation: ViewEncapsulation.None,
   template: `
     <div class="zip-shell">
+      <app-page-header icon="database" title="Zipper" subtitle="Archive and asset workbench" />
       <div class="zip-toolbar">
         <div class="zip-title">
           <app-icon name="database" [size]="16" />

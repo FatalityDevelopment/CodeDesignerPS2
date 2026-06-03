@@ -4,7 +4,7 @@ html {
 }
 
 body {
-    padding: 10px;
+    padding: 0;
     font-family: var(--vscode-editor-font-family);
     color: var(--vscode-editor-foreground);
     background: var(--vscode-editor-background);

@@ -24,7 +24,7 @@ input {
 
 .mcb-shell {
   display: grid;
-  grid-template-rows: auto auto 1fr;
+  grid-template-rows: auto auto auto 1fr;
   width: 100vw;
   height: 100vh;
   min-width: 0;

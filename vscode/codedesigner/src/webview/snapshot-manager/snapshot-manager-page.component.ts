@@ -8,6 +8,8 @@ import {
   inject,
 } from '@angular/core';
 import { getVsCodeApi } from '../shared/vscode-api';
+import { IconComponent } from '../shared/icon.component';
+import { PageHeaderComponent } from '../shared/page-header.component';
 import { PaginatedTableComponent, ColumnDef, ConfirmDialogComponent } from '../shared/components/index';
 import { SnapshotEntry } from '../disasm-panel/types';
 import '../shared/styles/shared.css';
@@ -16,12 +18,13 @@ import './snapshot-manager-page.css';
 @Component({
   selector: 'app-snapshot-manager-page',
   standalone: true,
-  imports: [PaginatedTableComponent, ConfirmDialogComponent],
+  imports: [PaginatedTableComponent, ConfirmDialogComponent, IconComponent, PageHeaderComponent],
   encapsulation: ViewEncapsulation.None,
   template: `
 <div class="sm-outer">
+  <app-page-header icon="camera" title="Snapshots" subtitle="Snapshot manager" />
   <div class="sm-header">
-    <span class="sm-title">Snapshot Manager</span>
+    <span class="sm-title"><app-icon name="camera" [size]="14" /> Snapshot Manager</span>
     <button class="lm-tool-btn sm-refresh-btn" title="Refresh" (click)="onRefresh()">&#x21BB;</button>
   </div>
 

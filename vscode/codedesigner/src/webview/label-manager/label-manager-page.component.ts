@@ -7,6 +7,7 @@ import {
   inject,
 } from '@angular/core';
 import { getVsCodeApi } from '../shared/vscode-api';
+import { PageHeaderComponent } from '../shared/page-header.component';
 import {
   LabelManagerOverlayComponent,
   LabelManagerAction,
@@ -29,9 +30,9 @@ import '../disasm-editor/disasm-editor.css';
 @Component({
   selector: 'app-label-manager-page',
   standalone: true,
-  imports: [LabelManagerOverlayComponent],
+  imports: [LabelManagerOverlayComponent, PageHeaderComponent],
   encapsulation: ViewEncapsulation.None,
-  template: `<app-label-manager-overlay #lmComp (action$)="onAction($event)" (close$)="onClose()" />`,
+  template: `<div class="lm-page-shell"><app-page-header icon="tag" title="Labels" subtitle="Label manager" /><app-label-manager-overlay #lmComp (action$)="onAction($event)" (close$)="onClose()" /></div>`,
 })
 export class LabelManagerPageComponent implements AfterViewInit {
   private readonly lmRef = viewChild.required<LabelManagerOverlayComponent>('lmComp');
