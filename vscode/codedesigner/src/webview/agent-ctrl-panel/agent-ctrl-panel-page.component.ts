@@ -51,6 +51,7 @@ const ORCH_FIELDS: Field<OrchestrationProfile>[] = [
     icon="bot"
     title="AI"
     subtitle="Agent control panel"
+    accent="ai"
     [showMcp]="true"
     [mcpOnline]="mcpOnline()"
     (runMcp)="post('runMcpServer')" />

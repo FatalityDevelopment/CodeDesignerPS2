@@ -22,6 +22,11 @@ app-page-header {
   display: block;
   flex: 0 0 auto;
   min-width: 0;
+  box-sizing: border-box;
+}
+.cd-page-header,
+.cd-page-header * {
+  box-sizing: border-box;
 }
 .cd-page-header {
   display: flex;
@@ -48,8 +53,13 @@ app-page-header {
   display: grid;
   place-items: center;
   flex: 0 0 36px;
-  border: 1px solid #7a5500;
+  border: 1px solid #0e639c;
   border-radius: 7px;
+  background: linear-gradient(135deg, #0e639c, #174b70);
+  color: #fff;
+}
+.cd-page-header-ai .cd-page-mark {
+  border-color: #7a5500;
   background: linear-gradient(135deg, #4b3400, #251a00);
   color: #e8a030;
 }
@@ -149,7 +159,7 @@ app-page-header {
 }
   `],
   template: `
-<header class="cd-page-header">
+<header class="cd-page-header" [class.cd-page-header-ai]="accent() === 'ai'">
   <div class="cd-page-brand">
     <div class="cd-page-mark"><app-icon [name]="icon()" [size]="22" /></div>
     <div class="cd-page-copy">
@@ -179,6 +189,7 @@ export class PageHeaderComponent {
   readonly icon = input.required<string>();
   readonly title = input.required<string>();
   readonly subtitle = input('');
+  readonly accent = input<'blue' | 'ai'>('blue');
   readonly showMcp = input(false);
   readonly mcpOnline = input(false);
   readonly runMcp = output<void>();
