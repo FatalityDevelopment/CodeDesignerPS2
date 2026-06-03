@@ -168,6 +168,7 @@ app-page-header {
     </div>
   </div>
   <div class="cd-page-actions">
+    <ng-content select="[page-header-actions]"></ng-content>
     @if (showMcp()) {
       <div class="cd-mcp-status" [class.cd-mcp-online]="mcpOnline()" [title]="'CodeDesigner.AI server' + (mcpOnline() ? ' is running' : ' is not running')">
         <app-icon class="cd-mcp-ico" name="bot" [size]="14" />

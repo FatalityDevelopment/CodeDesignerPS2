@@ -132,14 +132,14 @@ type IncomingMsg = InitMsg | ConnectionMsg | LivePadStateMsg | LivePollStoppedMs
     encapsulation: ViewEncapsulation.None,
     template: `
 <div class="jm-host">
-  <app-page-header icon="gamepad2" title="Controller" subtitle="Virtual PS2 controller and active-low cheat mask builder" />
-
-  <div class="jm-titlebar">
-    <span class="jm-connection" [class.jm-connection-on]="connected()">{{ connected() ? 'connected' : 'offline' }}</span>
-    <button class="jm-panel-toggle" type="button" (click)="toggleSidePanel()" [attr.aria-expanded]="!sideCollapsed()" title="Toggle details panel">
-      {{ sideCollapsed() ? 'Show Details' : 'Hide Details' }}
-    </button>
-  </div>
+  <app-page-header icon="gamepad2" title="Controller" subtitle="Virtual PS2 controller and active-low cheat mask builder">
+    <div page-header-actions class="jm-header-actions">
+      <span class="jm-connection" [class.jm-connection-on]="connected()">{{ connected() ? 'connected' : 'offline' }}</span>
+      <button class="jm-panel-toggle" type="button" (click)="toggleSidePanel()" [attr.aria-expanded]="!sideCollapsed()" title="Toggle details panel">
+        {{ sideCollapsed() ? 'Show Details' : 'Hide Details' }}
+      </button>
+    </div>
+  </app-page-header>
 
   <div class="jm-main" [class.jm-main-collapsed]="sideCollapsed()">
 
