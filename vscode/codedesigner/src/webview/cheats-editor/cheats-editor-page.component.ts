@@ -9,6 +9,7 @@ import {
   ElementRef,
 } from '@angular/core';
 import { getVsCodeApi } from '../shared/vscode-api';
+import { PageHeaderComponent } from '../shared/page-header.component';
 import './cheats-editor-page.css';
 
 /** A game that owns cheat lists — mirrors CheatGameInfo on the C# side. */
@@ -59,9 +60,11 @@ const CODE_RE = /^[0-9A-Fa-f]+(\s+[0-9A-Fa-f]+)*$/;
 @Component({
   selector: 'app-cheats-editor-page',
   standalone: true,
+  imports: [PageHeaderComponent],
   encapsulation: ViewEncapsulation.None,
   template: `
     <div class="ce-shell">
+      <app-page-header icon="sparkles" title="Cheats" subtitle="Cheat code editor" />
       <!-- ══ Panel 1 — games & builds ══════════════════════════════════ -->
       <div class="ce-panel ce-panel-left">
         <div class="ce-panel-head">Cheats</div>

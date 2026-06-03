@@ -2400,7 +2400,9 @@ function hexDump(raw: Uint8Array, layers: DissectedLayer[] = [], selectedLayerId
     --cd-panel-shadow: 0 2px 8px rgba(0, 0, 0, 0.22);
     display: flex;
     flex-direction: column;
-    height: 100vh;
+    height: 100%;
+    flex: 1 1 auto;
+    min-height: 0;
     overflow: hidden;
     background: var(--cd-panel-bg);
     color: var(--vscode-editor-foreground, #d4d4d4);
