@@ -2,6 +2,7 @@ import { CommonModule } from '@angular/common';
 import { AfterViewInit, Component, NgZone, OnDestroy, ViewEncapsulation, computed, inject, signal } from '@angular/core';
 import { getVsCodeApi } from '../shared/vscode-api';
 import { IconComponent } from '../shared/icon.component';
+import { PageHeaderComponent } from '../shared/page-header.component';
 import './agent-ctrl-panel-page.css';
 
 type Tab = 'overview' | 'orchestration' | 'agents' | 'skills' | 'memories' | 'tools' | 'activity' | 'history';
@@ -46,10 +47,13 @@ const ORCH_FIELDS: Field<OrchestrationProfile>[] = [
   selector: 'app-agent-ctrl-panel-page', standalone: true, encapsulation: ViewEncapsulation.None,
   template: `
 <div class="aic-shell">
-  <header class="aic-header">
-    <div class="aic-brand"><div class="aic-brand-mark"><app-icon name="bot" [size]="22" /></div><div><h1>AI</h1><p>Agent control panel</p></div></div>
-    <div class="mcp-status" [class.mcp-online]="mcpOnline()" [title]="'CodeDesigner.AI server' + (mcpOnline() ? ' is running' : ' is not running')"><app-icon class="mcp-ico" name="bot" [size]="14" /><span class="mcp-label">MCP</span><span class="mcp-state"><span class="mcp-dot"></span>{{mcpOnline() ? 'Online' : 'Offline'}}</span>@if(!mcpOnline()){<button class="mcp-run-btn" (click)="post('runMcpServer')"><app-icon name="play" [size]="12" /><span>Run</span></button>}</div>
-  </header>
+  <app-page-header
+    icon="bot"
+    title="AI"
+    subtitle="Agent control panel"
+    [showMcp]="true"
+    [mcpOnline]="mcpOnline()"
+    (runMcp)="post('runMcpServer')" />
   <nav class="aic-tabs">
     @for (tab of tabs; track tab.id) {
       <button [class.active]="activeTab() === tab.id" (click)="openTab(tab.id)"><app-icon [name]="tab.icon" [size]="15" />{{tab.label}}</button>
@@ -96,7 +100,7 @@ const ORCH_FIELDS: Field<OrchestrationProfile>[] = [
 
 <ng-template #historyPanel><section class="aic-page"><div class="aic-page-title"><div><p class="aic-eyebrow">Conversation activity</p><h2>History</h2><p>Review recorded MCP conversation messages.</p></div><button class="aic-btn" (click)="loadHistory()">↻ Refresh history</button></div><input class="aic-search" [value]="historyFilter()" (input)="historyFilter.set($any($event.target).value)" placeholder="Filter messages…"><div class="aic-history">@for(msg of filteredHistory();track msg.id){<article><header><strong>{{msg.agentName || msg.role}}</strong><span>{{formatDate(msg.createdAt)}}</span></header><p>{{msg.content}}</p></article>}@empty{<div class="aic-blank compact"><h3>No history entries found</h3></div>}</div></section></ng-template>
   `,
-  imports: [CommonModule, IconComponent],
+  imports: [CommonModule, IconComponent, PageHeaderComponent],
 })
 export class AgentCtrlPanelPageComponent implements AfterViewInit, OnDestroy {
   private readonly mcpPollTimer: ReturnType<typeof setInterval>;

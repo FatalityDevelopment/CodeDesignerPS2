@@ -10,6 +10,7 @@ import {
   signal,
 } from '@angular/core';
 import { IconComponent } from '../shared/icon.component';
+import { PageHeaderComponent } from '../shared/page-header.component';
 import { getVsCodeApi } from '../shared/vscode-api';
 import {
   Ps2Icon,
@@ -60,10 +61,11 @@ interface IconSlot {
 @Component({
   selector: 'app-hdd-browser-page',
   standalone: true,
-  imports: [IconComponent],
+  imports: [IconComponent, PageHeaderComponent],
   encapsulation: ViewEncapsulation.None,
   template: `
     <div class="hdb-shell">
+      <app-page-header icon="harddrive" title="HDD" subtitle="PS2 hard drive image browser" />
       <div class="hdb-toolbar">
         <div class="hdb-title">
           <app-icon name="harddrive" [size]="16" />

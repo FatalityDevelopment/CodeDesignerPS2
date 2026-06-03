@@ -21,15 +21,19 @@ html, body {
 .ce-shell {
   display: grid;
   grid-template-columns: 270px 1fr 270px;
+  grid-template-rows: auto minmax(0, 1fr);
   height: 100vh;
   overflow: hidden;
 }
 
 /* ── Panels ───────────────────────────────────────────────────────────────── */
+.ce-shell > app-page-header { grid-column: 1 / -1; }
+
 .ce-panel {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  min-height: 0;
   border-right: 1px solid var(--vscode-editorGroup-border, #404040);
 }
 
