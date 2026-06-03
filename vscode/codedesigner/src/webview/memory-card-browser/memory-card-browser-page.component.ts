@@ -10,6 +10,7 @@ import {
   signal,
 } from '@angular/core';
 import { IconComponent } from '../shared/icon.component';
+import { PageHeaderComponent } from '../shared/page-header.component';
 import { getVsCodeApi } from '../shared/vscode-api';
 import {
   Ps2Icon,
@@ -49,10 +50,11 @@ interface IconSlot {
 @Component({
   selector: 'app-memory-card-browser-page',
   standalone: true,
-  imports: [IconComponent],
+  imports: [IconComponent, PageHeaderComponent],
   encapsulation: ViewEncapsulation.None,
   template: `
     <div class="mcb-shell">
+      <app-page-header icon="memorystick" title="Memory Card" subtitle="PS2 memory card browser" />
       <div class="mcb-toolbar">
         <div class="mcb-title">
           <app-icon name="memorystick" [size]="16" />
