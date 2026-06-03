@@ -8,6 +8,7 @@ import {
     OnDestroy,
 } from '@angular/core';
 import { getVsCodeApi } from '../shared/vscode-api';
+import { PageHeaderComponent } from '../shared/page-header.component';
 import {
     PacketViewerComponent,
     PacketViewerAction,
@@ -28,9 +29,9 @@ import './packet-viewer-page.css';
 @Component({
     selector: 'app-packet-viewer-page',
     standalone: true,
-    imports: [PacketViewerComponent],
+    imports: [PacketViewerComponent, PageHeaderComponent],
     encapsulation: ViewEncapsulation.None,
-    template: `<app-packet-viewer #pvComp />`,
+    template: `<div class="pv-page-shell"><app-page-header icon="radiotower" title="Packets" subtitle="Network packet viewer" /><app-packet-viewer #pvComp /></div>`,
 })
 export class PacketViewerPageComponent implements AfterViewInit, OnDestroy {
     private readonly pvRef = viewChild.required<PacketViewerComponent>('pvComp');

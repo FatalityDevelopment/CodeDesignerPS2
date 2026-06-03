@@ -14,3 +14,20 @@ html, body {
     font-family: var(--vscode-font-family, 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif);
     font-size: 13px;
 }
+
+
+.pv-page-shell {
+    display: flex;
+    flex-direction: column;
+    width: 100vw;
+    height: 100vh;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+}
+
+app-packet-viewer {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+}

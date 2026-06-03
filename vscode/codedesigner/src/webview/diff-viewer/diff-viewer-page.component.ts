@@ -11,6 +11,8 @@ import {
   effect,
 } from '@angular/core';
 import { getVsCodeApi } from '../shared/vscode-api';
+import { IconComponent } from '../shared/icon.component';
+import { PageHeaderComponent } from '../shared/page-header.component';
 import { PaginatedTableComponent, ColumnDef } from '../shared/components/index';
 import { PorterPageComponent, PortResultPayload } from './porter-page.component';
 import { SnapshotEntry } from '../disasm-panel/types';
@@ -32,14 +34,15 @@ type DiffMode = 'flat-flat' | 'live-flat';
 @Component({
   selector: 'app-diff-viewer-page',
   standalone: true,
-  imports: [PaginatedTableComponent, PorterPageComponent],
+  imports: [PaginatedTableComponent, PorterPageComponent, IconComponent, PageHeaderComponent],
   encapsulation: ViewEncapsulation.None,
   template: `
 <div class="dv-outer">
+  <app-page-header icon="gitcompare" title="Diff" subtitle="Memory diff and cheat porter" />
   <!-- Tab bar -->
   <div class="dv-tab-bar">
-    <button class="dv-tab" [class.dv-tab-active]="activeTab() === 'diff'"   (click)="activeTab.set('diff')">&#x2194; Memory Diff</button>
-    <button class="dv-tab" [class.dv-tab-active]="activeTab() === 'porter'" (click)="activeTab.set('porter')">&#x2699; Cheat Porter</button>
+    <button class="dv-tab" [class.dv-tab-active]="activeTab() === 'diff'"   (click)="activeTab.set('diff')"><app-icon name="gitcompare" [size]="14" /> Memory Diff</button>
+    <button class="dv-tab" [class.dv-tab-active]="activeTab() === 'porter'" (click)="activeTab.set('porter')"><app-icon name="settings" [size]="14" /> Cheat Porter</button>
   </div>
 
   <!-- ── Diff tab ──────────────────────────────────────────────────────── -->
