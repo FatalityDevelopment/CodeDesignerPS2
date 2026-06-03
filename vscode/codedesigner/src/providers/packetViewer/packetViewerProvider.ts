@@ -378,7 +378,7 @@ export class PacketViewerProvider {
 
         const panel = vscode.window.createWebviewPanel(
             'codedesigner.packetViewer',
-            '📡 Packet Viewer',
+            'Packet Viewer',
             vscode.ViewColumn.One,
             {
                 enableScripts:           true,

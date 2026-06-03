@@ -1200,7 +1200,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
 
         const panel = vscode.window.createWebviewPanel(
             'disasm.labelManager',
-            '🏷 Label Manager',
+            'Label Manager',
             vscode.ViewColumn.One,
             {
                 enableScripts: true,
@@ -1308,6 +1308,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 localResourceRoots: [this._extensionUri]
             }
         );
+
 
         // Track this panel for pause/resume broadcast and address lookup.
         const physBase = DisasmEditorProvider._toPhysAddr(baseAddress);

@@ -6,7 +6,7 @@ function showBootstrapError(err: unknown): void {
     const msg = err instanceof Error ? (err.stack ?? err.message) : String(err);
     document.body.innerHTML =
         `<div style="font-family:monospace;padding:16px;color:#e74c3c;font-size:12px;">` +
-        `<b>Joker Maker failed to initialise</b><br><br>` +
+        `<b>Controller failed to initialise</b><br><br>` +
         `<pre style="white-space:pre-wrap">${msg}</pre>` +
         `<br><small>Right-click -> Inspect to see full webview console.</small></div>`;
     try {

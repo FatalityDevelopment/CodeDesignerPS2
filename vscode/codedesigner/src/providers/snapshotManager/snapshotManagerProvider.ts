@@ -28,7 +28,7 @@ export class SnapshotManagerProvider {
 
         const panel = vscode.window.createWebviewPanel(
             'codedesigner.snapshotManager',
-            '📷 Snapshot Manager',
+            'Snapshot Manager',
             vscode.ViewColumn.One,
             {
                 enableScripts:           true,

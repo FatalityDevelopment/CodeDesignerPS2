@@ -31,7 +31,7 @@ export class StructureVisualizerProvider {
 
         const panel = vscode.window.createWebviewPanel(
             'codedesigner.structureVisualizer',
-            '🧬 Structure Visualizer',
+            'Structure Visualizer',
             vscode.ViewColumn.One,
             {
                 enableScripts:           true,

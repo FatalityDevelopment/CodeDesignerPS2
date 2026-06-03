@@ -53,7 +53,7 @@ interface VirtualPadStateMsg {
     rightStick: { x: number; y: number };
 }
 
-/** Provider for the standalone Joker Maker / virtual controller webview. */
+/** Provider for the standalone Controller / virtual PS2 controller webview. */
 export class JokerMakerProvider {
     public static readonly viewType = 'codedesigner.jokerMaker';
 
@@ -77,7 +77,7 @@ export class JokerMakerProvider {
 
         const panel = vscode.window.createWebviewPanel(
             JokerMakerProvider.viewType,
-            'Joker Maker',
+            'Controller',
             vscode.ViewColumn.Active,
             {
                 enableScripts:           true,
@@ -266,7 +266,7 @@ export class JokerMakerProvider {
 <script nonce="${nonce}">${getWebviewErrorHandlerScript()}</script>
 </head>
 <body>
-<app-joker-maker-page><p style="color:#888;font-family:sans-serif;padding:16px;font-size:13px;">Loading Joker Maker...</p></app-joker-maker-page>
+<app-joker-maker-page><p style="color:#888;font-family:sans-serif;padding:16px;font-size:13px;">Loading Controller...</p></app-joker-maker-page>
 <script src="${scriptUri}"></script>
 </body>
 </html>`;

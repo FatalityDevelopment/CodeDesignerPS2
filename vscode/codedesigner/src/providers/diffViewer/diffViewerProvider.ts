@@ -35,7 +35,7 @@ export class DiffViewerProvider {
 
         const panel = vscode.window.createWebviewPanel(
             'codedesigner.diffViewer',
-            '⟺ Memory Diff Viewer',
+            'Memory Diff Viewer',
             vscode.ViewColumn.One,
             {
                 enableScripts:           true,

@@ -42,7 +42,7 @@ export function getDebugChannel(): vscode.LogOutputChannel {
 }
 
 /**
- * Get the PadState channel - receives Joker Maker virtual controller events
+ * Get the PadState channel - receives Controller virtual controller events
  * (button presses, releases, stick motion) and live pad-state updates.
  */
 export function getPadStateChannel(): vscode.OutputChannel {
@@ -71,7 +71,7 @@ export function activate(context: vscode.ExtensionContext) {
 	debugOutputChannel = vscode.window.createOutputChannel('CodeDesigner - Debug', { log: true });
 	context.subscriptions.push(debugOutputChannel);
 
-	// Joker Maker / live pad-state events land in their own channel so they
+	// Controller / live pad-state events land in their own channel so they
 	// don't drown out the main extension log.
 	padStateChannel = vscode.window.createOutputChannel('Code Designer PadState');
 	context.subscriptions.push(padStateChannel);
@@ -340,7 +340,7 @@ export function activate(context: vscode.ExtensionContext) {
 	);
 	context.subscriptions.push(saveScreenshotCommand);
 
-	// Joker Maker (virtual PS2 controller)
+	// Controller (virtual PS2 controller)
 	// Standalone webview that builds GameShark joker codes from a canvas-rendered
 	// controller, mirrors live pad state via PINE, and can drive PCSX2 pad input.
 	const jokerMakerProvider = new JokerMakerProvider(context.extensionUri, socketClient);

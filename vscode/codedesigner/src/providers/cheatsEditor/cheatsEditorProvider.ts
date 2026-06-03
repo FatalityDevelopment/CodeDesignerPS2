@@ -34,7 +34,7 @@ export class CheatsEditorProvider {
 
         const panel = vscode.window.createWebviewPanel(
             'codedesigner.cheatsEditor',
-            '🎮 PS2 Cheats Editor',
+            'PS2 Cheats Editor',
             vscode.ViewColumn.One,
             {
                 enableScripts:           true,
