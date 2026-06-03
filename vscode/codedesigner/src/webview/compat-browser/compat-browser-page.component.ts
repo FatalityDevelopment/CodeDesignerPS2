@@ -8,6 +8,7 @@ import {
   signal,
 } from '@angular/core';
 import { IconComponent } from '../shared/icon.component';
+import { PageHeaderComponent } from '../shared/page-header.component';
 import { getVsCodeApi } from '../shared/vscode-api';
 import './compat-browser-page.css';
 
@@ -31,17 +32,12 @@ const PAGE_SIZE = 50;
 @Component({
   selector: 'app-compat-browser-page',
   standalone: true,
-  imports: [IconComponent],
+  imports: [IconComponent, PageHeaderComponent],
   encapsulation: ViewEncapsulation.None,
   template: `
     <div class="cb-shell">
+      <app-page-header icon="gamepad2" title="Compatibility" subtitle="PCSX2 game compatibility browser" />
       <div class="cb-toolbar">
-        <div class="cb-toolbar-title">
-          <app-icon name="gamepad2" [size]="16" />
-          <span>PS2 Game Compatibility</span>
-        </div>
-        <div class="cb-toolbar-spacer"></div>
-
         <label class="cb-search">
           <app-icon name="search" [size]="14" />
           <input

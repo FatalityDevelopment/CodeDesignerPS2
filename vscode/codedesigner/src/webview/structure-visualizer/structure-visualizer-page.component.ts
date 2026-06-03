@@ -10,6 +10,8 @@ import {
 } from '@angular/core';
 import mermaid from 'mermaid';
 import { getVsCodeApi } from '../shared/vscode-api';
+import { IconComponent } from '../shared/icon.component';
+import { PageHeaderComponent } from '../shared/page-header.component';
 import '../shared/styles/shared.css';
 import {
   SvLabel, SvGroup, SvCallGraph, SvNodeResolved,
@@ -30,12 +32,14 @@ type Mode = 'class' | 'vtable' | 'callgraph';
 @Component({
   selector: 'app-structure-visualizer-page',
   standalone: true,
+  imports: [IconComponent, PageHeaderComponent],
   encapsulation: ViewEncapsulation.None,
   template: `
     <div class="sv-shell">
+      <app-page-header icon="workflow" title="Structure" subtitle="Structure visualizer" />
       <!-- ── Toolbar ───────────────────────────────────────────────────── -->
       <div class="sv-toolbar">
-        <span class="sv-title">Structure Visualizer</span>
+        <span class="sv-title"><app-icon name="workflow" [size]="14" /> Structure Visualizer</span>
         <select class="sv-select" [value]="setName()" (change)="onSetPick($event)"
                 [disabled]="sets().length === 0">
           @for (s of sets(); track s) { <option [value]="s">{{ s }}</option> }
