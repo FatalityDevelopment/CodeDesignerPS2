@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import { SocketClient, ZipperOperationResult } from '../../socketClient';
 import { getOutputChannel, getZdbChannel } from '../../extension';
 import { getNonce, getWebviewErrorHandlerScript } from '../../utils/nonce';
+import { applyCodeDesignerPanelIcon } from '../../utils/webviewPanel';
 
 export class ZipperWorkbenchProvider {
     public static readonly viewType = 'codedesigner.zipperWorkbench';
@@ -49,6 +50,7 @@ export class ZipperWorkbenchProvider {
             },
         );
 
+        applyCodeDesignerPanelIcon(panel, this._extensionUri);
         this._panel = panel;
         panel.onDidDispose(() => { this._panel = undefined; });
         panel.webview.onDidReceiveMessage(async msg => {
@@ -370,6 +372,10 @@ export class ZipperWorkbenchProvider {
         });
     }
 
+    // True when this file is the entry point for the SOCOM UI bundle —
+    // currently restricted to READERC.ZAR / READERX.ZAR. Opening a single
+    // _TXR / _PAL / _MDL inside the same folder used to trigger the entire
+    // bundle (~50 ZED archives) which made the model viewer freeze while
     private async _loadArchiveNodes(webview: vscode.Webview, filePath: string | undefined): Promise<void> {
         if (!filePath) { return; }
         if (!this._ensureConnected(webview)) { return; }
@@ -386,6 +392,20 @@ export class ZipperWorkbenchProvider {
         const dir = path.dirname(currentPath);
         const base = path.basename(currentPath);
         const result: Partial<Record<'txr' | 'pal' | 'geo' | 'mdl', string>> = {};
+
+        // Reader archives (READERC.ZAR / READERX.ZAR): load UI_TXR + UI_PAL so
+        // that RDR screens can display their texture thumbnails immediately.
+        if (/^reader[cx]\.zar$/i.test(base)) {
+            for (const name of ['UI_TXR.ZED', 'UI2D_TXR.ZED']) {
+                const p = path.join(dir, name);
+                if (fs.existsSync(p)) { result['txr'] = p; break; }
+            }
+            for (const name of ['UI_PAL.ZED', 'UI2D_PAL.ZED']) {
+                const p = path.join(dir, name);
+                if (fs.existsSync(p)) { result['pal'] = p; break; }
+            }
+            return result;
+        }
 
         // Match the prefix before _MDL / _TXR / _PAL / _GEO.
         const familyMatch = base.match(/^(.+?)_(MDL|TXR|PAL|GEO)(\([^)]+\))?\.ZED$/i);

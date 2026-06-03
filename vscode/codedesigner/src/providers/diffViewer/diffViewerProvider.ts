@@ -6,6 +6,7 @@ import { getNonce, getWebviewErrorHandlerScript } from '../../utils/nonce';
 import { SnapshotEntry } from '../../webview/disasm-panel/types';
 import { SnapshotDataDelegate } from '../snapshotManager/snapshotManagerProvider';
 import { SocketClient } from '../../socketClient';
+import { applyCodeDesignerPanelIcon } from '../../utils/webviewPanel';
 
 const MAX_DIFF_ROWS  = 10_000;
 /** 32 MB — full EE RAM */
@@ -43,6 +44,7 @@ export class DiffViewerProvider {
                 localResourceRoots:      [this.extensionUri],
             }
         );
+        applyCodeDesignerPanelIcon(panel, this.extensionUri);
         this._panel = panel;
 
         panel.onDidDispose(() => { this._panel = undefined; });

@@ -167,6 +167,12 @@ type IncomingMsg = InitMsg | ConnectionMsg | LivePadStateMsg | LivePollStoppedMs
         <div class="jm-metric"><div class="jm-metric-label">Pressed</div><div class="jm-metric-value">{{ pressed().length }} buttons</div></div>
       </div>
 
+      <div class="jm-metrics">
+        <div class="jm-metric"><div class="jm-metric-label">Joker code</div><div class="jm-metric-value">{{ hexCode() }}</div></div>
+        <div class="jm-metric"><div class="jm-metric-label">Raw mask</div><div class="jm-metric-value">{{ buttonsRaw() }}</div></div>
+        <div class="jm-metric"><div class="jm-metric-label">Pressed</div><div class="jm-metric-value">{{ pressed().length }} buttons</div></div>
+      </div>
+
       <div class="jm-toggles">
         <label class="jm-toggle" title="Click multiple buttons to build a combined code.">
           <input type="checkbox"

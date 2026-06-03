@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import { getOutputChannel } from '../../extension';
 import { getNonce, getWebviewErrorHandlerScript } from '../../utils/nonce';
 import { SnapshotEntry } from '../../webview/disasm-panel/types';
+import { applyCodeDesignerPanelIcon } from '../../utils/webviewPanel';
 
 /** Minimal interface the SnapshotManagerProvider needs from DisasmPanelProvider. */
 export interface SnapshotDataDelegate {
@@ -36,6 +37,7 @@ export class SnapshotManagerProvider {
                 localResourceRoots:      [this.extensionUri],
             }
         );
+        applyCodeDesignerPanelIcon(panel, this.extensionUri);
         this._panel = panel;
 
         panel.onDidDispose(() => { this._panel = undefined; });

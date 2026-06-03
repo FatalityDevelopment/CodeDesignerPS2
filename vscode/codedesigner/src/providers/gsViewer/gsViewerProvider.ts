@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as net from 'net';
 import { getOutputChannel } from '../../extension';
 import { getNonce } from '../../utils/nonce';
+import { applyCodeDesignerPanelIcon } from '../../utils/webviewPanel';
 
 /**
  * GS framebuffer viewer.
@@ -72,6 +73,7 @@ export class GsViewerProvider {
                 localResourceRoots: [],
             },
         );
+        applyCodeDesignerPanelIcon(this._panel, this._extensionUri);
 
         this._panel.webview.html = this._buildHtml(this._panel.webview);
 

@@ -5,6 +5,7 @@ import { getOutputChannel } from '../../extension';
 import { AiActivityEvent, AiLabelUpdateEvent, AiPacketEvent, AiSessionStartEvent, AiToolCallEvent, SocketClient, McpAgentInfo, McpMemoryInfo, McpOrchestrationInfo } from '../../socketClient';
 import { getNonce, getWebviewErrorHandlerScript } from '../../utils/nonce';
 import { McpProgressReportEditorProvider } from '../mcpProgressReportEditor/mcpProgressReportEditorProvider';
+import { applyCodeDesignerPanelIcon } from '../../utils/webviewPanel';
 
 /**
  * Provider for the AI agent control panel standalone webview tab.
@@ -38,7 +39,7 @@ export class AgentCtrlPanelProvider {
         private readonly requestMcpStatus: () => Promise<boolean>,
         private readonly runMcpServer: () => Promise<void>,
     ) {
-        this._mcpProgressReportEditor = new McpProgressReportEditorProvider(socketClient);
+        this._mcpProgressReportEditor = new McpProgressReportEditorProvider(socketClient, extensionUri);
         socketClient.onConnected(() => { void socketClient.subscribeActivity(); });
         socketClient.onActivityNotification((event: AiActivityEvent) => this._recordActivity({ at: Date.now(), kind: 'activity', address: event.address, region: event.region, text: `${event.command} @ ${this._hex(event.address)}${event.region ? `  (${event.region})` : ''}` }));
         socketClient.onSessionStart((_event: AiSessionStartEvent) => this._recordActivity({ at: Date.now(), kind: 'session', text: 'AI session started' }));
@@ -79,6 +80,7 @@ export class AgentCtrlPanelProvider {
                 localResourceRoots:      [this.extensionUri],
             }
         );
+        applyCodeDesignerPanelIcon(panel, this.extensionUri);
         this._panel = panel;
         void this._sendMcpStatus(panel.webview);
         void this.socketClient.subscribeActivity();

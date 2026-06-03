@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import { SocketClient, HddFileEntryInfo } from '../../socketClient';
 import { getOutputChannel } from '../../extension';
 import { getNonce, getWebviewErrorHandlerScript } from '../../utils/nonce';
+import { applyCodeDesignerPanelIcon } from '../../utils/webviewPanel';
 
 export class HddBrowserProvider {
     public static readonly viewType = 'codedesigner.hddBrowser';
@@ -36,6 +37,7 @@ export class HddBrowserProvider {
             },
         );
 
+        applyCodeDesignerPanelIcon(panel, this._extensionUri);
         this._panel = panel;
         panel.onDidDispose(() => { this._panel = undefined; });
         panel.webview.onDidReceiveMessage(async msg => {

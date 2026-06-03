@@ -1,6 +1,21 @@
 import * as THREE from 'three';
 import type { ZedModel } from './zed-model-parser';
 
+// Guard rails for the WebGL upload path. PS2 textures are always 2^N square
+// and tiny by modern standards, so anything above 2048 is almost certainly a
+// mis-parse — uploading it can blow VRAM budgets and crash the renderer
+// process. The unique material cap is the same idea: a model that
+// "wants" 200 materials is almost certainly a misclassified payload.
+const MAX_TEXTURE_DIMENSION = 2048;
+const MAX_UNIQUE_MATERIALS = 64;
+// Hard cap on the BufferGeometry the renderer will allocate. World models
+// stay well under 100k verts; anything above this is parsed garbage from a
+// payload that isn't actually a 3D model (UI / script blobs that happen to
+// match the chunk magic). Crashing the GPU process with a 200MB typed
+// array is exactly the failure mode the user has been hitting.
+const MAX_VERTICES_TOTAL = 200_000;
+const MAX_INDICES_TOTAL = 600_000;
+
 // Three.js viewer for ZED model payloads. Mirrors the structure of the PS2
 // memory-card icon renderer (resize observer, raf loop, dispose) but uses an
 // orbit-style mouse drag instead of an animation tween. The scene Y axis is
@@ -181,8 +196,20 @@ export class ZedModelRenderer {
       const key = effective.toLowerCase();
       const existing = materialIndexByTif.get(key);
       if (existing !== undefined) { return existing; }
+      // Cap the number of unique materials per model. Past this limit the
+      // chunk just gets the fallback grey material — better than crashing
+      // the renderer process by allocating dozens of WebGL textures.
+      if (this.materials.length >= MAX_UNIQUE_MATERIALS) { return 0; }
       const tex = textures[key] ?? fallbackTexture;
       if (!tex) { return 0; }
+      // Sanity-check the decoded texture so a malformed header doesn't
+      // bring down the GPU process. PS2 textures are always 2^N square in
+      // practice; anything bigger than 2048 or smaller than 4 is junk.
+      if (!Number.isFinite(tex.width) || !Number.isFinite(tex.height)) { return 0; }
+      if (tex.width < 4 || tex.height < 4) { return 0; }
+      if (tex.width > MAX_TEXTURE_DIMENSION || tex.height > MAX_TEXTURE_DIMENSION) { return 0; }
+      const expectedLen = tex.width * tex.height * 4;
+      if (tex.rgba.length < expectedLen) { return 0; }
       const dt = new THREE.DataTexture(
         tex.rgba,
         tex.width,
@@ -231,7 +258,15 @@ export class ZedModelRenderer {
       }
       return [outU, outV];
     };
+    let bailedOnSize = false;
     for (const chunk of visibleChunks) {
+      // Hard stop: a single malformed chunk shouldn't be able to allocate
+      // millions of floats and tip the renderer process over the OOM line.
+      // PS2 chunks are at most ~4k verts in practice; anything past
+      // MAX_VERTICES_TOTAL is almost certainly a mis-parsed payload (likely
+      // a UI / scripting blob that happened to satisfy the chunk magic).
+      if (vBase + chunk.vertices.length > MAX_VERTICES_TOTAL) { bailedOnSize = true; break; }
+      if (iBase + chunk.indices.length > MAX_INDICES_TOTAL) { bailedOnSize = true; break; }
       for (const v of chunk.vertices) {
         allPositions.push(v.x, v.y, v.z);
         const [tu, tv] = transformUv(v.u, v.v);
@@ -255,6 +290,12 @@ export class ZedModelRenderer {
       iBase += kept;
     }
 
+    if (bailedOnSize) {
+      console.warn(
+        `[ZedModelRenderer] model exceeded vertex/index caps; skipping render. ` +
+          `vBase=${vBase} iBase=${iBase}`,
+      );
+    }
     if (allIndices.length === 0) { return; }
 
     const geometry = new THREE.BufferGeometry();

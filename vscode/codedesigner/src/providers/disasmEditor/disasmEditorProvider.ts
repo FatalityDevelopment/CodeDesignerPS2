@@ -5,6 +5,7 @@ import { SocketClient, LabelEntry, StringEntry, FunctionEntry, PointerEntry, Flo
 import { getOutputChannel } from "../../extension";
 import { getNonce, getWebviewErrorHandlerScript } from "../../utils/nonce";
 import { classifyAddress, MemoryRegion } from "../../shared/memoryRegions";
+import { applyCodeDesignerPanelIcon } from '../../utils/webviewPanel';
 
 /**
  * Maps {@link MemoryRegion} to the sidebar-menu label that opens the panel.
@@ -1146,6 +1147,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 localResourceRoots: [this._extensionUri]
             }
         );
+        applyCodeDesignerPanelIcon(panel, this._extensionUri);
         this._introPanel = panel;
         panel.onDidDispose(() => { this._introPanel = undefined; });
         const imgUri = panel.webview.asWebviewUri(
@@ -1208,6 +1210,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 localResourceRoots: [this._extensionUri],
             }
         );
+        applyCodeDesignerPanelIcon(panel, this._extensionUri);
         this._labelManagerPanel = panel;
         panel.onDidDispose(() => { this._labelManagerPanel = undefined; });
 
