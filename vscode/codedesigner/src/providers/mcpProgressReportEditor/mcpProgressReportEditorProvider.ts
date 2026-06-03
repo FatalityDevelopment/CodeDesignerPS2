@@ -30,7 +30,7 @@ export class McpProgressReportEditorProvider {
             { enableScripts: true }
         );
 
-        applyCodeDesignerPanelIcon(panel, this.extensionUri);
+        applyCodeDesignerPanelIcon(panel, this.extensionUri, 'database');
         this._panels.set(id, panel);
 
         panel.onDidDispose(() => {

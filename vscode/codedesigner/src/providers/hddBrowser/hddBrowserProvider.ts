@@ -37,7 +37,7 @@ export class HddBrowserProvider {
             },
         );
 
-        applyCodeDesignerPanelIcon(panel, this._extensionUri);
+        applyCodeDesignerPanelIcon(panel, this._extensionUri, 'harddrive');
         this._panel = panel;
         panel.onDidDispose(() => { this._panel = undefined; });
         panel.webview.onDidReceiveMessage(async msg => {

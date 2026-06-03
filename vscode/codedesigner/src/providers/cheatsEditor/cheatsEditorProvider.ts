@@ -43,7 +43,7 @@ export class CheatsEditorProvider {
                 localResourceRoots:      [this.extensionUri],
             }
         );
-        applyCodeDesignerPanelIcon(panel, this.extensionUri);
+        applyCodeDesignerPanelIcon(panel, this.extensionUri, 'sparkles');
         this._panel = panel;
         panel.onDidDispose(() => { this._panel = undefined; });
 

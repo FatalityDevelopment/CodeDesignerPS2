@@ -387,7 +387,7 @@ export class PacketViewerProvider {
                 localResourceRoots:      [this.extensionUri],
             }
         );
-        applyCodeDesignerPanelIcon(panel, this.extensionUri);
+        applyCodeDesignerPanelIcon(panel, this.extensionUri, 'radiotower');
         this._panel = panel;
 
         panel.onDidDispose(() => { this._panel = undefined; this._capturing = false; });

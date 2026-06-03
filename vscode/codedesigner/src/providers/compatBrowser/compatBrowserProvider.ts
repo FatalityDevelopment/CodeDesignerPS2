@@ -39,7 +39,7 @@ export class CompatBrowserProvider {
                 localResourceRoots:      [this.extensionUri],
             }
         );
-        applyCodeDesignerPanelIcon(panel, this.extensionUri);
+        applyCodeDesignerPanelIcon(panel, this.extensionUri, 'gamepad2');
         this._panel = panel;
         panel.onDidDispose(() => { this._panel = undefined; });
 

@@ -40,7 +40,7 @@ export class StructureVisualizerProvider {
                 localResourceRoots:      [this.extensionUri],
             }
         );
-        applyCodeDesignerPanelIcon(panel, this.extensionUri);
+        applyCodeDesignerPanelIcon(panel, this.extensionUri, 'workflow');
         this._panel = panel;
         panel.onDidDispose(() => { this._panel = undefined; });
 

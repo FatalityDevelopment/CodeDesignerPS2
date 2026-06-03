@@ -44,7 +44,7 @@ export class DiffViewerProvider {
                 localResourceRoots:      [this.extensionUri],
             }
         );
-        applyCodeDesignerPanelIcon(panel, this.extensionUri);
+        applyCodeDesignerPanelIcon(panel, this.extensionUri, 'gitcompare');
         this._panel = panel;
 
         panel.onDidDispose(() => { this._panel = undefined; });

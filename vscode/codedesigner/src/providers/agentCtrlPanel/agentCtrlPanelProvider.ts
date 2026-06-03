@@ -80,7 +80,7 @@ export class AgentCtrlPanelProvider {
                 localResourceRoots:      [this.extensionUri],
             }
         );
-        applyCodeDesignerPanelIcon(panel, this.extensionUri);
+        applyCodeDesignerPanelIcon(panel, this.extensionUri, 'bot');
         this._panel = panel;
         void this._sendMcpStatus(panel.webview);
         void this.socketClient.subscribeActivity();
