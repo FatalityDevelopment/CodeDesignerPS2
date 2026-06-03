@@ -5,7 +5,7 @@ import { SocketClient, LabelEntry, StringEntry, FunctionEntry, PointerEntry, Flo
 import { getOutputChannel } from "../../extension";
 import { getNonce, getWebviewErrorHandlerScript } from "../../utils/nonce";
 import { classifyAddress, MemoryRegion } from "../../shared/memoryRegions";
-import { applyCodeDesignerPanelIcon } from '../../utils/webviewPanel';
+import { applyCodeDesignerPanelIcon, getMemoryRegionPanelIcon } from '../../utils/webviewPanel';
 
 /**
  * Maps {@link MemoryRegion} to the sidebar-menu label that opens the panel.
@@ -1210,7 +1210,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 localResourceRoots: [this._extensionUri],
             }
         );
-        applyCodeDesignerPanelIcon(panel, this._extensionUri);
+        applyCodeDesignerPanelIcon(panel, this._extensionUri, 'tag');
         this._labelManagerPanel = panel;
         panel.onDidDispose(() => { this._labelManagerPanel = undefined; });
 
@@ -1311,7 +1311,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 localResourceRoots: [this._extensionUri]
             }
         );
-
+        applyCodeDesignerPanelIcon(panel, this._extensionUri, getMemoryRegionPanelIcon(label));
 
         // Track this panel for pause/resume broadcast and address lookup.
         const physBase = DisasmEditorProvider._toPhysAddr(baseAddress);

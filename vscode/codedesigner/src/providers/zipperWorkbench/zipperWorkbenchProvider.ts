@@ -50,7 +50,7 @@ export class ZipperWorkbenchProvider {
             },
         );
 
-        applyCodeDesignerPanelIcon(panel, this._extensionUri);
+        applyCodeDesignerPanelIcon(panel, this._extensionUri, 'database');
         this._panel = panel;
         panel.onDidDispose(() => { this._panel = undefined; });
         panel.webview.onDidReceiveMessage(async msg => {

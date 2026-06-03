@@ -73,7 +73,7 @@ export class GsViewerProvider {
                 localResourceRoots: [],
             },
         );
-        applyCodeDesignerPanelIcon(this._panel, this._extensionUri);
+        applyCodeDesignerPanelIcon(this._panel, this._extensionUri, 'monitor');
 
         this._panel.webview.html = this._buildHtml(this._panel.webview);
 

@@ -86,7 +86,7 @@ export class JokerMakerProvider {
                 localResourceRoots:      [this._extensionUri],
             },
         );
-        applyCodeDesignerPanelIcon(panel, this._extensionUri);
+        applyCodeDesignerPanelIcon(panel, this._extensionUri, 'gamepad2');
         this._panel = panel;
 
         panel.onDidDispose(() => {
