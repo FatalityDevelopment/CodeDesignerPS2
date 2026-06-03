@@ -229,7 +229,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private _pcsx2GraphicsReady = false;
     /** Callbacks waiting for PCSX2's GS stream to come up. */
     private _pcsx2ReadyWaiters = new Set<() => void>();
-    /** Standalone Joker Maker webview, registered from extension.ts after provider setup. */
+    /** Standalone Controller webview, registered from extension.ts after provider setup. */
     private _jokerMakerProvider?: JokerMakerProvider;
 
     /** Returns the workspace root directory (used by DisasmEditorProvider for history lookup). */
@@ -244,7 +244,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     public toggleConnectionFromCommand(): void {
         this.handleConnect(this.selectedEmulatorPath, this.selectedBiosPath, this.selectedGamePath);
     }
-    /** Provides the standalone Joker Maker panel used by the cheats tab. */
+    /** Provides the standalone Controller panel used by the cheats tab. */
     public setJokerMakerProvider(provider: JokerMakerProvider): void {
         this._jokerMakerProvider = provider;
     }

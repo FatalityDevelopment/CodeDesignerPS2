@@ -13,6 +13,7 @@ import {
     ElementRef,
 } from '@angular/core';
 import { getVsCodeApi } from '../shared/vscode-api';
+import { IconComponent } from '../shared/icon.component';
 import './joker-maker-page.css';
 
 // Geometry
@@ -126,20 +127,27 @@ type IncomingMsg = InitMsg | ConnectionMsg | LivePadStateMsg | LivePollStoppedMs
 @Component({
     selector: 'app-joker-maker-page',
     standalone: true,
+    imports: [IconComponent],
     changeDetection: ChangeDetectionStrategy.OnPush,
     encapsulation: ViewEncapsulation.None,
     template: `
 <div class="jm-host">
 
   <div class="jm-titlebar">
-    <div class="jm-mark">JM</div>
-    <div><div class="jm-title">Joker Maker</div><div class="jm-subtitle">Virtual PS2 controller and active-low cheat mask builder</div></div>
+    <div class="jm-mark"><app-icon name="gamepad2" [size]="17" /></div>
+    <div><div class="jm-title">Controller</div><div class="jm-subtitle">Virtual PS2 controller and active-low cheat mask builder</div></div>
     <span class="jm-connection" [class.jm-connection-on]="connected()">{{ connected() ? 'connected' : 'offline' }}</span>
+    <button class="jm-panel-toggle" type="button" (click)="toggleSidePanel()" [attr.aria-expanded]="!sideCollapsed()" title="Toggle details panel">
+      {{ sideCollapsed() ? 'Show Details' : 'Hide Details' }}
+    </button>
   </div>
 
-  <div class="jm-main">
+  <div class="jm-main" [class.jm-main-collapsed]="sideCollapsed()">
 
     <div class="jm-stage">
+      @if (sideCollapsed()) {
+        <button class="jm-side-reopen" type="button" (click)="toggleSidePanel()">Show details</button>
+      }
       <div class="jm-hint">
         <div><span class="c">// click any button</span></div>
         <div><span class="c">// drag the analog sticks</span></div>
@@ -151,7 +159,13 @@ type IncomingMsg = InitMsg | ConnectionMsg | LivePadStateMsg | LivePollStoppedMs
               aria-label="PS controller"></canvas>
     </div>
 
-    <aside class="jm-side">
+    <aside class="jm-side" [class.jm-side-collapsed]="sideCollapsed()" [attr.aria-hidden]="sideCollapsed()">
+
+      <div class="jm-metrics">
+        <div class="jm-metric"><div class="jm-metric-label">Joker code</div><div class="jm-metric-value">{{ hexCode() }}</div></div>
+        <div class="jm-metric"><div class="jm-metric-label">Raw mask</div><div class="jm-metric-value">{{ buttonsRaw() }}</div></div>
+        <div class="jm-metric"><div class="jm-metric-label">Pressed</div><div class="jm-metric-value">{{ pressed().length }} buttons</div></div>
+      </div>
 
       <div class="jm-metrics">
         <div class="jm-metric"><div class="jm-metric-label">Joker code</div><div class="jm-metric-value">{{ hexCode() }}</div></div>
@@ -209,7 +223,7 @@ type IncomingMsg = InitMsg | ConnectionMsg | LivePadStateMsg | LivePollStoppedMs
   </div>
 
   <div class="jm-statusbar">
-    <span>Joker Maker</span>
+    <span>Controller</span>
     <span>pressed: {{ pressed().length }}</span>
     <span class="jm-status-right">{{ hexCode() }}</span>
   </div>
@@ -239,6 +253,7 @@ export class JokerMakerPageComponent implements AfterViewInit, OnDestroy {
     readonly livePadButtons = signal(0xFFFF);
     readonly copyLabel     = signal('Copy JSON');
     readonly copyCodeLabel = signal('Copy code');
+    readonly sideCollapsed = signal(false);
 
     /** Hex value computed from currently-pressed buttons (excluding 'ps'). */
     readonly hexCode = computed(() => {
@@ -390,6 +405,10 @@ export class JokerMakerPageComponent implements AfterViewInit, OnDestroy {
             this.pressed.set([]);
             this.logEvent('release', 'all');
         }
+    }
+
+    toggleSidePanel(): void {
+        this.sideCollapsed.update(collapsed => !collapsed);
     }
 
     setLiveEnabled(on: boolean): void {

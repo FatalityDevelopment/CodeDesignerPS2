@@ -1312,7 +1312,6 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             }
         );
 
-        applyCodeDesignerPanelIcon(panel, this._extensionUri);
 
         // Track this panel for pause/resume broadcast and address lookup.
         const physBase = DisasmEditorProvider._toPhysAddr(baseAddress);

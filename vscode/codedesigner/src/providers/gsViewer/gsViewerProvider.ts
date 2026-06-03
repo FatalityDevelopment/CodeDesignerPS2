@@ -65,7 +65,7 @@ export class GsViewerProvider {
 
         this._panel = vscode.window.createWebviewPanel(
             GsViewerProvider.viewType,
-            'GS Stream Viewer',
+            'Preview',
             vscode.ViewColumn.Active,
             {
                 enableScripts: true,
@@ -235,33 +235,40 @@ export class GsViewerProvider {
 <head>
     <meta charset="UTF-8" />
     <meta http-equiv="Content-Security-Policy" content="${csp}" />
-    <title>GS Stream Viewer</title>
+    <title>Preview</title>
     <style>
-        :root { color-scheme: dark; --bg:#181818; --panel:#1f1f1f; --panel-hi:#252526; --border:var(--vscode-panel-border,#313131); --text:var(--vscode-foreground,#d4d4d4); --muted:var(--vscode-descriptionForeground,#8f8f8f); --accent:#007acc; --live:#4ec94e; --idle:#cca700; --dead:#f48771; }
-        * { box-sizing: border-box; } html, body { margin:0; padding:0; height:100%; background:var(--bg); color:var(--text); font-family:var(--vscode-font-family,'Segoe UI',sans-serif); font-size:12px; }
+        :root { color-scheme: dark; --bg:#181818; --panel-hi:#252526; --border:var(--vscode-panel-border,#313131); --text:var(--vscode-foreground,#d4d4d4); --muted:var(--vscode-descriptionForeground,#8f8f8f); --accent:#007acc; --live:#4ec94e; --idle:#cca700; --dead:#f48771; }
+        * { box-sizing: border-box; }
+        html, body { margin:0; padding:0; height:100%; background:var(--bg); color:var(--text); font-family:var(--vscode-font-family,'Segoe UI',sans-serif); font-size:12px; }
         body { display:flex; flex-direction:column; overflow:hidden; }
-        #toolbar { min-height:50px; padding:7px 12px; border-bottom:1px solid var(--border); display:flex; gap:14px; align-items:center; background:var(--panel-hi); }
-        .brand { display:flex; align-items:center; gap:9px; min-width:205px; } .brand-mark { width:28px; height:28px; display:grid; place-items:center; border-radius:6px; background:linear-gradient(145deg,#0e639c,#174b70); color:#fff; font-weight:800; font-size:10px; }
+        #toolbar { min-height:50px; padding:7px 12px; border-bottom:1px solid var(--border); display:flex; flex-wrap:wrap; gap:10px 14px; align-items:center; background:var(--panel-hi); }
+        .brand { display:flex; align-items:center; gap:9px; min-width:175px; flex:0 1 auto; }
+        .brand-mark { width:28px; height:28px; display:grid; place-items:center; border-radius:6px; background:linear-gradient(145deg,#0e639c,#174b70); color:#fff; }
+        .brand-mark svg { display:block; }
         .brand-title { font-weight:650; letter-spacing:.01em; } .brand-subtitle { color:var(--muted); font-size:10px; margin-top:2px; }
-        #status { display:inline-flex; align-items:center; gap:7px; min-width:0; color:var(--muted); } .dot { width:8px; height:8px; border-radius:50%; flex:none; background:#555; }
-        .dot.live { background:var(--live); box-shadow:0 0 7px rgba(78,201,78,.65); } .dot.idle { background:var(--idle); box-shadow:0 0 7px rgba(204,167,0,.45); } .dot.dead { background:var(--dead); }
-        #text { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .actions { display:flex; gap:6px; margin-left:auto; }
-        button { display:inline-flex; align-items:center; gap:5px; background:#333; color:var(--text); border:1px solid #4a4a4a; border-radius:3px; padding:5px 9px; cursor:pointer; font:inherit; }
+        .connection { margin-left:auto; display:inline-flex; align-items:center; gap:6px; min-width:0; max-width:min(520px,100%); padding:4px 8px; border:1px solid var(--border); border-radius:10px; color:var(--muted); font-size:10px; text-transform:uppercase; letter-spacing:.06em; white-space:nowrap; }
+        .connection .dot { width:7px; height:7px; border-radius:50%; flex:none; background:var(--dead); }
+        .connection.live { color:#b5cea8; border-color:#365d36; } .connection.live .dot { background:var(--live); box-shadow:0 0 6px rgba(78,201,78,.65); }
+        .connection.idle { color:#dcdcaa; border-color:#5a4b16; } .connection.idle .dot { background:var(--idle); box-shadow:0 0 6px rgba(204,167,0,.45); }
+        .connection.dead { color:var(--muted); } .connection.dead .dot { background:var(--dead); }
+        #text { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:6px; margin-left:auto; }
+        button { display:inline-flex; align-items:center; justify-content:center; gap:5px; background:#333; color:var(--text); border:1px solid #4a4a4a; border-radius:3px; padding:5px 9px; cursor:pointer; font:inherit; white-space:nowrap; }
         button:hover { background:#414141; border-color:#666; } button:active { background:#0e639c; } button.primary { background:#0e639c; border-color:#1177bb; color:#fff; } button.primary:hover { background:#1177bb; }
-        #stage { position:relative; flex:1; min-height:0; display:flex; align-items:center; justify-content:center; overflow:hidden; padding:20px; background-color:#101010; background-image:linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px); background-size:18px 18px; }
+        #stage { position:relative; flex:1 1 auto; min-height:0; display:flex; align-items:center; justify-content:center; overflow:hidden; padding:20px; background-color:#101010; background-image:linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px); background-size:18px 18px; }
         .frame-shell { position:relative; max-width:100%; max-height:100%; display:flex; border:1px solid #333; box-shadow:0 12px 35px rgba(0,0,0,.35); background:#000; }
-        canvas { max-width:100%; max-height:calc(100vh - 114px); image-rendering:pixelated; background:#000; } body.smooth canvas { image-rendering:auto; }
+        canvas { max-width:100%; max-height:100%; image-rendering:pixelated; background:#000; } body.smooth canvas { image-rendering:auto; }
         #resolution { position:absolute; right:8px; bottom:8px; padding:3px 6px; border-radius:3px; color:#ccc; background:rgba(0,0,0,.68); font-family:var(--vscode-editor-font-family,monospace); font-size:10px; }
         #overlay { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--text); pointer-events:none; text-align:center; padding:18px; }
         #overlay .box { max-width:500px; padding:18px 20px; border-radius:7px; border:1px solid #3a3a3a; background:rgba(30,30,30,.94); box-shadow:0 12px 35px rgba(0,0,0,.25); line-height:1.45; } #overlay .hint { color:var(--muted); font-size:11px; margin-top:7px; }
         #footer { min-height:25px; display:flex; align-items:center; gap:16px; padding:0 10px; background:var(--accent); color:#fff; font-size:11px; } #meta { margin-left:auto; font-family:var(--vscode-editor-font-family,monospace); white-space:nowrap; }
-        @media (max-width:760px) { .brand{min-width:auto}.brand-subtitle{display:none}#text{display:none}button span{display:none}#toolbar{gap:9px} }
+        @media (max-width:760px) { #toolbar { align-items:flex-start; } .brand { min-width:150px; } .connection { margin-left:0; flex:1 1 220px; } .actions { margin-left:0; justify-content:flex-start; } .brand-subtitle { display:none; } }
     </style>
 </head>
 <body>
     <header id="toolbar">
-        <div class="brand"><div class="brand-mark">GS</div><div><div class="brand-title">GS Stream Viewer</div><div class="brand-subtitle">Live PCSX2 framebuffer monitor</div></div></div>
-        <div id="status"><span class="dot" id="dot"></span><span id="text">connecting…</span></div>
+        <div class="brand"><div class="brand-mark"><svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="3" rx="2" /><line x1="8" x2="16" y1="21" y2="21" /><line x1="12" x2="12" y1="17" y2="21" /></svg></div><div><div class="brand-title">Preview</div><div class="brand-subtitle">Live PCSX2 framebuffer monitor</div></div></div>
+        <div id="status" class="connection"><span class="dot" id="dot"></span><span id="text">connecting…</span></div>
         <div class="actions">
             <button id="smoothing" title="Toggle pixel smoothing"><span>Smoothing</span></button><button id="fullscreen" title="Toggle fullscreen stage"><span>Fullscreen</span></button>
             <button id="screenshot" class="primary" title="Save a screenshot in PCSX2"><span>Screenshot</span></button><button id="controller" title="Open the virtual controller"><span>Controller</span></button><button id="reconnect" title="Reconnect to the GS bridge"><span>Reconnect</span></button>
@@ -272,6 +279,7 @@ export class GsViewerProvider {
 
     <script nonce="${nonce}">
         const vscode = acquireVsCodeApi();
+        const status = document.getElementById('status');
         const dot = document.getElementById('dot');
         const text = document.getElementById('text');
         const meta = document.getElementById('meta');
@@ -313,17 +321,18 @@ export class GsViewerProvider {
             const stale   = connected && (framesShown === 0 || ageMs >= STALE_MS);
 
             // Dot
-            dot.className = 'dot ' + (flowing ? 'live' : (stale ? 'idle' : 'dead'));
+            status.className = 'connection ' + (flowing ? 'live' : (stale ? 'idle' : 'dead'));
+            dot.className = 'dot';
 
             // Status text
             if (!connected) {
-                text.textContent = lastErr ? ('disconnected (' + lastErr + ')') : 'disconnected from bridge :8766';
+                text.textContent = lastErr ? ('offline (' + lastErr + ')') : 'offline - bridge :8766';
             } else if (framesShown === 0) {
-                text.textContent = 'connected — waiting for frames from PCSX2';
+                text.textContent = 'connected - waiting for frames';
             } else if (ageMs >= STALE_MS) {
-                text.textContent = 'connected — no frames for ' + (ageMs / 1000).toFixed(1) + 's';
+                text.textContent = 'connected - idle ' + (ageMs / 1000).toFixed(1) + 's';
             } else {
-                text.textContent = 'connected — live';
+                text.textContent = 'connected - live';
             }
 
             // Meta (right-aligned)
