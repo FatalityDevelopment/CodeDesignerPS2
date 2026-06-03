@@ -5,6 +5,7 @@ import {
     ChangeDetectionStrategy,
     ViewEncapsulation,
 } from '@angular/core';
+import { IconComponent } from '../shared/icon.component';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -2383,15 +2384,35 @@ function hexDump(raw: Uint8Array, layers: DissectedLayer[] = [], selectedLayerId
     standalone: true,
     changeDetection: ChangeDetectionStrategy.OnPush,
     encapsulation: ViewEncapsulation.None,
+    imports: [IconComponent],
     styles: [`
 /* ── Top-level layout ─────────────────────────────────────────── */
 .pv-root {
+    --cd-panel-bg: var(--vscode-editor-background, #1e1e1e);
+    --cd-panel-bg-raised: var(--vscode-editorWidget-background, var(--vscode-sideBar-background, #252526));
+    --cd-panel-header-bg: var(--vscode-editorGroupHeader-tabsBackground, var(--vscode-sideBar-background, #252526));
+    --cd-panel-control-bg: var(--vscode-button-secondaryBackground, rgba(255, 255, 255, 0.08));
+    --cd-panel-control-hover-bg: var(--vscode-button-secondaryHoverBackground, var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.12)));
+    --cd-panel-border: var(--vscode-panel-border, var(--vscode-editorGroup-border, #3e3e42));
+    --cd-panel-border-subtle: color-mix(in srgb, var(--cd-panel-border) 58%, transparent);
+    --cd-panel-row-hover: var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.06));
+    --cd-panel-muted: var(--vscode-descriptionForeground, #858585);
+    --cd-panel-shadow: 0 2px 8px rgba(0, 0, 0, 0.22);
     display: flex;
     flex-direction: column;
     height: 100vh;
     overflow: hidden;
-    background: #1e1e1e;
-    color: #cccccc;
+    background: var(--cd-panel-bg);
+    color: var(--vscode-editor-foreground, #d4d4d4);
+}
+
+.pv-root app-icon,
+.pv-root .lic {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    line-height: 0;
 }
 
 /* ── Toolbar ──────────────────────────────────────────────────── */
@@ -2399,39 +2420,42 @@ function hexDump(raw: Uint8Array, layers: DissectedLayer[] = [], selectedLayerId
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 6px 12px;
-    background: #252526;
-    border-bottom: 1px solid #3c3c3c;
+    padding: 8px 10px;
+    background: var(--cd-panel-header-bg);
+    border-bottom: 1px solid var(--cd-panel-border);
     flex-shrink: 0;
     flex-wrap: wrap;
 }
 .pv-toolbar button {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
     padding: 4px 10px;
-    border: 1px solid #555;
-    border-radius: 3px;
-    background: #333;
-    color: #ccc;
+    border: 1px solid var(--cd-panel-border);
+    border-radius: 4px;
+    background: var(--cd-panel-control-bg);
+    color: var(--vscode-editor-foreground, #d4d4d4);
     font-size: 12px;
     cursor: pointer;
     white-space: nowrap;
 }
-.pv-toolbar button:hover { background: #444; }
-.pv-toolbar button.pv-active { background: #0e639c; border-color: #1177bb; color: #fff; }
+.pv-toolbar button:hover { background: var(--cd-panel-control-hover-bg); color: #fff; }
+.pv-toolbar button.pv-active { background: var(--vscode-button-background, #0e639c); border-color: var(--vscode-button-background, #0e639c); color: #fff; }
 .pv-toolbar button:disabled { opacity: 0.5; cursor: default; }
 .pv-toolbar select, .pv-toolbar input {
     padding: 3px 6px;
-    border: 1px solid #555;
-    border-radius: 3px;
-    background: #333;
-    color: #ccc;
+    border: 1px solid var(--cd-panel-border);
+    border-radius: 4px;
+    background: var(--cd-panel-control-bg);
+    color: var(--vscode-editor-foreground, #d4d4d4);
     font-size: 12px;
 }
 .pv-toolbar input { width: 110px; }
-.pv-toolbar .pv-sep { width: 1px; height: 20px; background: #555; }
+.pv-toolbar .pv-sep { width: 1px; height: 20px; background: var(--cd-panel-border); }
 .pv-toolbar .pv-stats {
     margin-left: auto;
     font-size: 11px;
-    color: #888;
+    color: var(--cd-panel-muted);
     white-space: nowrap;
 }
 
@@ -2444,8 +2468,13 @@ function hexDump(raw: Uint8Array, layers: DissectedLayer[] = [], selectedLayerId
 }
 .pv-pane {
     overflow: auto;
-    border-bottom: 1px solid #3c3c3c;
+    margin: 8px 10px 0;
+    border: 1px solid var(--cd-panel-border);
+    border-radius: 8px;
+    background: var(--cd-panel-bg-raised);
+    box-shadow: var(--cd-panel-shadow);
 }
+.pv-pane:last-child { margin-bottom: 8px; }
 .pv-pane-packets { flex: 2; min-height: 80px; }
 .pv-pane-dissect { flex: 1.2; min-height: 80px; }
 .pv-pane-hexdump { flex: 1; min-height: 60px; }
@@ -2460,12 +2489,12 @@ function hexDump(raw: Uint8Array, layers: DissectedLayer[] = [], selectedLayerId
 .pv-table th {
     position: sticky;
     top: 0;
-    background: #2d2d2d;
-    border-bottom: 1px solid #555;
+    background: var(--cd-panel-header-bg);
+    border-bottom: 1px solid var(--cd-panel-border);
     text-align: left;
     padding: 4px 8px;
     font-weight: 600;
-    color: #999;
+    color: var(--cd-panel-muted);
     font-size: 11px;
     text-transform: uppercase;
     letter-spacing: 0.04em;
@@ -2479,8 +2508,8 @@ function hexDump(raw: Uint8Array, layers: DissectedLayer[] = [], selectedLayerId
     max-width: 500px;
 }
 .pv-table tr { cursor: pointer; }
-.pv-table tr:hover { background: #2a2d2e; }
-.pv-table tr.pv-selected { background: #094771; }
+.pv-table tr:hover { background: var(--cd-panel-row-hover); }
+.pv-table tr.pv-selected { background: var(--vscode-list-activeSelectionBackground, #094771); color: var(--vscode-list-activeSelectionForeground, #fff); }
 .pv-dir-tx { color: #e6a23c; }
 .pv-dir-rx { color: #67c23a; }
 .pv-server { color: #c792ea; font-weight: 600; }
@@ -2495,8 +2524,8 @@ function hexDump(raw: Uint8Array, layers: DissectedLayer[] = [], selectedLayerId
     gap: 6px;
     font-size: 12px;
 }
-.pv-tree-layer:hover { background: #2a2d2e; }
-.pv-tree-layer.pv-layer-selected { background: #094771; }
+.pv-tree-layer:hover { background: var(--cd-panel-row-hover); }
+.pv-tree-layer.pv-layer-selected { background: var(--vscode-list-activeSelectionBackground, #094771); color: var(--vscode-list-activeSelectionForeground, #fff); }
 .pv-tree-dot {
     width: 8px;
     height: 8px;
@@ -2525,7 +2554,7 @@ function hexDump(raw: Uint8Array, layers: DissectedLayer[] = [], selectedLayerId
     font-family: var(--vscode-editor-font-family, 'Cascadia Code', 'Consolas', monospace);
     font-size: 12px;
     padding: 2px 4px 4px;
-    background: #2d2d30;
+    background: var(--cd-panel-bg-raised);
 }
 .pv-hex-row {
     display: flex;
@@ -2534,8 +2563,8 @@ function hexDump(raw: Uint8Array, layers: DissectedLayer[] = [], selectedLayerId
     line-height: 1.4;
 }
 .pv-hex-row:first-child {
-    background: #2d2d30;
-    border-bottom: 2px solid #3e3e42;
+    background: var(--cd-panel-header-bg);
+    border-bottom: 1px solid var(--cd-panel-border);
 }
 .pv-hex-addr {
     color: #858585;
@@ -2564,7 +2593,7 @@ function hexDump(raw: Uint8Array, layers: DissectedLayer[] = [], selectedLayerId
 .pv-hex-ascii {
     color: #608b4e;
     width: 16ch;
-    border-left: 1px solid #3e3e42;
+    border-left: 1px solid var(--cd-panel-border);
     padding-left: 8px;
     display: flex;
     flex-shrink: 0;
@@ -2584,15 +2613,15 @@ function hexDump(raw: Uint8Array, layers: DissectedLayer[] = [], selectedLayerId
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 3px 12px;
-    background: #252526;
-    border-top: 1px solid #3c3c3c;
+    padding: 4px 12px;
+    background: var(--cd-panel-header-bg);
+    border-top: 1px solid var(--cd-panel-border);
     font-size: 11px;
-    color: #888;
+    color: var(--cd-panel-muted);
     flex-shrink: 0;
 }
-.pv-statusbar .pv-status-ok { color: #67c23a; }
-.pv-statusbar .pv-status-err { color: #f56c6c; }
+.pv-statusbar .pv-status-ok { color: #67c23a; display: inline-flex; align-items: center; gap: 5px; }
+.pv-statusbar .pv-status-err { color: #f56c6c; display: inline-flex; align-items: center; gap: 5px; }
 
 /* ── Empty state ──────────────────────────────────────────────── */
 .pv-empty {
@@ -2601,54 +2630,68 @@ function hexDump(raw: Uint8Array, layers: DissectedLayer[] = [], selectedLayerId
     align-items: center;
     justify-content: center;
     height: 100%;
-    color: #666;
+    color: var(--cd-panel-muted);
     gap: 8px;
 }
-.pv-empty-icon { font-size: 48px; opacity: 0.4; }
+.pv-empty-icon { opacity: 0.42; color: var(--cd-panel-muted); }
 
 /* ── Display filter bar ───────────────────────────────────────── */
 .pv-filterbar {
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 4px 12px;
-    background: #1e1e1e;
-    border-bottom: 1px solid #3c3c3c;
+    padding: 6px 10px;
+    background: var(--cd-panel-bg);
+    border-bottom: 1px solid var(--cd-panel-border);
     flex-shrink: 0;
 }
 .pv-filterbar-label {
     font-size: 11px;
-    color: #888;
+    color: var(--cd-panel-muted);
     white-space: nowrap;
 }
 .pv-filterbar-input {
     flex: 1;
     padding: 3px 6px;
-    border: 1px solid #555;
-    border-radius: 3px;
-    background: #2d2d30;
-    color: #ccc;
+    border: 1px solid var(--cd-panel-border);
+    border-radius: 4px;
+    background: var(--cd-panel-control-bg);
+    color: var(--vscode-editor-foreground, #d4d4d4);
     font-size: 12px;
     font-family: var(--vscode-editor-font-family, 'Cascadia Code', 'Consolas', monospace);
     min-width: 0;
 }
-.pv-filterbar-input:focus { outline: 1px solid #0e639c; border-color: #0e639c; }
+.pv-filterbar-input:focus { outline: 1px solid var(--vscode-focusBorder, #0e639c); border-color: var(--vscode-focusBorder, #0e639c); }
 .pv-filterbar-clear {
-    padding: 2px 6px;
-    border: 1px solid #555;
-    border-radius: 3px;
-    background: #333;
-    color: #ccc;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 3px 6px;
+    border: 1px solid var(--cd-panel-border);
+    border-radius: 4px;
+    background: var(--cd-panel-control-bg);
+    color: var(--vscode-editor-foreground, #d4d4d4);
     font-size: 11px;
     cursor: pointer;
     flex-shrink: 0;
 }
-.pv-filterbar-clear:hover { background: #444; }
+.pv-filterbar-clear:hover { background: var(--cd-panel-control-hover-bg); color: #fff; }
 .pv-filterbar-count {
     font-size: 11px;
-    color: #888;
+    color: var(--cd-panel-muted);
     white-space: nowrap;
     flex-shrink: 0;
+}
+.pv-file-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12px;
+    color: var(--cd-panel-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    max-width: 220px;
+    text-overflow: ellipsis;
 }
 `],
     template: `
@@ -2656,17 +2699,17 @@ function hexDump(raw: Uint8Array, layers: DissectedLayer[] = [], selectedLayerId
     <!-- ── Toolbar ─────────────────────────────────────────────────── -->
     <div class="pv-toolbar">
         @if (!capturing()) {
-            <button (click)="onStartCapture()">&#9654; Start Capture</button>
+            <button (click)="onStartCapture()"><app-icon name="play" [size]="13" /><span>Start Capture</span></button>
         } @else {
-            <button class="pv-active" (click)="onStopCapture()">&#9209; Stop Capture</button>
+            <button class="pv-active" (click)="onStopCapture()"><app-icon name="pause" [size]="13" /><span>Stop Capture</span></button>
         }
-        <button (click)="onPollOnce()" [disabled]="!capturing()">&#10227; Poll</button>
-        <button (click)="onClear()">&#10005; Clear</button>
+        <button (click)="onPollOnce()" [disabled]="!capturing()"><app-icon name="refreshcw" [size]="13" /><span>Poll</span></button>
+        <button (click)="onClear()"><app-icon name="trash2" [size]="13" /><span>Clear</span></button>
         <div class="pv-sep"></div>
-        <button (click)="onOpenPcap()" title="Open a .pcap file">&#128194; Open</button>
-        <button (click)="onSavePcap()" [disabled]="packets().length === 0" title="Save capture as .pcap">&#128190; Save</button>
+        <button (click)="onOpenPcap()" title="Open a .pcap file"><app-icon name="upload" [size]="13" /><span>Open</span></button>
+        <button (click)="onSavePcap()" [disabled]="packets().length === 0" title="Save capture as .pcap"><app-icon name="save" [size]="13" /><span>Save</span></button>
         @if (filename()) {
-            <span style="font-size:12px;color:#aaa;white-space:nowrap;overflow:hidden;max-width:220px;text-overflow:ellipsis" [title]="filename()">&#128196; {{ filename() }}</span>
+            <span class="pv-file-chip" [title]="filename()"><app-icon name="filecode" [size]="13" />{{ filename() }}</span>
         }
         <div class="pv-sep"></div>
         <label style="font-size:12px;color:#999">Direction</label>
@@ -2701,7 +2744,7 @@ function hexDump(raw: Uint8Array, layers: DissectedLayer[] = [], selectedLayerId
             <input type="text" placeholder="IP address" [value]="filterIP()" (input)="filterIP.set($any($event).target.value)" />
         }
         @if (filterType() !== 0) {
-            <button (click)="onApplyFilter()">Apply</button>
+            <button (click)="onApplyFilter()"><app-icon name="filter" [size]="13" /><span>Apply</span></button>
         }
         <span class="pv-stats">
             @if (stats()) {
@@ -2724,7 +2767,7 @@ function hexDump(raw: Uint8Array, layers: DissectedLayer[] = [], selectedLayerId
                [value]="displayFilter()"
                (input)="displayFilter.set($any($event).target.value)" />
         @if (displayFilter()) {
-            <button class="pv-filterbar-clear" (click)="displayFilter.set('')" title="Clear filter">&#10005;</button>
+            <button class="pv-filterbar-clear" (click)="displayFilter.set('')" title="Clear filter"><app-icon name="x" [size]="12" /></button>
             <span class="pv-filterbar-count">{{ filteredPackets().length }} / {{ packets().length }}</span>
         }
     </div>
@@ -2735,13 +2778,13 @@ function hexDump(raw: Uint8Array, layers: DissectedLayer[] = [], selectedLayerId
         <div class="pv-pane pv-pane-packets">
             @if (packets().length === 0) {
                 <div class="pv-empty">
-                    <div class="pv-empty-icon">&#128225;</div>
+                    <app-icon class="pv-empty-icon" name="radiotower" [size]="44" />
                     <div>No packets captured</div>
-                    <div style="font-size:11px">Click <b>Start Capture</b> to begin or <b>&#128194; Open</b> to load a .pcap file</div>
+                    <div style="font-size:11px">Click <b>Start Capture</b> to begin or <b>Open</b> to load a .pcap file</div>
                 </div>
             } @else if (filteredPackets().length === 0) {
                 <div class="pv-empty">
-                    <div class="pv-empty-icon">&#128269;</div>
+                    <app-icon class="pv-empty-icon" name="search" [size]="44" />
                     <div>No packets match the display filter</div>
                 </div>
             } @else {
@@ -2786,7 +2829,7 @@ function hexDump(raw: Uint8Array, layers: DissectedLayer[] = [], selectedLayerId
                     @for (layer of selectedLayers(); track $index; let li = $index) {
                         <div class="pv-tree-layer" [class.pv-layer-selected]="selectedLayerIdx() === li"
                              (click)="selectLayer(li)">
-                            <span class="pv-tree-chevron">{{ expandedLayers().has(li) ? '&#9662;' : '&#9656;' }}</span>
+                            <app-icon class="pv-tree-chevron" [name]="expandedLayers().has(li) ? 'chevrondown' : 'chevronright'" [size]="12" />
                             <span class="pv-tree-dot" [style.background]="layer.color"></span>
                             <span>{{ layer.label }}</span>
                         </div>
@@ -2815,7 +2858,8 @@ function hexDump(raw: Uint8Array, layers: DissectedLayer[] = [], selectedLayerId
     <div class="pv-statusbar">
         @if (adapterStatus()) {
             <span [class]="adapterStatus()!.enabled ? 'pv-status-ok' : 'pv-status-err'">
-                {{ adapterStatus()!.enabled ? '&#9679; Connected' : '&#9675; Disconnected' }}
+                <app-icon [name]="adapterStatus()!.enabled ? 'circlecheck' : 'ban'" [size]="12" />
+                <span>{{ adapterStatus()!.enabled ? 'Connected' : 'Disconnected' }}</span>
             </span>
             @if (adapterStatus()!.enabled) {
                 <span>MAC: {{ adapterStatus()!.ps2Mac }}</span>
