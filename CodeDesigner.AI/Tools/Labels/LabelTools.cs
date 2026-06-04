@@ -13,7 +13,7 @@ public sealed class LabelAddBatchTool(IEmulatorBridge bridge)
 {
     [ToolEntryPoint]
     public async Task<string> InvokeAsync(
-        [Description("Game identifier / ISO serial (e.g. 'SCUS-97275').")] string gameId,
+        [Description("PS2 disc serial (e.g. 'SCUS-97275'). MUST be the SCUS/SLUS/SLES/... serial — not an ISO path, filename, or numeric ID.")] string gameId,
         [Description("Label set to add the entries to (e.g. 'ai-analysis').")] string labelSet,
         [Description("JSON array of {address, name, comment?, type?, argRegs?, returnRegs?, elementStride?, elementCount?, nodeNextOffset?, nodeSize?} entries.")] string entries,
         CancellationToken ct = default)
@@ -45,7 +45,7 @@ public sealed class GroupCreateTool(IEmulatorBridge bridge)
 {
     [ToolEntryPoint]
     public async Task<string> InvokeAsync(
-        [Description("Game identifier / ISO serial (e.g. 'SCUS-97275').")] string gameId,
+        [Description("PS2 disc serial (e.g. 'SCUS-97275'). MUST be the SCUS/SLUS/SLES/... serial — not an ISO path, filename, or numeric ID.")] string gameId,
         [Description("Label set to create the group in (e.g. 'ai-analysis').")] string setName,
         [Description("Group name, e.g. 'PlayerController'.")] string name,
         [Description("Group kind: Class (default), Module, Subsystem, or VTable.")] string? kind = null,
@@ -64,7 +64,7 @@ public sealed class GroupListTool(IEmulatorBridge bridge)
 {
     [ToolEntryPoint]
     public async Task<string> InvokeAsync(
-        [Description("Game identifier / ISO serial.")] string gameId,
+        [Description("PS2 disc serial (e.g. 'SCUS-97275'). MUST be the SCUS/SLUS/SLES/... serial — not an ISO path, filename, or numeric ID.")] string gameId,
         [Description("Label set name.")] string setName,
         CancellationToken ct = default)
     {
@@ -79,7 +79,7 @@ public sealed class GroupAddMemberTool(IEmulatorBridge bridge)
 {
     [ToolEntryPoint]
     public async Task<string> InvokeAsync(
-        [Description("Game identifier / ISO serial.")] string gameId,
+        [Description("PS2 disc serial (e.g. 'SCUS-97275'). MUST be the SCUS/SLUS/SLES/... serial — not an ISO path, filename, or numeric ID.")] string gameId,
         [Description("Label set name.")] string setName,
         [Description("Group name.")] string groupName,
         [Description("Address of an existing label to add (hex/decimal).")] string labelAddress,
@@ -98,7 +98,7 @@ public sealed class GroupRemoveMemberTool(IEmulatorBridge bridge)
 {
     [ToolEntryPoint]
     public async Task<string> InvokeAsync(
-        [Description("Game identifier / ISO serial.")] string gameId,
+        [Description("PS2 disc serial (e.g. 'SCUS-97275'). MUST be the SCUS/SLUS/SLES/... serial — not an ISO path, filename, or numeric ID.")] string gameId,
         [Description("Label set name.")] string setName,
         [Description("Group name.")] string groupName,
         [Description("Member label address to remove (hex/decimal).")] string labelAddress,
@@ -115,7 +115,7 @@ public sealed class GroupDeleteTool(IEmulatorBridge bridge)
 {
     [ToolEntryPoint]
     public async Task<string> InvokeAsync(
-        [Description("Game identifier / ISO serial.")] string gameId,
+        [Description("PS2 disc serial (e.g. 'SCUS-97275'). MUST be the SCUS/SLUS/SLES/... serial — not an ISO path, filename, or numeric ID.")] string gameId,
         [Description("Label set name.")] string setName,
         [Description("Group name to delete.")] string groupName,
         CancellationToken ct = default)
@@ -131,7 +131,7 @@ public sealed class CallGraphScanTool(IEmulatorBridge bridge)
 {
     [ToolEntryPoint]
     public async Task<string> InvokeAsync(
-        [Description("Game identifier / ISO serial (e.g. 'SCUS-97275'). Omit for file-only sessions.")] string? gameId,
+        [Description("PS2 disc serial (e.g. 'SCUS-97275') — never an ISO path or filename. Omit for file-only sessions.")] string? gameId,
         [Description("Start address of the code segment to scan (hex/decimal).")] string address,
         [Description("Number of bytes to scan from the start address.")] int length,
         [Description("Memory region: 'ee' (default) or 'iop'.")] string? region = null,
@@ -149,7 +149,7 @@ public sealed class CallGraphQueryTool(IEmulatorBridge bridge)
 {
     [ToolEntryPoint]
     public async Task<string> InvokeAsync(
-        [Description("Game identifier / ISO serial (e.g. 'SCUS-97275'). Omit for file-only sessions.")] string? gameId,
+        [Description("PS2 disc serial (e.g. 'SCUS-97275') — never an ISO path or filename. Omit for file-only sessions.")] string? gameId,
         [Description("Focus function address (hex/decimal).")] string address,
         [Description("Max hops from the focus (1-12, default 3).")] int? depth = null,
         [Description("Traversal: 'callers', 'callees', or 'both' (default).")] string? direction = null,
