@@ -4,6 +4,7 @@ html {
 }
 
 body {
+    /* Original disassembler panel outer padding. */
     padding: 10px;
     font-family: var(--vscode-editor-font-family);
     color: var(--vscode-editor-foreground);
