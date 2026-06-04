@@ -2508,15 +2508,12 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             return;
         }
 
-        // PCSX2 must have connected at least once so the bridge captured the
-        // savestates path from the emu log into the settings table.
-        let saveDir: string | null;
-        try { saveDir = await this.socketClient.getSetting('pcsx2.path.savestates'); }
-        catch { saveDir = null; }
+        const saveDir = await this._resolvePcsx2SavestatesDir();
         if (!saveDir) {
             vscode.window.showWarningMessage(
-                "Could not locate PCSX2's savestates folder. Launch PCSX2 once so its " +
-                'paths are captured into pcsx2.path.savestates, then try again.');
+                "Could not locate PCSX2's savestates folder. Launch PCSX2 once via " +
+                'the Connect button so its directory listing is captured, or set ' +
+                'pcsx2.path.savestates manually.');
             return;
         }
 
@@ -2569,6 +2566,63 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
      * written. Returns `null` when the savestates folder contains no canonical
      * save for this serial yet — the caller falls back to a CRC-less filename.
      */
+    /**
+     * Resolve PCSX2's savestates directory with a fallback chain so the
+     * Snapshot button works even when the emu-log path-extractor never ran
+     * (e.g. PCSX2 was already running when VS Code attached, or this update
+     * shipped after the user's last fresh launch).
+     *
+     * Resolution order:
+     *   1. `pcsx2.path.savestates` setting (auto-captured from the emu log).
+     *   2. `<pcsx2.path.dataRoot>/sstates` — PCSX2's default layout
+     *      (`EmuFolders::LoadConfig` joins DataRoot + the "sstates" subkey).
+     *   3. Windows default: `%USERPROFILE%\Documents\PCSX2\sstates`.
+     *
+     * On a successful fallback we backfill the `pcsx2.path.savestates`
+     * setting so subsequent lookups are fast and consistent — useful when
+     * the emu-log polling missed the directory listing for any reason.
+     */
+    private async _resolvePcsx2SavestatesDir(): Promise<string | null> {
+        const trySetting = async (key: string): Promise<string | null> => {
+            try { return (await this.socketClient.getSetting(key))?.trim() || null; }
+            catch { return null; }
+        };
+
+        // 1. Captured savestates path.
+        const direct = await trySetting('pcsx2.path.savestates');
+        if (direct && fs.existsSync(direct)) { return direct; }
+
+        // 2. Derived from DataRoot.
+        const dataRoot = await trySetting('pcsx2.path.dataRoot');
+        if (dataRoot) {
+            const derived = path.join(dataRoot, 'sstates');
+            if (fs.existsSync(derived)) {
+                void this._backfillSavestatesPath(derived);
+                return derived;
+            }
+        }
+
+        // 3. Windows default — PCSX2 stores user data under
+        //    %USERPROFILE%\Documents\PCSX2 unless overridden by portable mode.
+        if (process.platform === 'win32') {
+            const home = process.env.USERPROFILE || require('os').homedir();
+            if (home) {
+                const winDefault = path.join(home, 'Documents', 'PCSX2', 'sstates');
+                if (fs.existsSync(winDefault)) {
+                    void this._backfillSavestatesPath(winDefault);
+                    return winDefault;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private async _backfillSavestatesPath(p: string): Promise<void> {
+        try { await this.socketClient.setSetting('pcsx2.path.savestates', p); }
+        catch (err: any) { getOutputChannel().debug(`backfill pcsx2.path.savestates failed: ${err?.message ?? err}`); }
+    }
+
     private _tryDiscoverCurrentCrc(saveDir: string, serial: string): string | null {
         if (!serial) { return null; }
         let files: string[];
@@ -2757,9 +2811,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     public async getPcsx2Savestates(): Promise<SnapshotEntry[]> {
         if (!this.socketClient.isConnected()) { return []; }
 
-        let dir: string | null;
-        try { dir = await this.socketClient.getSetting('pcsx2.path.savestates'); }
-        catch { return []; }
+        const dir = await this._resolvePcsx2SavestatesDir();
         if (!dir) { return []; }
 
         let files: string[];
