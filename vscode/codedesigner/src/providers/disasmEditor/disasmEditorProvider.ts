@@ -104,11 +104,10 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   private _archiveLabels: LabelEntry[] = [];
   /** Current game (ISO) name — used to resolve the per-game labels.json path. */
   private _currentGameName: string = '';
-  /** Current game disc identifier for label manager DB queries — the PS2 serial (e.g. "SCUS-97275"). Empty when unknown. */
+  /** PS2 serial of the currently loaded game (e.g. "SCUS-97275"). Empty when unknown. Used for snapshot filename matching and as a label-manager fallback. */
   private _currentGameSerial: string = '';
-
-  /** Matches a PS2 disc serial: 3-4 letters, dash or underscore, 3-6 digits (e.g. SCUS-97275, SLUS_217.06). */
-  private static readonly _SERIAL_PATTERN = /^[A-Za-z]{3,4}[-_]\d{3,6}(?:\.\d{1,3})?$/;
+  /** Numeric GameDisc.Id returned by UPDATEGAMEDISC. Preferred over the serial for label-manager DB queries since it's stable across re-imports. Null when the upsert hasn't run yet. */
+  private _currentGameDiscId: number | null = null;
   /** Workspace root — used to resolve the per-game labels.json path. */
   private _workspaceRoot: string = '';
   /** Name of the currently active label set on the server (e.g. "MyLabels"), or null when no user set is active. */
@@ -561,17 +560,17 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
    * Called by DisasmPanelProvider when the selected game changes.
    * Used to resolve the per-game labels.json path for user-created labels.
    */
-  public setCurrentGame(gameName: string, workspaceRoot: string, gameSerial?: string): void {
+  public setCurrentGame(gameName: string, workspaceRoot: string, gameSerial?: string, gameDiscId?: number | null): void {
     this._currentGameName   = gameName;
     this._workspaceRoot     = workspaceRoot;
-    // Only accept strings that look like a PS2 serial (SCUS-97275, SLUS_217.06).
-    // ISO paths, filenames, and numeric IDs are rejected here to prevent them
-    // from leaking into label-manager DB calls — callers must resolve the real
-    // serial via PINE or isoBootElf before assigning it.
-    const trimmed = (gameSerial ?? '').trim();
-    this._currentGameSerial = DisasmEditorProvider._SERIAL_PATTERN.test(trimmed)
-      ? trimmed.toUpperCase().replace('_', '-')
-      : '';
+    this._currentGameSerial = gameSerial ?? '';
+    // null means "leave as-is", undefined explicitly clears it. This lets
+    // _resolveSerialForGamePath update only the serial (when refreshing on
+    // startup) without clobbering a discId already captured by the disc
+    // upsert during handleGameChanged.
+    if (gameDiscId !== null) {
+      this._currentGameDiscId = gameDiscId ?? null;
+    }
     // Reset the active label set when the game changes — it will be re-established
     // when the label manager refreshes or the user selects a set.
     this._activeSetName = null;
@@ -3630,14 +3629,17 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       || '';
     if (!workspaceDir) { return null; }
 
-    // GameDiscId must always be the PS2 serial (e.g. "SCUS-97275"). Falling
-    // back to the ISO filename or basename here would poison the LabelSets
-    // table — any new sets created against this gameId would be scoped to a
-    // non-serial identifier, and existing per-serial sets wouldn't resolve.
-    // When no serial is known, use the explicit NO_GAME_SELECTED sentinel so
-    // the label manager still opens (with the Built-in set) and the backend
-    // returns an empty user-set list.
-    const gameDiscId = this._currentGameSerial || DisasmEditorProvider.NO_GAME_SELECTED;
+    // Prefer the numeric GameDisc.Id when we have one — it's the stable
+    // primary key and bypasses ResolveGameDiscIdAsync's string-matching tiers.
+    // Fall back to the serial, then the ISO basename, so the label manager
+    // still resolves when the disc upsert hasn't run yet. NO_GAME_SELECTED
+    // sentinel only when nothing is known so the panel still opens with the
+    // Built-in set.
+    const gameDiscId =
+      this._currentGameDiscId !== null ? this._currentGameDiscId.toString()
+      : this._currentGameSerial
+      || this._currentGameName
+      || DisasmEditorProvider.NO_GAME_SELECTED;
     return { workspaceDir, gameDiscId };
   }
 

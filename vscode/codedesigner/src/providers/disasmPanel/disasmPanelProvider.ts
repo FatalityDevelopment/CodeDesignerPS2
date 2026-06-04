@@ -3049,16 +3049,16 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         this.loadSnapshotsForGame(this.selectedGameName);
         this.loadGameLabels(this.selectedGameName);
 
-        // Resolve the SCUS/SLUS serial. Two-tier strategy:
-        //   1. Ask a running PCSX2 (PINE) for its loaded-game serial.
-        //   2. If PINE has no game (or isn't running), read SYSTEM.CNF from
-        //      the ISO directly so we still get the canonical serial.
-        // Never persist the ISO path as a serial — label sets are scoped by
-        // GameDisc.Serial and any other identifier would silently fragment them.
+        // Resolve the SCUS/SLUS serial (PINE → ISO bootElf), then upsert the
+        // Game / GameRegion / GameDisc rows so the label manager can scope by
+        // the stable GameDisc.Id. The upsert runs even when PCSX2 isn't
+        // attached — that's what was missing before, leaving the Games table
+        // empty for the loaded title.
         if (gamePath && this._bridgeMode) {
             const serial = await this._resolveSerialForGamePath(gamePath);
             if (serial) {
                 this._currentGameSerial = serial;
+                let discId: number | undefined;
                 try {
                     let gameTitle = this.selectedGameName;
                     try {
@@ -3066,18 +3066,17 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                         const t = (info.Title ?? '').replace(/\0/g, '').trim();
                         if (t) { gameTitle = t; }
                     } catch { /* PCSX2 not attached — fall back to filename */ }
-                    // Upsert Game/GameRegion/GameDisc in the database with IsoPath,
-                    // serial, and title so the game appears in the DB immediately.
-                    await this.socketClient.updateGameDisc(serial, gamePath, undefined, gameTitle);
+                    discId = await this.socketClient.updateGameDisc(serial, gamePath, undefined, gameTitle);
                 } catch { /* DB upsert is best-effort */ }
-                this.editorProvider.setCurrentGame(this.selectedGameName, this.workspaceRoot, serial);
+                this.editorProvider.setCurrentGame(this.selectedGameName, this.workspaceRoot, serial, discId);
                 // Re-list snapshots now that we know the serial — the initial
                 // call above filtered with an empty serial (= show all).
                 this._snapshotManagerProvider.notifySnapshotsChanged();
             } else {
-                // Couldn't resolve a serial — open the label manager against
-                // the NO_GAME_SELECTED sentinel rather than the ISO path.
-                this.editorProvider.setCurrentGame(this.selectedGameName, this.workspaceRoot, undefined);
+                // No serial recoverable (unreadable ISO, etc.) — keep the
+                // editor context with just the filename so the user can
+                // still browse the Built-in set.
+                this.editorProvider.setCurrentGame(this.selectedGameName, this.workspaceRoot, gamePath);
             }
         }
 
@@ -3189,23 +3188,34 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private loadGameLabels(isoName: string): void {
         // Update the editor provider's current game context so user-created
         // labels are saved to the correct per-game file. Pass the cached
-        // serial only — never the ISO path. setCurrentGame rejects non-serial
-        // values defensively.
-        this.editorProvider.setCurrentGame(isoName, this.workspaceRoot, this._currentGameSerial || undefined);
+        // serial when we have one, otherwise the ISO path (handleGameChanged
+        // will upgrade this to a numeric discId once the upsert runs).
+        this.editorProvider.setCurrentGame(
+            isoName,
+            this.workspaceRoot,
+            this._currentGameSerial || this.selectedGamePath || undefined,
+        );
 
         // If we don't yet have a serial cached (e.g. startup before the user
-        // touches the dropdown), resolve it from the ISO in the background
-        // and re-seed the editor context. Without this the Label Manager
-        // would open with the NO_GAME_SELECTED sentinel until the user
-        // re-selects a game.
-        if (!this._currentGameSerial && this.selectedGamePath) {
-            void this._resolveSerialForGamePath(this.selectedGamePath).then(serial => {
-                if (serial && !this._currentGameSerial) {
+        // touches the dropdown), resolve it from the ISO in the background,
+        // upsert the GameDisc row, and re-seed the editor context with the
+        // numeric discId. Without this the Games + GameDiscs tables stay
+        // empty for any preference-restored game.
+        if (!this._currentGameSerial && this.selectedGamePath && this.socketClient.isConnected()) {
+            const gamePath = this.selectedGamePath;
+            void (async () => {
+                try {
+                    const serial = await this._resolveSerialForGamePath(gamePath);
+                    if (!serial || this._currentGameSerial) { return; }
                     this._currentGameSerial = serial;
-                    this.editorProvider.setCurrentGame(isoName, this.workspaceRoot, serial);
+                    let discId: number | undefined;
+                    try {
+                        discId = await this.socketClient.updateGameDisc(serial, gamePath, undefined, isoName);
+                    } catch { /* upsert is best-effort */ }
+                    this.editorProvider.setCurrentGame(isoName, this.workspaceRoot, serial, discId);
                     this._snapshotManagerProvider.notifySnapshotsChanged();
-                }
-            }).catch(() => { /* best-effort */ });
+                } catch { /* best-effort */ }
+            })();
         }
 
         if (!isoName || !this.workspaceRoot) {

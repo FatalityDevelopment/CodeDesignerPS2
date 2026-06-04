@@ -125,6 +125,29 @@ namespace CodeDesigner.Ps2.Bridge.Services
                     changed = true;
                 }
 
+                // Self-heal: if the disc's parent Game row is missing (legacy
+                // data, partial seed, or a manual SQL insert that skipped the
+                // Games table) wire one up now so downstream label-manager
+                // queries always have a complete Game → GameDisc chain.
+                bool parentMissing = disc.GameId == 0 ||
+                                     !db.Games.Any(g => g.Id == disc.GameId);
+                if (parentMissing)
+                {
+                    var title = !string.IsNullOrWhiteSpace(gameTitle)
+                        ? gameTitle
+                        : $"Unknown Game ({normalized})";
+
+                    var game = db.Games.FirstOrDefault(g => g.Title == title);
+                    if (game is null)
+                    {
+                        game = new Game { Title = title };
+                        db.Games.Add(game);
+                        db.SaveChanges();
+                    }
+                    disc.GameId = game.Id;
+                    changed = true;
+                }
+
                 if (changed)
                     db.SaveChanges();
             }
