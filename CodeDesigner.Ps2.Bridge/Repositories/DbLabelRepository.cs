@@ -186,7 +186,7 @@ namespace CodeDesigner.Ps2.Bridge.Repositories
             {
                 SetName    = setName,
                 GameDiscId = discId,
-                GameId     = await ResolveCanonicalGameIdAsync(gameId),
+                GameId     = gameId,
                 IsBuiltIn  = false,
             };
 

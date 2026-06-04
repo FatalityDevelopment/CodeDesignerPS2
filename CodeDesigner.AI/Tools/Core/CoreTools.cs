@@ -287,7 +287,7 @@ public sealed class LabelAddTool(IEmulatorBridge bridge, SessionState state)
 {
     [ToolEntryPoint]
     public async Task<string> InvokeAsync(
-        [Description("Game identifier / ISO serial (e.g. 'SCUS-97275').")] string gameId,
+        [Description("Game identifier. Prefer the numeric GameDisc.Id (most stable); the SCUS/SLUS serial (e.g. 'SCUS-97275') also works.")] string gameId,
         [Description("Label set (e.g. 'ai-analysis').")] string labelSet,
         [Description("Virtual address (hex/decimal).")] string address,
         [Description("Label name (e.g. 'scePadRead').")] string label,
