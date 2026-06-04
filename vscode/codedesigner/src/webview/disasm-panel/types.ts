@@ -19,6 +19,16 @@ export interface SnapshotEntry {
   name: string;
   date: string;
   isoName: string;
+  /** PCSX2 disc serial parsed from the .p2s file name (e.g. "SCUS-97275"). */
+  serial?: string;
+  /** PCSX2 disc CRC parsed from the .p2s file name (8 hex chars). */
+  crc?: string;
+  /** PCSX2 slot token parsed from the .p2s file name ("00".."09", "resume", "backup"). */
+  slot?: string;
+  /** Byte size of the .p2s archive on disk. */
+  sizeBytes?: number;
+  /** File modification time in ms since epoch — used for stable date sorting. */
+  mtimeMs?: number;
 }
 
 export interface DiscElfEntry {

@@ -6,6 +6,41 @@ namespace CodeDesigner.AI.Tools.Pcsx2;
 // PCSX2 PINE-mode tools (debugging, symbols, registers, state, watches).
 // Commands match legacy CodeDesigner.Ps2.McpServer/Tools/Pcsx2.cs.
 
+[CdTool("pcsx2_get_paths", ToolDomain.Pcsx2, ToolRisk.ReadOnly,
+    "Return the absolute on-disk directories PCSX2 is using for this session, captured from " +
+    "the emu log on connection. Use this whenever you need to read or write a PCSX2-managed " +
+    "file (memory cards, save states, screenshots, cheats, patches, logs, textures, ISO covers, " +
+    "per-game .ini overrides, etc.) instead of guessing or hardcoding %DOCUMENTS%\\PCSX2.\n" +
+    "Returned keys (each value is an absolute directory):\n" +
+    "  pcsx2.path.dataRoot         — root of the user's PCSX2 data tree (parent of inis/, memcards/, sstates/, ...).\n" +
+    "  pcsx2.path.bios             — BIOS image search path.\n" +
+    "  pcsx2.path.snapshots        — in-game screenshot captures.\n" +
+    "  pcsx2.path.savestates       — .p2s save-state files.\n" +
+    "  pcsx2.path.memoryCards      — virtual PS2 memory card images (.ps2).\n" +
+    "  pcsx2.path.logs             — emulog.txt and other diagnostic logs.\n" +
+    "  pcsx2.path.cheats           — per-game .pnach cheat files.\n" +
+    "  pcsx2.path.patches          — built-in compatibility patches.\n" +
+    "  pcsx2.path.covers           — cover-art images shown in the game list.\n" +
+    "  pcsx2.path.gameSettings     — per-disc .ini overrides keyed by serial+CRC.\n" +
+    "  pcsx2.path.resources        — bundled, read-only resource tree shipped with PCSX2.\n" +
+    "  pcsx2.path.userResources    — user-overridable copy of the Resources tree.\n" +
+    "  pcsx2.path.cache            — shader/program/state caches (regenerated as needed).\n" +
+    "  pcsx2.path.textures         — HD-texture replacement / dump folder.\n" +
+    "  pcsx2.path.inputProfiles    — saved controller mapping profiles.\n" +
+    "  pcsx2.path.videos           — GS-dump / video capture output.\n" +
+    "  pcsx2.path.debuggerLayouts  — saved debugger window layouts.\n" +
+    "  pcsx2.path.debuggerSettings — per-game persisted debugger state.\n" +
+    "  pcsx2.path.discovered       — JSON array of every other path-shaped string seen in the emu log (diagnostics only).\n" +
+    "Values are populated automatically the first time PCSX2 connects in a session; empty " +
+    "values mean PCSX2 has not yet been launched (or the emu log line for that key has not " +
+    "been seen). Risk: read-only.")]
+public sealed class Pcsx2GetPathsTool(IEmulatorBridge bridge)
+{
+    [ToolEntryPoint] public async Task<string> InvokeAsync(CancellationToken ct = default)
+        => CdText.Message(await bridge.SendAsync(
+            new { Command = "GETALLSETTINGS", SettingPrefix = "pcsx2.path." }, ct));
+}
+
 [CdTool("pcsx2_get_symbol", ToolDomain.Pcsx2, ToolRisk.ReadOnly,
     "Look up EE function symbol name at an address via PINE. Risk: read-only.")]
 public sealed class Pcsx2GetSymbolTool(IEmulatorBridge bridge)

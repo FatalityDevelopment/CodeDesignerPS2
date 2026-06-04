@@ -69,10 +69,12 @@ export class DiffViewerProvider {
 
         switch (type) {
             case 'ready':
-                webview.postMessage({
-                    type: 'snapshotList',
-                    snapshots: this.delegate.getSnapshots(),
-                });
+                try {
+                    const snapshots = await this.delegate.getSnapshots();
+                    webview.postMessage({ type: 'snapshotList', snapshots });
+                } catch (err: any) {
+                    webview.postMessage({ type: 'snapshotList', snapshots: [], error: err?.message ?? String(err) });
+                }
                 if (this._pendingPreload) {
                     webview.postMessage({ type: 'preloadSnapshots', ...this._pendingPreload });
                     this._pendingPreload = null;
