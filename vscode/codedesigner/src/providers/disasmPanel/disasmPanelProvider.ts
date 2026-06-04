@@ -2490,9 +2490,15 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     }
 
     /**
-     * Save PCSX2 emulator state to a named .p2s file via the PINE socket bridge
-     * (SAVESTATETOFILE command → PineClient.SaveStateFile opcode 0x22).
-     * Only available in PINE mode.
+     * Save the live PCSX2 emulator state to a `.p2s` file in PCSX2's own
+     * savestates folder (`pcsx2.path.savestates`, populated from the emu log
+     * on first connect). PCSX2 names slot saves `<SERIAL> (<CRC>).<NN>.p2s`;
+     * for user-titled saves we keep the same prefix when serial+CRC are known
+     * so PCSX2 and the Snapshot Manager's per-game filter both recognise the
+     * file. The `.p2s` archive contains everything (memory, GS state, embedded
+     * Screenshot.png) — no sidecar `.extracted/` directory is generated here;
+     * the Snapshot Manager's "Open Memory" action extracts on demand.
+     * Routed through the PINE socket (SAVESTATETOFILE / opcode 0x22).
      */
     private async handleSnapshotPcsx2(): Promise<void> {
         const out = getOutputChannel();
@@ -2502,10 +2508,17 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             return;
         }
 
-        const isoName = this.selectedGameName || 'unknown_game';
-        const baseDir = this.workspaceRoot
-            ? path.join(this.workspaceRoot, 'snapshots')
-            : path.join(require('os').tmpdir(), 'ps2snapshots');
+        // PCSX2 must have connected at least once so the bridge captured the
+        // savestates path from the emu log into the settings table.
+        let saveDir: string | null;
+        try { saveDir = await this.socketClient.getSetting('pcsx2.path.savestates'); }
+        catch { saveDir = null; }
+        if (!saveDir) {
+            vscode.window.showWarningMessage(
+                "Could not locate PCSX2's savestates folder. Launch PCSX2 once so its " +
+                'paths are captured into pcsx2.path.savestates, then try again.');
+            return;
+        }
 
         // Prompt user for a save-state name (used as the .p2s file name).
         const snapName = await vscode.window.showInputBox({
@@ -2517,8 +2530,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         if (snapName === undefined) { return; } // cancelled
 
         const safeName = (snapName.trim() || 'savestate').replace(/[^a-zA-Z0-9_\-]/g, '_');
-        const dateStr = new Date().toISOString().slice(0, 10);
-        const saveDir = path.join(baseDir, isoName, dateStr);
+
         try { fs.mkdirSync(saveDir, { recursive: true }); } catch (mkErr: any) {
             if (mkErr?.code !== 'EEXIST') {
                 out.error(`Could not create save-state directory: ${mkErr?.message ?? mkErr}`);
@@ -2527,29 +2539,47 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             }
         }
 
-        const filePath = path.join(saveDir, `${safeName}.p2s`);
+        const serial = this._currentGameSerial.trim().toUpperCase();
+        const crc    = serial ? this._tryDiscoverCurrentCrc(saveDir, serial) : null;
+        let fileName: string;
+        if (serial && crc)   { fileName = `${serial} (${crc}).${safeName}.p2s`; }
+        else if (serial)     { fileName = `${serial}.${safeName}.p2s`; }
+        else                 { fileName = `${safeName}.p2s`; }
+        const filePath = path.join(saveDir, fileName);
+
         out.info(`Saving PCSX2 state → ${filePath}`);
 
         try {
             await this.socketClient.saveStateFile(filePath);
             out.info(`PCSX2 state saved to '${filePath}'.`);
-            vscode.window.showInformationMessage(`PCSX2 state saved: ${path.basename(filePath)}`);
+            vscode.window.showInformationMessage(`PCSX2 state saved: ${fileName}`);
 
-            // Extract memory dumps from the .p2s archive so they appear in snapshot
-            // history. This uses the C# server's existing ZipFile extraction code.
-            try {
-                await this.socketClient.extractP2s(filePath);
-                out.info(`PCSX2 state extracted for history: ${filePath}.extracted`);
-            } catch (exErr: any) {
-                out.warn(`Could not extract .p2s for history (${filePath}): ${exErr?.message ?? exErr}`);
-            }
-
-            // Refresh the snapshot list so the new entry is visible immediately.
-            this.loadSnapshotsForGame(isoName);
+            // Refresh the snapshot list so the new entry shows up immediately
+            // in the manager (filtered by the current game's serial).
+            void this.loadSnapshotsForGame(this.selectedGameName);
         } catch (err: any) {
             out.error(`PCSX2 save state failed: ${err?.message ?? err}`);
             vscode.window.showErrorMessage(`PCSX2 save state failed: ${err?.message ?? err}`);
         }
+    }
+
+    /**
+     * Best-effort lookup of the PCSX2 game CRC for the currently loaded disc
+     * by scanning sibling `<SERIAL> (<CRC>).*.p2s` files PCSX2 has already
+     * written. Returns `null` when the savestates folder contains no canonical
+     * save for this serial yet — the caller falls back to a CRC-less filename.
+     */
+    private _tryDiscoverCurrentCrc(saveDir: string, serial: string): string | null {
+        if (!serial) { return null; }
+        let files: string[];
+        try { files = fs.readdirSync(saveDir); } catch { return null; }
+        const escaped = serial.replace(/[-]/g, '\\-');
+        const re = new RegExp(`^${escaped}\\s+\\(([0-9A-Fa-f]{8})\\)\\.`, 'i');
+        for (const f of files) {
+            const m = f.match(re);
+            if (m) { return m[1].toUpperCase(); }
+        }
+        return null;
     }
 
     /**
@@ -2739,14 +2769,30 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         const serialFilter = this._currentGameSerial
             ? this._currentGameSerial.trim().toUpperCase()
             : '';
-        const nameRe = /^(\S+)\s+\(([0-9A-Fa-f]{8})\)\.(.+?)\.p2s$/;
+        // Two-tier match: canonical PCSX2 naming (with CRC) plus a fallback
+        // for user-titled saves that follow the "<SERIAL>.<slug>.p2s" form
+        // we write when CRC is unknown. Files matching neither pattern still
+        // appear in the list — they just lack parsed serial/slot metadata.
+        const nameReFull = /^([A-Za-z]+-\d+)\s+\(([0-9A-Fa-f]{8})\)\.(.+?)\.p2s$/;
+        const nameReSerialOnly = /^([A-Za-z]+-\d+)\.(.+?)\.p2s$/;
         const entries: SnapshotEntry[] = [];
 
         for (const name of files) {
             if (!name.toLowerCase().endsWith('.p2s')) { continue; }
-            const m = name.match(nameRe);
-            const serial = m ? m[1].toUpperCase() : '';
-            if (serialFilter && serial !== serialFilter) { continue; }
+            const mFull   = name.match(nameReFull);
+            const mSerial = mFull ? null : name.match(nameReSerialOnly);
+            const serial  = mFull ? mFull[1].toUpperCase()
+                          : mSerial ? mSerial[1].toUpperCase()
+                          : '';
+            const crc     = mFull ? mFull[2].toUpperCase() : undefined;
+            const slot    = mFull ? mFull[3]
+                          : mSerial ? mSerial[2]
+                          : undefined;
+
+            // Per-game filter: only skip files whose parsed serial *differs*
+            // from the current game. Files without a parseable serial fall
+            // through (likely user-saved customs) so they're never lost.
+            if (serialFilter && serial && serial !== serialFilter) { continue; }
 
             const full = path.join(dir, name);
             let mtimeMs = 0;
@@ -2757,8 +2803,6 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 size    = st.size;
             } catch { /* unreadable — show anyway */ }
 
-            const slot = m ? m[3] : undefined;
-            const crc  = m ? m[2].toUpperCase() : undefined;
             const label = slot === 'resume'
                 ? 'Resume state'
                 : slot === undefined
