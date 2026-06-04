@@ -37,29 +37,13 @@ body {
   width: 100%;
 }
 
-.jm-titlebar {
-  min-height: 50px;
-  display: flex;
+.jm-header-actions {
+  display: inline-flex;
   align-items: center;
-  gap: 10px;
-  padding: 7px 12px;
-  background: var(--jm-panel-hi);
-  border-bottom: 1px solid var(--jm-border);
-  flex: 0 0 auto;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
 }
-
-.jm-mark {
-  width: 28px;
-  height: 28px;
-  display: grid;
-  place-items: center;
-  border-radius: 6px;
-  background: linear-gradient(145deg, #0e639c, #174b70);
-  color: #fff;
-}
-
-.jm-title { color: var(--jm-text); font-size: 13px; font-weight: 650; }
-.jm-subtitle { margin-top: 2px; color: var(--jm-dim); font-size: 10px; }
 
 .jm-connection {
   margin-left: auto;
@@ -300,7 +284,7 @@ body {
 }
 
 @media (max-width: 680px) {
-  .jm-titlebar { flex-wrap: wrap; }
+  .jm-header-actions { flex-wrap: wrap; }
   .jm-connection { margin-left: 0; }
   .jm-side { width: 270px; flex-basis: 270px; }
   .jm-side-collapsed { width: 0; flex-basis: 0; }

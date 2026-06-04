@@ -13,7 +13,7 @@ import {
     ElementRef,
 } from '@angular/core';
 import { getVsCodeApi } from '../shared/vscode-api';
-import { IconComponent } from '../shared/icon.component';
+import { PageHeaderComponent } from '../shared/page-header.component';
 import './joker-maker-page.css';
 
 // Geometry
@@ -127,20 +127,19 @@ type IncomingMsg = InitMsg | ConnectionMsg | LivePadStateMsg | LivePollStoppedMs
 @Component({
     selector: 'app-joker-maker-page',
     standalone: true,
-    imports: [IconComponent],
+    imports: [PageHeaderComponent],
     changeDetection: ChangeDetectionStrategy.OnPush,
     encapsulation: ViewEncapsulation.None,
     template: `
 <div class="jm-host">
-
-  <div class="jm-titlebar">
-    <div class="jm-mark"><app-icon name="gamepad2" [size]="17" /></div>
-    <div><div class="jm-title">Controller</div><div class="jm-subtitle">Virtual PS2 controller and active-low cheat mask builder</div></div>
-    <span class="jm-connection" [class.jm-connection-on]="connected()">{{ connected() ? 'connected' : 'offline' }}</span>
-    <button class="jm-panel-toggle" type="button" (click)="toggleSidePanel()" [attr.aria-expanded]="!sideCollapsed()" title="Toggle details panel">
-      {{ sideCollapsed() ? 'Show Details' : 'Hide Details' }}
-    </button>
-  </div>
+  <app-page-header icon="gamepad2" title="Controller" subtitle="Virtual PS2 controller and active-low cheat mask builder">
+    <div page-header-actions class="jm-header-actions">
+      <span class="jm-connection" [class.jm-connection-on]="connected()">{{ connected() ? 'connected' : 'offline' }}</span>
+      <button class="jm-panel-toggle" type="button" (click)="toggleSidePanel()" [attr.aria-expanded]="!sideCollapsed()" title="Toggle details panel">
+        {{ sideCollapsed() ? 'Show Details' : 'Hide Details' }}
+      </button>
+    </div>
+  </app-page-header>
 
   <div class="jm-main" [class.jm-main-collapsed]="sideCollapsed()">
 

@@ -241,19 +241,18 @@ export class GsViewerProvider {
         * { box-sizing: border-box; }
         html, body { margin:0; padding:0; height:100%; background:var(--bg); color:var(--text); font-family:var(--vscode-font-family,'Segoe UI',sans-serif); font-size:12px; }
         body { display:flex; flex-direction:column; overflow:hidden; }
-        #toolbar { min-height:50px; padding:7px 12px; border-bottom:1px solid var(--border); display:flex; flex-wrap:wrap; gap:10px 14px; align-items:center; background:var(--panel-hi); }
-        .brand { display:flex; align-items:center; gap:9px; min-width:175px; flex:0 1 auto; }
-        .brand-mark { width:28px; height:28px; display:grid; place-items:center; border-radius:6px; background:linear-gradient(145deg,#0e639c,#174b70); color:#fff; }
-        .brand-mark svg { display:block; }
-        .brand-title { font-weight:650; letter-spacing:.01em; } .brand-subtitle { color:var(--muted); font-size:10px; margin-top:2px; }
-        .connection { margin-left:auto; display:inline-flex; align-items:center; gap:6px; min-width:0; max-width:min(520px,100%); padding:4px 8px; border:1px solid var(--border); border-radius:10px; color:var(--muted); font-size:10px; text-transform:uppercase; letter-spacing:.06em; white-space:nowrap; }
+        #toolbar { min-height:64px; padding:0 22px; border-bottom:1px solid var(--vscode-panel-border,#2d2d30); display:flex; gap:16px; align-items:center; background:#181818; }
+        .brand { display:flex; align-items:center; gap:10px; min-width:0; flex:1 1 auto; }
+        .brand-mark { width:36px; height:36px; display:grid; place-items:center; flex:0 0 36px; border:1px solid #0e639c; border-radius:7px; background:linear-gradient(135deg,#0e639c,#174b70); color:#fff; }
+        .brand-mark svg { display:block; width:22px; height:22px; }
+        .brand-title { color:var(--vscode-foreground,#f2f2f2); font-size:15px; font-weight:700; line-height:1.25; letter-spacing:0; } .brand-subtitle { color:var(--muted); font-size:11px; line-height:1.25; margin-top:3px; }
+        .connection { display:inline-flex; align-items:center; gap:6px; min-width:0; max-width:min(220px,100%); padding:4px 8px; border:1px solid var(--border); border-radius:10px; color:var(--muted); font-size:10px; text-transform:uppercase; letter-spacing:.06em; white-space:nowrap; }
         .connection .dot { width:7px; height:7px; border-radius:50%; flex:none; background:var(--dead); }
         .connection.live { color:#b5cea8; border-color:#365d36; } .connection.live .dot { background:var(--live); box-shadow:0 0 6px rgba(78,201,78,.65); }
-        .connection.idle { color:#dcdcaa; border-color:#5a4b16; } .connection.idle .dot { background:var(--idle); box-shadow:0 0 6px rgba(204,167,0,.45); }
         .connection.dead { color:var(--muted); } .connection.dead .dot { background:var(--dead); }
         #text { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-        .actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:6px; margin-left:auto; }
-        button { display:inline-flex; align-items:center; justify-content:center; gap:5px; background:#333; color:var(--text); border:1px solid #4a4a4a; border-radius:3px; padding:5px 9px; cursor:pointer; font:inherit; white-space:nowrap; }
+        .actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:6px; margin-left:0; }
+        button { min-height:28px; display:inline-flex; align-items:center; justify-content:center; gap:5px; background:#333; color:var(--text); border:1px solid #4a4a4a; border-radius:3px; padding:5px 9px; cursor:pointer; font:inherit; white-space:nowrap; }
         button:hover { background:#414141; border-color:#666; } button:active { background:#0e639c; } button.primary { background:#0e639c; border-color:#1177bb; color:#fff; } button.primary:hover { background:#1177bb; }
         #stage { position:relative; flex:1 1 auto; min-height:0; display:flex; align-items:center; justify-content:center; overflow:hidden; padding:20px; background-color:#101010; background-image:linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px); background-size:18px 18px; }
         .frame-shell { position:relative; max-width:100%; max-height:100%; display:flex; border:1px solid #333; box-shadow:0 12px 35px rgba(0,0,0,.35); background:#000; }
@@ -262,7 +261,7 @@ export class GsViewerProvider {
         #overlay { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--text); pointer-events:none; text-align:center; padding:18px; }
         #overlay .box { max-width:500px; padding:18px 20px; border-radius:7px; border:1px solid #3a3a3a; background:rgba(30,30,30,.94); box-shadow:0 12px 35px rgba(0,0,0,.25); line-height:1.45; } #overlay .hint { color:var(--muted); font-size:11px; margin-top:7px; }
         #footer { min-height:25px; display:flex; align-items:center; gap:16px; padding:0 10px; background:var(--accent); color:#fff; font-size:11px; } #meta { margin-left:auto; font-family:var(--vscode-editor-font-family,monospace); white-space:nowrap; }
-        @media (max-width:760px) { #toolbar { align-items:flex-start; } .brand { min-width:150px; } .connection { margin-left:0; flex:1 1 220px; } .actions { margin-left:0; justify-content:flex-start; } .brand-subtitle { display:none; } }
+        @media (max-width:760px) { #toolbar { min-height:64px; padding:0 14px; gap:10px; } .brand { min-width:150px; } .connection { flex:1 1 180px; } .actions { justify-content:flex-start; } .brand-subtitle { display:none; } }
     </style>
 </head>
 <body>
@@ -317,23 +316,11 @@ export class GsViewerProvider {
         function refreshUi() {
             const now = performance.now();
             const ageMs = lastFrameAt ? (now - lastFrameAt) : Infinity;
-            const flowing = connected && framesShown > 0 && ageMs < STALE_MS;
-            const stale   = connected && (framesShown === 0 || ageMs >= STALE_MS);
-
-            // Dot
-            status.className = 'connection ' + (flowing ? 'live' : (stale ? 'idle' : 'dead'));
+            // Match the Controller page's concise connection badge. Frame-flow
+            // details remain available in the footer and stage overlay.
+            status.className = 'connection ' + (connected ? 'live' : 'dead');
             dot.className = 'dot';
-
-            // Status text
-            if (!connected) {
-                text.textContent = lastErr ? ('offline (' + lastErr + ')') : 'offline - bridge :8766';
-            } else if (framesShown === 0) {
-                text.textContent = 'connected - waiting for frames';
-            } else if (ageMs >= STALE_MS) {
-                text.textContent = 'connected - idle ' + (ageMs / 1000).toFixed(1) + 's';
-            } else {
-                text.textContent = 'connected - live';
-            }
+            text.textContent = connected ? 'connected' : 'offline';
 
             // Meta (right-aligned)
             const dur = lastFrameAt - firstFrameAt;
