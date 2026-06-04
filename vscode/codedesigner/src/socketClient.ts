@@ -3770,15 +3770,24 @@ export class SocketClient {
      * identified by its serial (e.g. "SCUS-97275").
      * Creates the Game, GameRegion, and GameDisc rows automatically when missing.
      * Both isoPath, crc, and gameTitle are optional; only non-null values are used.
+     * Returns the resolved GameDisc.Id so callers can use it as the
+     * stable label-manager gameId (insulated from serial / IsoPath churn).
      */
-    public async updateGameDisc(serial: string, isoPath?: string, crc?: string, gameTitle?: string): Promise<void> {
-        await this.sendCommand({
+    public async updateGameDisc(serial: string, isoPath?: string, crc?: string, gameTitle?: string): Promise<number | undefined> {
+        const response = await this.sendCommand({
             Command:    'UPDATEGAMEDISC',
             GameSerial: serial,
             IsoPath:    isoPath,
             GameCrc:    crc,
             GameTitle:  gameTitle,
         });
+        if (!response.Success || !response.Data) { return undefined; }
+        try {
+            const parsed = JSON.parse(response.Data) as { GameDiscId?: number };
+            return parsed.GameDiscId;
+        } catch {
+            return undefined;
+        }
     }
 
     /**

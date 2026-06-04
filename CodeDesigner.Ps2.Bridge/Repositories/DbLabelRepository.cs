@@ -79,24 +79,6 @@ namespace CodeDesigner.Ps2.Bridge.Repositories
         internal static string NormalizeSerial(string serial) =>
             serial.Trim().ToUpperInvariant().Replace('_', '-');
 
-        /// <summary>
-        /// Returns the canonical PS2 serial for the disc that <paramref name="gameId"/>
-        /// resolves to (e.g. "SCUS-97275"), or the original input when the disc has
-        /// no serial recorded. Used to normalise the legacy <c>LabelSets.GameId</c>
-        /// column so it doesn't accumulate ISO paths or numeric IDs as new sets are
-        /// created against the same disc via different identifiers.
-        /// </summary>
-        internal async Task<string> ResolveCanonicalGameIdAsync(string gameId)
-        {
-            var discId = await ResolveGameDiscIdAsync(gameId);
-            if (discId is null) return gameId;
-            var serial = await _db.GameDiscs
-                                  .Where(d => d.Id == discId)
-                                  .Select(d => d.Serial)
-                                  .FirstOrDefaultAsync();
-            return string.IsNullOrWhiteSpace(serial) ? gameId : serial!;
-        }
-
         // ── Query helpers ──────────────────────────────────────────────────────
 
         internal async Task<IReadOnlyList<string>> GetSetNamesAsync(string gameId)
@@ -155,7 +137,7 @@ namespace CodeDesigner.Ps2.Bridge.Repositories
                 {
                     SetName    = setName,
                     GameDiscId = discId,
-                    GameId     = await ResolveCanonicalGameIdAsync(gameId),
+                    GameId     = gameId,
                     IsBuiltIn  = false,
                     IsSystem   = true,
                 };
@@ -270,7 +252,7 @@ namespace CodeDesigner.Ps2.Bridge.Repositories
 
             if (entity is null)
             {
-                entity = new DbLabelSet { SetName = set.SetName, GameDiscId = discId, GameId = await ResolveCanonicalGameIdAsync(gameId), IsBuiltIn = false };
+                entity = new DbLabelSet { SetName = set.SetName, GameDiscId = discId, GameId = gameId, IsBuiltIn = false };
                 _db.LabelSets.Add(entity);
                 await _db.SaveChangesAsync();
             }
@@ -334,7 +316,7 @@ namespace CodeDesigner.Ps2.Bridge.Repositories
 
             if (entity is null)
             {
-                entity = new DbLabelSet { SetName = setName, GameDiscId = discId, GameId = await ResolveCanonicalGameIdAsync(gameId), IsBuiltIn = false };
+                entity = new DbLabelSet { SetName = setName, GameDiscId = discId, GameId = gameId, IsBuiltIn = false };
                 _db.LabelSets.Add(entity);
                 await _db.SaveChangesAsync();
             }
@@ -406,7 +388,7 @@ namespace CodeDesigner.Ps2.Bridge.Repositories
 
             if (entity is null)
             {
-                entity = new DbLabelSet { SetName = setName, GameDiscId = discId, GameId = await ResolveCanonicalGameIdAsync(gameId), IsBuiltIn = false };
+                entity = new DbLabelSet { SetName = setName, GameDiscId = discId, GameId = gameId, IsBuiltIn = false };
                 _db.LabelSets.Add(entity);
                 await _db.SaveChangesAsync();
                 // Re-load so entity.Labels is tracked.
