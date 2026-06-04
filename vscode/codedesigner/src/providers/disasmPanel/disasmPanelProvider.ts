@@ -1964,6 +1964,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         this._pcsx2LogOffset = 0;
         this._pcsx2DiscoveredPaths.clear();
         this._pcsx2PersistedLabeledPaths.clear();
+        this._pcsx2PathsSidecarConsumed = false;
         if (this._pcsx2DiscoveredFlushTimer) { clearTimeout(this._pcsx2DiscoveredFlushTimer); this._pcsx2DiscoveredFlushTimer = undefined; }
         this._pcsx2GraphicsReady = false;
 
@@ -1972,6 +1973,15 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         // path, which previously aborted the whole run flow), and PCSX2
         // truncates it on open. Polling tolerates both.
         const consume = async () => {
+            // The PowerShell launcher writes `pcsx2-paths.json` once it has
+            // parsed PCSX2's startup directory listing. Ingest it as soon as
+            // it appears — this is more reliable than racing the live log
+            // ourselves, and works for users who only see PCSX2 through the
+            // hidden-window launch flow.
+            if (!this._pcsx2PathsSidecarConsumed) {
+                await this._tryIngestPcsx2PathsSidecar(path.join(path.dirname(logPath), 'pcsx2-paths.json'));
+            }
+
             try {
                 const stat = await fs.promises.stat(logPath);
                 // PCSX2 truncates the log when it (re)opens it — restart from 0.
@@ -2019,10 +2029,39 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         [/^Debugger Settings Directory:\s*(.+?)\s*$/m,   'pcsx2.path.debuggerSettings'],
     ];
 
+    /**
+     * Label-form → setting-key mapping for both the live extractor and the
+     * sidecar JSON / emu-log fallback reader. The label form matches what
+     * PCSX2 prints in the emu log AND what `launch-pcsx2-hidden.ps1` writes
+     * as keys in `pcsx2-paths.json`, so the same map drives every path.
+     */
+    private static readonly _pcsx2PathLabelToKey: Readonly<Record<string, string>> = {
+        'DataRoot':         'pcsx2.path.dataRoot',
+        'BIOS':             'pcsx2.path.bios',
+        'Snapshots':        'pcsx2.path.snapshots',
+        'Savestates':       'pcsx2.path.savestates',
+        'MemoryCards':      'pcsx2.path.memoryCards',
+        'Logs':             'pcsx2.path.logs',
+        'Cheats':           'pcsx2.path.cheats',
+        'Patches':          'pcsx2.path.patches',
+        'Covers':           'pcsx2.path.covers',
+        'Game Settings':    'pcsx2.path.gameSettings',
+        'Resources':        'pcsx2.path.resources',
+        'User Resources':   'pcsx2.path.userResources',
+        'Cache':            'pcsx2.path.cache',
+        'Textures':         'pcsx2.path.textures',
+        'Input Profile':    'pcsx2.path.inputProfiles',
+        'Video Dumping':    'pcsx2.path.videos',
+        'Debugger Layouts': 'pcsx2.path.debuggerLayouts',
+        'Debugger Settings':'pcsx2.path.debuggerSettings',
+    };
+
     /** Labeled keys we've already persisted this session — avoids redundant DB writes. */
     private _pcsx2PersistedLabeledPaths = new Map<string, string>();
     /** Debounce timer for flushing the bulk `pcsx2.path.discovered` JSON array. */
     private _pcsx2DiscoveredFlushTimer?: ReturnType<typeof setTimeout>;
+    /** True once the PowerShell-written `pcsx2-paths.json` sidecar has been ingested for this launch. */
+    private _pcsx2PathsSidecarConsumed = false;
 
     private extractAndPersistPcsx2Paths(chunk: string): void {
         // ── 1) Labeled paths: write each to its own setting key ────────────────
@@ -2602,7 +2641,53 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             }
         }
 
-        // 3. Windows default — PCSX2 stores user data under
+        // 3. PowerShell sidecar JSON, if present (most common case when the
+        //    launch flow ran but the live log polling missed the lines).
+        if (this._globalStoragePath) {
+            const sidecar = path.join(this._globalStoragePath, 'pcsx2', 'pcsx2-paths.json');
+            const fromSidecar = await this._tryIngestPcsx2PathsSidecar(sidecar);
+            if (fromSidecar && fs.existsSync(fromSidecar)) { return fromSidecar; }
+        }
+
+        // 4. Parse the on-disk emu log directly. Handles the case where PCSX2
+        //    has been running since before the path-extractor shipped — we
+        //    don't depend on the live polling loop having ever seen the
+        //    startup lines. Also backfills every captured pcsx2.path.* key.
+        const fromLog = await this._readPathsFromOnDiskEmuLog();
+        if (fromLog) {
+            const fromLogPath = fromLog['pcsx2.path.savestates'];
+            if (fromLogPath && fs.existsSync(fromLogPath)) { return fromLogPath; }
+            const fromLogRoot = fromLog['pcsx2.path.dataRoot'];
+            if (fromLogRoot) {
+                const derived = path.join(fromLogRoot, 'sstates');
+                if (fs.existsSync(derived)) {
+                    void this._backfillSavestatesPath(derived);
+                    return derived;
+                }
+            }
+        }
+
+        // 5. Parse PCSX2.ini directly. Works even when PCSX2 has never been
+        //    launched through VS Code (no globalStorage emu log, no sidecar)
+        //    — we mirror PCSX2's own portable-mode + DataRoot resolution and
+        //    read the [Folders] section that the emulator itself uses at
+        //    boot. The most general fallback that still relies on a real
+        //    PCSX2 install (vs. step 6's hard-coded guess).
+        const fromIni = await this._readPathsFromPcsx2Ini();
+        if (fromIni) {
+            const iniSavestates = fromIni['pcsx2.path.savestates'];
+            if (iniSavestates && fs.existsSync(iniSavestates)) { return iniSavestates; }
+            const iniRoot = fromIni['pcsx2.path.dataRoot'];
+            if (iniRoot) {
+                const derived = path.join(iniRoot, 'sstates');
+                if (fs.existsSync(derived)) {
+                    void this._backfillSavestatesPath(derived);
+                    return derived;
+                }
+            }
+        }
+
+        // 6. Windows default — PCSX2 stores user data under
         //    %USERPROFILE%\Documents\PCSX2 unless overridden by portable mode.
         if (process.platform === 'win32') {
             const home = process.env.USERPROFILE || require('os').homedir();
@@ -2621,6 +2706,177 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private async _backfillSavestatesPath(p: string): Promise<void> {
         try { await this.socketClient.setSetting('pcsx2.path.savestates', p); }
         catch (err: any) { getOutputChannel().debug(`backfill pcsx2.path.savestates failed: ${err?.message ?? err}`); }
+    }
+
+    /**
+     * Ingest the `pcsx2-paths.json` sidecar written by `launch-pcsx2-hidden.ps1`
+     * once PCSX2's startup directory listing has been captured. Every
+     * directory key is mapped through `_pcsx2PathLabelToKey` and written to
+     * the settings table. Returns the resolved `Savestates` path when found
+     * (so callers can use it directly without an extra getSetting round-trip).
+     */
+    private async _tryIngestPcsx2PathsSidecar(sidecarPath: string): Promise<string | null> {
+        try {
+            if (!fs.existsSync(sidecarPath)) { return null; }
+            const raw = await fs.promises.readFile(sidecarPath, 'utf8');
+            const doc = JSON.parse(raw) as { directories?: Record<string, string> };
+            const dirs = doc?.directories;
+            if (!dirs || typeof dirs !== 'object') { return null; }
+
+            let savestates: string | null = null;
+            for (const [label, value] of Object.entries(dirs)) {
+                const key = DisasmPanelProvider._pcsx2PathLabelToKey[label];
+                if (!key || typeof value !== 'string' || !value) { continue; }
+                if (this._pcsx2PersistedLabeledPaths.get(key) === value) { continue; }
+                this._pcsx2PersistedLabeledPaths.set(key, value);
+                if (key === 'pcsx2.path.savestates') { savestates = value; }
+                void this.socketClient.setSetting(key, value).catch(err => {
+                    getOutputChannel().debug(`Could not persist ${key} from sidecar: ${err?.message ?? err}`);
+                });
+            }
+            this._pcsx2PathsSidecarConsumed = true;
+            return savestates;
+        } catch (err: any) {
+            getOutputChannel().debug(`Could not read pcsx2-paths.json sidecar: ${err?.message ?? err}`);
+            return null;
+        }
+    }
+
+    /**
+     * Parse PCSX2's `PCSX2.ini` directly. The `[Folders]` section is the
+     * source PCSX2 itself reads at boot, so it works even when the user
+     * hasn't launched PCSX2 from VS Code (no globalStorage emu log, no
+     * sidecar JSON). DataRoot is resolved by mirroring PCSX2's own logic:
+     *  - if a `portable.ini` sits next to the executable, DataRoot = exeDir
+     *  - otherwise, DataRoot = `%USERPROFILE%\Documents\PCSX2` (Windows)
+     *
+     * Backfills every parsed directory into `pcsx2.path.*` so subsequent
+     * lookups take the cached fast path.
+     */
+    private async _readPathsFromPcsx2Ini(): Promise<Record<string, string> | null> {
+        let exePath: string | null;
+        try { exePath = await this.socketClient.getSetting('ui.selectedEmulator'); }
+        catch { exePath = null; }
+        if (!exePath || !fs.existsSync(exePath)) { return null; }
+
+        const exeDir = path.dirname(exePath);
+        let dataRoot: string;
+        if (fs.existsSync(path.join(exeDir, 'portable.ini'))) {
+            dataRoot = exeDir;
+        } else if (process.platform === 'win32') {
+            const home = process.env.USERPROFILE || require('os').homedir();
+            if (!home) { return null; }
+            dataRoot = path.join(home, 'Documents', 'PCSX2');
+        } else {
+            return null;
+        }
+
+        const iniPath = path.join(dataRoot, 'inis', 'PCSX2.ini');
+        if (!fs.existsSync(iniPath)) { return null; }
+
+        let text: string;
+        try { text = await fs.promises.readFile(iniPath, 'utf8'); }
+        catch { return null; }
+
+        const sectionMatch = text.match(/^\[Folders\]\s*\r?\n([\s\S]*?)(?=^\[|\Z)/m);
+        if (!sectionMatch) { return null; }
+
+        // PCSX2's INI uses condensed keys (e.g. "MemoryCards", "GameSettings");
+        // the emu log uses spaced labels ("Memory Cards", "Game Settings").
+        // Map ini-key → emu-label so we can reuse `_pcsx2PathLabelToKey`.
+        const iniToLabel: Readonly<Record<string, string>> = {
+            'Bios':             'BIOS',
+            'Snapshots':        'Snapshots',
+            'Savestates':       'Savestates',
+            'MemoryCards':      'MemoryCards',
+            'Logs':             'Logs',
+            'Cheats':           'Cheats',
+            'Patches':          'Patches',
+            'Covers':           'Covers',
+            'GameSettings':     'Game Settings',
+            'Resources':        'Resources',
+            'UserResources':    'User Resources',
+            'Cache':            'Cache',
+            'Textures':         'Textures',
+            'InputProfiles':    'Input Profile',
+            'Videos':           'Video Dumping',
+            'DebuggerLayouts':  'Debugger Layouts',
+            'DebuggerSettings': 'Debugger Settings',
+        };
+        // PCSX2's LoadConfig joins these against `<DataRoot>/inis` (the
+        // `Settings` folder), not DataRoot itself.
+        const settingsRelative = new Set(['DebuggerLayouts', 'DebuggerSettings']);
+        const settingsDir = path.join(dataRoot, 'inis');
+
+        const out: Record<string, string> = {
+            'pcsx2.path.dataRoot': dataRoot,
+        };
+
+        for (const m of sectionMatch[1].matchAll(/^\s*([A-Za-z]+)\s*=\s*(.+?)\s*$/gm)) {
+            const iniKey = m[1];
+            const value  = m[2];
+            const label  = iniToLabel[iniKey];
+            if (!label) { continue; }
+            const settingKey = DisasmPanelProvider._pcsx2PathLabelToKey[label];
+            if (!settingKey || !value) { continue; }
+            const baseDir = settingsRelative.has(iniKey) ? settingsDir : dataRoot;
+            out[settingKey] = path.isAbsolute(value) ? value : path.join(baseDir, value);
+        }
+
+        if (Object.keys(out).length <= 1) { return null; }
+
+        for (const [key, value] of Object.entries(out)) {
+            if (this._pcsx2PersistedLabeledPaths.get(key) === value) { continue; }
+            this._pcsx2PersistedLabeledPaths.set(key, value);
+            void this.socketClient.setSetting(key, value).catch(err => {
+                getOutputChannel().debug(`PCSX2.ini backfill ${key} failed: ${err?.message ?? err}`);
+            });
+        }
+        return out;
+    }
+
+    /**
+     * Last-resort path discovery: parse the on-disk emu log directly,
+     * looking for the `<Label> Directory: <path>` lines PCSX2 prints during
+     * `EmuFolders::LoadConfig`. Used by `_resolvePcsx2SavestatesDir` so a
+     * session whose log polling never ran (e.g. PCSX2 was already running
+     * before this code shipped) can still find PCSX2's folders on the next
+     * snapshot click — and also opportunistically backfills every
+     * `pcsx2.path.*` setting so future lookups are O(1).
+     */
+    private async _readPathsFromOnDiskEmuLog(): Promise<Record<string, string> | null> {
+        const logDir = this._globalStoragePath
+            ? path.join(this._globalStoragePath, 'pcsx2')
+            : null;
+        if (!logDir) { return null; }
+        const logPath = path.join(logDir, 'emulog.txt');
+        if (!fs.existsSync(logPath)) { return null; }
+
+        let text: string;
+        try { text = await fs.promises.readFile(logPath, 'utf8'); }
+        catch { return null; }
+
+        const out: Record<string, string> = {};
+        const re = /^(?:\[[^\]]*\]\s*)?(.+?) Directory:\s*(.+?)\s*$/gm;
+        for (const m of text.matchAll(re)) {
+            const label = m[1].trim();
+            const value = m[2].trim();
+            const key = DisasmPanelProvider._pcsx2PathLabelToKey[label];
+            if (!key || !value) { continue; }
+            if (!(key in out)) { out[key] = value; } // first occurrence wins
+        }
+        if (Object.keys(out).length === 0) { return null; }
+
+        // Backfill every captured path into the settings table so this
+        // expensive read only happens once.
+        for (const [key, value] of Object.entries(out)) {
+            if (this._pcsx2PersistedLabeledPaths.get(key) === value) { continue; }
+            this._pcsx2PersistedLabeledPaths.set(key, value);
+            void this.socketClient.setSetting(key, value).catch(err => {
+                getOutputChannel().debug(`emu-log backfill ${key} failed: ${err?.message ?? err}`);
+            });
+        }
+        return out;
     }
 
     private _tryDiscoverCurrentCrc(saveDir: string, serial: string): string | null {

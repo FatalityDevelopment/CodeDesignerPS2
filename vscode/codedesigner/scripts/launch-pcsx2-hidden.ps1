@@ -53,6 +53,7 @@ if ($isPcsx2Launch -and (Test-Path -LiteralPath $EmuLogPath)) {
 # The folder layout PCSX2 prints via EmuFolders::LoadConfig at startup. These
 # lines are pulled out of the stream and rendered as a tidy block.
 $DirNames = @(
+    'DataRoot',
     'BIOS', 'Snapshots', 'Savestates', 'MemoryCards', 'Logs', 'Cheats',
     'Patches', 'Covers', 'Game Settings', 'Resources', 'User Resources',
     'Cache', 'Textures', 'Input Profile', 'Video Dumping',
@@ -78,6 +79,27 @@ function Show-DirectoryBlock {
     }
     Write-Host ('  ' + ('-' * 64)) -ForegroundColor DarkCyan
     Write-Host ''
+
+    # Write the directory map as a sidecar JSON next to the emu log. The VS
+    # Code extension polls for this file and pushes every entry to the
+    # settings table (pcsx2.path.*) so the rest of the UI can locate
+    # PCSX2-managed folders (savestates, memcards, screenshots, etc.) without
+    # having to re-parse the live emu log itself.
+    try {
+        $logDir = Split-Path -Parent $EmuLogPath
+        if ($logDir) {
+            $jsonPath = Join-Path $logDir 'pcsx2-paths.json'
+            $payload = [ordered]@{
+                capturedAt  = (Get-Date).ToUniversalTime().ToString('o')
+                emuLogPath  = $EmuLogPath
+                directories = $script:dirs
+            }
+            $payload | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $jsonPath -Encoding utf8 -Force
+        }
+    }
+    catch {
+        Write-Host "  Could not write pcsx2-paths.json: $($_.Exception.Message)" -ForegroundColor DarkYellow
+    }
 }
 
 function Write-EmuLine {
