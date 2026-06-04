@@ -14,7 +14,7 @@ public sealed class DataFormatListTool(IEmulatorBridge bridge)
 {
     [ToolEntryPoint]
     public async Task<string> InvokeAsync(
-        [Description("Game identifier / ISO serial (e.g. 'SCUS-97275').")] string gameId,
+        [Description("PS2 disc serial (e.g. 'SCUS-97275'). MUST be the SCUS/SLUS/SLES/... serial — not an ISO path, filename, or numeric ID.")] string gameId,
         [Description("Optional range start address (hex/decimal). Omit for all overrides.")] string? address = null,
         [Description("Optional range end address (hex/decimal).")] string? endAddress = null,
         CancellationToken ct = default)
@@ -40,7 +40,7 @@ public sealed class DataFormatSetTool(IEmulatorBridge bridge)
 {
     [ToolEntryPoint]
     public async Task<string> InvokeAsync(
-        [Description("Game identifier / ISO serial.")] string gameId,
+        [Description("PS2 disc serial (e.g. 'SCUS-97275'). MUST be the SCUS/SLUS/SLES/... serial — not an ISO path, filename, or numeric ID.")] string gameId,
         [Description("Start virtual address (hex/decimal).")] string address,
         [Description("Length in bytes; must be a multiple of the kind's size (Byte=1, Half=2, Word/Float=4, DWord/Double=8, QWord=16).")] int length,
         [Description("Kind: Byte, Half, Word, DWord, QWord, Float, or Double.")] string kind,
@@ -67,7 +67,7 @@ public sealed class DataFormatClearTool(IEmulatorBridge bridge)
 {
     [ToolEntryPoint]
     public async Task<string> InvokeAsync(
-        [Description("Game identifier / ISO serial.")] string gameId,
+        [Description("PS2 disc serial (e.g. 'SCUS-97275'). MUST be the SCUS/SLUS/SLES/... serial — not an ISO path, filename, or numeric ID.")] string gameId,
         [Description("Address to clear (hex/decimal).")] string address,
         [Description("Bytes to clear from the address (default 1).")] int length = 1,
         CancellationToken ct = default)

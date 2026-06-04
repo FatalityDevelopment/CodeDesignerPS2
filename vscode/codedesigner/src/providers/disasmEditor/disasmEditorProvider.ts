@@ -104,8 +104,11 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   private _archiveLabels: LabelEntry[] = [];
   /** Current game (ISO) name — used to resolve the per-game labels.json path. */
   private _currentGameName: string = '';
-  /** Current game disc identifier for label manager DB queries — serial (e.g. "SCUS-97275") or full ISO path. */
+  /** Current game disc identifier for label manager DB queries — the PS2 serial (e.g. "SCUS-97275"). Empty when unknown. */
   private _currentGameSerial: string = '';
+
+  /** Matches a PS2 disc serial: 3-4 letters, dash or underscore, 3-6 digits (e.g. SCUS-97275, SLUS_217.06). */
+  private static readonly _SERIAL_PATTERN = /^[A-Za-z]{3,4}[-_]\d{3,6}(?:\.\d{1,3})?$/;
   /** Workspace root — used to resolve the per-game labels.json path. */
   private _workspaceRoot: string = '';
   /** Name of the currently active label set on the server (e.g. "MyLabels"), or null when no user set is active. */
@@ -561,9 +564,14 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   public setCurrentGame(gameName: string, workspaceRoot: string, gameSerial?: string): void {
     this._currentGameName   = gameName;
     this._workspaceRoot     = workspaceRoot;
-    // Always update the serial — clear it when not provided so a stale serial
-    // from a previously loaded game isn't used by _labelManagerCtx().
-    this._currentGameSerial = gameSerial ?? '';
+    // Only accept strings that look like a PS2 serial (SCUS-97275, SLUS_217.06).
+    // ISO paths, filenames, and numeric IDs are rejected here to prevent them
+    // from leaking into label-manager DB calls — callers must resolve the real
+    // serial via PINE or isoBootElf before assigning it.
+    const trimmed = (gameSerial ?? '').trim();
+    this._currentGameSerial = DisasmEditorProvider._SERIAL_PATTERN.test(trimmed)
+      ? trimmed.toUpperCase().replace('_', '-')
+      : '';
     // Reset the active label set when the game changes — it will be re-established
     // when the label manager refreshes or the user selects a set.
     this._activeSetName = null;
@@ -3622,12 +3630,14 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       || '';
     if (!workspaceDir) { return null; }
 
-    // Use serial (e.g. "SCUS-97275") when available so the DB can resolve to
-    // the exact GameDisc row.  Fall back to the ISO filename for backward
-    // compatibility.  When no game is selected at all, use a placeholder so
-    // the label manager still opens and shows the Built-in set; the backend
-    // gracefully returns an empty user-set list for an unknown identifier.
-    const gameDiscId = this._currentGameSerial || this._currentGameName || DisasmEditorProvider.NO_GAME_SELECTED;
+    // GameDiscId must always be the PS2 serial (e.g. "SCUS-97275"). Falling
+    // back to the ISO filename or basename here would poison the LabelSets
+    // table — any new sets created against this gameId would be scoped to a
+    // non-serial identifier, and existing per-serial sets wouldn't resolve.
+    // When no serial is known, use the explicit NO_GAME_SELECTED sentinel so
+    // the label manager still opens (with the Built-in set) and the backend
+    // returns an empty user-set list.
+    const gameDiscId = this._currentGameSerial || DisasmEditorProvider.NO_GAME_SELECTED;
     return { workspaceDir, gameDiscId };
   }
 

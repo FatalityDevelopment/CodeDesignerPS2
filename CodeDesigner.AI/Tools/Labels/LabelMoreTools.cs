@@ -13,7 +13,7 @@ namespace CodeDesigner.AI.Tools.Labels;
 public sealed class LabelListSetsTool(IEmulatorBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
-        [Description("Game ID / ISO serial (e.g. 'SCUS-97275').")] string gameId,
+        [Description("PS2 disc serial (e.g. 'SCUS-97275'). MUST be the SCUS/SLUS/SLES/... serial — not an ISO path, filename, or numeric ID.")] string gameId,
         CancellationToken ct = default)
         => CdText.Message(await bridge.SendAsync(new { Command = "GETLABELSETS", GameId = gameId }, ct));
 }
@@ -23,7 +23,7 @@ public sealed class LabelListSetsTool(IEmulatorBridge bridge)
 public sealed class LabelCreateSetTool(IEmulatorBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
-        [Description("Game ID / ISO serial.")] string gameId,
+        [Description("PS2 disc serial (e.g. 'SCUS-97275'). MUST be the SCUS/SLUS/SLES/... serial — not an ISO path, filename, or numeric ID.")] string gameId,
         [Description("New label set name (e.g. 'ai-analysis').")] string setName,
         CancellationToken ct = default)
         => CdText.Message(await bridge.SendAsync(new { Command = "CREATELABELSET", GameId = gameId, SetName = setName }, ct));
@@ -34,7 +34,7 @@ public sealed class LabelCreateSetTool(IEmulatorBridge bridge)
 public sealed class LabelSetActiveTool(IEmulatorBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
-        [Description("Game ID / ISO serial.")] string gameId,
+        [Description("PS2 disc serial (e.g. 'SCUS-97275'). MUST be the SCUS/SLUS/SLES/... serial — not an ISO path, filename, or numeric ID.")] string gameId,
         [Description("Label set name to activate (use 'Built-in' to clear).")] string setName,
         CancellationToken ct = default)
         => CdText.Message(await bridge.SendAsync(new { Command = "SETACTIVELABELSET", GameId = gameId, SetName = setName }, ct));
@@ -45,7 +45,7 @@ public sealed class LabelSetActiveTool(IEmulatorBridge bridge)
 public sealed class LabelDeleteSetTool(IEmulatorBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
-        [Description("Game ID / ISO serial.")] string gameId,
+        [Description("PS2 disc serial (e.g. 'SCUS-97275'). MUST be the SCUS/SLUS/SLES/... serial — not an ISO path, filename, or numeric ID.")] string gameId,
         [Description("Label set name to delete.")] string setName,
         CancellationToken ct = default)
         => CdText.Message(await bridge.SendAsync(new { Command = "DELETELABELSET", GameId = gameId, SetName = setName }, ct));
@@ -57,7 +57,7 @@ public sealed class LabelDeleteSetTool(IEmulatorBridge bridge)
 public sealed class IopLabelsRefreshTool(IEmulatorBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
-        [Description("Game ID / ISO serial.")] string gameId, CancellationToken ct = default)
+        [Description("PS2 disc serial (e.g. 'SCUS-97275'). MUST be the SCUS/SLUS/SLES/... serial — not an ISO path, filename, or numeric ID.")] string gameId, CancellationToken ct = default)
         => CdText.Message(await bridge.SendAsync(new { Command = "IOPLABELSREFRESH", GameId = gameId }, ct));
 }
 
@@ -66,7 +66,7 @@ public sealed class IopLabelsRefreshTool(IEmulatorBridge bridge)
 public sealed class IopLabelsRefreshModuleTool(IEmulatorBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
-        [Description("Game ID / ISO serial.")] string gameId,
+        [Description("PS2 disc serial (e.g. 'SCUS-97275'). MUST be the SCUS/SLUS/SLES/... serial — not an ISO path, filename, or numeric ID.")] string gameId,
         [Description("IOP module name (e.g. 'secrman').")] string moduleName,
         CancellationToken ct = default)
         => CdText.Message(await bridge.SendAsync(new { Command = "IOPLABELSREFRESHMODULE", GameId = gameId, SetName = moduleName }, ct));
@@ -88,7 +88,7 @@ public sealed class LabelListFunctionsTool(IEmulatorBridge bridge)
 public sealed class LabelDeleteTool(IEmulatorBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
-        [Description("Game ID / ISO serial.")] string gameId,
+        [Description("PS2 disc serial (e.g. 'SCUS-97275'). MUST be the SCUS/SLUS/SLES/... serial — not an ISO path, filename, or numeric ID.")] string gameId,
         [Description("Label set name.")] string labelSet,
         [Description("Virtual address (hex/decimal).")] string address,
         CancellationToken ct = default)

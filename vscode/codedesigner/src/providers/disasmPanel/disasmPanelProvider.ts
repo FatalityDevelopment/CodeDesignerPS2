@@ -1149,6 +1149,32 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     }
 
     /**
+     * Resolve the canonical PS2 disc serial (e.g. "SCUS-97275") for the
+     * currently selected ISO. Tries a running PCSX2 first, then reads
+     * SYSTEM.CNF from the ISO directly. Returns undefined when neither
+     * source yields a serial — callers must NOT substitute the ISO path.
+     */
+    private async _resolveSerialForGamePath(gamePath: string): Promise<string | undefined> {
+        if (!this.socketClient.isConnected()) { return undefined; }
+
+        // 1. Live PCSX2 PINE — only useful if the same game is loaded there.
+        try {
+            const info = await this.socketClient.getPcsx2GameInfo();
+            const serial = (info.ID ?? '').replace(/\0/g, '').trim();
+            if (serial) { return serial.toUpperCase(); }
+        } catch { /* PCSX2 not running — fall through to ISO read */ }
+
+        // 2. Static ISO read — works even without an attached emulator.
+        try {
+            const bootElf = await this.socketClient.isoBootElf(gamePath);
+            const serial = DisasmPanelProvider.serialFromBootElf(bootElf);
+            if (serial) { return serial; }
+        } catch { /* ISO unreadable or socket down */ }
+
+        return undefined;
+    }
+
+    /**
      * Derives a PS2 disc serial (e.g. "SLUS-21606") from a SYSTEM.CNF BOOT2
      * value such as "cdrom0:\SLUS_216.06;1". Returns undefined when the value
      * does not look like a serial.
@@ -3023,30 +3049,35 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         this.loadSnapshotsForGame(this.selectedGameName);
         this.loadGameLabels(this.selectedGameName);
 
-        // Persist the ISO path in the database so label sets can be resolved
-        // by GameDisc. Try to get the serial from a running PINE session first;
-        // if unavailable just update the path with an empty serial placeholder.
+        // Resolve the SCUS/SLUS serial. Two-tier strategy:
+        //   1. Ask a running PCSX2 (PINE) for its loaded-game serial.
+        //   2. If PINE has no game (or isn't running), read SYSTEM.CNF from
+        //      the ISO directly so we still get the canonical serial.
+        // Never persist the ISO path as a serial — label sets are scoped by
+        // GameDisc.Serial and any other identifier would silently fragment them.
         if (gamePath && this._bridgeMode) {
-            try {
-                const info = await this.socketClient.getPcsx2GameInfo();
-                const serial    = (info.ID    ?? '').replace(/\0/g, '').trim();
-                const gameTitle = (info.Title ?? '').replace(/\0/g, '').trim() || this.selectedGameName;
-                if (serial) {
-                    this._currentGameSerial = serial;
+            const serial = await this._resolveSerialForGamePath(gamePath);
+            if (serial) {
+                this._currentGameSerial = serial;
+                try {
+                    let gameTitle = this.selectedGameName;
+                    try {
+                        const info = await this.socketClient.getPcsx2GameInfo();
+                        const t = (info.Title ?? '').replace(/\0/g, '').trim();
+                        if (t) { gameTitle = t; }
+                    } catch { /* PCSX2 not attached — fall back to filename */ }
                     // Upsert Game/GameRegion/GameDisc in the database with IsoPath,
                     // serial, and title so the game appears in the DB immediately.
                     await this.socketClient.updateGameDisc(serial, gamePath, undefined, gameTitle);
-                    this.editorProvider.setCurrentGame(this.selectedGameName, this.workspaceRoot, serial);
-                    // Re-list snapshots now that we know the serial — the initial
-                    // call above filtered with an empty serial (= show all).
-                    this._snapshotManagerProvider.notifySnapshotsChanged();
-                } else {
-                    // Serial unavailable — just store IsoPath; use filename for DB fallback.
-                    this.editorProvider.setCurrentGame(this.selectedGameName, this.workspaceRoot, gamePath);
-                }
-            } catch {
-                // Not in PINE mode or PCSX2 not running — fall back to ISO path.
-                this.editorProvider.setCurrentGame(this.selectedGameName, this.workspaceRoot, gamePath);
+                } catch { /* DB upsert is best-effort */ }
+                this.editorProvider.setCurrentGame(this.selectedGameName, this.workspaceRoot, serial);
+                // Re-list snapshots now that we know the serial — the initial
+                // call above filtered with an empty serial (= show all).
+                this._snapshotManagerProvider.notifySnapshotsChanged();
+            } else {
+                // Couldn't resolve a serial — open the label manager against
+                // the NO_GAME_SELECTED sentinel rather than the ISO path.
+                this.editorProvider.setCurrentGame(this.selectedGameName, this.workspaceRoot, undefined);
             }
         }
 
@@ -3156,14 +3187,26 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
      * push them to the editor provider for display in the Labels tab.
      */
     private loadGameLabels(isoName: string): void {
-        // Always update the editor provider's current game context so user-created
-        // labels are saved to the correct per-game file.
-        // Pass the full ISO path (when available) so that _labelManagerCtx() can
-        // resolve the GameDisc even when PINE is not connected.  Without this the
-        // serial stays empty after a settings-restore and ResolveGameDiscIdAsync
-        // only receives the bare filename — which may fail to match an IsoPath
-        // that is stored as a full path in the database.
-        this.editorProvider.setCurrentGame(isoName, this.workspaceRoot, this.selectedGamePath || undefined);
+        // Update the editor provider's current game context so user-created
+        // labels are saved to the correct per-game file. Pass the cached
+        // serial only — never the ISO path. setCurrentGame rejects non-serial
+        // values defensively.
+        this.editorProvider.setCurrentGame(isoName, this.workspaceRoot, this._currentGameSerial || undefined);
+
+        // If we don't yet have a serial cached (e.g. startup before the user
+        // touches the dropdown), resolve it from the ISO in the background
+        // and re-seed the editor context. Without this the Label Manager
+        // would open with the NO_GAME_SELECTED sentinel until the user
+        // re-selects a game.
+        if (!this._currentGameSerial && this.selectedGamePath) {
+            void this._resolveSerialForGamePath(this.selectedGamePath).then(serial => {
+                if (serial && !this._currentGameSerial) {
+                    this._currentGameSerial = serial;
+                    this.editorProvider.setCurrentGame(isoName, this.workspaceRoot, serial);
+                    this._snapshotManagerProvider.notifySnapshotsChanged();
+                }
+            }).catch(() => { /* best-effort */ });
+        }
 
         if (!isoName || !this.workspaceRoot) {
             this.editorProvider.setGameLabels([]);
