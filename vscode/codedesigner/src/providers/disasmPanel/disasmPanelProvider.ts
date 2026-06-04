@@ -1759,6 +1759,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         this._pcsx2DiscoveredPaths.clear();
         this._pcsx2PersistedLabeledPaths.clear();
         if (this._pcsx2DiscoveredFlushTimer) { clearTimeout(this._pcsx2DiscoveredFlushTimer); this._pcsx2DiscoveredFlushTimer = undefined; }
+        if (this._pcsx2SnapshotRefreshTimer) { clearTimeout(this._pcsx2SnapshotRefreshTimer); this._pcsx2SnapshotRefreshTimer = undefined; }
     }
 
     /**
@@ -1966,6 +1967,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         this._pcsx2PersistedLabeledPaths.clear();
         this._pcsx2PathsSidecarConsumed = false;
         if (this._pcsx2DiscoveredFlushTimer) { clearTimeout(this._pcsx2DiscoveredFlushTimer); this._pcsx2DiscoveredFlushTimer = undefined; }
+        if (this._pcsx2SnapshotRefreshTimer) { clearTimeout(this._pcsx2SnapshotRefreshTimer); this._pcsx2SnapshotRefreshTimer = undefined; }
         this._pcsx2GraphicsReady = false;
 
         // Poll the emu log instead of fs.watch-ing it: the file does not exist
@@ -2062,19 +2064,42 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private _pcsx2DiscoveredFlushTimer?: ReturnType<typeof setTimeout>;
     /** True once the PowerShell-written `pcsx2-paths.json` sidecar has been ingested for this launch. */
     private _pcsx2PathsSidecarConsumed = false;
+    /** Debounce timer for refreshing snapshot lists after a wave of path writes. */
+    private _pcsx2SnapshotRefreshTimer?: ReturnType<typeof setTimeout>;
+
+    /**
+     * Write a `pcsx2.path.*` setting, dedup against what's already cached
+     * for this session, and — when the savestates path changes — debounce
+     * a refresh of the snapshot list so both the disasm-panel settings tab
+     * AND the Snapshot Manager pick up newly-discovered .p2s files without
+     * waiting for the next game-change event. Returns true when the value
+     * was new (i.e. actually persisted to the DB).
+     */
+    private _persistPcsx2PathSetting(key: string, value: string): boolean {
+        if (!value) { return false; }
+        if (this._pcsx2PersistedLabeledPaths.get(key) === value) { return false; }
+        this._pcsx2PersistedLabeledPaths.set(key, value);
+        void this.socketClient.setSetting(key, value).catch(err => {
+            getOutputChannel().debug(`Could not persist ${key}: ${err?.message ?? err}`);
+        });
+        if (key === 'pcsx2.path.savestates') {
+            // Debounce so a burst of writes (e.g. sidecar ingest + emu-log
+            // backfill arriving milliseconds apart) only triggers one refresh.
+            if (this._pcsx2SnapshotRefreshTimer) { clearTimeout(this._pcsx2SnapshotRefreshTimer); }
+            this._pcsx2SnapshotRefreshTimer = setTimeout(() => {
+                this._pcsx2SnapshotRefreshTimer = undefined;
+                void this.loadSnapshotsForGame(this.selectedGameName);
+            }, 250);
+        }
+        return true;
+    }
 
     private extractAndPersistPcsx2Paths(chunk: string): void {
         // ── 1) Labeled paths: write each to its own setting key ────────────────
         for (const [re, key] of DisasmPanelProvider._pcsx2LabeledPathKeys) {
             const m = chunk.match(re);
             if (!m) { continue; }
-            const value = m[1].trim();
-            if (!value) { continue; }
-            if (this._pcsx2PersistedLabeledPaths.get(key) === value) { continue; }
-            this._pcsx2PersistedLabeledPaths.set(key, value);
-            void this.socketClient.setSetting(key, value).catch(err => {
-                getOutputChannel().debug(`Could not persist ${key}: ${err?.message ?? err}`);
-            });
+            this._persistPcsx2PathSetting(key, m[1].trim());
         }
 
         // ── 2) Bulk dump: collect every path-shaped string and flush as JSON ──
@@ -2704,8 +2729,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     }
 
     private async _backfillSavestatesPath(p: string): Promise<void> {
-        try { await this.socketClient.setSetting('pcsx2.path.savestates', p); }
-        catch (err: any) { getOutputChannel().debug(`backfill pcsx2.path.savestates failed: ${err?.message ?? err}`); }
+        this._persistPcsx2PathSetting('pcsx2.path.savestates', p);
     }
 
     /**
@@ -2727,12 +2751,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             for (const [label, value] of Object.entries(dirs)) {
                 const key = DisasmPanelProvider._pcsx2PathLabelToKey[label];
                 if (!key || typeof value !== 'string' || !value) { continue; }
-                if (this._pcsx2PersistedLabeledPaths.get(key) === value) { continue; }
-                this._pcsx2PersistedLabeledPaths.set(key, value);
+                this._persistPcsx2PathSetting(key, value);
                 if (key === 'pcsx2.path.savestates') { savestates = value; }
-                void this.socketClient.setSetting(key, value).catch(err => {
-                    getOutputChannel().debug(`Could not persist ${key} from sidecar: ${err?.message ?? err}`);
-                });
             }
             this._pcsx2PathsSidecarConsumed = true;
             return savestates;
@@ -2826,11 +2846,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         if (Object.keys(out).length <= 1) { return null; }
 
         for (const [key, value] of Object.entries(out)) {
-            if (this._pcsx2PersistedLabeledPaths.get(key) === value) { continue; }
-            this._pcsx2PersistedLabeledPaths.set(key, value);
-            void this.socketClient.setSetting(key, value).catch(err => {
-                getOutputChannel().debug(`PCSX2.ini backfill ${key} failed: ${err?.message ?? err}`);
-            });
+            this._persistPcsx2PathSetting(key, value);
         }
         return out;
     }
@@ -2870,11 +2886,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         // Backfill every captured path into the settings table so this
         // expensive read only happens once.
         for (const [key, value] of Object.entries(out)) {
-            if (this._pcsx2PersistedLabeledPaths.get(key) === value) { continue; }
-            this._pcsx2PersistedLabeledPaths.set(key, value);
-            void this.socketClient.setSetting(key, value).catch(err => {
-                getOutputChannel().debug(`emu-log backfill ${key} failed: ${err?.message ?? err}`);
-            });
+            this._persistPcsx2PathSetting(key, value);
         }
         return out;
     }
