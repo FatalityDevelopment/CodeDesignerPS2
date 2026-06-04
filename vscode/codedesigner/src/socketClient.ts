@@ -2857,6 +2857,20 @@ export class SocketClient {
     }
 
     /**
+     * Read `Screenshot.png` from a PCSX2 .p2s save-state archive and return it
+     * as a base64-encoded string (no leading data-URI prefix). Returns `null`
+     * when the archive does not embed a screenshot.
+     */
+    public async readP2sScreenshot(filePath: string): Promise<string | null> {
+        const response = await this.sendCommand({ Command: 'READP2SSCREENSHOT', FilePath: filePath });
+        if (!response.Success) {
+            if (response.Error && /not found in \.p2s/i.test(response.Error)) { return null; }
+            throw new Error(response.Error || 'ReadP2sScreenshot failed');
+        }
+        return (response as { Data?: string }).Data ?? null;
+    }
+
+    /**
      * Ping the server
      */
     public async ping(): Promise<string> {

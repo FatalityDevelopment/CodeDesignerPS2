@@ -7,9 +7,19 @@ import { applyCodeDesignerPanelIcon } from '../../utils/webviewPanel';
 
 /** Minimal interface the SnapshotManagerProvider needs from DisasmPanelProvider. */
 export interface SnapshotDataDelegate {
-    getSnapshots(): SnapshotEntry[];
+    /**
+     * Async list of PCSX2 .p2s save states from `pcsx2.path.savestates`,
+     * already filtered to the currently selected game and sorted newest-first.
+     */
+    getSnapshots(): Promise<SnapshotEntry[]>;
     openSnapshot(snapshotPath: string): Promise<void>;
     reloadSnapshot(snapshotPath: string): Promise<void>;
+    /**
+     * Read the embedded `Screenshot.png` from a .p2s archive via the bridge.
+     * Returns base64 PNG bytes (no data-URI prefix) or `null` when no
+     * screenshot is embedded / the bridge is unreachable.
+     */
+    getP2sScreenshot(p2sPath: string): Promise<string | null>;
 }
 
 export class SnapshotManagerProvider {
@@ -52,10 +62,19 @@ export class SnapshotManagerProvider {
     /** Push an updated snapshot list to the open panel (if any). */
     public notifySnapshotsChanged(): void {
         if (!this._panel) { return; }
-        this._panel.webview.postMessage({
-            type: 'snapshotList',
-            snapshots: this.delegate.getSnapshots(),
-        });
+        void this._pushList(this._panel.webview);
+    }
+
+    private async _pushList(webview: vscode.Webview): Promise<void> {
+        try {
+            const snapshots = await this.delegate.getSnapshots();
+            webview.postMessage({ type: 'snapshotList', snapshots });
+        } catch (err: any) {
+            webview.postMessage({
+                type: 'snapshotError',
+                message: `Could not list snapshots: ${err?.message ?? err}`,
+            });
+        }
     }
 
     // ── Message dispatch ──────────────────────────────────────────────────────
@@ -66,10 +85,7 @@ export class SnapshotManagerProvider {
         switch (type) {
             case 'ready':
             case 'refresh':
-                webview.postMessage({
-                    type: 'snapshotList',
-                    snapshots: this.delegate.getSnapshots(),
-                });
+                await this._pushList(webview);
                 break;
 
             case 'snapshotOpen':
@@ -93,13 +109,30 @@ export class SnapshotManagerProvider {
                 const snapPath = msg['path'] as string;
                 try {
                     fs.rmSync(snapPath, { recursive: true, force: true });
+                    // Best-effort: also drop the sibling .extracted/ companion the
+                    // bridge generates on demand for the hex viewer.
+                    const sidecar = snapPath + '.extracted';
+                    try { fs.rmSync(sidecar, { recursive: true, force: true }); } catch { /* may not exist */ }
                     webview.postMessage({ type: 'snapshotActionResult', message: 'Snapshot deleted.' });
-                    webview.postMessage({
-                        type: 'snapshotList',
-                        snapshots: this.delegate.getSnapshots(),
-                    });
+                    await this._pushList(webview);
                 } catch (err: any) {
                     webview.postMessage({ type: 'snapshotError', message: `Delete failed: ${err?.message ?? err}` });
+                }
+                break;
+            }
+
+            case 'snapshotScreenshot': {
+                const p2sPath = msg['path'] as string;
+                try {
+                    const data = await this.delegate.getP2sScreenshot(p2sPath);
+                    webview.postMessage({ type: 'snapshotScreenshot', path: p2sPath, data });
+                } catch (err: any) {
+                    webview.postMessage({
+                        type: 'snapshotScreenshot',
+                        path: p2sPath,
+                        data: null,
+                        error: err?.message ?? String(err),
+                    });
                 }
                 break;
             }
@@ -129,6 +162,7 @@ export class SnapshotManagerProvider {
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
+               img-src ${webview.cspSource} data:;
                style-src 'unsafe-inline';
                script-src ${webview.cspSource} 'nonce-${nonce}';">
 <script nonce="${nonce}">${getWebviewErrorHandlerScript()}</script>

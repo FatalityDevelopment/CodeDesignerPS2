@@ -758,6 +758,16 @@ public class DatabaseSeeder
             "Query the running PCSX2 emulator status via the PINE IPC socket. " +
             "Returns Running/Paused state and whether a game is loaded."),
 
+        ("pcsx2_get_paths_desc",
+            "Return the absolute on-disk directories PCSX2 is using for this session, captured " +
+            "from the emu log on connection. Use this for any access to PCSX2-managed files " +
+            "(memcards, save states, screenshots, cheats, patches, logs, textures, covers, " +
+            "per-game .ini overrides, etc.) instead of guessing %DOCUMENTS%\\PCSX2. " +
+            "Returns key/value pairs for pcsx2.path.dataRoot, .bios, .snapshots, .savestates, " +
+            ".memoryCards, .logs, .cheats, .patches, .covers, .gameSettings, .resources, " +
+            ".userResources, .cache, .textures, .inputProfiles, .videos, .debuggerLayouts, " +
+            ".debuggerSettings, and a diagnostic .discovered JSON array."),
+
         ("pcsx2_game_info_desc",
             "Query the running game's title, serial ID, UUID, and version from PCSX2 via the PINE " +
             "IPC socket. Only available when PCSX2 is running with PINE enabled."),
@@ -1081,5 +1091,85 @@ public class DatabaseSeeder
         ("emu.pcsx2.slot",
             null,
             "PINE slot number used when connecting to PCSX2 (default: 28011)."),
+
+        // ── PCSX2 discovered paths ─────────────────────────────────────────────
+        // Populated automatically by the VS Code extension when it parses the
+        // PCSX2 emu log on connection. Each value is the absolute directory
+        // PCSX2 reported using on startup.
+        ("pcsx2.path.dataRoot",
+            null,
+            "PCSX2 DataRoot: the user's PCSX2 documents folder that contains all per-user subfolders (inis, memcards, sstates, etc.)."),
+
+        ("pcsx2.path.bios",
+            null,
+            "PCSX2 BIOS directory: where PCSX2 scans for PS2 BIOS images."),
+
+        ("pcsx2.path.snapshots",
+            null,
+            "PCSX2 Snapshots directory: target folder for in-game screenshot captures."),
+
+        ("pcsx2.path.savestates",
+            null,
+            "PCSX2 Savestates directory: where .p2s save-state files are written."),
+
+        ("pcsx2.path.memoryCards",
+            null,
+            "PCSX2 MemoryCards directory: location of virtual PS2 memory card images (.ps2)."),
+
+        ("pcsx2.path.logs",
+            null,
+            "PCSX2 Logs directory: where emulog.txt and other diagnostic logs are written."),
+
+        ("pcsx2.path.cheats",
+            null,
+            "PCSX2 Cheats directory: per-game .pnach cheat files loaded at boot."),
+
+        ("pcsx2.path.patches",
+            null,
+            "PCSX2 Patches directory: built-in compatibility patches PCSX2 ships with."),
+
+        ("pcsx2.path.covers",
+            null,
+            "PCSX2 Covers directory: game-cover artwork shown in the Big Picture / game list."),
+
+        ("pcsx2.path.gameSettings",
+            null,
+            "PCSX2 GameSettings directory: per-disc .ini overrides keyed by serial+CRC."),
+
+        ("pcsx2.path.resources",
+            null,
+            "PCSX2 Resources directory: bundled (read-only) shaders, fonts, and database files shipped with PCSX2."),
+
+        ("pcsx2.path.userResources",
+            null,
+            "PCSX2 UserResources directory: user-overridable copy of the Resources tree."),
+
+        ("pcsx2.path.cache",
+            null,
+            "PCSX2 Cache directory: shader/program/state caches that PCSX2 may regenerate."),
+
+        ("pcsx2.path.textures",
+            null,
+            "PCSX2 Textures directory: HD texture replacement / dump folder used by the texture pack system."),
+
+        ("pcsx2.path.inputProfiles",
+            null,
+            "PCSX2 Input Profiles directory: saved controller mapping profiles."),
+
+        ("pcsx2.path.videos",
+            null,
+            "PCSX2 Video Dumping directory: where the GS dump / video capture output is written."),
+
+        ("pcsx2.path.debuggerLayouts",
+            null,
+            "PCSX2 Debugger Layouts directory: saved window layouts for the built-in debugger."),
+
+        ("pcsx2.path.debuggerSettings",
+            null,
+            "PCSX2 Debugger Settings directory: per-game persisted debugger state (breakpoints, watches, symbols)."),
+
+        ("pcsx2.path.discovered",
+            "[]",
+            "JSON array of every other path-shaped string the bridge has observed in the PCSX2 emu log (best-effort, may contain non-path matches). Kept for diagnostics."),
     ];
 }

@@ -16,7 +16,7 @@ import { DiffViewerProvider } from '../diffViewer/diffViewerProvider';
 import { MemoryRegion } from '../../shared/memoryRegions';
 import { JokerMakerProvider } from '../jokerMaker/jokerMakerProvider';
 import { CompatBrowserProvider } from '../compatBrowser/compatBrowserProvider';
-import { ArchiveCheat } from '../../webview/disasm-panel/types';
+import { ArchiveCheat, SnapshotEntry } from '../../webview/disasm-panel/types';
 
 interface EmuSettings {
     bios?: Array<{ name: string; path: string }>;
@@ -29,15 +29,6 @@ interface UserPreferences {
     selectedEmulator?: string;
     selectedBios?: string;
     selectedGame?: string;
-}
-
-interface SnapshotEntry {
-    label: string;
-    timestamp: string;
-    path: string;
-    name: string;
-    date: string;
-    isoName: string;
 }
 
 interface SnapshotInfoFile {
@@ -186,6 +177,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private selectedBiosPath: string = '';
     private selectedGamePath: string = '';
     private selectedGameName: string = '';
+    /** Disc serial of the currently selected game (set by handleGameChanged). Empty when unknown. */
+    private _currentGameSerial: string = '';
     private _paused: boolean = false;
     /** If Run was clicked before socket connect, execute this mode once connected. */
     private _pendingRunMode: 'emulator' | 'pcsx2' | null = null;
@@ -273,9 +266,10 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         this._packetViewerProvider    = new PacketViewerProvider(_extensionUri, socketClient);
 
         const delegate: SnapshotDataDelegate = {
-            getSnapshots:   () => this.snapshots,
-            openSnapshot:   (p) => this.handleOpenSnapshot(p),
-            reloadSnapshot: (p) => this.handleLoadSnapshot(p),
+            getSnapshots:    () => this.getPcsx2Savestates(),
+            openSnapshot:    (p) => this.handleOpenSnapshot(p),
+            reloadSnapshot:  (p) => this.handleLoadSnapshot(p),
+            getP2sScreenshot: (p) => this.handleReadP2sScreenshot(p),
         };
         this._snapshotManagerProvider = new SnapshotManagerProvider(_extensionUri, delegate);
         this._diffViewerProvider      = new DiffViewerProvider(_extensionUri, delegate, socketClient);
@@ -1763,6 +1757,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         }
         this._pcsx2LogOffset = 0;
         this._pcsx2DiscoveredPaths.clear();
+        this._pcsx2PersistedLabeledPaths.clear();
+        if (this._pcsx2DiscoveredFlushTimer) { clearTimeout(this._pcsx2DiscoveredFlushTimer); this._pcsx2DiscoveredFlushTimer = undefined; }
     }
 
     /**
@@ -1967,6 +1963,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         if (this._pcsx2LogTimer) { clearInterval(this._pcsx2LogTimer); this._pcsx2LogTimer = undefined; }
         this._pcsx2LogOffset = 0;
         this._pcsx2DiscoveredPaths.clear();
+        this._pcsx2PersistedLabeledPaths.clear();
+        if (this._pcsx2DiscoveredFlushTimer) { clearTimeout(this._pcsx2DiscoveredFlushTimer); this._pcsx2DiscoveredFlushTimer = undefined; }
         this._pcsx2GraphicsReady = false;
 
         // Poll the emu log instead of fs.watch-ing it: the file does not exist
@@ -1994,20 +1992,73 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         this._pcsx2LogTimer = setInterval(() => { void consume(); }, 500);
     }
 
+    /**
+     * Labels emitted by `EmuFolders::LoadConfig` in PCSX2 (pcsx2/Pcsx2Config.cpp:2315-2331).
+     * Each PCSX2 startup logs `<Label> Directory: <absolute path>` and we persist them
+     * under stable `pcsx2.path.<key>` setting keys so other parts of the system can
+     * resolve PCSX2's actual on-disk layout without having to re-scan the log.
+     */
+    private static readonly _pcsx2LabeledPathKeys: ReadonlyArray<readonly [RegExp, string]> = [
+        [/^DataRoot Directory:\s*(.+?)\s*$/m,            'pcsx2.path.dataRoot'],
+        [/^BIOS Directory:\s*(.+?)\s*$/m,                'pcsx2.path.bios'],
+        [/^Snapshots Directory:\s*(.+?)\s*$/m,           'pcsx2.path.snapshots'],
+        [/^Savestates Directory:\s*(.+?)\s*$/m,          'pcsx2.path.savestates'],
+        [/^MemoryCards Directory:\s*(.+?)\s*$/m,         'pcsx2.path.memoryCards'],
+        [/^Logs Directory:\s*(.+?)\s*$/m,                'pcsx2.path.logs'],
+        [/^Cheats Directory:\s*(.+?)\s*$/m,              'pcsx2.path.cheats'],
+        [/^Patches Directory:\s*(.+?)\s*$/m,             'pcsx2.path.patches'],
+        [/^Covers Directory:\s*(.+?)\s*$/m,              'pcsx2.path.covers'],
+        [/^Game Settings Directory:\s*(.+?)\s*$/m,       'pcsx2.path.gameSettings'],
+        [/^Resources Directory:\s*(.+?)\s*$/m,           'pcsx2.path.resources'],
+        [/^User Resources Directory:\s*(.+?)\s*$/m,      'pcsx2.path.userResources'],
+        [/^Cache Directory:\s*(.+?)\s*$/m,               'pcsx2.path.cache'],
+        [/^Textures Directory:\s*(.+?)\s*$/m,            'pcsx2.path.textures'],
+        [/^Input Profile Directory:\s*(.+?)\s*$/m,       'pcsx2.path.inputProfiles'],
+        [/^Video Dumping Directory:\s*(.+?)\s*$/m,       'pcsx2.path.videos'],
+        [/^Debugger Layouts Directory:\s*(.+?)\s*$/m,    'pcsx2.path.debuggerLayouts'],
+        [/^Debugger Settings Directory:\s*(.+?)\s*$/m,   'pcsx2.path.debuggerSettings'],
+    ];
+
+    /** Labeled keys we've already persisted this session — avoids redundant DB writes. */
+    private _pcsx2PersistedLabeledPaths = new Map<string, string>();
+    /** Debounce timer for flushing the bulk `pcsx2.path.discovered` JSON array. */
+    private _pcsx2DiscoveredFlushTimer?: ReturnType<typeof setTimeout>;
+
     private extractAndPersistPcsx2Paths(chunk: string): void {
+        // ── 1) Labeled paths: write each to its own setting key ────────────────
+        for (const [re, key] of DisasmPanelProvider._pcsx2LabeledPathKeys) {
+            const m = chunk.match(re);
+            if (!m) { continue; }
+            const value = m[1].trim();
+            if (!value) { continue; }
+            if (this._pcsx2PersistedLabeledPaths.get(key) === value) { continue; }
+            this._pcsx2PersistedLabeledPaths.set(key, value);
+            void this.socketClient.setSetting(key, value).catch(err => {
+                getOutputChannel().debug(`Could not persist ${key}: ${err?.message ?? err}`);
+            });
+        }
+
+        // ── 2) Bulk dump: collect every path-shaped string and flush as JSON ──
         const pathPattern = /([A-Za-z]:\\[^\s"']+|\/[^\s"']+)/g;
-        let matched = false;
+        let changed = false;
         for (const m of chunk.matchAll(pathPattern)) {
             const p = m[1].trim();
             if (!p || p.length < 3) { continue; }
+            const before = this._pcsx2DiscoveredPaths.size;
             this._pcsx2DiscoveredPaths.add(p);
-            matched = true;
+            if (this._pcsx2DiscoveredPaths.size !== before) { changed = true; }
         }
-        if (!matched) { return; }
-        const root = this.workspaceRoot || process.cwd();
-        const outFile = path.join(root, 'pcsx2-paths.md');
-        const lines = ['# PCSX2 discovered paths', '', ...Array.from(this._pcsx2DiscoveredPaths).sort().map(p => `- \`${p}\``), ''];
-        void fs.promises.writeFile(outFile, lines.join('\n'), 'utf8');
+        if (!changed) { return; }
+
+        // Debounce the bulk write — emu log emissions can be chatty during boot.
+        if (this._pcsx2DiscoveredFlushTimer) { clearTimeout(this._pcsx2DiscoveredFlushTimer); }
+        this._pcsx2DiscoveredFlushTimer = setTimeout(() => {
+            this._pcsx2DiscoveredFlushTimer = undefined;
+            const json = JSON.stringify(Array.from(this._pcsx2DiscoveredPaths).sort());
+            void this.socketClient.setSetting('pcsx2.path.discovered', json).catch(err => {
+                getOutputChannel().debug(`Could not persist pcsx2.path.discovered: ${err?.message ?? err}`);
+            });
+        }, 1000);
     }
 
     /** Marks PCSX2 graphics-ready when the emu log reports "GSStream: listening". */
@@ -2524,10 +2575,19 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         }
     }
     public async handleOpenSnapshot(snapshotPath: string): Promise<void> {
-        // For PCSX2 .p2s snapshots, open the .bin files from the companion extracted directory.
-        const dirPath = snapshotPath.endsWith('.p2s')
-            ? snapshotPath + '.extracted'
-            : snapshotPath;
+        // PCSX2 .p2s save states are zips; extract them to a sibling .extracted
+        // directory on demand so the hex viewer can open the embedded .bin
+        // memory dumps. Idempotent — the bridge re-uses the existing folder
+        // when snapshot-info.json is newer than the .p2s.
+        let dirPath = snapshotPath;
+        if (snapshotPath.endsWith('.p2s')) {
+            try {
+                dirPath = await this.socketClient.extractP2s(snapshotPath);
+            } catch (err: any) {
+                vscode.window.showErrorMessage(`Could not extract snapshot: ${err?.message ?? err}`);
+                return;
+            }
+        }
 
         try {
             const files = fs.readdirSync(dirPath)
@@ -2540,6 +2600,22 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             }
         } catch (err: any) {
             vscode.window.showErrorMessage(`Could not open snapshot: ${err?.message ?? err}`);
+        }
+    }
+
+    /**
+     * Read Screenshot.png from a .p2s archive via the bridge and return it as
+     * a base64-encoded string (no data-URI prefix). Returns `null` when the
+     * archive has no embedded screenshot or when the bridge is unavailable.
+     * Used by the Snapshot Manager webview's preview pane.
+     */
+    public async handleReadP2sScreenshot(p2sPath: string): Promise<string | null> {
+        if (!this.socketClient.isConnected()) { return null; }
+        try {
+            return await this.socketClient.readP2sScreenshot(p2sPath);
+        } catch (err: any) {
+            getOutputChannel().debug(`readP2sScreenshot(${p2sPath}) failed: ${err?.message ?? err}`);
+            return null;
         }
     }
 
@@ -2589,6 +2665,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             ? path.basename(gamePath, path.extname(gamePath))
             : '';
 
+        // Reset cached serial before resolving — keeps stale state from leaking
+        // when the user switches games while still inside the same session.
+        this._currentGameSerial = '';
         this.loadSnapshotsForGame(this.selectedGameName);
         this.loadGameLabels(this.selectedGameName);
 
@@ -2601,10 +2680,14 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 const serial    = (info.ID    ?? '').replace(/\0/g, '').trim();
                 const gameTitle = (info.Title ?? '').replace(/\0/g, '').trim() || this.selectedGameName;
                 if (serial) {
+                    this._currentGameSerial = serial;
                     // Upsert Game/GameRegion/GameDisc in the database with IsoPath,
                     // serial, and title so the game appears in the DB immediately.
                     await this.socketClient.updateGameDisc(serial, gamePath, undefined, gameTitle);
                     this.editorProvider.setCurrentGame(this.selectedGameName, this.workspaceRoot, serial);
+                    // Re-list snapshots now that we know the serial — the initial
+                    // call above filtered with an empty serial (= show all).
+                    this._snapshotManagerProvider.notifySnapshotsChanged();
                 } else {
                     // Serial unavailable — just store IsoPath; use filename for DB fallback.
                     this.editorProvider.setCurrentGame(this.selectedGameName, this.workspaceRoot, gamePath);
@@ -2626,108 +2709,82 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
      * Previously-deleted snapshots are automatically excluded because this always
      * re-reads the current filesystem state.
      */
-    private loadSnapshotsForGame(isoName: string): void {
-        if (!isoName || !this.workspaceRoot) {
-            this.snapshots = [];
-            this.webview?.postMessage({ command: 'updateSnapshots', snapshots: [], gameName: '' });
-            this._snapshotManagerProvider.notifySnapshotsChanged();
-            return;
-        }
-
-        const isoFolder = path.join(this.workspaceRoot, 'snapshots', isoName);
-        const entries: SnapshotEntry[] = [];
-
-        try {
-            if (!fs.existsSync(isoFolder)) {
-                this.snapshots = [];
-                this.webview?.postMessage({ command: 'updateSnapshots', snapshots: [], gameName: isoName });
-                this._snapshotManagerProvider.notifySnapshotsChanged();
-                return;
-            }
-
-            // Walk: <isoFolder>/<date>/...
-            const dateDirs = fs.readdirSync(isoFolder, { withFileTypes: true })
-                .filter(d => d.isDirectory())
-                .map(d => d.name)
-                .sort()
-                .reverse();  // newest date first
-
-            for (const dateDir of dateDirs) {
-                const datePath = path.join(isoFolder, dateDir);
-                const dirEntries = fs.readdirSync(datePath, { withFileTypes: true });
-
-                // ── Internal-emulator snapshots: sub-directories ──────────────
-                for (const dirent of dirEntries.filter(d => d.isDirectory())) {
-                    // Skip .extracted directories (PCSX2 snapshot extraction folders)
-                    if (dirent.name.endsWith('.extracted')) {
-                        continue;
-                    }
-
-                    const snapPath = path.join(datePath, dirent.name);
-                    const infoPath = path.join(snapPath, 'snapshot-info.json');
-
-                    if (fs.existsSync(infoPath)) {
-                        try {
-                            const info = JSON.parse(fs.readFileSync(infoPath, 'utf-8')) as SnapshotInfoFile;
-                            entries.push({
-                                label:     info.name,
-                                name:      info.name,
-                                timestamp: new Date(info.timestamp).toLocaleTimeString(),
-                                path:      snapPath,
-                                date:      dateDir,
-                                isoName:   info.isoName,
-                            });
-                        } catch { /* skip malformed info files */ }
-                    } else {
-                        // Legacy fallback: only include if the directory contains .bin files.
-                        const hasBins = fs.readdirSync(snapPath).some(f => f.endsWith('.bin'));
-                        if (hasBins) {
-                            entries.push({
-                                label:     dirent.name,
-                                name:      dirent.name,
-                                timestamp: '',
-                                path:      snapPath,
-                                date:      dateDir,
-                                isoName,
-                            });
-                        }
-                    }
-                }
-
-                // ── PCSX2 save states: .p2s files ─────────────────────────────
-                for (const dirent of dirEntries.filter(d => d.isFile() && d.name.endsWith('.p2s'))) {
-                    const p2sPath = path.join(datePath, dirent.name);
-                    const snapName = path.basename(dirent.name, '.p2s');
-
-                    // Use the extracted companion directory as the snapshot path when
-                    // available so the history reader can access memory dumps directly.
-                    const extractedDir    = p2sPath + '.extracted';
-                    const extractedInfo   = path.join(extractedDir, 'snapshot-info.json');
-                    const snapshotDirPath = fs.existsSync(extractedInfo) ? extractedDir : p2sPath;
-
-                    let timestamp = '';
-                    try {
-                        const stat = fs.statSync(p2sPath);
-                        timestamp = stat.mtime.toLocaleTimeString();
-                    } catch { /* ignore */ }
-
-                    entries.push({
-                        label:     snapName,
-                        name:      snapName,
-                        timestamp,
-                        path:      snapshotDirPath,
-                        date:      dateDir,
-                        isoName,
-                    });
-                }
-            }
-        } catch (err: any) {
-            getOutputChannel().warn(`Could not load snapshots for ${isoName}: ${err?.message ?? err}`);
-        }
-
+    private async loadSnapshotsForGame(isoName: string): Promise<void> {
+        const entries = await this.getPcsx2Savestates();
         this.snapshots = entries;
         this.webview?.postMessage({ command: 'updateSnapshots', snapshots: entries, gameName: isoName });
         this._snapshotManagerProvider.notifySnapshotsChanged();
+    }
+
+    /**
+     * List PCSX2 .p2s save-state files from the directory PCSX2 reported
+     * (`pcsx2.path.savestates` in the settings table, populated on the first
+     * emulator connection). When a current game serial is known the list is
+     * filtered to that game's save states (PCSX2 names them
+     * `<SERIAL> (<CRC>).<slot>.p2s`); otherwise every .p2s file in the folder
+     * is returned.
+     */
+    public async getPcsx2Savestates(): Promise<SnapshotEntry[]> {
+        if (!this.socketClient.isConnected()) { return []; }
+
+        let dir: string | null;
+        try { dir = await this.socketClient.getSetting('pcsx2.path.savestates'); }
+        catch { return []; }
+        if (!dir) { return []; }
+
+        let files: string[];
+        try { files = fs.readdirSync(dir); }
+        catch { return []; }
+
+        const serialFilter = this._currentGameSerial
+            ? this._currentGameSerial.trim().toUpperCase()
+            : '';
+        const nameRe = /^(\S+)\s+\(([0-9A-Fa-f]{8})\)\.(.+?)\.p2s$/;
+        const entries: SnapshotEntry[] = [];
+
+        for (const name of files) {
+            if (!name.toLowerCase().endsWith('.p2s')) { continue; }
+            const m = name.match(nameRe);
+            const serial = m ? m[1].toUpperCase() : '';
+            if (serialFilter && serial !== serialFilter) { continue; }
+
+            const full = path.join(dir, name);
+            let mtimeMs = 0;
+            let size    = 0;
+            try {
+                const st = fs.statSync(full);
+                mtimeMs = st.mtimeMs;
+                size    = st.size;
+            } catch { /* unreadable — show anyway */ }
+
+            const slot = m ? m[3] : undefined;
+            const crc  = m ? m[2].toUpperCase() : undefined;
+            const label = slot === 'resume'
+                ? 'Resume state'
+                : slot === undefined
+                    ? path.basename(name, '.p2s')
+                    : /^\d+$/.test(slot)
+                        ? `Slot ${parseInt(slot, 10)}`
+                        : slot;
+
+            const mtime = new Date(mtimeMs || Date.now());
+            entries.push({
+                label,
+                name,
+                timestamp: mtime.toLocaleString(),
+                path:      full,
+                date:      mtime.toISOString().slice(0, 10),
+                isoName:   serial && crc ? `${serial} (${crc})` : '',
+                serial:    serial || undefined,
+                crc,
+                slot,
+                sizeBytes: size,
+                mtimeMs,
+            });
+        }
+
+        entries.sort((a, b) => (b.mtimeMs ?? 0) - (a.mtimeMs ?? 0));
+        return entries;
     }
 
     /**

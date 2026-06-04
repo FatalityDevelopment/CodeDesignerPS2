@@ -1,61 +1,364 @@
-/* ══════════════════════════════════════════════════════════════════════════
-   Snapshot Manager — matches label-manager / disasm-editor visual style
-   ══════════════════════════════════════════════════════════════════════════ */
+/* Snapshot Manager — mirrors the zipper-workbench layout (sidebar list +
+   content with screenshot preview), all driven by VS Code theme vars so it
+   matches the disasm panel + zipper styling guide. */
 
-* { box-sizing: border-box; margin: 0; padding: 0; }
-
-body, html {
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
   height: 100%;
-  font-family: monospace;
-  font-size: 12px;
-  color: #d4d4d4;
-  background: #1e1e1e;
   overflow: hidden;
+  background: var(--vscode-editor-background, #1e1e1e);
+  color: var(--vscode-editor-foreground, #d4d4d4);
+  font-family: var(--vscode-font-family, "Segoe UI", sans-serif);
+  font-size: var(--vscode-font-size, 13px);
 }
 
-.sm-outer {
+button,
+input {
+  font: inherit;
+}
+
+.sm-shell {
   display: flex;
   flex-direction: column;
+  width: 100vw;
   height: 100vh;
-  overflow: hidden;
-  font-family: monospace;
-  font-size: 12px;
-  color: #d4d4d4;
-  background: #1e1e1e;
+  min-width: 0;
+  min-height: 0;
+  background: var(--vscode-editor-background, #1e1e1e);
 }
 
-/* ── Header bar ─────────────────────────────────────────────────────────── */
-.sm-header {
+/* ── Toolbar ───────────────────────────────────────────────────────────── */
+.sm-toolbar {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 14px;
-  background: #252526;
-  border-bottom: 1px solid #3e3e42;
-  flex-shrink: 0;
+  min-height: 39px;
+  padding: 0 12px;
+  background: var(--vscode-sideBar-background, #252526);
+  border-bottom: 1px solid var(--vscode-sideBar-border, #2d2d30);
 }
 
 .sm-title {
-  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--vscode-sideBarTitle-foreground, #bbbbbb);
   font-weight: 600;
-  color: #cccccc;
-  flex: 1;
 }
 
-/* ── Status bar ─────────────────────────────────────────────────────────── */
+.sm-toolbar-spacer { flex: 1; }
+
+.sm-count {
+  color: var(--vscode-descriptionForeground, #ccccccb3);
+  font-size: 12px;
+}
+
+/* ── Buttons ───────────────────────────────────────────────────────────── */
+.sm-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 4px;
+  color: var(--vscode-button-secondaryForeground, var(--vscode-editor-foreground, #d4d4d4));
+  background: var(--vscode-button-secondaryBackground, #3a3d41);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.sm-btn:hover:not(:disabled) {
+  background: var(--vscode-button-secondaryHoverBackground, #45494e);
+}
+
+.sm-btn:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.sm-btn svg { width: 12px; height: 12px; }
+
+.sm-primary {
+  color: var(--vscode-button-foreground, #ffffff);
+  background: var(--vscode-button-background, #0e639c);
+}
+
+.sm-primary:hover:not(:disabled) {
+  background: var(--vscode-button-hoverBackground, #1177bb);
+}
+
+.sm-danger-btn {
+  color: var(--vscode-errorForeground, #f48771);
+}
+
+.sm-danger-btn:hover:not(:disabled) {
+  background: rgba(244, 135, 113, 0.12);
+  color: var(--vscode-errorForeground, #f48771);
+}
+
+/* ── Status strip ──────────────────────────────────────────────────────── */
 .sm-status {
-  padding: 3px 10px;
+  padding: 5px 12px;
   font-size: 11px;
-  font-family: monospace;
-  background: #252526;
-  border-bottom: 1px solid #3e3e42;
-  flex-shrink: 0;
-  color: #73c991;
+  color: var(--vscode-descriptionForeground, #73c991);
+  background: var(--vscode-editorGroupHeader-tabsBackground, #252526);
+  border-bottom: 1px solid var(--vscode-sideBar-border, #2d2d30);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.sm-status.sm-status-error { color: #f48771; }
 
-/* ── Table column widths ────────────────────────────────────────────────── */
-.sm-col-date    { white-space: nowrap; width: 160px; font-size: 11px; }
-.sm-col-title   { font-weight: 500; }
-.sm-col-game    { font-size: 11px; width: 120px; }
-.sm-col-actions { white-space: nowrap; width: 160px; text-align: right; }
+.sm-status-error { color: var(--vscode-errorForeground, #f48771); }
+
+/* ── Main grid: sidebar + content ─────────────────────────────────────── */
+.sm-main {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+}
+
+.sm-sidebar {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  align-content: start;
+  min-width: 0;
+  min-height: 0;
+  background: var(--vscode-sideBar-background, #252526);
+  border-right: 1px solid var(--vscode-sideBar-border, #2d2d30);
+  overflow: hidden;
+}
+
+.sm-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  margin: 10px;
+  padding: 0 9px;
+  box-sizing: border-box;
+  color: var(--vscode-input-placeholderForeground, #a6a6a6);
+  background: var(--vscode-input-background, #3c3c3c);
+  border: 1px solid var(--vscode-input-border, transparent);
+  border-radius: 4px;
+}
+
+.sm-search:focus-within {
+  border-color: var(--vscode-focusBorder, #007fd4);
+}
+
+.sm-search input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  color: var(--vscode-input-foreground, #cccccc);
+  background: transparent;
+}
+
+.sm-list {
+  min-height: 0;
+  overflow: auto;
+  padding: 0 6px 10px;
+}
+
+.sm-empty-row {
+  padding: 14px 12px;
+  color: var(--vscode-descriptionForeground, #ccccccb3);
+  font-size: 12px;
+  text-align: center;
+}
+
+.sm-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto;
+  column-gap: 8px;
+  row-gap: 2px;
+  width: 100%;
+  padding: 8px 10px;
+  margin-bottom: 4px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sm-row:hover {
+  background: var(--vscode-list-hoverBackground, #2a2d2e);
+}
+
+.sm-row.active {
+  background: var(--vscode-list-activeSelectionBackground, #094771);
+  color: var(--vscode-list-activeSelectionForeground, #ffffff);
+  border-color: var(--vscode-focusBorder, #007fd4);
+}
+
+.sm-row-label {
+  grid-column: 1;
+  grid-row: 1;
+  font-weight: 600;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sm-row-meta {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground, #ccccccb3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sm-row-meta:nth-of-type(2) { grid-column: 2; grid-row: 1; }
+.sm-row-meta:nth-of-type(3) { grid-column: 1 / -1; grid-row: 2; }
+
+.sm-row.active .sm-row-meta { color: rgba(255, 255, 255, 0.78); }
+
+/* ── Content (right pane) ─────────────────────────────────────────────── */
+.sm-content {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--vscode-editor-background, #1e1e1e);
+}
+
+.sm-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--vscode-descriptionForeground, #ccccccb3);
+  font-size: 13px;
+  text-align: center;
+  padding: 24px;
+}
+
+.sm-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px 8px;
+  border-bottom: 1px solid var(--vscode-editorGroup-border, #2d2d30);
+}
+
+.sm-head-main { min-width: 0; }
+
+.sm-file-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--vscode-editor-foreground, #d4d4d4);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sm-summary {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground, #ccccccb3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Preview pane (screenshot + meta cards + actions) ─────────────────── */
+.sm-preview {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
+  gap: 12px;
+  padding: 12px 16px 16px;
+  min-height: 0;
+}
+
+.sm-preview-stage {
+  position: relative;
+  min-width: 0;
+  min-height: 220px;
+  background: #111318;
+  border: 1px solid var(--vscode-widget-border, #303031);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.sm-preview-pic {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #111318;
+  image-rendering: auto;
+}
+
+.sm-preview-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  background: rgba(17, 19, 24, 0.65);
+  color: var(--vscode-descriptionForeground, #ccccccb3);
+  text-align: center;
+  pointer-events: none;
+}
+
+.sm-preview-info {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.sm-preview-info > div {
+  min-width: 0;
+  padding: 8px;
+  background: var(--vscode-editorWidget-background, #252526);
+  border: 1px solid var(--vscode-widget-border, #303031);
+  border-radius: 4px;
+}
+
+.sm-preview-info span {
+  display: block;
+  color: var(--vscode-descriptionForeground, #ccccccb3);
+  font-size: 11px;
+}
+
+.sm-preview-info strong {
+  display: block;
+  margin-top: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--vscode-editor-foreground, #d4d4d4);
+  font-weight: 600;
+}
+
+.sm-actions {
+  display: grid;
+  gap: 6px;
+  background: transparent !important;
+  border: 0 !important;
+  padding: 4px 0 0 !important;
+}
+
+.sm-actions .sm-btn {
+  justify-content: flex-start;
+  height: 30px;
+  padding: 0 10px;
+}

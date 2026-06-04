@@ -26,6 +26,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
             reg.Add(c => HandleLoadSnapshot(c.InputPath),                                                                  "LOADSNAPSHOT");
             reg.Add(c => HandleLoadElf(c.InputPath),                                                                       "LOADELF");
             reg.Add(c => HandleExtractP2s(c.FilePath),                                                                     "EXTRACTP2S", "EXTRACT_P2S");
+            reg.Add(c => HandleReadP2sScreenshot(c.FilePath),                                                              "READP2SSCREENSHOT", "READ_P2S_SCREENSHOT");
             reg.Add(c => HandleListDiscElfs(c.IsoPath),                                                                    "LISTDISCELFS");
             reg.Add(c => HandleRecompile(c.IsoPath, c.ElfName, c.OutputDirectory),                                         "RECOMPILE");
         }
@@ -340,6 +341,45 @@ namespace CodeDesigner.Ps2.Bridge.Services
             catch (Exception ex)
             {
                 return Responses.Error($"EXTRACTP2S failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Handle READP2SSCREENSHOT — open a .p2s save-state archive and return the
+        /// embedded <c>Screenshot.png</c> entry as base64 in <see cref="CommandResponse.Data"/>.
+        /// Used by the Snapshot Manager webview to preview a save state without
+        /// extracting the full archive.
+        /// </summary>
+        private string HandleReadP2sScreenshot(string? filePath)
+        {
+            if (string.IsNullOrEmpty(filePath))
+                return Responses.Error("FilePath is required for READP2SSCREENSHOT");
+            if (!File.Exists(filePath))
+                return Responses.Error($"File not found: {filePath}");
+
+            try
+            {
+                using var archive = ArchiveFactory.OpenArchive(filePath);
+                foreach (var entry in archive.Entries)
+                {
+                    if (!string.Equals(Path.GetFileName(entry.Key), "Screenshot.png", StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    using var ms = new MemoryStream();
+                    using var src = entry.OpenEntryStream();
+                    src.CopyTo(ms);
+                    return JsonSerializer.Serialize(new CommandResponse
+                    {
+                        Success = true,
+                        Command = "READP2SSCREENSHOT",
+                        Data    = Convert.ToBase64String(ms.ToArray()),
+                    });
+                }
+                return Responses.Error("Screenshot.png not found in .p2s archive");
+            }
+            catch (Exception ex)
+            {
+                return Responses.Error($"READP2SSCREENSHOT failed: {ex.Message}");
             }
         }
 
