@@ -33,8 +33,8 @@ app-page-header {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  flex: 0 0 70px;
-  min-height: 70px;
+  flex: 0 0 64px;
+  min-height: 64px;
   width: 100%;
   padding: 0 22px;
   border-bottom: 1px solid var(--vscode-panel-border, #2d2d30);
