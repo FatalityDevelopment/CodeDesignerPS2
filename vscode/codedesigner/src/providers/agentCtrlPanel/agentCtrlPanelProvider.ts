@@ -253,6 +253,8 @@ export class AgentCtrlPanelProvider {
             case 'chatSessionRename': await this._handleChatSessionRename(msg, webview); break;
             case 'chatSessionDelete': await this._handleChatSessionDelete(msg['id'] as number, webview); break;
             case 'chatMessageClear':  await this._handleChatMessageClear(msg['sessionId'] as number, webview); break;
+            case 'chatMessageAction': await this._handleChatMessageAction(msg, webview); break;
+            case 'chatCodeAction':    await this._handleChatCodeAction(msg, webview); break;
             case 'chatSend':          await this._handleChatSend(msg, webview); break;
 
             default:
@@ -760,6 +762,26 @@ export class AgentCtrlPanelProvider {
         } catch (err: any) {
             webview.postMessage({ type: 'chatSendResult', sessionId, messages: [], error: err?.message ?? String(err) });
         }
+    }
+
+
+    private async _handleChatMessageAction(msg: Record<string, unknown>, webview: vscode.Webview): Promise<void> {
+        const command = (msg['command'] as string | undefined) ?? '';
+        webview.postMessage({
+            type:    'chatMessageActionResult',
+            chipId:  msg['chipId'],
+            command,
+            message: command ? 'Inserted action into composer.' : 'Action recorded.',
+        });
+    }
+
+    private async _handleChatCodeAction(msg: Record<string, unknown>, webview: vscode.Webview): Promise<void> {
+        const action = (msg['action'] as string | undefined) ?? 'code';
+        webview.postMessage({
+            type:    'chatCodeActionResult',
+            action,
+            message: `${action} is queued for the backend pipeline placeholder.`,
+        });
     }
 
     private static readonly AGENT_IMAGE_MAP = [
