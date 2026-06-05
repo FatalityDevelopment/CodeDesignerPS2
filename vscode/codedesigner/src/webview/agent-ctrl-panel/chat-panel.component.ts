@@ -220,6 +220,11 @@ interface OrchestrationRef { id: number; name: string; isActive?: boolean; }
           [disabled]="sending()"></textarea>
         <div class="chat-composer-row">
           <span class="chat-composer-hint">{{ status() }}</span>
+          <div class="chat-followups">
+            @for (chip of followups(); track chip) {
+              <button type="button" (click)="useFollowup(chip)">{{ chip }}</button>
+            }
+          </div>
           <button class="aic-btn primary" [disabled]="!draft().trim() || sending()" (click)="send()">
             {{ sending() ? 'Sending…' : 'Send →' }}
           </button>
@@ -336,7 +341,9 @@ interface OrchestrationRef { id: number; name: string; isActive?: boolean; }
       <span class="cb-code-lang">{{ b.language }}</span>
       @if (b.filename) { <span class="cb-code-file">{{ b.filename }}</span> }
       <span class="cb-code-actions">
-        <button (click)="copyText(b.source)">Copy</button>
+        @for (action of (b.actions || ['copy']); track action) {
+          <button (click)="onCodeAction(b, action)">{{ action }}</button>
+        }
       </span>
     </header>
     <pre><code>{{ b.source }}</code></pre>
@@ -353,7 +360,7 @@ interface OrchestrationRef { id: number; name: string; isActive?: boolean; }
       <li>
         <span class="cb-t-time">{{ row.t }}</span>
         <span class="cb-t-dot" [attr.data-status]="row.status"></span>
-        <span class="cb-t-label">{{ row.label }}</span>
+        <span class="cb-t-label" [innerHTML]="renderInline(row.label)"></span>
         @if (row.tag) { <span class="cb-pill" [attr.data-tone]="row.tag.tone || 'info'">{{ row.tag.text }}</span> }
       </li>
     }
@@ -390,6 +397,11 @@ export class ChatPanelComponent implements AfterViewInit, OnDestroy {
   readonly draft           = signal<string>('');
   readonly sending         = signal<boolean>(false);
   readonly status          = signal<string>('');
+  readonly followups       = signal<string[]>([
+    '@Scorpion trace callers of OnTakeDamage',
+    '@Kano harden the patch against teammate fire',
+    '@Kitana extend struct to +0x80',
+  ]);
 
   readonly activeSession = computed<ChatSession | undefined>(() =>
     this.sessions().find(s => s.id === this.activeSessionId()) ?? undefined,
@@ -472,6 +484,17 @@ export class ChatPanelComponent implements AfterViewInit, OnDestroy {
         this.status.set('Cleared.');
         break;
 
+      case 'chatMessageActionResult':
+        if (data.error) { this.status.set(data.error); break; }
+        if (data.command) { this.draft.set(data.command); queueMicrotask(() => this.composerEl?.nativeElement.focus()); }
+        this.status.set(data.message || 'Action ready.');
+        break;
+
+      case 'chatCodeActionResult':
+        if (data.error) { this.status.set(data.error); break; }
+        this.status.set(data.message || 'Code action queued.');
+        break;
+
       case 'chatSendResult':
         this.sending.set(false);
         if (data.error) { this.status.set(data.error); break; }
@@ -502,14 +525,14 @@ export class ChatPanelComponent implements AfterViewInit, OnDestroy {
   }
 
   createSession(): void {
-    const title = (typeof window.prompt === 'function'
-      ? window.prompt('Title for the new chat?', 'New chat')
-      : 'New chat') ?? '';
-    if (!title.trim()) { return; }
-    // Default the squad to whichever orchestration is currently marked active.
+    // VS Code webviews do not reliably support blocking browser prompts, so
+    // create the thread immediately and let users rename it from the header.
+    const nextNumber = this.sessions().length + 1;
+    const title = nextNumber === 1 ? 'New chat' : `New chat ${nextNumber}`;
     const orch = this.orchestrations().find(o => o.isActive);
+    this.status.set('Creating chat…');
     this.post('chatSessionCreate', {
-      title:            title.trim(),
+      title,
       orchestrationId:  orch?.id,
     });
   }
@@ -563,6 +586,16 @@ export class ChatPanelComponent implements AfterViewInit, OnDestroy {
   onActionChip(chip: { id: string; label: string; command?: string }): void {
     // §3.10 in the chat-templates spec: chip click routes through the host.
     this.post('chatMessageAction', { sessionId: this.activeSessionId(), chipId: chip.id, command: chip.command });
+  }
+
+  onCodeAction(block: Extract<Block, { kind: 'code' }>, action: string): void {
+    if (action === 'copy') { this.copyText(block.source); this.status.set('Copied code.'); return; }
+    this.post('chatCodeAction', { sessionId: this.activeSessionId(), action, filename: block.filename, language: block.language, source: block.source });
+  }
+
+  useFollowup(text: string): void {
+    this.draft.set(text);
+    queueMicrotask(() => this.composerEl?.nativeElement.focus());
   }
 
   // ── Rendering helpers ──────────────────────────────────────────────────────
