@@ -156,3 +156,7 @@
   .chat-shell{display:flex;flex-direction:column}
   .chat-sidebar{max-height:35vh;border-right:0;border-bottom:1px solid #2a2a2a}
 }
+
+.chat-followups{display:flex;flex:1;flex-wrap:wrap;gap:6px;min-width:0}
+.chat-followups button{padding:4px 9px;border:1px solid #343434;border-radius:999px;background:#202020;color:#cfcfcf;font-size:11px;cursor:pointer;white-space:nowrap;max-width:240px;overflow:hidden;text-overflow:ellipsis}
+.chat-followups button:hover{border-color:#5b6b8b;color:#fff;background:#262626}
