@@ -157,25 +157,6 @@ interface AiProviderOption { id: string; label: string; model: string; badge: st
         </div>
       </header>
 
-      <!-- Context chips strip — placeholder until the host wires real context. -->
-      <div class="chat-context-row">
-        <span class="chat-context-label">CONTEXT</span>
-        @if (session.gameTag) { <span class="chat-context-chip">⊙ {{ session.gameTag }}</span> }
-        @if (session.gameSerial) { <span class="chat-context-chip">⊙ {{ session.gameSerial }}</span> }
-        <button class="chat-context-add" disabled title="Coming soon">+ Add</button>
-        <span class="chat-context-spacer"></span>
-        <label class="chat-provider-picker" [title]="selectedProvider().description">
-          <span class="chat-provider-dot">{{ selectedProvider().badge }}</span>
-          <span class="chat-provider-meta"><b>{{ selectedProvider().label }}</b><em>{{ selectedProvider().model }}</em></span>
-          <select [value]="selectedProviderId()" (change)="setProvider($any($event.target).value)">
-            @for (provider of providerOptions; track provider.id) {
-              <option [value]="provider.id">{{ provider.label }} · {{ provider.model }}</option>
-            }
-          </select>
-        </label>
-        <span class="chat-squad-chip">Squad <strong>{{ session.orchestrationName || '—' }}</strong></span>
-      </div>
-
       <!-- Scrollable thread. -->
       <div #scrollEl class="chat-thread-scroll">
         @if (messages().length === 0) {
@@ -191,6 +172,9 @@ interface AiProviderOption { id: string; label: string; model: string; badge: st
                 @for (b of blocksFor(m); track $index) {
                   <ng-container *ngTemplateOutlet="blockTpl; context: { $implicit: b }"></ng-container>
                 }
+              </div>
+              <div class="chat-msg-avatar chat-msg-user-avatar" title="You" aria-label="User">
+                <span class="chat-user-icon" aria-hidden="true">👤</span>
               </div>
             } @else {
               <div class="chat-msg-avatar" [title]="m.agentDisplay || ''">
@@ -230,6 +214,9 @@ interface AiProviderOption { id: string; label: string; model: string; badge: st
               }
             </select>
           </label>
+          <button class="chat-context-button" type="button" [title]="contextTitle(session)" (click)="showContext(session)">
+            <span>Context</span><strong>{{ contextCount(session) }}</strong>
+          </button>
           <span class="chat-model-summary">{{ selectedProvider().model }}</span>
           <button class="chat-collapse-btn" type="button" (click)="toggleComposer()">
             {{ composerCollapsed() ? 'Expand composer' : 'Collapse' }}
@@ -517,7 +504,7 @@ export class ChatPanelComponent implements AfterViewInit, OnDestroy {
           }
         }
         this.loadSessions();
-        if (data.session && data.deletedId == null) { this.selectSession(data.session); }
+        if (data.session && (data.deletedId === null || data.deletedId === undefined)) { this.selectSession(data.session); }
         break;
 
       case 'chatMessageClearResult':
@@ -652,6 +639,23 @@ export class ChatPanelComponent implements AfterViewInit, OnDestroy {
     queueMicrotask(() => this.composerEl?.nativeElement.focus());
   }
 
+  contextCount(session: ChatSession): number {
+    return [session.gameTag, session.gameSerial, session.orchestrationName].filter(Boolean).length;
+  }
+
+  contextTitle(session: ChatSession): string {
+    const items = [
+      session.gameTag ? `Game: ${session.gameTag}` : '',
+      session.gameSerial ? `Serial: ${session.gameSerial}` : '',
+      session.orchestrationName ? `Squad: ${session.orchestrationName}` : '',
+    ].filter(Boolean);
+    return items.length > 0 ? items.join(' • ') : 'No attached chat context yet';
+  }
+
+  showContext(session: ChatSession): void {
+    this.status.set(this.contextTitle(session));
+  }
+
   // ── Rendering helpers ──────────────────────────────────────────────────────
 
   blocksFor(m: ChatMessage): Block[] { return m._blocks ?? []; }
@@ -756,33 +760,97 @@ function escapeHtml(text: string | undefined): string {
 }
 
 function renderCodeLine(line: string, language: string): string {
-  const escaped = escapeHtml(line);
   if (language === 'cds') {
-    const directive = escaped.match(/^(\s*)(@[A-Za-z_][\w]*)\b(.*)$/);
+    const directive = line.match(/^(\s*)(@[A-Za-z_][\w]*)\b(.*)$/);
     if (directive) {
-      return `${directive[1]}<span class="cb-cds-directive">${directive[2]}</span>${colorizeRegisters(directive[3])}`;
+      return `${escapeHtml(directive[1])}<span class="cb-cds-directive">${escapeHtml(directive[2])}</span>${renderProgramCode(directive[3])}`;
     }
 
-    const fnLine = escaped.match(/^(\s*)(fn)\s+([A-Za-z_][\w]*)\b(.*)$/);
+    const fnLine = line.match(/^(\s*)(fn)\s+([A-Za-z_][\w]*)\b(.*)$/);
     if (fnLine) {
-      return `${fnLine[1]}<span class="cb-cds-keyword">${fnLine[2]}</span> <span class="label">${fnLine[3]}</span>${colorizeRegisters(fnLine[4])}`;
+      return `${escapeHtml(fnLine[1])}<span class="cb-cds-keyword">${escapeHtml(fnLine[2])}</span> <span class="label">${escapeHtml(fnLine[3])}</span>${renderProgramCode(fnLine[4])}`;
     }
 
-    const labelLine = escaped.match(/^(\s*)([A-Za-z_][\w]*:)(.*)$/);
+    const labelLine = line.match(/^(\s*)([A-Za-z_][\w]*:)(.*)$/);
     if (labelLine) {
-      return `${labelLine[1]}<span class="label">${labelLine[2]}</span>${colorizeRegisters(labelLine[3])}`;
+      return `${escapeHtml(labelLine[1])}<span class="label">${escapeHtml(labelLine[2])}</span>${renderProgramCode(labelLine[3])}`;
     }
   }
 
-  const commentSplit = escaped.match(/^(.*?)(\s*(?:;|\/\/).*)$/);
-  const codePart = commentSplit ? commentSplit[1] : escaped;
-  const commentPart = commentSplit ? `<span class="comment">${commentSplit[2]}</span>` : '';
-  const asm = codePart.match(/^(\s*)([A-Za-z.][\w.]*)\b(.*)$/);
-  if (asm && (language === 'cds' || language === 'mips' || language === 'asm' || looksLikeMipsOp(asm[2]))) {
-    return `${asm[1]}<span class="op">${asm[2]}</span><span class="args">${colorizeRegisters(asm[3])}</span>${commentPart}`;
+  const parts = splitLineComment(line, language);
+  const asm = parts.code.match(/^(\s*)([A-Za-z.][\w.]*)\b(.*)$/);
+  if (asm && (language === 'mips' || language === 'asm' || looksLikeMipsOp(asm[2]))) {
+    return `${escapeHtml(asm[1])}<span class="op">${escapeHtml(asm[2])}</span><span class="args">${colorizeRegisters(escapeHtml(asm[3]))}</span>${renderComment(parts.comment)}`;
   }
 
-  return colorizeRegisters(codePart) + commentPart;
+  if (language === 'cds' || looksLikeProgramLanguage(language)) {
+    return renderProgramCode(parts.code) + renderComment(parts.comment);
+  }
+
+  return colorizeRegisters(escapeHtml(parts.code)) + renderComment(parts.comment);
+}
+
+function splitLineComment(line: string, language: string): { code: string; comment: string } {
+  const commentTokens = language === 'asm' || language === 'mips' ? [';'] : ['//', ';'];
+  let quote: string | null = null;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (quote) {
+      if (ch === '\\') { i++; continue; }
+      if (ch === quote) { quote = null; }
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === '`') { quote = ch; continue; }
+    const token = commentTokens.find(t => line.startsWith(t, i));
+    if (token) {
+      return { code: line.slice(0, i), comment: line.slice(i) };
+    }
+  }
+  return { code: line, comment: '' };
+}
+
+function renderComment(comment: string): string {
+  return comment ? `<span class="comment">${escapeHtml(comment)}</span>` : '';
+}
+
+function looksLikeProgramLanguage(language: string): boolean {
+  return /^(program|source|code|c|cpp|c\+\+|cs|csharp|js|jsx|ts|tsx|javascript|typescript|java|rust|go|python|py)$/i.test(language);
+}
+
+function renderProgramCode(code: string): string {
+  const tokenPattern = /("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`|\b0x[0-9a-fA-F]+\b|\b\d+(?:\.\d+)?\b|\b[A-Za-z_][\w]*\b)/g;
+  let out = '';
+  let last = 0;
+  for (const match of code.matchAll(tokenPattern)) {
+    const token = match[0];
+    const index = match.index ?? 0;
+    out += colorizeRegisters(escapeHtml(code.slice(last, index)));
+    const nextChar = code[index + token.length] ?? '';
+    if (isStringToken(token)) {
+      out += `<span class="cb-prog-string">${escapeHtml(token)}</span>`;
+    } else if (/^(?:0x[0-9a-fA-F]+|\d+(?:\.\d+)?)$/.test(token)) {
+      out += `<span class="cb-prog-number">${escapeHtml(token)}</span>`;
+    } else if (isProgramKeyword(token)) {
+      out += `<span class="cb-cds-keyword">${escapeHtml(token)}</span>`;
+    } else if (nextChar === '(') {
+      out += `<span class="cb-prog-function">${escapeHtml(token)}</span>`;
+    } else if (/^[A-Z][A-Za-z0-9_]*$/.test(token)) {
+      out += `<span class="cb-prog-type">${escapeHtml(token)}</span>`;
+    } else {
+      out += colorizeRegisters(escapeHtml(token));
+    }
+    last = index + token.length;
+  }
+  out += colorizeRegisters(escapeHtml(code.slice(last)));
+  return out;
+}
+
+function isStringToken(token: string): boolean {
+  return token.startsWith('\"') || token.startsWith("'") || token.startsWith('`');
+}
+
+function isProgramKeyword(token: string): boolean {
+  return /^(fn|function|proc|program|var|let|const|struct|class|enum|type|interface|impl|return|if|else|for|while|do|switch|case|default|break|continue|goto|try|catch|finally|throw|new|delete|public|private|protected|static|readonly|async|await|yield|import|export|from|using|namespace|include|define|extern|true|false|null|undefined|void|int|uint|short|ushort|long|ulong|float|double|bool|char|string|byte|sbyte|u8|u16|u32|u64|i8|i16|i32|i64|usize|isize)$/i.test(token);
 }
 
 function looksLikeMipsOp(op: string): boolean {
@@ -820,7 +888,7 @@ function blockToText(b: Block): string {
 }
 
 function formatArgValue(v: unknown): string {
-  if (v == null) { return ''; }
+  if (v === null || v === undefined) { return ''; }
   if (typeof v === 'string') { return v; }
   if (typeof v === 'number' || typeof v === 'boolean') { return String(v); }
   try { return JSON.stringify(v); } catch { return String(v); }
