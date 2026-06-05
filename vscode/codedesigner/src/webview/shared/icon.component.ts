@@ -65,6 +65,7 @@ const ICONS: Record<string, string> = {
   edit: `<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z" /> <path d="m15 5 4 4" />`,
   filter: `<path d="M3 6h18" /> <path d="M7 12h10" /> <path d="M10 18h4" />`,
   chevronleft: `<path d="m15 18-6-6 6-6" />`,
+  'comment-discussion': `<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /> <path d="M8 10h.01" /> <path d="M12 10h.01" /> <path d="M16 10h.01" />`,
 };
 
 /**

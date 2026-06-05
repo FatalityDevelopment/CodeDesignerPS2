@@ -3,9 +3,10 @@ import { AfterViewInit, Component, NgZone, OnDestroy, ViewEncapsulation, compute
 import { getVsCodeApi } from '../shared/vscode-api';
 import { IconComponent } from '../shared/icon.component';
 import { PageHeaderComponent } from '../shared/page-header.component';
+import { ChatPanelComponent } from './chat-panel.component';
 import './agent-ctrl-panel-page.css';
 
-type Tab = 'overview' | 'orchestration' | 'agents' | 'skills' | 'memories' | 'tools' | 'activity' | 'history';
+type Tab = 'overview' | 'chat' | 'orchestration' | 'agents' | 'skills' | 'memories' | 'tools' | 'activity' | 'history';
 
 export interface AgentProfile {
   id: number; isAgentLead: boolean; name: string; imageUri?: string; description?: string; status?: string;
@@ -73,10 +74,11 @@ const ORCH_FIELDS: Field<OrchestrationProfile>[] = [
         <div class="aic-dashboard-grid">
           <section class="aic-card"><div class="aic-card-head"><div><p class="aic-eyebrow">Active execution plan</p><h3>{{activeOrchestration()?.name || 'No orchestration selected'}}</h3></div><button class="aic-link" (click)="openTab('orchestration')">Manage →</button></div><p>{{activeOrchestration()?.description || 'Choose an orchestration profile to define how the agent team coordinates.'}}</p></section>
           <section class="aic-card"><div class="aic-card-head"><div><p class="aic-eyebrow">Agent roster</p><h3>Specialist profiles</h3></div><button class="aic-link" (click)="openTab('agents')">Manage →</button></div><div class="aic-avatar-row">@for (agent of agents().slice(0, 8); track agent.id) { <div class="aic-avatar mini" [title]="agent.name">@if(agent.imageUri){<img [src]="agent.imageUri" [alt]="agent.name">}@else{<span>{{initials(agent.name)}}</span>}</div> }</div></section>
-          <section class="aic-card wide"><div class="aic-card-head"><div><p class="aic-eyebrow">Configuration map</p><h3>Everything remains in reach</h3></div></div><div class="aic-quick-grid"><button (click)="openTab('skills')"><app-icon name="sparkles" [size]="16" /> <span><strong>Skills</strong><small>Edit reusable workspace recipes</small></span></button><button (click)="openTab('memories')"><app-icon name="database" [size]="16" /> <span><strong>Memories</strong><small>Shared and agent-scoped context</small></span></button><button (click)="openTab('tools')"><app-icon name="wrench" [size]="16" /> <span><strong>Tools</strong><small>Keep MCP tool descriptions current</small></span></button><button (click)="openTab('history')"><app-icon name="history" [size]="16" /> <span><strong>History</strong><small>Review conversation activity</small></span></button></div></section>
+          <section class="aic-card wide"><div class="aic-card-head"><div><p class="aic-eyebrow">Configuration map</p><h3>Everything remains in reach</h3></div></div><div class="aic-quick-grid"><button (click)="openTab('chat')"><app-icon name="comment-discussion" [size]="16" /> <span><strong>Chat</strong><small>Talk to the squad in a persistent thread</small></span></button><button (click)="openTab('skills')"><app-icon name="sparkles" [size]="16" /> <span><strong>Skills</strong><small>Edit reusable workspace recipes</small></span></button><button (click)="openTab('memories')"><app-icon name="database" [size]="16" /> <span><strong>Memories</strong><small>Shared and agent-scoped context</small></span></button><button (click)="openTab('tools')"><app-icon name="wrench" [size]="16" /> <span><strong>Tools</strong><small>Keep MCP tool descriptions current</small></span></button></div></section>
         </div>
       </section>
     }
+    @if (activeTab() === 'chat') { <app-chat-panel [agents]="chatAgentRefs()" [orchestrations]="chatOrchestrationRefs()" /> }
     @if (activeTab() === 'orchestration') { <ng-container [ngTemplateOutlet]="orchPanel"></ng-container> }
     @if (activeTab() === 'agents') { <ng-container [ngTemplateOutlet]="agentPanel"></ng-container> }
     @if (activeTab() === 'skills') { <ng-container [ngTemplateOutlet]="skillPanel"></ng-container> }
@@ -101,13 +103,13 @@ const ORCH_FIELDS: Field<OrchestrationProfile>[] = [
 
 <ng-template #historyPanel><section class="aic-page"><div class="aic-page-title"><div><p class="aic-eyebrow">Conversation activity</p><h2>History</h2><p>Review recorded MCP conversation messages.</p></div><button class="aic-btn" (click)="loadHistory()">↻ Refresh history</button></div><input class="aic-search" [value]="historyFilter()" (input)="historyFilter.set($any($event.target).value)" placeholder="Filter messages…"><div class="aic-history">@for(msg of filteredHistory();track msg.id){<article><header><strong>{{msg.agentName || msg.role}}</strong><span>{{formatDate(msg.createdAt)}}</span></header><p>{{msg.content}}</p></article>}@empty{<div class="aic-blank compact"><h3>No history entries found</h3></div>}</div></section></ng-template>
   `,
-  imports: [CommonModule, IconComponent, PageHeaderComponent],
+  imports: [CommonModule, IconComponent, PageHeaderComponent, ChatPanelComponent],
 })
 export class AgentCtrlPanelPageComponent implements AfterViewInit, OnDestroy {
   private readonly mcpPollTimer: ReturnType<typeof setInterval>;
   private readonly zone = inject(NgZone); private readonly vscode = getVsCodeApi();
   readonly tabs: { id: Tab; label: string; icon: string }[] = [
-    { id:'overview',label:'Overview',icon:'bot' },{ id:'orchestration',label:'Orchestration',icon:'workflow' },{ id:'agents',label:'Agents',icon:'network' },
+    { id:'overview',label:'Overview',icon:'bot' },{ id:'chat',label:'Chat',icon:'comment-discussion' },{ id:'orchestration',label:'Orchestration',icon:'workflow' },{ id:'agents',label:'Agents',icon:'network' },
     { id:'skills',label:'Skills',icon:'sparkles' },{ id:'memories',label:'Memories',icon:'database' },{ id:'tools',label:'Tools',icon:'wrench' },{ id:'activity',label:'Activity',icon:'radiotower' },{ id:'history',label:'History',icon:'history' },
   ];
   readonly activeTab=signal<Tab>('overview'); readonly agents=signal<AgentProfile[]>([]); readonly orchestrations=signal<OrchestrationProfile[]>([]); readonly skills=signal<SkillEntry[]>([]); readonly memories=signal<McpMemoryEntry[]>([]); readonly tools=signal<McpConfigEntry[]>([]); readonly history=signal<ConversationMessage[]>([]); readonly activity=signal<ActivityEntry[]>([]); readonly mcpOnline=signal(false); readonly status=signal('');
@@ -115,12 +117,15 @@ export class AgentCtrlPanelPageComponent implements AfterViewInit, OnDestroy {
   readonly showMemoryForm=signal(false); readonly newMemoryName=signal(''); readonly newMemoryAgentId=signal<number|null>(null); readonly editingToolKey=signal<string|null>(null); readonly editingToolValue=signal(''); readonly historyFilter=signal('');
   readonly agentFields=AGENT_FIELDS; readonly orchFields=ORCH_FIELDS;
   readonly activeOrchestration=computed(()=>this.orchestrations().find(o=>o.isActive)); readonly leadAgents=computed(()=>this.agents().filter(a=>a.isAgentLead)); readonly validSkillName=computed(()=>/^[a-z0-9][a-z0-9-]*$/.test(this.skillDraft().name)); readonly filteredHistory=computed(()=>{const q=this.historyFilter().toLowerCase();return this.history().filter(m=>!q||m.content.toLowerCase().includes(q)||(m.agentName||m.role).toLowerCase().includes(q));});
+  // Cross-tab inputs for the chat panel: it only needs the lookup data, not the full editor state.
+  readonly chatAgentRefs=computed(()=>this.agents().map(a=>({id:a.id,name:a.name,imageUri:a.imageUri})));
+  readonly chatOrchestrationRefs=computed(()=>this.orchestrations().map(o=>({id:o.id,name:o.name,isActive:o.isActive})));
   ngAfterViewInit(){window.addEventListener('message',this.onWindowMessage);this.post('ready');this.refreshCore();}
   constructor(){this.mcpPollTimer=setInterval(()=>this.post('requestMcpStatus'),5000);}
   ngOnDestroy(){clearInterval(this.mcpPollTimer);window.removeEventListener('message',this.onWindowMessage);}
   private readonly onWindowMessage=(e:MessageEvent)=>this.zone.run(()=>this.handle(e.data));
   post(type:string, extra:Record<string,unknown>={}){this.vscode.postMessage({type,...extra});}
-  openTab(tab:Tab){this.activeTab.set(tab);if(tab==='skills')this.loadSkills();if(tab==='memories')this.loadMemories();if(tab==='tools')this.loadTools();if(tab==='history')this.loadHistory();if(tab==='activity')this.post('requestMcpStatus');}
+  openTab(tab:Tab){this.activeTab.set(tab);if(tab==='skills')this.loadSkills();if(tab==='memories')this.loadMemories();if(tab==='tools')this.loadTools();if(tab==='history')this.loadHistory();if(tab==='activity')this.post('requestMcpStatus');if(tab==='chat'){this.loadAgents();this.loadOrchestrations();}}
   refreshCore(){this.loadAgents();this.loadOrchestrations();this.loadSkills();}
   loadAgents(){this.post('agentList');} loadOrchestrations(){this.post('orchestrationList');} loadSkills(){this.post('skillList');} loadMemories(){this.post('memoryListAll');} loadTools(){this.post('toolList');} loadHistory(){this.post('historyList');}
   formatActivityTime(at:number){return new Date(at).toTimeString().slice(0,8);} initials(name=''){return name.replace(/^\[[^\]]+\]\s*/, '').split(/\s+/).slice(0,2).map(x=>x[0]).join('').toUpperCase()||'AI';} formatDate(v:string){return v?new Date(v).toLocaleString():'Unknown';} getAgentName(id:number){return this.agents().find(a=>a.id===id)?.name||`Agent ${id}`;}

@@ -37,6 +37,7 @@ namespace CodeDesigner.Ps2.Bridge
         Repositories.DbMcpMemoryRepository?               Services.IBridgeContext.McpMemoryRepo       => McpMemoryRepo;
         Repositories.DbMcpAgentRepository?                Services.IBridgeContext.McpAgentRepo        => McpAgentRepo;
         Repositories.DbMcpOrchestrationRepository?        Services.IBridgeContext.McpOrchestrationRepo => McpOrchestrationRepo;
+        Repositories.DbMcpChatRepository?                 Services.IBridgeContext.ChatRepo            => ChatRepo;
         Repositories.DbDataFormatRepository               Services.IBridgeContext.DataFormatRepo      => DataFormatRepo;
         CodeDesigner.Ps2.LabelManager.Ps2LabelManager     Services.IBridgeContext.LabelMgr            => LabelMgr;
         void Services.IBridgeContext.RecordNavEntry(uint address, string source) => RecordNavEntry(address, source);
@@ -123,6 +124,9 @@ namespace CodeDesigner.Ps2.Bridge
 
         /// <summary>Persistence layer for MCP Orchestration profiles backed by the database.</summary>
         internal DbMcpOrchestrationRepository? McpOrchestrationRepo { get; }
+
+        /// <summary>Persistence layer for the AI control panel's Chat tab.</summary>
+        internal DbMcpChatRepository? ChatRepo { get; }
 
         /// <summary>Persistence layer for disassembler data-format overrides.</summary>
         internal DbDataFormatRepository DataFormatRepo { get; }
@@ -278,6 +282,7 @@ namespace CodeDesigner.Ps2.Bridge
             McpMemoryRepo = new DbMcpMemoryRepository(db);
             McpAgentRepo  = new DbMcpAgentRepository(db);
             McpOrchestrationRepo = new DbMcpOrchestrationRepository(db);
+            ChatRepo      = new DbMcpChatRepository(db);
             DataFormatRepo = new DbDataFormatRepository(db, LabelRepo);
 
             // Constructed before the service list because GsStreamService takes
@@ -319,6 +324,7 @@ namespace CodeDesigner.Ps2.Bridge
                 new Services.McpConfigService(ctx),
                 new Services.AgentService(ctx),
                 new Services.OrchestrationService(ctx),
+                new Services.ChatService(ctx),
                 new Services.MemoryEntryService(ctx),
                 new Services.SnapshotHistoryService(ctx),
                 new Services.SymbolDatabaseService(ctx),

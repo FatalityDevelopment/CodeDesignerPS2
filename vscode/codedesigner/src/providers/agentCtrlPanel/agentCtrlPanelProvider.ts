@@ -246,6 +246,15 @@ export class AgentCtrlPanelProvider {
             case 'skillSave': await this._handleSkillSave(msg, webview); break;
             case 'skillDelete': await this._handleSkillDelete(msg['path'] as string, webview); break;
 
+            // ── Chat tab (sessions + streamed messages) ───────────────────────
+            case 'chatSessionList':   await this._sendChatSessionList(webview); break;
+            case 'chatSessionGet':    await this._handleChatSessionGet(msg['id'] as number, webview); break;
+            case 'chatSessionCreate': await this._handleChatSessionCreate(msg, webview); break;
+            case 'chatSessionRename': await this._handleChatSessionRename(msg, webview); break;
+            case 'chatSessionDelete': await this._handleChatSessionDelete(msg['id'] as number, webview); break;
+            case 'chatMessageClear':  await this._handleChatMessageClear(msg['sessionId'] as number, webview); break;
+            case 'chatSend':          await this._handleChatSend(msg, webview); break;
+
             default:
                 getOutputChannel().warn(`[AgentCtrlPanel] Unknown message type: ${type}`);
                 break;
@@ -675,6 +684,82 @@ export class AgentCtrlPanelProvider {
             const skillPath = path.resolve(workspaceRoot, relativePath); if (!skillPath.startsWith(`${root}${path.sep}`) || path.basename(skillPath) !== 'SKILL.md') { throw new Error('Invalid skill path.'); }
             await fs.rm(path.dirname(skillPath), { recursive: true, force: true }); webview.postMessage({ type: 'skillActionResult', message: 'Deleted skill.' });
         } catch (err: any) { webview.postMessage({ type: 'skillActionResult', error: err?.message ?? String(err) }); }
+    }
+
+    // ── Chat tab handlers ────────────────────────────────────────────────────
+    //
+    // The webview owns the rendered chat shell; this provider is the message
+    // courier between it and the SocketClient. Wire payloads follow the
+    // contract in docs/ai-chat-templates.md.
+
+    private async _sendChatSessionList(webview: vscode.Webview): Promise<void> {
+        try {
+            const sessions = await this.socketClient.mcpChatSessionList();
+            webview.postMessage({ type: 'chatSessionListResult', sessions });
+        } catch (err: any) {
+            webview.postMessage({ type: 'chatSessionListResult', sessions: [], error: err?.message ?? String(err) });
+        }
+    }
+
+    private async _handleChatSessionGet(id: number, webview: vscode.Webview): Promise<void> {
+        try {
+            const { session, messages } = await this.socketClient.mcpChatSessionGet(id);
+            webview.postMessage({ type: 'chatSessionGetResult', session, messages });
+        } catch (err: any) {
+            webview.postMessage({ type: 'chatSessionGetResult', error: err?.message ?? String(err) });
+        }
+    }
+
+    private async _handleChatSessionCreate(msg: Record<string, unknown>, webview: vscode.Webview): Promise<void> {
+        try {
+            const session = await this.socketClient.mcpChatSessionCreate({
+                title:           (msg['title']           as string | undefined) ?? 'New chat',
+                orchestrationId:  msg['orchestrationId'] as number | undefined,
+                gameSerial:       msg['gameSerial']      as string | undefined,
+                gameTag:          msg['gameTag']         as string | undefined,
+            });
+            webview.postMessage({ type: 'chatSessionActionResult', session, message: `Created '${session.title}'.` });
+        } catch (err: any) {
+            webview.postMessage({ type: 'chatSessionActionResult', error: err?.message ?? String(err) });
+        }
+    }
+
+    private async _handleChatSessionRename(msg: Record<string, unknown>, webview: vscode.Webview): Promise<void> {
+        try {
+            const session = await this.socketClient.mcpChatSessionRename(msg['id'] as number, msg['title'] as string);
+            webview.postMessage({ type: 'chatSessionActionResult', session, message: `Renamed to '${session.title}'.` });
+        } catch (err: any) {
+            webview.postMessage({ type: 'chatSessionActionResult', error: err?.message ?? String(err) });
+        }
+    }
+
+    private async _handleChatSessionDelete(id: number, webview: vscode.Webview): Promise<void> {
+        try {
+            await this.socketClient.mcpChatSessionDelete(id);
+            webview.postMessage({ type: 'chatSessionActionResult', deletedId: id, message: 'Deleted.' });
+        } catch (err: any) {
+            webview.postMessage({ type: 'chatSessionActionResult', error: err?.message ?? String(err) });
+        }
+    }
+
+    private async _handleChatMessageClear(sessionId: number, webview: vscode.Webview): Promise<void> {
+        try {
+            await this.socketClient.mcpChatMessageClear(sessionId);
+            webview.postMessage({ type: 'chatMessageClearResult', sessionId, message: 'Cleared.' });
+        } catch (err: any) {
+            webview.postMessage({ type: 'chatMessageClearResult', error: err?.message ?? String(err) });
+        }
+    }
+
+    private async _handleChatSend(msg: Record<string, unknown>, webview: vscode.Webview): Promise<void> {
+        const sessionId = msg['sessionId'] as number;
+        const text      = (msg['text'] as string | undefined) ?? '';
+        try {
+            const appended = await this.socketClient.mcpChatSend(sessionId, text);
+            webview.postMessage({ type: 'chatSendResult', sessionId, messages: appended });
+        } catch (err: any) {
+            webview.postMessage({ type: 'chatSendResult', sessionId, messages: [], error: err?.message ?? String(err) });
+        }
     }
 
     private static readonly AGENT_IMAGE_MAP = [

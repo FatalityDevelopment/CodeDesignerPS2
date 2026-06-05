@@ -96,6 +96,12 @@ namespace CodeDesigner.Ps2.Bridge
         public List<DiscElfEntry>? ElfFiles { get; set; }
         public string? BootElf { get; set; }
 
+        // Chat-tab results (MCPCHAT_*)
+        public List<McpChatSessionInfo>? McpChatSessions { get; set; }
+        public McpChatSessionInfo? McpChatSession { get; set; }
+        public List<McpChatMessageInfo>? McpChatMessages { get; set; }
+        public McpChatMessageInfo? McpChatMessage { get; set; }
+
         // RECOMPILE fields
         public int? FunctionCount { get; set; }
         public List<string>? WrittenFiles { get; set; }

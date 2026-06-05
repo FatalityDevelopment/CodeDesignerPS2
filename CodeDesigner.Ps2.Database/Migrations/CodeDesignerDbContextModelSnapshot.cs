@@ -629,6 +629,102 @@ namespace CodeDesigner.Ps2.Database.Migrations
                     b.ToTable("McpAgentTasks");
                 });
 
+            modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.McpChatMessage", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("AgentDisplay")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("BlocksJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
+                    b.Property<int?>("LatencyMs")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("McpAgentId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("McpChatSessionId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Role")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
+                    b.Property<int?>("Tokens")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("McpAgentId");
+
+                    b.HasIndex("McpChatSessionId", "CreatedAt");
+
+                    b.ToTable("McpChatMessages");
+                });
+
+            modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.McpChatSession", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("GameSerial")
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<string>("GameTag")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<int?>("McpOrchestrationId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("McpOrchestrationId");
+
+                    b.HasIndex("UpdatedAt");
+
+                    b.ToTable("McpChatSessions");
+                });
+
             modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.McpConfig", b =>
                 {
                     b.Property<int>("Id")
@@ -994,6 +1090,34 @@ namespace CodeDesigner.Ps2.Database.Migrations
                     b.Navigation("McpAgent");
                 });
 
+            modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.McpChatMessage", b =>
+                {
+                    b.HasOne("CodeDesigner.Ps2.Database.Entities.McpAgent", "McpAgent")
+                        .WithMany()
+                        .HasForeignKey("McpAgentId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("CodeDesigner.Ps2.Database.Entities.McpChatSession", "McpChatSession")
+                        .WithMany("Messages")
+                        .HasForeignKey("McpChatSessionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("McpAgent");
+
+                    b.Navigation("McpChatSession");
+                });
+
+            modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.McpChatSession", b =>
+                {
+                    b.HasOne("CodeDesigner.Ps2.Database.Entities.McpOrchestration", "McpOrchestration")
+                        .WithMany()
+                        .HasForeignKey("McpOrchestrationId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("McpOrchestration");
+                });
+
             modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.McpMemory", b =>
                 {
                     b.HasOne("CodeDesigner.Ps2.Database.Entities.McpAgent", "Agent")
@@ -1063,6 +1187,11 @@ namespace CodeDesigner.Ps2.Database.Migrations
             modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.McpAgent", b =>
                 {
                     b.Navigation("Tasks");
+                });
+
+            modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.McpChatSession", b =>
+                {
+                    b.Navigation("Messages");
                 });
 #pragma warning restore 612, 618
         }

@@ -41,6 +41,12 @@ public class CodeDesignerDbContext : DbContext
     /// <summary>Messages exchanged between agent sessions (coordination bus).</summary>
     public DbSet<McpAgentMessage> McpAgentMessages { get; set; } = null!;
 
+    /// <summary>Persistent chat threads shown in the AI control panel's Chat tab.</summary>
+    public DbSet<McpChatSession> McpChatSessions { get; set; } = null!;
+
+    /// <summary>Individual messages within a chat session (one row per rendered bubble).</summary>
+    public DbSet<McpChatMessage> McpChatMessages { get; set; } = null!;
+
     /// <summary>Game metadata (title, description, cover art).</summary>
     public DbSet<Game> Games { get; set; } = null!;
 
@@ -236,6 +242,47 @@ public class CodeDesignerDbContext : DbContext
             // Inbox-pop performance: index unread messages by recipient.
             entity.HasIndex(m => new { m.ToSessionId, m.ReadAt });
             entity.HasIndex(m => new { m.ToAgentId,   m.ReadAt });
+        });
+
+        // ── McpChatSession ─────────────────────────────────────────────────────
+        modelBuilder.Entity<McpChatSession>(entity =>
+        {
+            entity.HasKey(s => s.Id);
+            entity.Property(s => s.Title).HasMaxLength(512).IsRequired();
+            entity.Property(s => s.GameSerial).HasMaxLength(32);
+            entity.Property(s => s.GameTag).HasMaxLength(64);
+
+            entity.HasOne(s => s.McpOrchestration)
+                  .WithMany()
+                  .HasForeignKey(s => s.McpOrchestrationId)
+                  .OnDelete(DeleteBehavior.SetNull);
+
+            // Sidebar query: most-recently-updated chat first.
+            entity.HasIndex(s => s.UpdatedAt);
+        });
+
+        // ── McpChatMessage ─────────────────────────────────────────────────────
+        modelBuilder.Entity<McpChatMessage>(entity =>
+        {
+            entity.HasKey(m => m.Id);
+            entity.Property(m => m.Kind).HasMaxLength(16).IsRequired();
+            entity.Property(m => m.AgentDisplay).HasMaxLength(256);
+            entity.Property(m => m.Role).HasMaxLength(64);
+            entity.Property(m => m.Status).HasMaxLength(16).IsRequired();
+
+            entity.HasOne(m => m.McpChatSession)
+                  .WithMany(s => s.Messages)
+                  .HasForeignKey(m => m.McpChatSessionId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(m => m.McpAgent)
+                  .WithMany()
+                  .HasForeignKey(m => m.McpAgentId)
+                  .OnDelete(DeleteBehavior.SetNull);
+
+            // The renderer always pages through messages by session in
+            // chronological order — index covers that path.
+            entity.HasIndex(m => new { m.McpChatSessionId, m.CreatedAt });
         });
 
         // ── GameRegion ─────────────────────────────────────────────────────────

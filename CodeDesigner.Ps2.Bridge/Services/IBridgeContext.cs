@@ -51,6 +51,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
         DbMcpMemoryRepository? McpMemoryRepo { get; }
         DbMcpAgentRepository? McpAgentRepo { get; }
         DbMcpOrchestrationRepository? McpOrchestrationRepo { get; }
+        DbMcpChatRepository? ChatRepo { get; }
         DbDataFormatRepository DataFormatRepo { get; }
 
         // ── Shared state used by multiple services ───────────────────────────

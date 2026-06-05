@@ -270,6 +270,39 @@ namespace CodeDesigner.Ps2.Bridge
         /// <summary>New value (tool description) for MCPCONFIG_UPDATE.</summary>
         public string? McpConfigValue { get; set; }
 
+        // Chat-tab fields (MCPCHAT_*). One persistent session per visible thread;
+        // one message row per rendered bubble. See docs/ai-chat-templates.md.
+        /// <summary>Database row ID of the chat session to operate on.</summary>
+        public int? McpChatSessionId { get; set; }
+        /// <summary>Display title for the chat session (MCPCHAT_SESSION_CREATE / RENAME).</summary>
+        public string? McpChatTitle { get; set; }
+        /// <summary>Optional orchestration profile to attach to the chat (MCPCHAT_SESSION_CREATE).</summary>
+        public int? McpChatOrchestrationId { get; set; }
+        /// <summary>Optional context chip: PS2 game serial (MCPCHAT_SESSION_CREATE).</summary>
+        public string? McpChatGameSerial { get; set; }
+        /// <summary>Optional context chip: game tag / CRC (MCPCHAT_SESSION_CREATE).</summary>
+        public string? McpChatGameTag { get; set; }
+        /// <summary>Database row ID of the chat message to operate on (MCPCHAT_MESSAGE_UPDATE / DELETE).</summary>
+        public int? McpChatMessageId { get; set; }
+        /// <summary>One of "user" / "agent" / "system" — drives the renderer's chrome.</summary>
+        public string? McpChatKind { get; set; }
+        /// <summary>Optional FK to the agent persona authoring an agent message.</summary>
+        public int? McpChatAgentId { get; set; }
+        /// <summary>Snapshot of the agent display name at write time (e.g. "[Fatality] Raiden").</summary>
+        public string? McpChatAgentDisplay { get; set; }
+        /// <summary>Snapshot of the role badge (e.g. "ORCHESTRATOR", "MEMORY SCANNER").</summary>
+        public string? McpChatRole { get; set; }
+        /// <summary>JSON array of blocks following the chat-templates spec.</summary>
+        public string? McpChatBlocksJson { get; set; }
+        /// <summary>Token count surfaced in the message header.</summary>
+        public int? McpChatTokens { get; set; }
+        /// <summary>Latency (ms) surfaced in the message header.</summary>
+        public int? McpChatLatencyMs { get; set; }
+        /// <summary>"streaming" / "done" / "error".</summary>
+        public string? McpChatStatus { get; set; }
+        /// <summary>User-typed prompt being sent to the orchestrator (MCPCHAT_SEND).</summary>
+        public string? McpChatUserText { get; set; }
+
 
         // Discord presence fields (SETDISCORDPRESENCE)
         /// <summary>GameDisc row ID for Discord presence context.</summary>

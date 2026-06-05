@@ -136,6 +136,22 @@ interface CommandMessage {
     // MCP Config (MCPCONFIG_LIST / MCPCONFIG_UPDATE)
     McpConfigKey?: string;
     McpConfigValue?: string;
+    // MCP Chat tab (MCPCHAT_*) — see docs/ai-chat-templates.md
+    McpChatSessionId?: number;
+    McpChatTitle?: string;
+    McpChatOrchestrationId?: number;
+    McpChatGameSerial?: string;
+    McpChatGameTag?: string;
+    McpChatMessageId?: number;
+    McpChatKind?: 'user' | 'agent' | 'system';
+    McpChatAgentId?: number;
+    McpChatAgentDisplay?: string;
+    McpChatRole?: string;
+    McpChatBlocksJson?: string;
+    McpChatTokens?: number;
+    McpChatLatencyMs?: number;
+    McpChatStatus?: 'streaming' | 'done' | 'error';
+    McpChatUserText?: string;
     // Game Disc (UPDATEGAMEDISC)
     GameSerial?: string;
     GameCrc?: string;
@@ -552,6 +568,11 @@ interface CommandResponse {
     // MCPORCHESTRATION_LIST / MCPORCHESTRATION_ADD / MCPORCHESTRATION_GET / MCPORCHESTRATION_UPDATE results
     McpOrchestrations?: McpOrchestrationInfo[];
     McpOrchestration?: McpOrchestrationInfo;
+    // MCPCHAT_* results — chat sessions and rendered messages for the AI control panel's Chat tab.
+    McpChatSessions?: McpChatSessionInfo[];
+    McpChatSession?: McpChatSessionInfo;
+    McpChatMessages?: McpChatMessageInfo[];
+    McpChatMessage?: McpChatMessageInfo;
     // GETGAMECHEATS results
     GameCheats?: GameCheatInfo[];
     GameTitle?: string;
@@ -822,6 +843,42 @@ export interface CheatListInfo {
     serial?:    string;
     crc?:       string;
     updatedAt?: string;
+}
+
+/**
+ * One persistent chat thread shown in the AI control panel's Chat tab sidebar.
+ */
+export interface McpChatSessionInfo {
+    id:                 number;
+    title:              string;
+    orchestrationId?:   number;
+    orchestrationName?: string;
+    gameSerial?:        string;
+    gameTag?:           string;
+    messageCount:       number;
+    createdAt:          string;
+    updatedAt:          string;
+}
+
+/**
+ * One rendered message in a chat session. <c>blocksJson</c> is an opaque JSON
+ * array following the contract documented in <c>docs/ai-chat-templates.md</c>;
+ * the host parses it once on receipt and hands the typed blocks to the
+ * Angular renderer.
+ */
+export interface McpChatMessageInfo {
+    id:            number;
+    sessionId:     number;
+    kind:          'user' | 'agent' | 'system';
+    agentId?:      number;
+    agentDisplay?: string;
+    role?:         string;
+    blocksJson:    string;
+    tokens?:       number;
+    latencyMs?:    number;
+    status:        'streaming' | 'done' | 'error';
+    createdAt:     string;
+    updatedAt:     string;
 }
 
 /**
@@ -4240,6 +4297,146 @@ export class SocketClient {
     public async mcpOrchestrationExport(id: number, outputPath: string): Promise<void> {
         const response = await this.sendCommand({ Command: 'MCPORCHESTRATION_EXPORT', McpOrchestrationId: id, OutputPath: outputPath });
         if (!response.Success) { throw new Error(response.Error || 'MCPORCHESTRATION_EXPORT failed'); }
+    }
+
+    // ── Chat tab (MCPCHAT_*) ─────────────────────────────────────────────────
+    // Backs the AI control panel's Chat tab. See docs/ai-chat-templates.md for
+    // the message-envelope contract that drives the renderer.
+
+    /** MCPCHAT_SESSION_LIST — returns every chat session, newest activity first. */
+    public async mcpChatSessionList(): Promise<McpChatSessionInfo[]> {
+        const r = await this.sendCommand({ Command: 'MCPCHAT_SESSION_LIST' });
+        if (!r.Success) { throw new Error(r.Error || 'MCPCHAT_SESSION_LIST failed'); }
+        return r.McpChatSessions ?? [];
+    }
+
+    /** MCPCHAT_SESSION_GET — returns a session plus its full message list. */
+    public async mcpChatSessionGet(id: number): Promise<{ session: McpChatSessionInfo; messages: McpChatMessageInfo[] }> {
+        const r = await this.sendCommand({ Command: 'MCPCHAT_SESSION_GET', McpChatSessionId: id });
+        if (!r.Success) { throw new Error(r.Error || 'MCPCHAT_SESSION_GET failed'); }
+        if (!r.McpChatSession) { throw new Error(`Chat session ${id} not found.`); }
+        return { session: r.McpChatSession, messages: r.McpChatMessages ?? [] };
+    }
+
+    /** MCPCHAT_SESSION_CREATE — opens a new chat thread. */
+    public async mcpChatSessionCreate(args: {
+        title:            string;
+        orchestrationId?: number;
+        gameSerial?:      string;
+        gameTag?:         string;
+    }): Promise<McpChatSessionInfo> {
+        const r = await this.sendCommand({
+            Command:                 'MCPCHAT_SESSION_CREATE',
+            McpChatTitle:            args.title,
+            McpChatOrchestrationId:  args.orchestrationId,
+            McpChatGameSerial:       args.gameSerial,
+            McpChatGameTag:          args.gameTag,
+        });
+        if (!r.Success) { throw new Error(r.Error || 'MCPCHAT_SESSION_CREATE failed'); }
+        return r.McpChatSession!;
+    }
+
+    /** MCPCHAT_SESSION_RENAME — renames a session. */
+    public async mcpChatSessionRename(id: number, title: string): Promise<McpChatSessionInfo> {
+        const r = await this.sendCommand({ Command: 'MCPCHAT_SESSION_RENAME', McpChatSessionId: id, McpChatTitle: title });
+        if (!r.Success) { throw new Error(r.Error || 'MCPCHAT_SESSION_RENAME failed'); }
+        return r.McpChatSession!;
+    }
+
+    /** MCPCHAT_SESSION_DELETE — cascade-deletes a session and its messages. */
+    public async mcpChatSessionDelete(id: number): Promise<void> {
+        const r = await this.sendCommand({ Command: 'MCPCHAT_SESSION_DELETE', McpChatSessionId: id });
+        if (!r.Success) { throw new Error(r.Error || 'MCPCHAT_SESSION_DELETE failed'); }
+    }
+
+    /** MCPCHAT_MESSAGE_LIST — returns the messages in a session, chronologically. */
+    public async mcpChatMessageList(sessionId: number): Promise<McpChatMessageInfo[]> {
+        const r = await this.sendCommand({ Command: 'MCPCHAT_MESSAGE_LIST', McpChatSessionId: sessionId });
+        if (!r.Success) { throw new Error(r.Error || 'MCPCHAT_MESSAGE_LIST failed'); }
+        return r.McpChatMessages ?? [];
+    }
+
+    /**
+     * MCPCHAT_MESSAGE_APPEND — writes one message into a session. Used both by
+     * MCPCHAT_SEND (server-side) and directly by the host when persisting a
+     * locally-streamed reply.
+     */
+    public async mcpChatMessageAppend(args: {
+        sessionId:     number;
+        kind:          'user' | 'agent' | 'system';
+        agentId?:      number;
+        agentDisplay?: string;
+        role?:         string;
+        blocksJson:    string;
+        tokens?:       number;
+        latencyMs?:    number;
+        status?:       'streaming' | 'done' | 'error';
+    }): Promise<McpChatMessageInfo> {
+        const r = await this.sendCommand({
+            Command:             'MCPCHAT_MESSAGE_APPEND',
+            McpChatSessionId:    args.sessionId,
+            McpChatKind:         args.kind,
+            McpChatAgentId:      args.agentId,
+            McpChatAgentDisplay: args.agentDisplay,
+            McpChatRole:         args.role,
+            McpChatBlocksJson:   args.blocksJson,
+            McpChatTokens:       args.tokens,
+            McpChatLatencyMs:    args.latencyMs,
+            McpChatStatus:       args.status,
+        });
+        if (!r.Success) { throw new Error(r.Error || 'MCPCHAT_MESSAGE_APPEND failed'); }
+        return r.McpChatMessage!;
+    }
+
+    /**
+     * MCPCHAT_MESSAGE_UPDATE — patches the block payload + meta of an existing
+     * message. Pass <c>undefined</c> to leave a field unchanged.
+     */
+    public async mcpChatMessageUpdate(args: {
+        id:          number;
+        blocksJson?: string;
+        tokens?:     number;
+        latencyMs?:  number;
+        status?:     'streaming' | 'done' | 'error';
+    }): Promise<McpChatMessageInfo> {
+        const r = await this.sendCommand({
+            Command:           'MCPCHAT_MESSAGE_UPDATE',
+            McpChatMessageId:  args.id,
+            McpChatBlocksJson: args.blocksJson,
+            McpChatTokens:     args.tokens,
+            McpChatLatencyMs:  args.latencyMs,
+            McpChatStatus:     args.status,
+        });
+        if (!r.Success) { throw new Error(r.Error || 'MCPCHAT_MESSAGE_UPDATE failed'); }
+        return r.McpChatMessage!;
+    }
+
+    /** MCPCHAT_MESSAGE_DELETE — removes one message. */
+    public async mcpChatMessageDelete(id: number): Promise<void> {
+        const r = await this.sendCommand({ Command: 'MCPCHAT_MESSAGE_DELETE', McpChatMessageId: id });
+        if (!r.Success) { throw new Error(r.Error || 'MCPCHAT_MESSAGE_DELETE failed'); }
+    }
+
+    /** MCPCHAT_MESSAGE_CLEAR — drops every message in a session, keeping the row. */
+    public async mcpChatMessageClear(sessionId: number): Promise<void> {
+        const r = await this.sendCommand({ Command: 'MCPCHAT_MESSAGE_CLEAR', McpChatSessionId: sessionId });
+        if (!r.Success) { throw new Error(r.Error || 'MCPCHAT_MESSAGE_CLEAR failed'); }
+    }
+
+    /**
+     * MCPCHAT_SEND — submits a user prompt. The server persists the user
+     * message, runs the orchestrator pipeline, and returns the rows the
+     * webview should append. Currently the orchestrator is a placeholder
+     * stub; the wire shape (and streaming via MESSAGE_UPDATE) is final.
+     */
+    public async mcpChatSend(sessionId: number, text: string): Promise<McpChatMessageInfo[]> {
+        const r = await this.sendCommand({
+            Command:          'MCPCHAT_SEND',
+            McpChatSessionId: sessionId,
+            McpChatUserText:  text,
+        }, 60_000);
+        if (!r.Success) { throw new Error(r.Error || 'MCPCHAT_SEND failed'); }
+        return r.McpChatMessages ?? [];
     }
 
     // ── DEV9 Network commands ────────────────────────────────────────────────
