@@ -313,6 +313,7 @@ namespace CodeDesigner.Ps2.Bridge
                 new Services.SnapshotsService(ctx),
                 new Services.MemoryCardService(ctx),
                 new Services.ZipperFileFormatsService(),
+                new Services.ZipperWeaponsService(),
                 new Services.IsoService(ctx),
                 new Services.LabelService(ctx),
                 new Services.McpConfigService(ctx),
