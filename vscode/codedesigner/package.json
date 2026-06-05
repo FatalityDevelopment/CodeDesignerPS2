@@ -2,7 +2,7 @@
   "name": "codedesigner",
   "displayName": "CodeDesigner",
   "description": "A very cool description",
-  "version": "0.0.1",
+  "version": "1.3.0",
   "engines": {
     "vscode": "^1.108.1"
   },
@@ -95,6 +95,11 @@
         "command": "codedesigner.openStructureVisualizer",
         "title": "CodeDesigner: Open Structure Visualizer",
         "icon": "$(type-hierarchy)"
+      },
+      {
+        "command": "codedesigner.openWelcome",
+        "title": "CodeDesigner: Open Welcome",
+        "icon": "$(sparkle)"
       },
       {
         "command": "codedesigner.toggleEmulatorConnection",

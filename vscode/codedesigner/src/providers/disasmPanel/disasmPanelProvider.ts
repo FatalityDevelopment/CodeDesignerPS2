@@ -229,6 +229,34 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     public getWorkspaceRoot(): string { return this.workspaceRoot; }
     /** Returns the ISO name derived from the currently selected game path. */
     public getSelectedGameName(): string { return this.selectedGameName; }
+    /** Path of the selected emulator (used by the Welcome page status box). */
+    public getSelectedEmulatorPath(): string { return this.selectedEmulatorPath; }
+    /** Path of the selected BIOS (used by the Welcome page status box). */
+    public getSelectedBiosPath(): string { return this.selectedBiosPath; }
+    /** Disc serial of the currently selected/loaded game (e.g. SCUS-97275). */
+    public getCurrentGameSerial(): string { return this._currentGameSerial; }
+    /** Bridge socket connection state for the Welcome page status box. */
+    public isBridgeConnected(): boolean { return this.socketClient.isConnected(); }
+    /** True when the selected emulator process is running. Wrapper for Welcome page. */
+    public async isSelectedEmulatorRunning(): Promise<boolean> {
+        return this.detectSelectedEmulatorProcessRunning(this.selectedEmulatorPath);
+    }
+    /** Friendly display label for the selected emulator, derived from its settings entry. */
+    public getSelectedEmulatorLabel(): string {
+        const sel = this.selectedEmulatorPath;
+        if (!sel) { return ''; }
+        const entry = (this.settings.emulators ?? []).find(e => e.path === sel);
+        if (entry?.type) { return entry.type; }
+        return path.basename(sel, path.extname(sel));
+    }
+    /** Friendly display label for the selected BIOS. */
+    public getSelectedBiosLabel(): string {
+        const sel = this.selectedBiosPath;
+        if (!sel) { return ''; }
+        const entry = (this.settings.bios ?? []).find(b => b.path === sel);
+        if (entry?.name) { return entry.name; }
+        return path.basename(sel, path.extname(sel));
+    }
     /**
      * Toggle the emulator connection — invoked by the panel header
      * (view/title) Connect/Disconnect action. Uses the panel's currently
@@ -882,6 +910,21 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         } else {
             this.settings.emulators = existing;
         }
+
+        // Dedup games by path (case-insensitive). Keeps the first occurrence —
+        // legacy settings files sometimes accumulate duplicate entries after a
+        // Windows drive letter changes case between sessions.
+        if (this.settings.games?.length) {
+            const seenPaths = new Set<string>();
+            const deduped: typeof this.settings.games = [];
+            for (const g of this.settings.games) {
+                const key = (g.path ?? '').toLowerCase();
+                if (!key || seenPaths.has(key)) { continue; }
+                seenPaths.add(key);
+                deduped.push(g);
+            }
+            this.settings.games = deduped;
+        }
     }
 
     /** Attempt to load settings from a specific file path. Returns true on success. */
@@ -1000,11 +1043,20 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 getOutputChannel().debug(`Could not persist preferences to DB: ${err?.message ?? err}`);
             }
         } else {
-            // Offline fallback — write to the JSON file only.
+            // Offline fallback — write to the JSON file only.  Preserve any
+            // unknown fields (e.g. `version`) the user / packager added so a
+            // round-trip through this provider does not silently drop them.
             const settingsPath = this.settingsJsonPath;
             if (!settingsPath) { return; }
+            let existing: Record<string, unknown> = {};
             try {
-                await fs.promises.writeFile(settingsPath, JSON.stringify(prefs, null, 2), 'utf-8');
+                const raw = await fs.promises.readFile(settingsPath, 'utf-8');
+                const parsed = JSON.parse(raw);
+                if (parsed && typeof parsed === 'object') { existing = parsed; }
+            } catch { /* file may not exist yet — that's fine */ }
+            const merged = { ...existing, ...prefs };
+            try {
+                await fs.promises.writeFile(settingsPath, JSON.stringify(merged, null, 2), 'utf-8');
             } catch (err: any) {
                 getOutputChannel().debug(`Could not save ${settingsPath}: ${err?.message ?? err}`);
             }
@@ -1045,7 +1097,18 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             // Merge game list from DB if present.
             const rawGames = settings['emu.games'];
             if (rawGames) {
-                try { this.settings.games = JSON.parse(rawGames); changed = true; } catch { /* ignore */ }
+                try {
+                    const parsed: Array<{ name: string; path: string }> = JSON.parse(rawGames);
+                    // Dedup by path (case-insensitive) — see loadEmuSettings for context.
+                    const seen = new Set<string>();
+                    this.settings.games = parsed.filter(g => {
+                        const key = (g.path ?? '').toLowerCase();
+                        if (!key || seen.has(key)) { return false; }
+                        seen.add(key);
+                        return true;
+                    });
+                    changed = true;
+                } catch { /* ignore */ }
             }
 
             // Merge BIOS list from DB if present.
@@ -1105,8 +1168,15 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                         selectedBios:     this.selectedBiosPath,
                         selectedGame:     this.selectedGamePath,
                     };
+                    let existing: Record<string, unknown> = {};
                     try {
-                        await fs.promises.writeFile(prefsPath, JSON.stringify(prefs, null, 2), 'utf-8');
+                        const raw = await fs.promises.readFile(prefsPath, 'utf-8');
+                        const parsed = JSON.parse(raw);
+                        if (parsed && typeof parsed === 'object') { existing = parsed; }
+                    } catch { /* may not exist yet */ }
+                    const merged = { ...existing, ...prefs };
+                    try {
+                        await fs.promises.writeFile(prefsPath, JSON.stringify(merged, null, 2), 'utf-8');
                     } catch (err: any) {
                         getOutputChannel().debug(`Could not sync codedesigner-settings.json from DB: ${err?.message ?? err}`);
                     }
@@ -4215,7 +4285,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         if (uris && uris.length > 0) {
             const filePath = uris[0].fsPath;
             if (!this.settings.games) { this.settings.games = []; }
-            if (!this.settings.games.some(g => g.path === filePath)) {
+            const filePathLower = filePath.toLowerCase();
+            if (!this.settings.games.some(g => g.path.toLowerCase() === filePathLower)) {
                 const gameName = path.basename(filePath, path.extname(filePath));
                 this.settings.games.push({ name: gameName, path: filePath });
                 await this.saveEmuSettings();
@@ -4340,7 +4411,11 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         for (const r of LIVE_REGIONS_DEFAULT) {
             await this.editorProvider.openLiveMemoryView(r.region, r.address, r.size, r.label);
         }
-        this.editorProvider.openIntroPanel();
+        // Welcome tab replaces the old logo splash. It is registered as a
+        // command in extension.ts so the disasm panel does not need to import
+        // the WelcomeProvider directly.
+        try { await vscode.commands.executeCommand('codedesigner.openWelcome'); }
+        catch { /* welcome command not registered (yet) — non-fatal */ }
     }
 
     /**

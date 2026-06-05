@@ -12,6 +12,7 @@ import { StructureVisualizerProvider } from './providers/structureVisualizer/str
 import { MemoryCardBrowserProvider } from './providers/memoryCardBrowser/memoryCardBrowserProvider';
 import { HddBrowserProvider } from './providers/hddBrowser/hddBrowserProvider';
 import { ZipperWorkbenchProvider } from './providers/zipperWorkbench/zipperWorkbenchProvider';
+import { WelcomeProvider, WelcomeDataDelegate } from './providers/welcome/welcomeProvider';
 import { SocketClient } from './socketClient';
 
 let socketClient: SocketClient | null = null;
@@ -381,6 +382,29 @@ export function activate(context: vscode.ExtensionContext) {
 		},
 	);
 	context.subscriptions.push(openHddBrowserCommand);
+
+	// ── Welcome page ────────────────────────────────────────────────────────
+	// Landing page shown at activation in place of the old logo splash. Pulls
+	// live status from the disasm panel provider via a small data delegate.
+	const welcomeDelegate: WelcomeDataDelegate = {
+		isBridgeConnected:       () => disasmPanelProvider.isBridgeConnected(),
+		isEmulatorRunning:       () => disasmPanelProvider.isSelectedEmulatorRunning(),
+		getSelectedEmulatorPath: () => disasmPanelProvider.getSelectedEmulatorPath(),
+		getSelectedEmulatorLabel: () => disasmPanelProvider.getSelectedEmulatorLabel(),
+		getSelectedBiosPath:     () => disasmPanelProvider.getSelectedBiosPath(),
+		getSelectedBiosLabel:    () => disasmPanelProvider.getSelectedBiosLabel(),
+		getLoadedGameTitle:      () => disasmPanelProvider.getSelectedGameName(),
+		getLoadedGameSerial:     () => disasmPanelProvider.getCurrentGameSerial(),
+		connectEmulator:         () => disasmPanelProvider.toggleConnectionFromCommand(),
+	};
+	const welcomeProvider = new WelcomeProvider(
+		context.extensionUri, context.extensionPath, welcomeDelegate,
+	);
+	context.subscriptions.push(
+		vscode.commands.registerCommand('codedesigner.openWelcome', () => welcomeProvider.open()),
+	);
+	socketClient.onConnected(()    => welcomeProvider.notifyStatusChanged());
+	socketClient.onDisconnected(() => welcomeProvider.notifyStatusChanged());
 
 	// Standalone FileFormats/Zipper workbench for ZDB/ZAR/ZED containers,
 	// SOCOM II saves, and APACHE00.ZDB patch builds.

@@ -29,6 +29,7 @@
     "src/webview/memory-card-browser/main.ts",
     "src/webview/hdd-browser/main.ts",
     "src/webview/zipper-workbench/main.ts",
+    "src/webview/welcome/main.ts",
     "src/webview/typings.d.ts"
   ],
   "exclude": [

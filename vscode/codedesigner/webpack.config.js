@@ -102,6 +102,7 @@ const webviewConfig = {
     'memory-card-browser': './src/webview/memory-card-browser/main.ts',
     'hdd-browser': './src/webview/hdd-browser/main.ts',
     'zipper-workbench': './src/webview/zipper-workbench/main.ts',
+    'welcome':         './src/webview/welcome/main.ts',
   },
   output: {
     path: path.resolve(__dirname, 'dist/webview'),

@@ -1,0 +1,592 @@
+/* CodeDesigner Welcome page — mirrors the disasm panel's acc-section /
+   acc-header / acc-body language: bordered rounded cards, subtle
+   rgba(255,255,255,0.018) backgrounds, 11px uppercase letter-spaced
+   section headers, button colors keyed off VS Code theme vars. */
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  min-height: 100%;
+  background: var(--vscode-editor-background, #1e1e1e);
+  color: var(--vscode-editor-foreground, #d4d4d4);
+  font-family: var(--vscode-font-family, "Segoe UI", sans-serif);
+  font-size: var(--vscode-font-size, 13px);
+  position: relative;
+  overflow-x: hidden;
+}
+
+button { font: inherit; cursor: pointer; }
+
+/* ── Watermark logo (same image the disasm editor paints behind its
+   content). `--cd-bg-logo` is injected by WelcomeProvider with the
+   resolved webview URI for codedesigner-logo.png. */
+body::before {
+  content: "";
+  position: fixed;
+  left: 50%;
+  top: 16vh;
+  width: min(60vw, 520px);
+  max-width: calc(100vw - 64px);
+  aspect-ratio: 1;
+  transform: translateX(-50%);
+  background-image: var(--cd-bg-logo, none);
+  background-repeat: no-repeat;
+  background-position: center top;
+  background-size: contain;
+  opacity: 0.06;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ── Page container ──────────────────────────────────────────────────── */
+
+.cd-welcome {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 24px 28px 56px;
+}
+
+@media (max-width: 720px) {
+  .cd-welcome { padding: 16px 14px 40px; gap: 12px; }
+}
+
+/* ── Hero (header + status box) ──────────────────────────────────────── */
+
+.cd-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 20px;
+  align-items: stretch;
+}
+
+@media (max-width: 880px) {
+  .cd-hero { grid-template-columns: 1fr; }
+}
+
+.cd-hero-left {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.cd-hero-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.cd-hero-logo {
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  flex-shrink: 0;
+  background: rgba(255,255,255,0.022);
+  border: 1px solid var(--vscode-panel-border, #313131);
+  object-fit: contain;
+  padding: 4px;
+}
+
+.cd-hero-copy { min-width: 0; }
+
+.cd-hero-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--vscode-foreground, #f0f0f0);
+  line-height: 1.1;
+}
+
+.cd-hero-subtitle {
+  margin: 4px 0 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--vscode-descriptionForeground, #8f8f8f);
+}
+
+.cd-hero-blurb {
+  margin: 0;
+  max-width: 640px;
+  color: var(--vscode-descriptionForeground, #aaa);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.cd-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+/* ── Buttons (match disasm panel .btn-grid / .dbg-btn coloring) ──────── */
+
+.cd-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--vscode-panel-border, #313131);
+  border-radius: 4px;
+  background: var(--vscode-button-secondaryBackground, #252526);
+  color: var(--vscode-button-secondaryForeground, var(--vscode-foreground, #d4d4d4));
+  font-family: var(--vscode-font-family, sans-serif);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background 0.1s, border-color 0.1s;
+}
+
+.cd-btn:hover {
+  background: var(--vscode-button-secondaryHoverBackground, #2f2f30);
+  border-color: #454545;
+}
+
+.cd-btn-primary {
+  background: var(--vscode-button-background, #0e639c);
+  border-color: var(--vscode-button-background, #0e639c);
+  color: var(--vscode-button-foreground, #ffffff);
+}
+
+.cd-btn-primary:hover {
+  background: var(--vscode-button-hoverBackground, #1177bb);
+  border-color: var(--vscode-button-hoverBackground, #1177bb);
+}
+
+/* ── acc-section card (mirrors disasm panel) ─────────────────────────── */
+
+.acc-section.cd-card {
+  border: 1px solid var(--vscode-panel-border, #313131);
+  border-radius: 6px;
+  background: rgba(255,255,255,0.018);
+  overflow: hidden;
+  min-width: 0;
+}
+
+.acc-header.cd-card-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: var(--vscode-foreground, #d4d4d4);
+  padding: 9px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-align: left;
+  font-family: var(--vscode-font-family, sans-serif);
+}
+
+.acc-ico {
+  flex-shrink: 0;
+  color: var(--vscode-descriptionForeground, #b0b0b0);
+}
+
+.acc-title { flex: 1; min-width: 0; }
+
+.acc-body {
+  padding: 4px 11px 12px;
+}
+
+.cd-row { display: grid; gap: 14px; }
+.cd-row-2col { grid-template-columns: 1fr 1fr; }
+@media (max-width: 880px) { .cd-row-2col { grid-template-columns: 1fr; } }
+
+/* ── Status box ──────────────────────────────────────────────────────── */
+
+.cd-status {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+}
+
+.cd-status-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.cd-status-name { font-weight: 700; color: var(--vscode-foreground, #d4d4d4); }
+.cd-status-host {
+  margin-left: auto;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 10.5px;
+  color: var(--vscode-descriptionForeground, #8f8f8f);
+}
+
+.cd-status-dot {
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  background: #c44;
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.08);
+  flex-shrink: 0;
+}
+
+.cd-status-dot.cd-status-on {
+  background: #5cff6d;
+  box-shadow: 0 0 6px 1px rgba(92,255,109,0.55);
+  animation: cd-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes cd-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+.cd-status-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.cd-status-grid > div {
+  display: grid;
+  grid-template-columns: 80px 1fr;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.cd-status-grid dt {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--vscode-descriptionForeground, #8f8f8f);
+  margin: 0;
+}
+
+.cd-status-grid dd {
+  margin: 0;
+  color: var(--vscode-foreground, #d4d4d4);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.cd-status-serial {
+  margin-left: 6px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground, #8f8f8f);
+}
+
+.cd-status-state { display: inline-flex; align-items: center; gap: 6px; }
+
+.cd-pip {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: #6b6b6b;
+}
+
+.cd-pip-on {
+  background: #5cff6d;
+  box-shadow: 0 0 5px 1px rgba(92,255,109,0.55);
+}
+
+.cd-status-on-text { color: #5cff6d; font-weight: 600; }
+
+.cd-muted { color: var(--vscode-descriptionForeground, #8f8f8f); }
+
+.cd-status-foot {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--vscode-panel-border, #2f2f2f);
+  font-size: 11px;
+  color: #5cff6d;
+}
+
+/* ── Section header link button ──────────────────────────────────────── */
+
+.cd-link-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: transparent;
+  border: none;
+  padding: 2px 4px;
+  margin-left: auto;
+  color: var(--vscode-textLink-foreground, #3794ff);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.cd-link-btn:hover {
+  color: var(--vscode-textLink-activeForeground, #4daafc);
+  text-decoration: underline;
+}
+
+.cd-tag {
+  margin-left: 6px;
+  padding: 1px 7px;
+  border: 1px solid var(--vscode-panel-border, #313131);
+  border-radius: 9px;
+  background: rgba(255,255,255,0.04);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0;
+  color: var(--vscode-foreground, #d4d4d4);
+  text-transform: none;
+}
+
+/* ── List rows (Start, Walkthroughs) ─────────────────────────────────── */
+
+.cd-list { list-style: none; padding: 0; margin: 0; }
+.cd-list li { padding: 0; }
+
+.cd-listrow {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 6px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--vscode-foreground, #d4d4d4);
+  text-align: left;
+  position: relative;
+}
+
+.cd-listrow:hover { background: rgba(255,255,255,0.04); }
+
+.cd-listrow-ico {
+  flex-shrink: 0;
+  color: var(--vscode-textLink-foreground, #3794ff);
+}
+
+.cd-listrow-check {
+  display: inline-flex;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  align-items: center;
+  justify-content: center;
+  color: var(--vscode-descriptionForeground, #6f6f6f);
+}
+
+.cd-listrow-check-on { color: #5cff6d; }
+
+.cd-listrow-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.cd-listrow-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--vscode-textLink-foreground, #3794ff);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cd-listrow-walk .cd-listrow-title { color: var(--vscode-foreground, #d4d4d4); }
+
+.cd-listrow-sub {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground, #8f8f8f);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Browse "…" button — same shape as the disasm panel's .browse-btn. */
+.browse-btn {
+  width: 26px;
+  height: 24px;
+  flex-shrink: 0;
+  background: var(--vscode-button-secondaryBackground, #252526);
+  border: 1px solid var(--vscode-panel-border, #313131);
+  border-radius: 3px;
+  color: var(--vscode-descriptionForeground, #aaa);
+  font-size: 13px;
+  line-height: 1;
+}
+
+.browse-btn:hover {
+  background: var(--vscode-button-secondaryHoverBackground, #2f2f30);
+  color: var(--vscode-foreground, #d4d4d4);
+}
+
+.cd-empty {
+  margin: 6px 2px 0;
+  color: var(--vscode-descriptionForeground, #8f8f8f);
+  font-style: italic;
+  font-size: 12px;
+}
+
+/* ── Tools grid (matches disasm panel .btn-grid look) ───────────────── */
+
+.cd-tools-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+@media (max-width: 980px) { .cd-tools-grid { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 720px) { .cd-tools-grid { grid-template-columns: repeat(2, 1fr); } }
+
+.cd-tool {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  background: var(--vscode-button-secondaryBackground, #252526);
+  border: 1px solid var(--vscode-panel-border, #313131);
+  border-radius: 4px;
+  color: var(--vscode-foreground, #d4d4d4);
+  text-align: left;
+  transition: background 0.1s, border-color 0.1s;
+  min-width: 0;
+  min-height: 46px;
+}
+
+.cd-tool:hover {
+  background: var(--vscode-button-secondaryHoverBackground, #2f2f30);
+  border-color: #454545;
+}
+
+.cd-tool-ico {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+  background: rgba(55, 148, 255, 0.10);
+  color: var(--vscode-textLink-foreground, #3794ff);
+}
+
+.cd-tool-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.cd-tool-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cd-tool-sub {
+  font-size: 10.5px;
+  color: var(--vscode-descriptionForeground, #8f8f8f);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── What's New (rendered markdown) ─────────────────────────────────── */
+
+.cd-md {
+  color: var(--vscode-foreground, #d4d4d4);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.cd-md h1, .cd-md h2, .cd-md h3 {
+  margin: 12px 0 6px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--vscode-foreground, #f0f0f0);
+}
+
+.cd-md h1:first-child, .cd-md h2:first-child, .cd-md h3:first-child {
+  margin-top: 2px;
+}
+
+.cd-md p { margin: 6px 0; }
+.cd-md ul, .cd-md ol { margin: 4px 0 4px 20px; padding: 0; }
+.cd-md li { margin: 3px 0; }
+.cd-md code {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(255,255,255,0.06);
+  color: var(--vscode-textLink-foreground, #9cdcfe);
+}
+.cd-md pre {
+  margin: 6px 0;
+  padding: 8px 10px;
+  border-radius: 4px;
+  background: rgba(0,0,0,0.35);
+  border: 1px solid var(--vscode-panel-border, #313131);
+  overflow-x: auto;
+}
+.cd-md pre code {
+  background: transparent;
+  color: var(--vscode-foreground, #d4d4d4);
+  padding: 0;
+}
+.cd-md strong { color: var(--vscode-foreground, #f0f0f0); }
+.cd-md a { color: var(--vscode-textLink-foreground, #3794ff); text-decoration: none; }
+.cd-md a:hover { text-decoration: underline; }
+
+/* ── Keyboard tips ──────────────────────────────────────────────────── */
+
+.cd-keys { list-style: none; margin: 0; padding: 0; }
+.cd-keys li {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  align-items: center;
+  gap: 12px;
+  padding: 5px 2px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.cd-keys li:last-child { border-bottom: none; }
+
+.cd-kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 8px;
+  border: 1px solid var(--vscode-panel-border, #3a3a3a);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.04);
+  color: var(--vscode-foreground, #d4d4d4);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.cd-kbd-label {
+  font-size: 11.5px;
+  color: var(--vscode-descriptionForeground, #aaa);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
