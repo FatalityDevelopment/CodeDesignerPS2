@@ -164,6 +164,15 @@ interface AiProviderOption { id: string; label: string; model: string; badge: st
         @if (session.gameSerial) { <span class="chat-context-chip">⊙ {{ session.gameSerial }}</span> }
         <button class="chat-context-add" disabled title="Coming soon">+ Add</button>
         <span class="chat-context-spacer"></span>
+        <label class="chat-provider-picker" [title]="selectedProvider().description">
+          <span class="chat-provider-dot">{{ selectedProvider().badge }}</span>
+          <span class="chat-provider-meta"><b>{{ selectedProvider().label }}</b><em>{{ selectedProvider().model }}</em></span>
+          <select [value]="selectedProviderId()" (change)="setProvider($any($event.target).value)">
+            @for (provider of providerOptions; track provider.id) {
+              <option [value]="provider.id">{{ provider.label }} · {{ provider.model }}</option>
+            }
+          </select>
+        </label>
         <span class="chat-squad-chip">Squad <strong>{{ session.orchestrationName || '—' }}</strong></span>
       </div>
 
