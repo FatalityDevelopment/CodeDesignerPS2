@@ -525,14 +525,14 @@ export class ChatPanelComponent implements AfterViewInit, OnDestroy {
   }
 
   createSession(): void {
-    const title = (typeof window.prompt === 'function'
-      ? window.prompt('Title for the new chat?', 'New chat')
-      : 'New chat') ?? '';
-    if (!title.trim()) { return; }
-    // Default the squad to whichever orchestration is currently marked active.
+    // VS Code webviews do not reliably support blocking browser prompts, so
+    // create the thread immediately and let users rename it from the header.
+    const nextNumber = this.sessions().length + 1;
+    const title = nextNumber === 1 ? 'New chat' : `New chat ${nextNumber}`;
     const orch = this.orchestrations().find(o => o.isActive);
+    this.status.set('Creating chat…');
     this.post('chatSessionCreate', {
-      title:            title.trim(),
+      title,
       orchestrationId:  orch?.id,
     });
   }
