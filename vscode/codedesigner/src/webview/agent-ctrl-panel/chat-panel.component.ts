@@ -220,26 +220,46 @@ interface AiProviderOption { id: string; label: string; model: string; badge: st
       </div>
 
       <!-- Composer. -->
-      <footer class="chat-composer">
-        <textarea
-          #composerEl
-          rows="3"
-          [value]="draft()"
-          (input)="draft.set($any($event.target).value)"
-          (keydown.enter)="onComposerEnter($event)"
-          placeholder="Message the squad… (Enter to send, Shift+Enter for newline)"
-          [disabled]="sending()"></textarea>
-        <div class="chat-composer-row">
-          <span class="chat-composer-hint">{{ status() }}</span>
-          <div class="chat-followups">
-            @for (chip of followups(); track chip) {
-              <button type="button" (click)="useFollowup(chip)">{{ chip }}</button>
-            }
-          </div>
-          <button class="aic-btn primary" [disabled]="!draft().trim() || sending()" (click)="send()">
-            {{ sending() ? 'Sending…' : 'Send →' }}
+      <footer class="chat-composer" [class.is-collapsed]="composerCollapsed()">
+        <div class="chat-composer-top">
+          <label class="chat-model-select" [title]="selectedProvider().description">
+            <span>Model</span>
+            <select [value]="selectedProviderId()" (change)="setProvider($any($event.target).value)">
+              @for (provider of providerOptions; track provider.id) {
+                <option [value]="provider.id">{{ provider.label }} — {{ provider.model }}</option>
+              }
+            </select>
+          </label>
+          <span class="chat-model-summary">{{ selectedProvider().model }}</span>
+          <button class="chat-collapse-btn" type="button" (click)="toggleComposer()">
+            {{ composerCollapsed() ? 'Expand composer' : 'Collapse' }}
           </button>
         </div>
+        @if (!composerCollapsed()) {
+          <textarea
+            #composerEl
+            rows="3"
+            [value]="draft()"
+            (input)="draft.set($any($event.target).value)"
+            (keydown.enter)="onComposerEnter($event)"
+            placeholder="Message {{ selectedProvider().label }}… (Enter to send, Shift+Enter for newline)"
+            [disabled]="sending()"></textarea>
+          <div class="chat-composer-row">
+            <span class="chat-composer-hint">{{ status() }}</span>
+            <div class="chat-followups">
+              @for (chip of followups(); track chip) {
+                <button type="button" (click)="useFollowup(chip)">{{ chip }}</button>
+              }
+            </div>
+            <button class="aic-btn primary" [disabled]="!draft().trim() || sending()" (click)="send()">
+              {{ sending() ? 'Sending…' : 'Send →' }}
+            </button>
+          </div>
+        } @else {
+          <button class="chat-collapsed-prompt" type="button" (click)="toggleComposer()">
+            Message {{ selectedProvider().label }}…
+          </button>
+        }
       </footer>
     } @else {
       <div class="aic-blank">
@@ -328,8 +348,7 @@ interface AiProviderOption { id: string; label: string; model: string; badge: st
 <ng-template #disasmTpl let-b>
   <div class="cb-disasm">
     @if (b.header) { <header>; {{ b.header }}</header> }
-    <pre>@for (l of b.lines; track $index) {<span class="cb-disasm-line" [class.highlight]="l.highlight" [innerHTML]="renderDisasmLine(l)"></span>
-}</pre>
+    <pre [innerHTML]="renderDisasmBlock(b)"></pre>
   </div>
 </ng-template>
 
@@ -414,12 +433,13 @@ export class ChatPanelComponent implements AfterViewInit, OnDestroy {
     '@Kitana extend struct to +0x80',
   ]);
   readonly selectedProviderId = signal<string>('codex');
+  readonly composerCollapsed = signal<boolean>(false);
   readonly providerOptions: AiProviderOption[] = [
-    { id: 'codex', label: 'Codex', model: 'GPT-5.5 Codex', badge: 'CX', description: 'Default coding agent for repo-aware implementation work.' },
-    { id: 'openai', label: 'OpenAI', model: 'GPT-5.5', badge: 'AI', description: 'General frontier model for planning, analysis, and chat.' },
-    { id: 'copilot', label: 'Copilot', model: 'Copilot Chat', badge: 'CP', description: 'VS Code-style assistant option for familiar Copilot workflows.' },
-    { id: 'anthropic', label: 'Anthropic', model: 'Claude', badge: 'CL', description: 'Alternative provider slot for Claude-backed sessions.' },
-    { id: 'local', label: 'Local', model: 'Workspace MCP', badge: 'LC', description: 'Placeholder for local or custom model providers.' },
+    { id: 'codex', label: 'Codex', model: 'GPT-5.5 Codex', badge: 'CX', description: 'Best for repo-aware coding, patches, and agentic implementation.' },
+    { id: 'gpt55', label: 'OpenAI', model: 'GPT-5.5', badge: 'AI', description: 'Best for general reasoning, design, and broad assistant work.' },
+    { id: 'copilot', label: 'Copilot', model: 'Copilot Chat', badge: 'CP', description: 'Familiar VS Code assistant workflow and model routing.' },
+    { id: 'claude', label: 'Claude', model: 'Claude Sonnet', badge: 'CL', description: 'Alternative long-context assistant provider.' },
+    { id: 'local', label: 'Local', model: 'Workspace MCP', badge: 'LC', description: 'Custom local or workspace-backed model endpoint.' },
   ];
   readonly selectedProvider = computed<AiProviderOption>(() =>
     this.providerOptions.find(p => p.id === this.selectedProviderId()) ?? this.providerOptions[0],
@@ -623,7 +643,13 @@ export class ChatPanelComponent implements AfterViewInit, OnDestroy {
   setProvider(id: string): void {
     if (!this.providerOptions.some(p => p.id === id)) { return; }
     this.selectedProviderId.set(id);
-    this.status.set(`Provider set to ${this.selectedProvider().label}.`);
+    this.status.set(`Model set to ${this.selectedProvider().label} · ${this.selectedProvider().model}.`);
+  }
+
+  toggleComposer(): void {
+    this.composerCollapsed.update(v => !v);
+    if (this.composerCollapsed()) { return; }
+    queueMicrotask(() => this.composerEl?.nativeElement.focus());
   }
 
   // ── Rendering helpers ──────────────────────────────────────────────────────
@@ -677,13 +703,8 @@ export class ChatPanelComponent implements AfterViewInit, OnDestroy {
   padNum(n: number): string { return n < 10 ? `0${n}` : String(n); }
 
 
-  renderDisasmLine(l: { addr: string; op: string; ops?: string; note?: string; tag?: string }): string {
-    const addr = `<span class="addr">${escapeHtml(l.addr)}</span>`;
-    const op = `<span class="op">${escapeHtml(l.op || '')}</span>`;
-    const args = `<span class="args">${colorizeRegisters(escapeHtml(l.ops || ''))}</span>`;
-    const note = l.note ? ` <span class="comment">; ${escapeHtml(l.note)}</span>` : '';
-    const tag = l.tag ? ` <em>${escapeHtml(l.tag)}</em>` : '';
-    return `${addr}    ${op}    ${args}${note}${tag}`;
+  renderDisasmBlock(b: Extract<Block, { kind: 'disasm' }>): string {
+    return (b.lines || []).map(l => renderDisasmLine(l)).join('');
   }
 
   renderCodeSource(b: Extract<Block, { kind: 'code' }>): string {
@@ -714,6 +735,16 @@ export class ChatPanelComponent implements AfterViewInit, OnDestroy {
   }
 }
 
+
+
+function renderDisasmLine(l: { addr: string; op: string; ops?: string; note?: string; tag?: string; highlight?: boolean }): string {
+  const addr = `<span class="addr">${escapeHtml(l.addr)}</span>`;
+  const op = `<span class="op">${escapeHtml(l.op || '')}</span>`;
+  const args = `<span class="args">${colorizeRegisters(escapeHtml(l.ops || ''))}</span>`;
+  const note = l.note ? ` <span class="comment">; ${escapeHtml(l.note)}</span>` : '';
+  const tag = l.tag ? ` <em>${escapeHtml(l.tag)}</em>` : '';
+  return `<span class="cb-disasm-line${l.highlight ? ' highlight' : ''}">${addr}    ${op}    ${args}${note}${tag}</span>`;
+}
 
 function escapeHtml(text: string | undefined): string {
   return String(text ?? '')
