@@ -11,6 +11,7 @@ import {
 import mermaid from 'mermaid';
 import { getVsCodeApi } from '../shared/vscode-api';
 import { IconComponent } from '../shared/icon.component';
+import { PageHeaderComponent } from '../shared/page-header.component';
 import '../shared/styles/shared.css';
 import {
   SvLabel, SvGroup, SvCallGraph, SvNodeResolved,
@@ -31,19 +32,12 @@ type Mode = 'class' | 'vtable' | 'callgraph';
 @Component({
   selector: 'app-structure-visualizer-page',
   standalone: true,
-  imports: [IconComponent],
+  imports: [IconComponent, PageHeaderComponent],
   encapsulation: ViewEncapsulation.None,
   template: `
     <div class="sv-shell">
-      <div class="sv-panel-head">
-        <div class="sv-panel-brand">
-          <span class="sv-panel-mark"><app-icon name="workflow" [size]="18" /></span>
-          <div class="sv-panel-copy">
-            <div class="sv-panel-title">Structure Visualizer</div>
-            <div class="sv-panel-subtitle">{{ gameName() || 'No loaded game' }}<span class="sv-panel-id">{{ gameId() ? ' · ' + gameId() : '' }}</span></div>
-          </div>
-        </div>
-        <div class="sv-panel-actions">
+      <app-page-header icon="workflow" title="Structure" [subtitle]="headerSubtitle()">
+        <div page-header-actions class="sv-header-actions">
           <select class="sv-select sv-set-select" [value]="setName()" (change)="onSetPick($event)"
                   [disabled]="sets().length === 0" title="Active label set">
             @for (s of sets(); track s) { <option [value]="s">{{ s }}</option> }
@@ -52,7 +46,7 @@ type Mode = 'class' | 'vtable' | 'callgraph';
           <button class="lm-tool-btn sv-icon-btn" [disabled]="busy()" (click)="reload()" title="Reload from backend"><app-icon name="refreshcw" [size]="13" /></button>
           <button class="lm-tool-btn" (click)="newSet()" title="Create a new label set"><app-icon name="plus" [size]="12" /> Set</button>
         </div>
-      </div>
+      </app-page-header>
 
       <!-- ── Mode tabs ─────────────────────────────────────────────────── -->
       <div class="sv-tabs" aria-label="Structure visualizer views">
@@ -712,6 +706,13 @@ export class StructureVisualizerPageComponent implements AfterViewInit {
   zoomOut(): void { this.setZoom(this.zoom() / 1.2); }
   zoomReset(): void { this.setZoom(1); }
   zoomPct(): number { return Math.round(this.zoom() * 100); }
+
+  headerSubtitle(): string {
+    const game = this.gameName().trim();
+    const id = this.gameId().trim();
+    if (!game && !id) { return 'Structure visualizer'; }
+    return `Structure visualizer · ${game || 'Loaded game'}${id ? ` · ${id}` : ''}`;
+  }
 
   modeLabel(): string {
     switch (this.mode()) {

@@ -5,7 +5,6 @@ html { height: 100%; }
 body {
   height: 100%;
   margin: 0;
-  padding: 10px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -40,64 +39,8 @@ app-icon,
 
 .lic svg { display: block; }
 
-/* ── Disassembler-style header card ──────────────────────────────────── */
-.sv-panel-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  flex-shrink: 0;
-  padding: 10px;
-  border: 1px solid var(--vscode-panel-border, #313131);
-  border-radius: 6px;
-  background: rgba(255,255,255,0.022);
-}
-
-.sv-panel-brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
-.sv-panel-mark {
-  width: 34px;
-  height: 34px;
-  display: grid;
-  place-items: center;
-  flex: 0 0 34px;
-  border: 1px solid #0e639c;
-  border-radius: 6px;
-  background: linear-gradient(135deg, #0e639c, #174b70);
-  color: #fff;
-}
-
-.sv-panel-copy { min-width: 0; }
-
-.sv-panel-title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--vscode-foreground, #f2f2f2);
-}
-
-.sv-panel-subtitle {
-  margin-top: 4px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 11px;
-  color: var(--vscode-descriptionForeground, #8f8f8f);
-}
-
-.sv-panel-id {
-  color: var(--vscode-textLink-foreground, #569cd6);
-  font-family: var(--vscode-editor-font-family, monospace);
-}
-
-.sv-panel-actions {
+/* ── Page header actions ─────────────────────────────────────────────── */
+.sv-header-actions {
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -110,7 +53,7 @@ app-icon,
   display: flex;
   align-items: center;
   gap: 3px;
-  margin: 8px 0 10px;
+  margin: 8px 10px 10px;
   padding: 3px;
   flex-shrink: 0;
   border: 1px solid var(--vscode-panel-border, #313131);
@@ -162,7 +105,7 @@ app-icon,
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 7px 0;
+  padding: 7px 10px;
   border-bottom: 1px solid var(--vscode-panel-border, #313131);
   flex-wrap: wrap;
   flex-shrink: 0;
@@ -259,7 +202,7 @@ app-icon,
 
 /* ── Status ──────────────────────────────────────────────────────────── */
 .sv-status {
-  margin-top: 8px;
+  margin: 8px 10px 0;
   padding: 6px 10px;
   border: 1px solid var(--vscode-panel-border, #313131);
   border-radius: 6px;
@@ -279,7 +222,7 @@ app-icon,
   display: flex;
   flex: 1;
   min-height: 0;
-  margin-top: 8px;
+  margin: 8px 10px 10px;
   overflow: hidden;
   border: 1px solid var(--vscode-panel-border, #313131);
   border-radius: 6px;
@@ -402,8 +345,7 @@ app-icon,
 }
 
 @media (max-width: 720px) {
-  .sv-panel-head { align-items: stretch; flex-direction: column; }
-  .sv-panel-actions { justify-content: flex-start; }
+  .sv-header-actions { justify-content: flex-start; }
   .sv-set-select { max-width: none; flex: 1; }
   .sv-editor { width: 280px; }
 }
