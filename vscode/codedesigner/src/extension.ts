@@ -18,6 +18,7 @@ import { SocketClient } from './socketClient';
 let socketClient: SocketClient | null = null;
 let outputChannel: vscode.LogOutputChannel;
 let debugOutputChannel: vscode.LogOutputChannel;
+let cdsCompilerOutputChannel: vscode.LogOutputChannel;
 let padStateChannel: vscode.OutputChannel;
 let zdbChannel: vscode.OutputChannel;
 
@@ -36,10 +37,17 @@ export function getOutputChannel(): vscode.LogOutputChannel {
 }
 
 /**
- * Get the debug channel instance — used for CDS compilation errors shown with red text.
+ * Get the debug channel instance for verbose extension diagnostics.
  */
 export function getDebugChannel(): vscode.LogOutputChannel {
     return debugOutputChannel;
+}
+
+/**
+ * Get the CDS compiler channel — contains generated codes and compiler logs.
+ */
+export function getCdsCompilerChannel(): vscode.LogOutputChannel {
+    return cdsCompilerOutputChannel;
 }
 
 /**
@@ -68,9 +76,15 @@ export function activate(context: vscode.ExtensionContext) {
 	outputChannel = vscode.window.createOutputChannel('CodeDesigner', { log: true });
 	context.subscriptions.push(outputChannel);
 
-	// Create a separate debug channel for CDS compilation errors (shown in red).
+	// Create a separate debug channel for verbose extension diagnostics.
 	debugOutputChannel = vscode.window.createOutputChannel('CodeDesigner - Debug', { log: true });
 	context.subscriptions.push(debugOutputChannel);
+
+	// CDS compiler output lives in its own channel so generated codes, parser
+	// diagnostics, sidecar directives, and compiler status do not get mixed into
+	// the general extension logs.
+	cdsCompilerOutputChannel = vscode.window.createOutputChannel('CodeDesigner - CDS Compiler', { log: true });
+	context.subscriptions.push(cdsCompilerOutputChannel);
 
 	// Controller / live pad-state events land in their own channel so they
 	// don't drown out the main extension log.
