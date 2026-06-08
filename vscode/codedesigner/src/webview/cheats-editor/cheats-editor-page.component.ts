@@ -49,7 +49,7 @@ const CONVERT_FORMATS = [
 
 const SECTION_RE = /^\[--SectionStart:(.*)--\]$/;
 const BRACKET_RE = /^\[(.+)\]$/;
-const CODE_RE = /^[0-9A-Fa-f]+(\s+[0-9A-Fa-f]+)*$/;
+const CODE_RE = /^[0-9A-Fa-f?*]+(\s+[0-9A-Fa-f?*]+)*$/;
 
 /**
  * Three-panel PS2 cheat-code editor:
@@ -195,11 +195,11 @@ const CODE_RE = /^[0-9A-Fa-f]+(\s+[0-9A-Fa-f]+)*$/;
           }
         </div>
       </div>
-    </div>
 
-    @if (statusMsg()) {
-      <div class="ce-status" [class.error]="statusIsError()">{{ statusMsg() }}</div>
-    }
+      @if (statusMsg()) {
+        <div class="ce-status" [class.error]="statusIsError()">{{ statusMsg() }}</div>
+      }
+    </div>
   `,
 })
 export class CheatsEditorPageComponent implements AfterViewInit {
@@ -281,7 +281,7 @@ export class CheatsEditorPageComponent implements AfterViewInit {
         return;
       }
       if (!CODE_RE.test(line)) {
-        errors.push(`Line ${idx + 1}: "${line}" is not a valid hex code line.`);
+        errors.push(`Line ${idx + 1}: "${line}" is not a valid code line (hex digits plus ? or * placeholders).`);
         return;
       }
       current.codeCount++;
