@@ -4,7 +4,7 @@ import * as net from 'net';
 import * as os from 'os';
 import * as path from 'path';
 import * as child_process from 'child_process';
-import { getOutputChannel, getDebugChannel } from '../../extension';
+import { getOutputChannel, getCdsCompilerChannel } from '../../extension';
 import { SocketClient, LabelEntry, DiscElfEntry, CdsSidecarResult, CdsDiagnostic } from '../../socketClient';
 import { getNonce, getWebviewErrorHandlerScript } from '../../utils/nonce';
 import { DisasmEditorProvider } from '../disasmEditor/disasmEditorProvider';
@@ -3861,17 +3861,43 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         await vscode.commands.executeCommand('markdown.showPreview', uri);
     }
 
-    /** Compile the active .cds file and return GameShark codes to the CDS tab. */
-    private async handleCompileCds(): Promise<void> {
-        const out = getOutputChannel();
+    private _formatCdsCompilerLocation(filePath: string | undefined): string {
+        return filePath ? `${path.basename(filePath)} (${filePath})` : '(unknown file)';
+    }
 
-        // Always read from the currently active text editor first so clicking
-        // Compile always uses whichever .cds tab the user has open.  VS Code
-        // preserves vscode.window.activeTextEditor even after a sidebar panel
-        // gains focus, so this reliably reflects the file the user had visible
-        // before clicking the button.
+    private _writeCdsCompilerHeader(channel: vscode.LogOutputChannel, filePath: string | undefined): void {
+        channel.clear();
+        channel.show(true);
+        channel.info('CodeDesigner CDS compile started.');
+        channel.info(`Source: ${this._formatCdsCompilerLocation(filePath)}`);
+    }
+
+    /** Compile the CDS document that owns an editor-title run action. */
+    public async compileCdsDocument(uri?: vscode.Uri): Promise<void> {
+        const targetUri = uri ?? vscode.window.activeTextEditor?.document.uri;
+        if (!targetUri || targetUri.scheme !== 'file' || !targetUri.fsPath.toLowerCase().endsWith('.cds')) {
+            vscode.window.showWarningMessage('Open a .cds file to compile.');
+            return;
+        }
+
+        const doc = vscode.workspace.textDocuments.find(d => d.uri.toString() === targetUri.toString())
+            ?? await vscode.workspace.openTextDocument(targetUri);
+
+        this._activeCdsFilePath = doc.uri.fsPath;
+        this._activeCdsContent  = doc.getText();
+        await this.handleCompileCds(false);
+    }
+
+    /** Compile the active .cds file and return GameShark codes to the CDS tab. */
+    private async handleCompileCds(useActiveEditor = true): Promise<void> {
+        const out = getOutputChannel();
+        const compilerOut = getCdsCompilerChannel();
+
+        // Webview compile requests refresh from the active editor so unsaved
+        // .cds edits are compiled. Editor-title run actions pass a specific URI
+        // and pre-populate the cached file/content before calling this method.
         const activeEditor = vscode.window.activeTextEditor;
-        if (activeEditor?.document.uri.fsPath.toLowerCase().endsWith('.cds')) {
+        if (useActiveEditor && activeEditor?.document.uri.fsPath.toLowerCase().endsWith('.cds')) {
             this._activeCdsFilePath = activeEditor.document.uri.fsPath;
             this._activeCdsContent  = activeEditor.document.getText();
         }
@@ -3880,12 +3906,15 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         const filePath   = this._activeCdsFilePath;
         const fileUri    = filePath ? vscode.Uri.file(filePath) : undefined;
 
+        this._writeCdsCompilerHeader(compilerOut, filePath);
+
         // Clear any previous diagnostics for this file before every compile run
         if (fileUri) { this._cdsDiagnostics.delete(fileUri); }
 
         if (!sourceCode) {
             const msg = 'No .cds file is open. Open a Code Designer Source file to compile.';
             out.warn(`CDS compile: ${msg}`);
+            compilerOut.warn(msg);
             this.webview?.postMessage({
                 command: 'cdsCompileResult',
                 success: false,
@@ -3895,10 +3924,12 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         }
 
         out.info(`CDS compiling: ${filePath ? path.basename(filePath) : '(unknown)'}`);
+        compilerOut.info(`Source length: ${sourceCode.length} character(s).`);
 
         if (!this.socketClient.isConnected()) {
             const msg = 'Not connected to emulator server.';
             out.warn(`CDS compile: ${msg}`);
+            compilerOut.warn(msg);
             this.webview?.postMessage({
                 command: 'cdsCompileResult',
                 success: false,
@@ -3915,6 +3946,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             if (this.getPointerLabels) {
                 try { pointerLabels = await this.getPointerLabels(); } catch { /* ignore — not connected */ }
             }
+            compilerOut.info(`Pointer labels supplied: ${pointerLabels.length}.`);
 
             const { results, sidecars } = await this.socketClient.compileCds(
                 sourceCode,
@@ -3930,13 +3962,14 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 ? vscode.workspace.textDocuments.find(d => d.uri.toString() === fileUri.toString())
                 : undefined;
 
+            compilerOut.info(`Compiler returned ${results.length} instruction result(s) and ${sidecars.length} sidecar directive(s).`);
+
             for (const r of results) {
                 if (r.Success && r.Hex) {
                     codeLines.push(r.Hex);
                 } else if (!r.Success && r.Error) {
                     const ln = r.LineNumber ?? 0;
-                    // Log to the Debug channel with error severity (shows in red)
-                    getDebugChannel().error(`Line ${ln}: ${r.Error}`);
+                    compilerOut.error(`Line ${ln}: ${r.Error}`);
                     errors.push({ lineNumber: ln, message: r.Error });
 
                     // Build a diagnostic that highlights the offending line in the editor
@@ -3961,7 +3994,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 }
             }
 
-            // ── Log sidecar commands to the Debug channel ─────────────────────
+            // ── Log sidecar commands to the CDS compiler channel ─────────────
             for (const sc of sidecars) {
                 const addrHex = `0x${sc.Address.toString(16).toUpperCase().padStart(8, '0')}`;
                 switch (sc.Kind) {
@@ -3969,26 +4002,26 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                         const expHex = sc.ExpectedValue !== undefined
                             ? `0x${sc.ExpectedValue.toString(16).toUpperCase().padStart(8, '0')}` : '?';
                         if (sc.AssertPassed === true) {
-                            out.info(`CDS assert @ ${addrHex} ${sc.Operator ?? '=='} ${expHex} — passed`);
+                            compilerOut.info(`assert @ ${addrHex} ${sc.Operator ?? '=='} ${expHex} — passed`);
                         } else if (sc.AssertPassed === false) {
                             const actHex = sc.ActualValue !== undefined
                                 ? `0x${sc.ActualValue.toString(16).toUpperCase().padStart(8, '0')}` : '?';
-                            getDebugChannel().error(
-                                `CDS assert @ ${addrHex} ${sc.Operator ?? '=='} ${expHex} FAILED (got ${actHex})`);
+                            compilerOut.error(
+                                `assert @ ${addrHex} ${sc.Operator ?? '=='} ${expHex} FAILED (got ${actHex})`);
                         } else {
-                            out.info(`CDS assert @ ${addrHex} ${sc.Operator ?? '=='} ${expHex} (not checked — no live backend)`);
+                            compilerOut.info(`assert @ ${addrHex} ${sc.Operator ?? '=='} ${expHex} (not checked — no live backend)`);
                         }
                         break;
                     }
                     case 'breakpoint':
-                        out.info(`CDS breakpoint requested @ ${addrHex} — use SETBP to install`);
+                        compilerOut.info(`breakpoint requested @ ${addrHex} — use SETBP to install`);
                         break;
                     case 'watchpoint':
-                        out.info(`CDS watchpoint requested: ${sc.AccessType ?? 'write'} @ ${addrHex} (${sc.WatchSize ?? 4} bytes) — use PINEADDWATCH to install`);
+                        compilerOut.info(`watchpoint requested: ${sc.AccessType ?? 'write'} @ ${addrHex} (${sc.WatchSize ?? 4} bytes) — use PINEADDWATCH to install`);
                         break;
                     case 'log': {
                         const directive = sc.Directive ?? 'log';
-                        out.info(`CDS ${directive} @ ${addrHex}: ${sc.MessageText ?? ''}`);
+                        compilerOut.info(`${directive} @ ${addrHex}: ${sc.MessageText ?? ''}`);
                         break;
                     }
                 }
@@ -4001,8 +4034,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 
             if (errors.length > 0) {
                 out.warn(`CDS compilation finished with ${errors.length} error(s).`);
-                // Reveal the Debug channel so the user sees the red error entries
-                getDebugChannel().show(true);
+                compilerOut.warn(`Compilation finished with ${errors.length} error(s).`);
+                compilerOut.show(true);
                 // Clear any stored sidecars — the patch is not valid when there are errors
                 this._lastCdsSidecars = [];
                 this.webview?.postMessage({ command: 'cdsCompileResult', success: false, errors });
@@ -4011,12 +4044,16 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 // Cache sidecars so handleAddPatch can install breakpoints/watchpoints
                 this._lastCdsSidecars = sidecars;
                 out.info(`CDS compilation succeeded — ${codeLines.length} code(s) generated.`);
+                compilerOut.info(`Compilation succeeded — ${codeLines.length} code(s) generated.`);
+                compilerOut.appendLine('');
+                compilerOut.appendLine('Generated GameShark codes:');
+                compilerOut.appendLine(codes.length > 0 ? codes : '(no codes generated)');
                 this.webview?.postMessage({ command: 'cdsCompileResult', success: true, codes, errors: [] });
             }
         } catch (err: any) {
             const msg = err?.message ?? String(err);
-            getDebugChannel().error(`CDS compile error: ${msg}`);
-            getDebugChannel().show(true);
+            compilerOut.error(`Compile error: ${msg}`);
+            compilerOut.show(true);
             this.webview?.postMessage({
                 command: 'cdsCompileResult',
                 success: false,
@@ -4100,6 +4137,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     /** Apply compiled GameShark codes to live memory (Add Patch), then install any sidecar breakpoints/watchpoints. */
     private async handleAddPatch(codes: string): Promise<void> {
         const out = getOutputChannel();
+        const compilerOut = getCdsCompilerChannel();
         if (!this.socketClient.isConnected()) {
             this.webview?.postMessage({ command: 'cdsPatchApplied', success: false, error: 'Not connected to emulator.' });
             return;
@@ -4108,6 +4146,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             // 1 — Apply the GameShark memory-patch codes
             await this.socketClient.applyCheats(codes);
             out.info('CDS patch applied to memory successfully.');
+            compilerOut.info('Patch applied to memory successfully.');
 
             // 2 — Install sidecar commands from the most recent compilation
             const sidecars = this._lastCdsSidecars;
@@ -4118,6 +4157,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                         case 'breakpoint':
                             await this.socketClient.setBreakpoint(sc.Address);
                             out.info(`CDS breakpoint installed @ ${addrHex}`);
+                            compilerOut.info(`breakpoint installed @ ${addrHex}`);
                             break;
 
                         case 'watchpoint': {
@@ -4134,12 +4174,13 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                                        : 2; // default: write
                             await this.socketClient.addPineWatch(sc.Address, endAddr, cond);
                             out.info(`CDS watchpoint installed: ${sc.AccessType ?? 'write'} @ ${addrHex} (${size} bytes)`);
+                            compilerOut.info(`watchpoint installed: ${sc.AccessType ?? 'write'} @ ${addrHex} (${size} bytes)`);
                             break;
                         }
 
                         case 'log': {
                             const directive = sc.Directive ?? 'log';
-                            out.info(`CDS ${directive} @ ${addrHex}: ${sc.MessageText ?? ''}`);
+                            compilerOut.info(`${directive} @ ${addrHex}: ${sc.MessageText ?? ''}`);
                             break;
                         }
                     }
@@ -4147,6 +4188,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                     // Log but do not abort — sidecar install is best-effort (e.g. breakpoints
                     // require PINE debugger extension; watchpoints require PINE mode).
                     out.warn(`CDS sidecar install failed for ${sc.Kind} @ ${addrHex}: ${sidecarErr?.message ?? sidecarErr}`);
+                    compilerOut.warn(`sidecar install failed for ${sc.Kind} @ ${addrHex}: ${sidecarErr?.message ?? sidecarErr}`);
                 }
             }
 
