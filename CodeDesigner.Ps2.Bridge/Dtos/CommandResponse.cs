@@ -203,6 +203,12 @@ namespace CodeDesigner.Ps2.Bridge
         /// <summary>Full label set payload for GETLABELSET / SETACTIVELABELSET / CREATELABELSET etc.</summary>
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public LabelSetPayload? LabelSet { get; set; }
+        /// <summary>Compact label-set search hits returned by SEARCHLABELSETS.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public List<LabelSetSearchResultInfo>? LabelSetSearchResults { get; set; }
+        /// <summary>Compact label search hits returned by SEARCHLABELS.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public List<LabelSearchResultInfo>? LabelSearchResults { get; set; }
 
         // MCP Config results (MCPCONFIG_LIST / MCPCONFIG_UPDATE)
         /// <summary>List of MCP config entries returned by MCPCONFIG_LIST.</summary>
@@ -305,6 +311,14 @@ namespace CodeDesigner.Ps2.Bridge
         /// <summary>A single cheat list, returned by CHEATEDITOR_CREATE.</summary>
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public CheatListInfo? CheatEditorList { get; set; }
+
+        /// <summary>Compact section summaries returned by CHEATEDITOR_SECTIONS.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public List<CheatSectionInfo>? CheatEditorSections { get; set; }
+
+        /// <summary>Compact cheat search hits returned by CHEATEDITOR_SEARCH.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public List<CheatSearchResultInfo>? CheatEditorSearchResults { get; set; }
     }
 
     /// <summary>

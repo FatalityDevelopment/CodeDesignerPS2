@@ -8,7 +8,7 @@ namespace CodeDesigner.AI.Tools.Admin;
 
 [CdTool("query_db", ToolDomain.Admin, ToolRisk.Dangerous,
     "Run arbitrary SQL against the CodeDesigner DB. For LABELS prefer the label tools " +
-    "(label_list / label_resolve_strings / get_functions) — they are cheaper and indexed; use " +
+    "(label_search / label_search_sets / label_list / get_functions) — they are cheaper and indexed; use " +
     "query_db only for data with no dedicated tool. Risk: DANGEROUS.")]
 public sealed class QueryDbTool(IEmulatorBridge bridge)
 {
