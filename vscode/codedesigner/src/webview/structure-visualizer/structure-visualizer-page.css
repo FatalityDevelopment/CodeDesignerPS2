@@ -1,5 +1,4 @@
-/* Structure Visualizer — styled to match the disassembler panel
-   (webview/disasm-panel/disasm-panel.css) and shared.css primitives. */
+/* Structure Visualizer — compact chrome matching the disassembler panel. */
 
 html { height: 100%; }
 
@@ -9,11 +8,17 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  font-family: var(--vscode-font-family, 'Segoe UI', sans-serif);
+  box-sizing: border-box;
+  font-family: var(--vscode-editor-font-family, var(--vscode-font-family, 'Segoe UI', sans-serif));
   font-size: 13px;
   color: var(--vscode-editor-foreground, #d4d4d4);
   background: var(--vscode-editor-background, #1e1e1e);
-  box-sizing: border-box;
+}
+
+app-structure-visualizer-page {
+  display: flex;
+  flex: 1;
+  min-height: 0;
 }
 
 .sv-shell {
@@ -22,6 +27,77 @@ body {
   flex: 1;
   min-height: 0;
 }
+
+app-icon,
+.lic {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  line-height: 0;
+}
+
+.lic svg { display: block; }
+
+/* ── Page header actions ─────────────────────────────────────────────── */
+.sv-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* ── View toolbar (mirrors disasm panel #panel-views) ─────────────────── */
+.sv-tabs {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  margin: 8px 10px 10px;
+  padding: 3px;
+  flex-shrink: 0;
+  border: 1px solid var(--vscode-panel-border, #313131);
+  border-radius: 6px;
+  background: rgba(255,255,255,0.018);
+}
+
+.sv-tab {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--vscode-foreground, #d4d4d4);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 0;
+  font-family: inherit;
+  font-size: 15px;
+  cursor: pointer;
+  transition: background 0.1s, border-color 0.1s;
+}
+
+.sv-tab:hover { background: rgba(255,255,255,0.07); }
+
+.sv-tab-on {
+  background: var(--vscode-button-background, #2d7f9f);
+  color: var(--vscode-button-foreground, #fff);
+  border-color: transparent;
+}
+
+.sv-tab-label {
+  margin-left: auto;
+  padding-right: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--vscode-descriptionForeground, #8f8f8f);
+}
+
+.sv-tab-tool { margin-left: 2px; }
 
 /* ── Toolbar / controls ──────────────────────────────────────────────── */
 .sv-toolbar,
@@ -33,10 +109,14 @@ body {
   border-bottom: 1px solid var(--vscode-panel-border, #313131);
   flex-wrap: wrap;
   flex-shrink: 0;
-  background: #252526;
 }
 
+.sv-controls { padding-top: 0; }
+
 .sv-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.06em;
@@ -44,20 +124,15 @@ body {
   color: var(--vscode-descriptionForeground, #8f8f8f);
   margin-right: 4px;
 }
-.sv-game {
-  font-weight: 600;
-  color: var(--vscode-textLink-foreground, #569cd6);
-  max-width: 220px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+
 .sv-spacer { flex: 1; }
+
 .sv-zoom {
   display: flex;
   align-items: center;
   gap: 2px;
 }
+
 .sv-sep {
   width: 1px;
   align-self: stretch;
@@ -65,7 +140,7 @@ body {
   margin: 0 4px;
 }
 
-/* ── Inputs (mirrors disasm-panel select styling) ────────────────────── */
+/* ── Inputs (mirrors disasm-panel select/input styling) ───────────────── */
 .sv-input,
 .sv-select {
   background: var(--vscode-input-background, #2a2a2a);
@@ -77,61 +152,46 @@ body {
   font-size: 12px;
   box-sizing: border-box;
 }
+
 .sv-input:focus,
 .sv-select:focus {
   outline: none;
   border-color: var(--vscode-focusBorder, #0e639c);
 }
+
 .sv-input::placeholder { color: var(--vscode-input-placeholderForeground, #888); }
 .sv-input { width: 150px; }
 .sv-input.sv-sm, .sv-select.sv-sm { width: 110px; }
 .sv-input.sv-xs { width: 64px; }
 .sv-full { width: 100%; }
 .sv-grow { flex: 1; min-width: 220px; }
+.sv-set-select { max-width: 210px; min-width: 120px; }
 
 /* ── Button modifiers (base is .lm-tool-btn from shared.css) ─────────── */
-.sv-primary {
-  background: var(--vscode-button-background, #0e639c);
-  color: var(--vscode-button-foreground, #fff);
-  border-color: transparent;
+.lm-tool-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
 }
-.sv-primary:hover:not(:disabled) {
-  background: var(--vscode-button-hoverBackground, #1177bb);
+
+.sv-icon-btn {
+  width: 28px;
+  padding-left: 0;
+  padding-right: 0;
 }
+
+.sv-primary,
 .sv-on {
   background: var(--vscode-button-background, #0e639c);
   color: var(--vscode-button-foreground, #fff);
   border-color: transparent;
 }
 
-/* ── Tabs ────────────────────────────────────────────────────────────── */
-.sv-tabs {
-  display: flex;
-  gap: 2px;
-  padding: 6px 10px 4px;
-  border-bottom: 1px solid var(--vscode-panel-border, #313131);
-  flex-shrink: 0;
-  background: #252526;
+.sv-primary:hover:not(:disabled) {
+  background: var(--vscode-button-hoverBackground, #1177bb);
 }
-.sv-tab {
-  background: rgba(255,255,255,0.02);
-  color: var(--vscode-foreground, #d4d4d4);
-  border: 1px solid transparent;
-  border-bottom: 2px solid transparent;
-  border-radius: 4px 4px 0 0;
-  padding: 6px 12px;
-  font-family: inherit;
-  font-size: 12px;
-  cursor: pointer;
-}
-.sv-tab:hover { background: rgba(255, 255, 255, 0.08); }
-.sv-tab-on {
-  background: var(--vscode-button-background, #2d7f9f);
-  color: var(--vscode-button-foreground, #fff);
-  border-color: transparent;
-  border-bottom-color: var(--vscode-button-background, #2d7f9f);
-  font-weight: 600;
-}
+
 .sv-depth {
   display: flex;
   align-items: center;
@@ -142,28 +202,42 @@ body {
 
 /* ── Status ──────────────────────────────────────────────────────────── */
 .sv-status {
+  margin: 8px 10px 0;
   padding: 6px 10px;
+  border: 1px solid var(--vscode-panel-border, #313131);
+  border-radius: 6px;
   font-size: 11px;
   color: var(--vscode-foreground, #d4d4d4);
   background: #252526;
-  border-bottom: 1px solid var(--vscode-panel-border, #313131);
   flex-shrink: 0;
 }
-.sv-error { color: var(--vscode-errorForeground, #f48771); }
+
+.sv-error {
+  color: var(--vscode-errorForeground, #f48771);
+  border-color: rgba(244,135,113,.45);
+}
 
 /* ── Body: diagram + editor ──────────────────────────────────────────── */
 .sv-body {
   display: flex;
   flex: 1;
   min-height: 0;
+  margin: 8px 10px 10px;
   overflow: hidden;
+  border: 1px solid var(--vscode-panel-border, #313131);
+  border-radius: 6px;
+  background: rgba(255,255,255,0.012);
 }
+
 .sv-diagram {
   flex: 1;
   overflow: auto;
   padding: 12px;
   background: var(--vscode-editor-background, #1e1e1e);
+  cursor: grab;
 }
+
+.sv-diagram.sv-panning { cursor: grabbing; }
 
 .sv-empty {
   flex: 1;
@@ -184,7 +258,6 @@ body {
   box-sizing: border-box;
 }
 
-/* Each editor block is a card, matching the disasm-panel section cards. */
 .sv-ed-section {
   margin-bottom: 10px;
   padding: 10px;
@@ -192,6 +265,7 @@ body {
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.022);
 }
+
 .sv-ed-section > * { margin-bottom: 5px; }
 .sv-ed-section > *:last-child { margin-bottom: 0; }
 
@@ -202,11 +276,13 @@ body {
   letter-spacing: 0.06em;
   color: var(--vscode-descriptionForeground, #8f8f8f);
 }
+
 .sv-ed-note {
   font-size: 11px;
   color: var(--vscode-descriptionForeground, #8f8f8f);
   font-style: italic;
 }
+
 .sv-ed-row {
   display: flex;
   align-items: center;
@@ -214,15 +290,23 @@ body {
   padding: 4px 6px;
   border-radius: 4px;
 }
-.sv-ed-row:hover {
-  background: rgba(255, 255, 255, 0.06);
-}
+
+.sv-ed-row:hover { background: rgba(255, 255, 255, 0.06); }
+
 .sv-ed-off {
   font-family: var(--vscode-editor-font-family, monospace);
   color: var(--vscode-textLink-foreground, #9cdcfe);
 }
-.sv-ed-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.sv-ed-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .sv-ed-vt { color: var(--vscode-descriptionForeground, #8f8f8f); }
+
 .sv-ed-addrow {
   display: flex;
   gap: 4px;
@@ -231,7 +315,8 @@ body {
 }
 
 /* ── Mermaid contrast overrides (dark disassembler-like palette) ─────── */
-.sv-diagram .mermaid svg { background: transparent; }
+.sv-diagram .mermaid svg,
+.sv-diagram svg { background: transparent; }
 .sv-diagram .node rect,
 .sv-diagram .node polygon,
 .sv-diagram .node path,
@@ -249,9 +334,7 @@ body {
 }
 .sv-diagram .edgePath .path,
 .sv-diagram .flowchart-link,
-.sv-diagram path.relation {
-  stroke: #7aa2c7 !important;
-}
+.sv-diagram path.relation { stroke: #7aa2c7 !important; }
 .sv-diagram marker path {
   fill: #7aa2c7 !important;
   stroke: #7aa2c7 !important;
@@ -259,4 +342,10 @@ body {
 .sv-diagram .edgeLabel {
   background-color: #1e1e1e !important;
   color: #c8c8c8 !important;
+}
+
+@media (max-width: 720px) {
+  .sv-header-actions { justify-content: flex-start; }
+  .sv-set-select { max-width: none; flex: 1; }
+  .sv-editor { width: 280px; }
 }
