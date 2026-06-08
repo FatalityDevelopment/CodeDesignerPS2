@@ -195,11 +195,11 @@ const CODE_RE = /^[0-9A-Fa-f?*]+(\s+[0-9A-Fa-f?*]+)*$/;
           }
         </div>
       </div>
-    </div>
 
-    @if (statusMsg()) {
-      <div class="ce-status" [class.error]="statusIsError()">{{ statusMsg() }}</div>
-    }
+      @if (statusMsg()) {
+        <div class="ce-status" [class.error]="statusIsError()">{{ statusMsg() }}</div>
+      }
+    </div>
   `,
 })
 export class CheatsEditorPageComponent implements AfterViewInit {
