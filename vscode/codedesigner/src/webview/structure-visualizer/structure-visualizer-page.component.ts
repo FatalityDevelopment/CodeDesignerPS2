@@ -11,7 +11,6 @@ import {
 import mermaid from 'mermaid';
 import { getVsCodeApi } from '../shared/vscode-api';
 import { IconComponent } from '../shared/icon.component';
-import { PageHeaderComponent } from '../shared/page-header.component';
 import '../shared/styles/shared.css';
 import {
   SvLabel, SvGroup, SvCallGraph, SvNodeResolved,
@@ -32,38 +31,50 @@ type Mode = 'class' | 'vtable' | 'callgraph';
 @Component({
   selector: 'app-structure-visualizer-page',
   standalone: true,
-  imports: [IconComponent, PageHeaderComponent],
+  imports: [IconComponent],
   encapsulation: ViewEncapsulation.None,
   template: `
     <div class="sv-shell">
-      <app-page-header icon="workflow" title="Structure" subtitle="Structure visualizer" />
-      <!-- ── Toolbar ───────────────────────────────────────────────────── -->
-      <div class="sv-toolbar">
-        <span class="sv-title"><app-icon name="workflow" [size]="14" /> Structure Visualizer</span>
-        <select class="sv-select" [value]="setName()" (change)="onSetPick($event)"
-                [disabled]="sets().length === 0">
-          @for (s of sets(); track s) { <option [value]="s">{{ s }}</option> }
-          @if (sets().length === 0) { <option value="">— no label sets —</option> }
-        </select>
-        <button class="lm-tool-btn" [disabled]="busy()" (click)="reload()" title="Reload from backend">⟳</button>
-        <button class="lm-tool-btn" (click)="newSet()" title="Create a new label set">+ Set</button>
-        <span class="sv-spacer"></span>
-        <div class="sv-zoom">
-          <button class="lm-tool-btn" [disabled]="!source()" (click)="zoomOut()" title="Zoom out">−</button>
-          <button class="lm-tool-btn" [disabled]="!source()" (click)="zoomReset()" title="Reset to 100%">{{ zoomPct() }}%</button>
-          <button class="lm-tool-btn" [disabled]="!source()" (click)="zoomIn()" title="Zoom in">+</button>
-          <button class="lm-tool-btn" [disabled]="!source()" (click)="fitToViewport(false)" title="Fit the whole diagram in view">Fit</button>
+      <div class="sv-panel-head">
+        <div class="sv-panel-brand">
+          <span class="sv-panel-mark"><app-icon name="workflow" [size]="18" /></span>
+          <div class="sv-panel-copy">
+            <div class="sv-panel-title">Structure Visualizer</div>
+            <div class="sv-panel-subtitle">{{ gameName() || 'No loaded game' }}<span class="sv-panel-id">{{ gameId() ? ' · ' + gameId() : '' }}</span></div>
+          </div>
         </div>
-        <button class="lm-tool-btn" [class.sv-on]="editMode()" (click)="toggleEdit()">{{ editMode() ? '✓ Editing' : '✎ Edit' }}</button>
-        <button class="lm-tool-btn" [disabled]="!source()" (click)="copySource()">Copy Mermaid</button>
-        <button class="lm-tool-btn" [disabled]="!source()" (click)="exportSvg()">Export SVG</button>
+        <div class="sv-panel-actions">
+          <select class="sv-select sv-set-select" [value]="setName()" (change)="onSetPick($event)"
+                  [disabled]="sets().length === 0" title="Active label set">
+            @for (s of sets(); track s) { <option [value]="s">{{ s }}</option> }
+            @if (sets().length === 0) { <option value="">— no label sets —</option> }
+          </select>
+          <button class="lm-tool-btn sv-icon-btn" [disabled]="busy()" (click)="reload()" title="Reload from backend"><app-icon name="refreshcw" [size]="13" /></button>
+          <button class="lm-tool-btn" (click)="newSet()" title="Create a new label set"><app-icon name="plus" [size]="12" /> Set</button>
+        </div>
       </div>
 
       <!-- ── Mode tabs ─────────────────────────────────────────────────── -->
-      <div class="sv-tabs">
-        <button class="sv-tab" [class.sv-tab-on]="mode() === 'class'"     (click)="setMode('class')">Class / Object</button>
-        <button class="sv-tab" [class.sv-tab-on]="mode() === 'vtable'"    (click)="setMode('vtable')">VTable</button>
-        <button class="sv-tab" [class.sv-tab-on]="mode() === 'callgraph'" (click)="setMode('callgraph')">Call Graph</button>
+      <div class="sv-tabs" aria-label="Structure visualizer views">
+        <button class="sv-tab" [class.sv-tab-on]="mode() === 'class'"     (click)="setMode('class')" title="Class / Object"><app-icon name="database" [size]="14" /></button>
+        <button class="sv-tab" [class.sv-tab-on]="mode() === 'vtable'"    (click)="setMode('vtable')" title="VTable"><app-icon name="library" [size]="14" /></button>
+        <button class="sv-tab" [class.sv-tab-on]="mode() === 'callgraph'" (click)="setMode('callgraph')" title="Call Graph"><app-icon name="network" [size]="14" /></button>
+        <span class="sv-tab-label">{{ modeLabel() }}</span>
+        <button class="sv-tab sv-tab-tool" [class.sv-tab-on]="editMode()" (click)="toggleEdit()" title="Toggle edit mode"><app-icon name="edit" [size]="14" /></button>
+      </div>
+
+      <!-- ── Toolbar ───────────────────────────────────────────────────── -->
+      <div class="sv-toolbar">
+        <span class="sv-title"><app-icon name="workflow" [size]="14" /> Diagram</span>
+        <span class="sv-spacer"></span>
+        <div class="sv-zoom">
+          <button class="lm-tool-btn sv-icon-btn" [disabled]="!source()" (click)="zoomOut()" title="Zoom out">−</button>
+          <button class="lm-tool-btn" [disabled]="!source()" (click)="zoomReset()" title="Reset to 100%">{{ zoomPct() }}%</button>
+          <button class="lm-tool-btn sv-icon-btn" [disabled]="!source()" (click)="zoomIn()" title="Zoom in">+</button>
+          <button class="lm-tool-btn" [disabled]="!source()" (click)="fitToViewport(false)" title="Fit the whole diagram in view">Fit</button>
+        </div>
+        <button class="lm-tool-btn" [disabled]="!source()" (click)="copySource()">Copy Mermaid</button>
+        <button class="lm-tool-btn" [disabled]="!source()" (click)="exportSvg()">Export SVG</button>
       </div>
 
       <!-- ── Mode controls ─────────────────────────────────────────────── -->
@@ -701,6 +712,14 @@ export class StructureVisualizerPageComponent implements AfterViewInit {
   zoomOut(): void { this.setZoom(this.zoom() / 1.2); }
   zoomReset(): void { this.setZoom(1); }
   zoomPct(): number { return Math.round(this.zoom() * 100); }
+
+  modeLabel(): string {
+    switch (this.mode()) {
+      case 'class': return 'Class / Object';
+      case 'vtable': return 'VTable';
+      case 'callgraph': return 'Call Graph';
+    }
+  }
 
   /**
    * Scale the diagram to fit the viewport. When <auto> is true (called after a
