@@ -66,9 +66,9 @@ namespace CodeDesigner.Ps2.CdsLanguage
         private static readonly Regex SetRegRegex =
             new(@"^setreg\s+\$?(\w+)\s*,\s*\$([0-9a-fA-F]+)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
-        // la $reg, :labelname  — load absolute address of label into reg via lui+ori
+        // la $reg, :labelname (or la $reg, labelname) — load absolute address of label into reg via lui+ori
         private static readonly Regex LaRegex =
-            new(@"^la\s+\$?(\w+)\s*,\s*:([a-zA-Z_][a-zA-Z0-9_.]*)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+            new(@"^la\s+\$?(\w+)\s*,\s*:?([a-zA-Z_][a-zA-Z0-9_.]*)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         private static readonly Regex LabelDefRegex =
             new(@"^([a-zA-Z_][a-zA-Z0-9_]*):$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -145,7 +145,8 @@ namespace CodeDesigner.Ps2.CdsLanguage
             "beq",  "bne",  "blez",  "bgtz",  "bltz",  "bgez",
             "beql", "bnel", "blezl", "bgtzl", "bltzl", "bgezl",
             "bltzal", "bgezal", "bltzall", "bgezall",
-            "bc1t", "bc1f", "bc1tl", "bc1fl"
+            "bc1t", "bc1f", "bc1tl", "bc1fl",
+            "b", "beqz", "bnez"
         };
 
         // Jump mnemonics that encode a 26-bit absolute word address
@@ -894,6 +895,7 @@ namespace CodeDesigner.Ps2.CdsLanguage
             // Extract optional :label suffix
             string labelRef = string.Empty;
             string coreLine = line;
+            bool labelWasCommaOperand = false;
 
             int colonIdx = line.LastIndexOf(':');
             if (colonIdx > 0)
@@ -903,6 +905,9 @@ namespace CodeDesigner.Ps2.CdsLanguage
                 {
                     labelRef = candidate.ToLowerInvariant();
                     coreLine = line.Substring(0, colonIdx).TrimEnd();
+                    labelWasCommaOperand = coreLine.EndsWith(",", StringComparison.Ordinal);
+                    if (labelWasCommaOperand)
+                        coreLine = coreLine.TrimEnd(',').TrimEnd();
                 }
             }
 
@@ -936,7 +941,7 @@ namespace CodeDesigner.Ps2.CdsLanguage
                         // Branch: replace label with 16-bit signed PC-relative offset (in words)
                         int offset = (int)((labelAddress - (currentAddress + 4)) / 4);
                         string offsetStr = $"${ (ushort)offset:X4}";
-                        assemblyLine = $"{coreLine} {offsetStr}";
+                        assemblyLine = AppendResolvedLabelOperand(coreLine, offsetStr, labelWasCommaOperand);
                     }
                     else if (JumpMnemonics.Contains(mnemonic))
                     {
@@ -947,7 +952,7 @@ namespace CodeDesigner.Ps2.CdsLanguage
                     else
                     {
                         // Other instruction – append the resolved hex address
-                        assemblyLine = $"{coreLine} $0{labelAddress:X8}";
+                        assemblyLine = AppendResolvedLabelOperand(coreLine, $"$0{labelAddress:X8}", labelWasCommaOperand);
                     }
                 }
             }
@@ -976,6 +981,9 @@ namespace CodeDesigner.Ps2.CdsLanguage
 
             currentAddress += 4;
         }
+
+        private static string AppendResolvedLabelOperand(string coreLine, string operand, bool labelWasCommaOperand)
+            => labelWasCommaOperand ? $"{coreLine}, {operand}" : $"{coreLine} {operand}";
 
         private string? NormalizeDirectiveGpr(string token, int lineNumber, string lineText)
         {

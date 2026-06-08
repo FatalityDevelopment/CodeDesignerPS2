@@ -375,6 +375,70 @@ nop
             Assert.AreEqual(MipsAssembler.Assemble("addu $a1, $t1, $zero"), pairs[5].Word);
         }
 
+
+
+        [TestMethod]
+        public void La_AllowsBareLabelReferenceForStdLibCompatibility()
+        {
+            var src = @"
+address $00200000
+target:
+nop
+la $t0, target
+";
+            var parser = new CdsParser();
+            var items = parser.Parse(src);
+            var errors = parser.Diagnostics
+                .Where(d => d.Severity == CdsDiagnosticSeverity.Error)
+                .ToList();
+            Assert.AreEqual(0, errors.Count,
+                "errors: " + string.Join(" | ", errors.Select(e => $"line {e.LineNumber}: {e.Message}")));
+
+            var la = items.OfType<LaSyntaxItem>().Single();
+            Assert.AreEqual("target", la.ResolvedLabel);
+            Assert.AreEqual(0x00200000u, la.Value);
+        }
+
+        [TestMethod]
+        public void Operation_CommaLabelOperand_ResolvesBranchTarget()
+        {
+            var src = @"
+address $00200000
+beq $a0, $zero, :done
+nop
+done:
+nop
+";
+            var parser = new CdsParser();
+            var items = parser.Parse(src);
+            var errors = parser.Diagnostics
+                .Where(d => d.Severity == CdsDiagnosticSeverity.Error)
+                .ToList();
+            Assert.AreEqual(0, errors.Count,
+                "errors: " + string.Join(" | ", errors.Select(e => $"line {e.LineNumber}: {e.Message}")));
+
+            var branch = items.OfType<OperationSyntaxItem>().First();
+            Assert.AreEqual("done", branch.ResolvedLabel);
+            Assert.AreEqual(MipsAssembler.Assemble("beq $a0, $zero, $0001"), branch.EncodedWord);
+        }
+
+        [TestMethod]
+        public void StdLib_Allocator_UsesLaResolvedHeapStateStorage()
+        {
+            string stdLibDir = LocateStdLibDir();
+            string allocatorPath = Path.Combine(stdLibDir, "allocator.cds");
+            if (!File.Exists(allocatorPath)) Assert.Inconclusive("allocator.cds missing");
+
+            var parser = new CdsParser();
+            parser.Parse(File.ReadAllText(allocatorPath), basePath: stdLibDir);
+            var errors = parser.Diagnostics
+                .Where(d => d.Severity == CdsDiagnosticSeverity.Error)
+                .ToList();
+            Assert.AreEqual(0, errors.Count,
+                "allocator.cds errors: " + string.Join(" | ",
+                    errors.Select(e => $"line {e.LineNumber}: {e.Message}")));
+        }
+
         // ------------------------------------------------------------------
         // Native function definitions: `function NAME(p1, p2) { body }`
         // ------------------------------------------------------------------

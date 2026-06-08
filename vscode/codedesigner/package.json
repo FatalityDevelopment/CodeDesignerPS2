@@ -48,6 +48,11 @@
         "title": "CodeDesigner: Send Message to Server"
       },
       {
+        "command": "codedesigner.compileCdsFile",
+        "title": "CodeDesigner: Compile CDS File",
+        "icon": "$(play)"
+      },
+      {
         "command": "codedesigner.recompile",
         "title": "CodeDesigner: Recompile Game ELF from Disc"
       },
@@ -143,6 +148,13 @@
       }
     ],
     "menus": {
+      "editor/title": [
+        {
+          "command": "codedesigner.compileCdsFile",
+          "when": "resourceLangId == cds",
+          "group": "navigation@1"
+        }
+      ],
       "view/title": [
         {
           "command": "codedesigner.toggleEmulatorConnection",
