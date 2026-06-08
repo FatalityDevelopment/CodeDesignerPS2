@@ -15,9 +15,11 @@
     { "include": "#sidecars" },
     { "include": "#pseudoInstructions" },
     { "include": "#instructions" },
-    { "include": "#hexLiterals" },
+    { "include": "#argumentOffsets" },
     { "include": "#registers" },
-    { "include": "#numbers" }
+    { "include": "#hexLiterals" },
+    { "include": "#numbers" },
+    { "include": "#operandPunctuation" }
   ],
   "repository": {
     "comments": {
@@ -173,58 +175,126 @@
       ]
     },
 
+    "argumentOffsets": {
+      "patterns": [
+        {
+          "comment": "Disassembler-style stack/base offsets such as $1234(sp); scope $ and the 16-bit offset separately to mirror the webview operand colors.",
+          "match": "(\\$)([0-9A-Fa-f]{4})(?=\\()",
+          "captures": {
+            "1": { "name": "punctuation.definition.numeric-sigil.cds" },
+            "2": { "name": "constant.numeric.offset.cds" }
+          }
+        }
+      ]
+    },
+
     "registers": {
       "patterns": [
         {
-          "comment": "$zero — always-zero constant. Word-boundary form matches both `$zero` and bare `zero`.",
-          "name": "variable.register.zero.cds",
-          "match": "\\bzero\\b"
+          "comment": "$zero / zero — always-zero constant. Captures the optional $ separately so .cds mirrors the disassembler editor sigil color.",
+          "match": "(?<![A-Za-z0-9_])(\\$?)(zero)(?![A-Za-z0-9_])",
+          "captures": {
+            "1": { "name": "punctuation.definition.register-sigil.cds" },
+            "2": { "name": "variable.register.zero.cds" }
+          }
         },
         {
-          "comment": "$at — assembler temporary",
-          "name": "variable.register.at.cds",
-          "match": "\\bat\\b"
+          "comment": "$at / at — assembler temporary",
+          "match": "(?<![A-Za-z0-9_])(\\$?)(at)(?![A-Za-z0-9_])",
+          "captures": {
+            "1": { "name": "punctuation.definition.register-sigil.cds" },
+            "2": { "name": "variable.register.at.cds" }
+          }
         },
         {
           "comment": "$v0/$v1 — function return values",
-          "name": "variable.register.value.cds",
-          "match": "\\bv[01]\\b"
+          "match": "(?<![A-Za-z0-9_])(\\$?)(v[01])(?![A-Za-z0-9_])",
+          "captures": {
+            "1": { "name": "punctuation.definition.register-sigil.cds" },
+            "2": { "name": "variable.register.value.cds" }
+          }
         },
         {
           "comment": "$a0-$a3 — call arguments",
-          "name": "variable.register.arg.cds",
-          "match": "\\ba[0-3]\\b"
+          "match": "(?<![A-Za-z0-9_])(\\$?)(a[0-3])(?![A-Za-z0-9_])",
+          "captures": {
+            "1": { "name": "punctuation.definition.register-sigil.cds" },
+            "2": { "name": "variable.register.arg.cds" }
+          }
         },
         {
           "comment": "$t0-$t9 — caller-saved temporaries",
-          "name": "variable.register.temp.cds",
-          "match": "\\bt[0-9]\\b"
+          "match": "(?<![A-Za-z0-9_])(\\$?)(t[0-9])(?![A-Za-z0-9_])",
+          "captures": {
+            "1": { "name": "punctuation.definition.register-sigil.cds" },
+            "2": { "name": "variable.register.temp.cds" }
+          }
         },
         {
           "comment": "$s0-$s7 — callee-saved registers",
-          "name": "variable.register.saved.cds",
-          "match": "\\bs[0-7]\\b"
+          "match": "(?<![A-Za-z0-9_])(\\$?)(s[0-7])(?![A-Za-z0-9_])",
+          "captures": {
+            "1": { "name": "punctuation.definition.register-sigil.cds" },
+            "2": { "name": "variable.register.saved.cds" }
+          }
         },
         {
           "comment": "$k0/$k1 — kernel-reserved registers",
-          "name": "variable.register.kernel.cds",
-          "match": "\\bk[01]\\b"
+          "match": "(?<![A-Za-z0-9_])(\\$?)(k[01])(?![A-Za-z0-9_])",
+          "captures": {
+            "1": { "name": "punctuation.definition.register-sigil.cds" },
+            "2": { "name": "variable.register.kernel.cds" }
+          }
         },
         {
-          "comment": "$gp/$sp/$fp/$ra — architectural special-purpose registers",
-          "name": "variable.register.special.cds",
-          "match": "\\b(?:gp|sp|fp|ra)\\b"
+          "comment": "$gp — global pointer",
+          "match": "(?<![A-Za-z0-9_])(\\$?)(gp)(?![A-Za-z0-9_])",
+          "captures": {
+            "1": { "name": "punctuation.definition.register-sigil.cds" },
+            "2": { "name": "variable.register.gp.cds" }
+          }
         },
         {
-          "comment": "$0-$31 numeric register form",
+          "comment": "$sp — stack pointer",
+          "match": "(?<![A-Za-z0-9_])(\\$?)(sp)(?![A-Za-z0-9_])",
+          "captures": {
+            "1": { "name": "punctuation.definition.register-sigil.cds" },
+            "2": { "name": "variable.register.sp.cds" }
+          }
+        },
+        {
+          "comment": "$fp — frame pointer",
+          "match": "(?<![A-Za-z0-9_])(\\$?)(fp)(?![A-Za-z0-9_])",
+          "captures": {
+            "1": { "name": "punctuation.definition.register-sigil.cds" },
+            "2": { "name": "variable.register.fp.cds" }
+          }
+        },
+        {
+          "comment": "$ra — return address",
+          "match": "(?<![A-Za-z0-9_])(\\$?)(ra)(?![A-Za-z0-9_])",
+          "captures": {
+            "1": { "name": "punctuation.definition.register-sigil.cds" },
+            "2": { "name": "variable.register.ra.cds" }
+          }
+        },
+        {
+          "comment": "$0-$31 and $r0-$r31 numeric register forms. Listed before hex literals so $10 is treated as a register instead of a hex literal.",
           "name": "variable.register.numeric.cds",
-          "match": "\\$[0-9]{1,2}\\b"
+          "match": "\\$r?(?:[0-9]|[12][0-9]|3[01])\\b|(?<![A-Za-z0-9_])r(?:[0-9]|[12][0-9]|3[01])(?![A-Za-z0-9_])"
         },
         {
-          "comment": "$f0-$f31 — floating-point registers",
+          "comment": "$f0-$f31 — floating-point registers. Listed before hex literals so $f0 is treated as a register.",
           "name": "variable.register.fpu.cds",
-          "match": "\\$f[0-9]{1,2}\\b"
+          "match": "\\$f(?:[0-9]|[12][0-9]|3[01])\\b"
         }
+      ]
+    },
+
+    "operandPunctuation": {
+      "patterns": [
+        { "name": "punctuation.separator.operand.cds", "match": "," },
+        { "name": "punctuation.section.parens.operand.cds", "match": "[()]" }
       ]
     },
 
