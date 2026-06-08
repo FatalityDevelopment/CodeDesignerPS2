@@ -3861,17 +3861,31 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         await vscode.commands.executeCommand('markdown.showPreview', uri);
     }
 
+    /** Compile the CDS document that owns an editor-title run action. */
+    public async compileCdsDocument(uri?: vscode.Uri): Promise<void> {
+        const targetUri = uri ?? vscode.window.activeTextEditor?.document.uri;
+        if (!targetUri || targetUri.scheme !== 'file' || !targetUri.fsPath.toLowerCase().endsWith('.cds')) {
+            vscode.window.showWarningMessage('Open a .cds file to compile.');
+            return;
+        }
+
+        const doc = vscode.workspace.textDocuments.find(d => d.uri.toString() === targetUri.toString())
+            ?? await vscode.workspace.openTextDocument(targetUri);
+
+        this._activeCdsFilePath = doc.uri.fsPath;
+        this._activeCdsContent  = doc.getText();
+        await this.handleCompileCds(false);
+    }
+
     /** Compile the active .cds file and return GameShark codes to the CDS tab. */
-    private async handleCompileCds(): Promise<void> {
+    private async handleCompileCds(useActiveEditor = true): Promise<void> {
         const out = getOutputChannel();
 
-        // Always read from the currently active text editor first so clicking
-        // Compile always uses whichever .cds tab the user has open.  VS Code
-        // preserves vscode.window.activeTextEditor even after a sidebar panel
-        // gains focus, so this reliably reflects the file the user had visible
-        // before clicking the button.
+        // Webview compile requests refresh from the active editor so unsaved
+        // .cds edits are compiled. Editor-title run actions pass a specific URI
+        // and pre-populate the cached file/content before calling this method.
         const activeEditor = vscode.window.activeTextEditor;
-        if (activeEditor?.document.uri.fsPath.toLowerCase().endsWith('.cds')) {
+        if (useActiveEditor && activeEditor?.document.uri.fsPath.toLowerCase().endsWith('.cds')) {
             this._activeCdsFilePath = activeEditor.document.uri.fsPath;
             this._activeCdsContent  = activeEditor.document.getText();
         }

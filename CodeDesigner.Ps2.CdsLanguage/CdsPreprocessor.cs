@@ -73,10 +73,9 @@ namespace CodeDesigner.Ps2.CdsLanguage
         // dispatch order in the main loop disambiguates macros from extern functions.
         private static readonly Regex FunctionCallRegex = MacroCallRegex;
 
-        // Callee-saved registers a function body must preserve if it touches them.
-        private static readonly Regex CalleeSavedRegex =
-            new(@"\$(s[0-7]|fp)\b",
-                RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        // Callee-saved register detection is done through CdsRegisters so bare
+        // names (s0), ABI names ($s0), numeric forms ($16), and rN aliases ($r16)
+        // stay in sync with the parser and VS Code .cds grammar.
 
         // Detect any jal/jalr in a body — means $ra is live across the call and must be saved.
         private static readonly Regex CallInBodyRegex =
@@ -1023,25 +1022,7 @@ namespace CodeDesigner.Ps2.CdsLanguage
         /// <c>$t0</c>). Returns <see langword="null"/> if the token is not a register.
         /// </summary>
         private static string? NormaliseRegister(string token)
-        {
-            if (string.IsNullOrWhiteSpace(token)) return null;
-            string s = token.Trim();
-            if (!s.StartsWith("$")) s = "$" + s;
-            // Validate against the known names; lowercase for canonical form.
-            string lower = s.ToLowerInvariant();
-            if (KnownRegisters.Contains(lower)) return lower;
-            // Numeric forms ($0..$31, $rN) — accept as-is.
-            if (Regex.IsMatch(lower, @"^\$(r?\d{1,2})$")) return lower;
-            return null;
-        }
-
-        private static readonly HashSet<string> KnownRegisters = new(StringComparer.OrdinalIgnoreCase)
-        {
-            "$zero","$at","$v0","$v1","$a0","$a1","$a2","$a3",
-            "$t0","$t1","$t2","$t3","$t4","$t5","$t6","$t7","$t8","$t9",
-            "$s0","$s1","$s2","$s3","$s4","$s5","$s6","$s7",
-            "$k0","$k1","$gp","$sp","$fp","$ra"
-        };
+            => CdsRegisters.NormalizeGpr(token);
 
         // -----------------------------------------------------------------------
         // Native function definition collection + expansion
@@ -1142,8 +1123,11 @@ namespace CodeDesigner.Ps2.CdsLanguage
             {
                 string text = StripInlineComment(line);
                 if (CallInBodyRegex.IsMatch(text)) needsRa = true;
-                foreach (Match rm in CalleeSavedRegex.Matches(text))
-                    savedRegs.Add("$" + rm.Groups[1].Value.ToLowerInvariant());
+                foreach (var (_, index) in CdsRegisters.EnumerateGprTokens(text))
+                {
+                    if (CdsRegisters.IsCalleeSavedGprIndex(index))
+                        savedRegs.Add("$" + CdsRegisters.CanonicalGprName(index));
+                }
             }
 
             // Build the final list: $ra first if needed, then $s0..$s7, $fp.

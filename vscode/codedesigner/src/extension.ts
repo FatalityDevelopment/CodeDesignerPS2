@@ -204,7 +204,12 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 	});
 
-	context.subscriptions.push(connectCommand, disconnectCommand, sendMessageCommand);
+	const compileCdsFileCommand = vscode.commands.registerCommand(
+		'codedesigner.compileCdsFile',
+		async (uri?: vscode.Uri) => disasmPanelProvider.compileCdsDocument(uri),
+	);
+
+	context.subscriptions.push(connectCommand, disconnectCommand, sendMessageCommand, compileCdsFileCommand);
 
 	// ── Recompile command ─────────────────────────────────────────────────────
 	// Allows the user to pick a disc image, choose an ELF on the disc (defaulting
