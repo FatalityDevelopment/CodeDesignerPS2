@@ -383,10 +383,14 @@ namespace CodeDesigner.Ps2.CdsLanguage
                 var setRegMatch = SetRegRegex.Match(trimmed);
                 if (setRegMatch.Success)
                 {
-                    string reg = setRegMatch.Groups[1].Value;
-                    uint value = Convert.ToUInt32(setRegMatch.Groups[2].Value, 16);
-                    var item = BuildSetReg(lineNumber, trimmed, reg, value, currentAddress);
-                    current.Add(item);
+                    string rawReg = setRegMatch.Groups[1].Value;
+                    string? reg = NormalizeDirectiveGpr(rawReg, lineNumber, trimmed);
+                    if (reg is not null)
+                    {
+                        uint value = Convert.ToUInt32(setRegMatch.Groups[2].Value, 16);
+                        var item = BuildSetReg(lineNumber, trimmed, reg, value, currentAddress);
+                        current.Add(item);
+                    }
                     currentAddress += 8;
                     continue;
                 }
@@ -395,22 +399,26 @@ namespace CodeDesigner.Ps2.CdsLanguage
                 var laMatch = LaRegex.Match(trimmed);
                 if (laMatch.Success)
                 {
-                    string reg = laMatch.Groups[1].Value;
+                    string rawReg = laMatch.Groups[1].Value;
+                    string? reg = NormalizeDirectiveGpr(rawReg, lineNumber, trimmed);
                     string labelRef = laMatch.Groups[2].Value.ToLowerInvariant();
-                    string? qualified = ResolveLabel(labelRef, scopeStack, labelMap);
-                    if (qualified == null)
+                    if (reg is not null)
                     {
-                        AddDiagnostic(CdsDiagnosticSeverity.Error, lineNumber,
-                            $"unresolved label reference ':{labelRef}' in '{trimmed}'", trimmed,
-                            $":{labelRef}", "CDS0012");
-                        // Emit a placeholder that decodes to (lui+ori) of address 0 so downstream
-                        // address tracking stays in sync.
-                        current.Add(BuildLa(lineNumber, trimmed, reg, labelRef, 0u, currentAddress));
-                    }
-                    else
-                    {
-                        uint addr = labelMap[qualified];
-                        current.Add(BuildLa(lineNumber, trimmed, reg, qualified, addr, currentAddress));
+                        string? qualified = ResolveLabel(labelRef, scopeStack, labelMap);
+                        if (qualified == null)
+                        {
+                            AddDiagnostic(CdsDiagnosticSeverity.Error, lineNumber,
+                                $"unresolved label reference ':{labelRef}' in '{trimmed}'", trimmed,
+                                $":{labelRef}", "CDS0012");
+                            // Emit a placeholder that decodes to (lui+ori) of address 0 so downstream
+                            // address tracking stays in sync.
+                            current.Add(BuildLa(lineNumber, trimmed, reg, labelRef, 0u, currentAddress));
+                        }
+                        else
+                        {
+                            uint addr = labelMap[qualified];
+                            current.Add(BuildLa(lineNumber, trimmed, reg, qualified, addr, currentAddress));
+                        }
                     }
                     currentAddress += 8;
                     continue;
@@ -422,17 +430,21 @@ namespace CodeDesigner.Ps2.CdsLanguage
                 {
                     string sizeSuffix = memMatch.Groups[1].Value;
                     uint offset  = Convert.ToUInt32(memMatch.Groups[2].Value, 16);
-                    string reg   = memMatch.Groups[3].Value;
+                    string rawReg = memMatch.Groups[3].Value;
+                    string? reg = NormalizeDirectiveGpr(rawReg, lineNumber, trimmed);
                     string opStr = memMatch.Groups[4].Value;
                     string operandStr = memMatch.Groups[5].Value;
-                    uint operand = ParseUInt(operandStr);
                     var memOp  = ParseMemOp(opStr);
                     var memSz  = ParseMemSize(sizeSuffix);
                     uint instrCount = memOp == CdsMemoryOperation.Assign ? 2u : 3u;
-                    var item = BuildMemOp(lineNumber, trimmed, offset, reg, memOp, operand, currentAddress, memSz);
-                    current.Add(item);
-                    AddDiagnostic(CdsDiagnosticSeverity.Warning, lineNumber,
-                        "register $t9 is clobbered by mem[] expansion", trimmed, "mem", "CDS0003");
+                    if (reg is not null)
+                    {
+                        uint operand = ParseUInt(operandStr);
+                        var item = BuildMemOp(lineNumber, trimmed, offset, reg, memOp, operand, currentAddress, memSz);
+                        current.Add(item);
+                        AddDiagnostic(CdsDiagnosticSeverity.Warning, lineNumber,
+                            "register $t9 is clobbered by mem[] expansion", trimmed, "mem", "CDS0003");
+                    }
                     currentAddress += instrCount * 4;
                     continue;
                 }
@@ -442,12 +454,15 @@ namespace CodeDesigner.Ps2.CdsLanguage
                 if (loadMatch.Success)
                 {
                     string sizeSuffix = loadMatch.Groups[1].Value;
-                    string targetReg = loadMatch.Groups[2].Value;
+                    string? targetReg = NormalizeDirectiveGpr(loadMatch.Groups[2].Value, lineNumber, trimmed);
                     uint offset = Convert.ToUInt32(loadMatch.Groups[3].Value, 16);
-                    string baseReg = loadMatch.Groups[4].Value;
-                    var memSz = ParseMemSize(sizeSuffix);
-                    var item = BuildLoadOp(lineNumber, trimmed, targetReg, offset, baseReg, currentAddress, memSz);
-                    current.Add(item);
+                    string? baseReg = NormalizeDirectiveGpr(loadMatch.Groups[4].Value, lineNumber, trimmed);
+                    if (targetReg is not null && baseReg is not null)
+                    {
+                        var memSz = ParseMemSize(sizeSuffix);
+                        var item = BuildLoadOp(lineNumber, trimmed, targetReg, offset, baseReg, currentAddress, memSz);
+                        current.Add(item);
+                    }
                     currentAddress += 4;
                     continue;
                 }
@@ -457,12 +472,15 @@ namespace CodeDesigner.Ps2.CdsLanguage
                 if (storeMatch.Success)
                 {
                     string sizeSuffix = storeMatch.Groups[1].Value;
-                    string sourceReg = storeMatch.Groups[2].Value;
+                    string? sourceReg = NormalizeDirectiveGpr(storeMatch.Groups[2].Value, lineNumber, trimmed);
                     uint offset = Convert.ToUInt32(storeMatch.Groups[3].Value, 16);
-                    string baseReg = storeMatch.Groups[4].Value;
-                    var memSz = ParseMemSize(sizeSuffix);
-                    var item = BuildStoreOp(lineNumber, trimmed, sourceReg, offset, baseReg, currentAddress, memSz);
-                    current.Add(item);
+                    string? baseReg = NormalizeDirectiveGpr(storeMatch.Groups[4].Value, lineNumber, trimmed);
+                    if (sourceReg is not null && baseReg is not null)
+                    {
+                        var memSz = ParseMemSize(sizeSuffix);
+                        var item = BuildStoreOp(lineNumber, trimmed, sourceReg, offset, baseReg, currentAddress, memSz);
+                        current.Add(item);
+                    }
                     currentAddress += 4;
                     continue;
                 }
@@ -957,6 +975,16 @@ namespace CodeDesigner.Ps2.CdsLanguage
             });
 
             currentAddress += 4;
+        }
+
+        private string? NormalizeDirectiveGpr(string token, int lineNumber, string lineText)
+        {
+            string? normalized = CdsRegisters.NormalizeGpr(token);
+            if (normalized is not null) return normalized.TrimStart('$');
+
+            AddDiagnostic(CdsDiagnosticSeverity.Error, lineNumber,
+                $"unrecognized GPR register '{token}'", lineText, token, "CDS0013");
+            return null;
         }
 
         // -----------------------------------------------------------------------

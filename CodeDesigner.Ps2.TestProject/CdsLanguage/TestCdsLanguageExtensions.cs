@@ -227,6 +227,39 @@ nop
                 && d.Message.Contains("expects 2 argument", StringComparison.OrdinalIgnoreCase)));
         }
 
+
+        [TestMethod]
+        public void ExternFunction_NumericAndRRegisterArgs_NormalizeToAbiNames()
+        {
+            var src = @"
+extern function f(x, y) at :f_label
+address $00200000
+f($8, r9)
+f_label:
+nop
+";
+            var pairs = Compile(src);
+            Assert.AreEqual(MipsAssembler.Assemble("addu $a0, $t0, $zero"), pairs[0].Word);
+            Assert.AreEqual(MipsAssembler.Assemble("addu $a1, $t1, $zero"), pairs[1].Word);
+        }
+
+        [TestMethod]
+        public void ExternFunction_OutOfRangeNumericRegister_IsDiagnosedBeforeAssembly()
+        {
+            var parser = new CdsParser();
+            var src = @"
+extern function f(x) at :f_label
+address $00200000
+f($99)
+f_label:
+nop
+";
+            parser.Parse(src);
+            Assert.IsTrue(parser.Diagnostics.Any(d =>
+                d.Severity == CdsDiagnosticSeverity.Error &&
+                d.Code == "CDS2004"));
+        }
+
         [TestMethod]
         public void ExternFunction_DispatchPriority_MacrosBeforeExterns()
         {
@@ -404,6 +437,51 @@ nop
             Assert.AreEqual(MipsAssembler.Assemble("lw $ra, 0($sp)"),     pairs[4].Word);
             Assert.AreEqual(MipsAssembler.Assemble("addiu $sp, $sp, 16"), pairs[5].Word);
             Assert.AreEqual(MipsAssembler.Assemble("jr $ra"),             pairs[6].Word);
+        }
+
+
+        [TestMethod]
+        public void FunctionDef_BareCalleeSavedRegister_IsSavedInFrame()
+        {
+            var src = @"
+address $00200000
+function uses_bare_s0() {
+    addiu s0, zero, 1
+}
+";
+            var pairs = Compile(src);
+            Assert.AreEqual(MipsAssembler.Assemble("addiu $sp, $sp, -16"), pairs[0].Word);
+            Assert.AreEqual(MipsAssembler.Assemble("sw $s0, 0($sp)"), pairs[1].Word);
+            Assert.AreEqual(MipsAssembler.Assemble("lw $s0, 0($sp)"), pairs[3].Word);
+        }
+
+        [TestMethod]
+        public void FunctionDef_NumericCalleeSavedRegister_IsSavedAsCanonicalAbiName()
+        {
+            var src = @"
+address $00200000
+function uses_numeric_s0() {
+    addiu $16, $zero, 1
+}
+";
+            var pairs = Compile(src);
+            Assert.AreEqual(MipsAssembler.Assemble("sw $s0, 0($sp)"), pairs[1].Word);
+            Assert.AreEqual(MipsAssembler.Assemble("lw $s0, 0($sp)"), pairs[3].Word);
+        }
+
+
+        [TestMethod]
+        public void FunctionDef_BareImmediateMatchingSavedRegisterIndex_DoesNotCreateFrame()
+        {
+            var src = @"
+address $00200000
+function immediate_only() {
+    addiu $t0, $zero, 16
+}
+";
+            var pairs = Compile(src);
+            Assert.AreEqual(MipsAssembler.Assemble("addiu $t0, $zero, 16"), pairs[0].Word);
+            Assert.AreEqual(MipsAssembler.Assemble("jr $ra"), pairs[1].Word);
         }
 
         [TestMethod]
