@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using CodeDesigner.Ps2.CheatEngine;
@@ -18,9 +19,9 @@ namespace CodeDesigner.Ps2.Bridge.Services
         public void Register(CommandRegistry reg)
         {
             reg.Add(c => HandleAssemble(c.Data),                                "ASSEMBLE");
-            reg.Add(c => HandleCompileCds(c.Data, c.Labels),                    "COMPILECDS");
-            reg.Add(c => HandleValidateCds(c.Data, c.Labels),                   "VALIDATECDS");
-            reg.Add(c => HandleCdsPatch(c.Data, c.Labels),                      "CDSPATCH");
+            reg.Add(c => HandleCompileCds(c.Data, c.Labels, c.FilePath),        "COMPILECDS");
+            reg.Add(c => HandleValidateCds(c.Data, c.Labels, c.FilePath),       "VALIDATECDS");
+            reg.Add(c => HandleCdsPatch(c.Data, c.Labels, c.FilePath),          "CDSPATCH");
             reg.Add(c => HandleDisassemble(c.Data, c.Address, c.GameId),        "DISASSEMBLE");
         }
 
@@ -59,7 +60,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
         /// <c>2AAAAAAA VVVVVVVV</c>
         /// </para>
         /// </summary>
-        private string HandleCompileCds(string? sourceCode, List<LabelEntry>? externalLabels = null)
+        private string HandleCompileCds(string? sourceCode, List<LabelEntry>? externalLabels = null, string? filePath = null)
         {
             try
             {
@@ -92,7 +93,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
 
                 // ── Parse ────────────────────────────────────────────────────────────
                 var parser = new CdsParser();
-                var items  = parser.Parse(sourceCode, basePath: "", externalLabels: extDict);
+                var items  = parser.Parse(sourceCode, basePath: GetCdsBasePath(filePath), externalLabels: extDict);
 
                 // ── Build results list ───────────────────────────────────────────────
                 var results = new List<InstructionResult>();
@@ -251,7 +252,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
         /// writing any memory or installing any breakpoints or watchpoints.
         /// </para>
         /// </summary>
-        private string HandleCdsPatch(string? sourceCode, List<LabelEntry>? externalLabels = null)
+        private string HandleCdsPatch(string? sourceCode, List<LabelEntry>? externalLabels = null, string? filePath = null)
         {
             try
             {
@@ -282,7 +283,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
 
                 // ── Parse ────────────────────────────────────────────────────────────
                 var parser = new CdsParser();
-                var items  = parser.Parse(sourceCode, basePath: "", externalLabels: extDict);
+                var items  = parser.Parse(sourceCode, basePath: GetCdsBasePath(filePath), externalLabels: extDict);
 
                 // Collect parser diagnostics as error results (informational — returned in response)
                 var errorResults = new List<InstructionResult>();
@@ -423,6 +424,19 @@ namespace CodeDesigner.Ps2.Bridge.Services
             }
         }
 
+        private static string GetCdsBasePath(string? filePath)
+        {
+            if (string.IsNullOrWhiteSpace(filePath)) return string.Empty;
+            try
+            {
+                return Path.GetDirectoryName(Path.GetFullPath(filePath)) ?? string.Empty;
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
         private static CdsSidecarResult CreateSidecarResult(CdsSyntaxItem sidecar) =>
             sidecar switch
             {
@@ -460,7 +474,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
         /// codes.  Returns all diagnostics (errors and warnings) produced by the preprocessor
         /// and parser, or a success message if no issues were found.
         /// </summary>
-        private string HandleValidateCds(string? sourceCode, List<LabelEntry>? externalLabels = null)
+        private string HandleValidateCds(string? sourceCode, List<LabelEntry>? externalLabels = null, string? filePath = null)
         {
             try
             {
@@ -488,7 +502,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
 
                 // ── Parse (no compile step) ──────────────────────────────────────
                 var parser = new CdsParser();
-                parser.Parse(sourceCode, basePath: "", externalLabels: extDict);
+                parser.Parse(sourceCode, basePath: GetCdsBasePath(filePath), externalLabels: extDict);
 
                 var diagnostics = parser.Diagnostics.ToList();
                 var results = new List<InstructionResult>();

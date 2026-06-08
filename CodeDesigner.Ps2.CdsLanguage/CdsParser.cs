@@ -66,9 +66,16 @@ namespace CodeDesigner.Ps2.CdsLanguage
         private static readonly Regex SetRegRegex =
             new(@"^setreg\s+\$?(\w+)\s*,\s*\$([0-9a-fA-F]+)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
-        // la $reg, :labelname  — load absolute address of label into reg via lui+ori
+        // la $reg, :labelname (or la $reg, labelname) — load absolute address of label into reg via lui+ori
         private static readonly Regex LaRegex =
-            new(@"^la\s+\$?(\w+)\s*,\s*:([a-zA-Z_][a-zA-Z0-9_.]*)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+            new(@"^la\s+\$?(\w+)\s*,\s*:?([a-zA-Z_][a-zA-Z0-9_.]*)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        private static readonly Regex LabelTokenRegex =
+            new(@"^[a-zA-Z_][a-zA-Z0-9_.]*$", RegexOptions.Compiled);
+
+        private static readonly Regex LabelOperandSuffixRegex =
+            new(@"^(?<core>.*?)(?<comma>,?)\s*:?(?<label>[a-zA-Z_][a-zA-Z0-9_.]*)$",
+                RegexOptions.Compiled);
 
         private static readonly Regex LabelDefRegex =
             new(@"^([a-zA-Z_][a-zA-Z0-9_]*):$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -145,7 +152,8 @@ namespace CodeDesigner.Ps2.CdsLanguage
             "beq",  "bne",  "blez",  "bgtz",  "bltz",  "bgez",
             "beql", "bnel", "blezl", "bgtzl", "bltzl", "bgezl",
             "bltzal", "bgezal", "bltzall", "bgezall",
-            "bc1t", "bc1f", "bc1tl", "bc1fl"
+            "bc1t", "bc1f", "bc1tl", "bc1fl",
+            "b", "beqz", "bnez"
         };
 
         // Jump mnemonics that encode a 26-bit absolute word address
@@ -383,35 +391,23 @@ namespace CodeDesigner.Ps2.CdsLanguage
                 var setRegMatch = SetRegRegex.Match(trimmed);
                 if (setRegMatch.Success)
                 {
-                    string reg = setRegMatch.Groups[1].Value;
-                    uint value = Convert.ToUInt32(setRegMatch.Groups[2].Value, 16);
-                    var item = BuildSetReg(lineNumber, trimmed, reg, value, currentAddress);
-                    current.Add(item);
+                    string rawReg = setRegMatch.Groups[1].Value;
+                    string? reg = NormalizeDirectiveGpr(rawReg, lineNumber, trimmed);
+                    if (reg is not null)
+                    {
+                        uint value = Convert.ToUInt32(setRegMatch.Groups[2].Value, 16);
+                        var item = BuildSetReg(lineNumber, trimmed, reg, value, currentAddress);
+                        current.Add(item);
+                    }
                     currentAddress += 8;
                     continue;
                 }
 
                 // ---- Load-address directive (la $reg, :label) ----
-                var laMatch = LaRegex.Match(trimmed);
-                if (laMatch.Success)
+                if (TryParseLa(trimmed, lineNumber, scopeStack, labelMap, currentAddress, out var laItem))
                 {
-                    string reg = laMatch.Groups[1].Value;
-                    string labelRef = laMatch.Groups[2].Value.ToLowerInvariant();
-                    string? qualified = ResolveLabel(labelRef, scopeStack, labelMap);
-                    if (qualified == null)
-                    {
-                        AddDiagnostic(CdsDiagnosticSeverity.Error, lineNumber,
-                            $"unresolved label reference ':{labelRef}' in '{trimmed}'", trimmed,
-                            $":{labelRef}", "CDS0012");
-                        // Emit a placeholder that decodes to (lui+ori) of address 0 so downstream
-                        // address tracking stays in sync.
-                        current.Add(BuildLa(lineNumber, trimmed, reg, labelRef, 0u, currentAddress));
-                    }
-                    else
-                    {
-                        uint addr = labelMap[qualified];
-                        current.Add(BuildLa(lineNumber, trimmed, reg, qualified, addr, currentAddress));
-                    }
+                    if (laItem is not null)
+                        current.Add(laItem);
                     currentAddress += 8;
                     continue;
                 }
@@ -422,17 +418,21 @@ namespace CodeDesigner.Ps2.CdsLanguage
                 {
                     string sizeSuffix = memMatch.Groups[1].Value;
                     uint offset  = Convert.ToUInt32(memMatch.Groups[2].Value, 16);
-                    string reg   = memMatch.Groups[3].Value;
+                    string rawReg = memMatch.Groups[3].Value;
+                    string? reg = NormalizeDirectiveGpr(rawReg, lineNumber, trimmed);
                     string opStr = memMatch.Groups[4].Value;
                     string operandStr = memMatch.Groups[5].Value;
-                    uint operand = ParseUInt(operandStr);
                     var memOp  = ParseMemOp(opStr);
                     var memSz  = ParseMemSize(sizeSuffix);
                     uint instrCount = memOp == CdsMemoryOperation.Assign ? 2u : 3u;
-                    var item = BuildMemOp(lineNumber, trimmed, offset, reg, memOp, operand, currentAddress, memSz);
-                    current.Add(item);
-                    AddDiagnostic(CdsDiagnosticSeverity.Warning, lineNumber,
-                        "register $t9 is clobbered by mem[] expansion", trimmed, "mem", "CDS0003");
+                    if (reg is not null)
+                    {
+                        uint operand = ParseUInt(operandStr);
+                        var item = BuildMemOp(lineNumber, trimmed, offset, reg, memOp, operand, currentAddress, memSz);
+                        current.Add(item);
+                        AddDiagnostic(CdsDiagnosticSeverity.Warning, lineNumber,
+                            "register $t9 is clobbered by mem[] expansion", trimmed, "mem", "CDS0003");
+                    }
                     currentAddress += instrCount * 4;
                     continue;
                 }
@@ -442,12 +442,15 @@ namespace CodeDesigner.Ps2.CdsLanguage
                 if (loadMatch.Success)
                 {
                     string sizeSuffix = loadMatch.Groups[1].Value;
-                    string targetReg = loadMatch.Groups[2].Value;
+                    string? targetReg = NormalizeDirectiveGpr(loadMatch.Groups[2].Value, lineNumber, trimmed);
                     uint offset = Convert.ToUInt32(loadMatch.Groups[3].Value, 16);
-                    string baseReg = loadMatch.Groups[4].Value;
-                    var memSz = ParseMemSize(sizeSuffix);
-                    var item = BuildLoadOp(lineNumber, trimmed, targetReg, offset, baseReg, currentAddress, memSz);
-                    current.Add(item);
+                    string? baseReg = NormalizeDirectiveGpr(loadMatch.Groups[4].Value, lineNumber, trimmed);
+                    if (targetReg is not null && baseReg is not null)
+                    {
+                        var memSz = ParseMemSize(sizeSuffix);
+                        var item = BuildLoadOp(lineNumber, trimmed, targetReg, offset, baseReg, currentAddress, memSz);
+                        current.Add(item);
+                    }
                     currentAddress += 4;
                     continue;
                 }
@@ -457,12 +460,15 @@ namespace CodeDesigner.Ps2.CdsLanguage
                 if (storeMatch.Success)
                 {
                     string sizeSuffix = storeMatch.Groups[1].Value;
-                    string sourceReg = storeMatch.Groups[2].Value;
+                    string? sourceReg = NormalizeDirectiveGpr(storeMatch.Groups[2].Value, lineNumber, trimmed);
                     uint offset = Convert.ToUInt32(storeMatch.Groups[3].Value, 16);
-                    string baseReg = storeMatch.Groups[4].Value;
-                    var memSz = ParseMemSize(sizeSuffix);
-                    var item = BuildStoreOp(lineNumber, trimmed, sourceReg, offset, baseReg, currentAddress, memSz);
-                    current.Add(item);
+                    string? baseReg = NormalizeDirectiveGpr(storeMatch.Groups[4].Value, lineNumber, trimmed);
+                    if (sourceReg is not null && baseReg is not null)
+                    {
+                        var memSz = ParseMemSize(sizeSuffix);
+                        var item = BuildStoreOp(lineNumber, trimmed, sourceReg, offset, baseReg, currentAddress, memSz);
+                        current.Add(item);
+                    }
                     currentAddress += 4;
                     continue;
                 }
@@ -873,26 +879,36 @@ namespace CodeDesigner.Ps2.CdsLanguage
             ref uint currentAddress,
             List<CdsSyntaxItem> items)
         {
-            // Extract optional :label suffix
-            string labelRef = string.Empty;
             string coreLine = line;
 
-            int colonIdx = line.LastIndexOf(':');
-            if (colonIdx > 0)
+            // Split mnemonic before extracting label operands so we can recognise both
+            // colon-qualified CDS references (`beq ..., :done`) and ordinary final
+            // label operands (`beq ..., done`) only for instructions that take labels.
+            string[] initialParts = coreLine.Split(new[] { ' ', '\t', ',' }, StringSplitOptions.RemoveEmptyEntries);
+            if (initialParts.Length == 0) return;
+
+            string mnemonic = initialParts[0].ToLowerInvariant();
+
+            // Be defensive: if a caller reaches the operation path with an `la` pseudo
+            // op, still expand it here instead of forwarding unknown `la` to the raw
+            // assembler. The normal directive path handles this before TryParseOperation.
+            if (TryParseLa(line, lineNumber, scopeStack, labelMap, currentAddress, out var laItem))
             {
-                string candidate = line.Substring(colonIdx + 1).Trim();
-                if (Regex.IsMatch(candidate, @"^[a-zA-Z_][a-zA-Z0-9_.]*$"))
-                {
-                    labelRef = candidate.ToLowerInvariant();
-                    coreLine = line.Substring(0, colonIdx).TrimEnd();
-                }
+                if (laItem is not null)
+                    items.Add(laItem);
+                currentAddress += 8;
+                return;
             }
 
-            // Split mnemonic
-            string[] parts = coreLine.Split(new[] { ' ', '\t', ',' }, StringSplitOptions.RemoveEmptyEntries);
-            if (parts.Length == 0) return;
+            string labelRef = string.Empty;
+            bool labelWasCommaOperand = false;
+            if (InstructionTakesLabelOperand(mnemonic)
+                && TryExtractInstructionLabelOperand(line, out var extractedCore, out var extractedLabel, out labelWasCommaOperand))
+            {
+                coreLine = extractedCore;
+                labelRef = extractedLabel;
+            }
 
-            string mnemonic = parts[0].ToLowerInvariant();
             string resolvedLabel = string.Empty;
 
             string assemblyLine = coreLine;
@@ -905,8 +921,9 @@ namespace CodeDesigner.Ps2.CdsLanguage
                 {
                     AddDiagnostic(CdsDiagnosticSeverity.Warning, lineNumber,
                         $"unresolved label reference ':{labelRef}' in '{line}'", line, $":{labelRef}", "CDS0001");
-                    // Keep coreLine as-is; encoding will fail naturally
-                    assemblyLine = coreLine;
+                    // Keep address tracking stable without emitting a second, less useful
+                    // assembler diagnostic for the now-missing label operand.
+                    assemblyLine = BuildPlaceholderLabelAssembly(mnemonic, coreLine, labelWasCommaOperand);
                 }
                 else
                 {
@@ -918,7 +935,7 @@ namespace CodeDesigner.Ps2.CdsLanguage
                         // Branch: replace label with 16-bit signed PC-relative offset (in words)
                         int offset = (int)((labelAddress - (currentAddress + 4)) / 4);
                         string offsetStr = $"${ (ushort)offset:X4}";
-                        assemblyLine = $"{coreLine} {offsetStr}";
+                        assemblyLine = AppendResolvedLabelOperand(coreLine, offsetStr, labelWasCommaOperand);
                     }
                     else if (JumpMnemonics.Contains(mnemonic))
                     {
@@ -929,7 +946,7 @@ namespace CodeDesigner.Ps2.CdsLanguage
                     else
                     {
                         // Other instruction – append the resolved hex address
-                        assemblyLine = $"{coreLine} $0{labelAddress:X8}";
+                        assemblyLine = AppendResolvedLabelOperand(coreLine, $"$0{labelAddress:X8}", labelWasCommaOperand);
                     }
                 }
             }
@@ -957,6 +974,110 @@ namespace CodeDesigner.Ps2.CdsLanguage
             });
 
             currentAddress += 4;
+        }
+
+        private static string AppendResolvedLabelOperand(string coreLine, string operand, bool labelWasCommaOperand)
+            => labelWasCommaOperand ? $"{coreLine}, {operand}" : $"{coreLine} {operand}";
+
+        private static bool InstructionTakesLabelOperand(string mnemonic)
+            => BranchMnemonics.Contains(mnemonic) || JumpMnemonics.Contains(mnemonic);
+
+        private static bool TryExtractInstructionLabelOperand(
+            string line,
+            out string coreLine,
+            out string labelRef,
+            out bool labelWasCommaOperand)
+        {
+            coreLine = line;
+            labelRef = string.Empty;
+            labelWasCommaOperand = false;
+
+            int colonIdx = line.LastIndexOf(':');
+            if (colonIdx > 0)
+            {
+                string candidate = line[(colonIdx + 1)..].Trim();
+                if (LabelTokenRegex.IsMatch(candidate))
+                {
+                    labelRef = candidate.ToLowerInvariant();
+                    coreLine = line[..colonIdx].TrimEnd();
+                    labelWasCommaOperand = coreLine.EndsWith(",", StringComparison.Ordinal);
+                    if (labelWasCommaOperand)
+                        coreLine = coreLine.TrimEnd(',').TrimEnd();
+                    return true;
+                }
+            }
+
+            var match = LabelOperandSuffixRegex.Match(line);
+            if (!match.Success) return false;
+
+            string candidateLabel = match.Groups["label"].Value;
+            string candidateCore = match.Groups["core"].Value.TrimEnd();
+            if (string.IsNullOrWhiteSpace(candidateCore)) return false;
+
+            // Avoid treating normal registers/immediates as labels. This intentionally
+            // only runs for branch/jump mnemonics via InstructionTakesLabelOperand.
+            if (CdsRegisters.TryGetGprIndex(candidateLabel, out _)) return false;
+            if (candidateLabel.StartsWith("0x", StringComparison.OrdinalIgnoreCase)) return false;
+
+            labelRef = candidateLabel.ToLowerInvariant();
+            labelWasCommaOperand = match.Groups["comma"].Value == ",";
+            coreLine = candidateCore;
+            if (labelWasCommaOperand)
+                coreLine = coreLine.TrimEnd(',').TrimEnd();
+            return true;
+        }
+
+        private static string BuildPlaceholderLabelAssembly(string mnemonic, string coreLine, bool labelWasCommaOperand)
+        {
+            if (BranchMnemonics.Contains(mnemonic))
+                return AppendResolvedLabelOperand(coreLine, "$0000", labelWasCommaOperand);
+            if (JumpMnemonics.Contains(mnemonic))
+                return $"{mnemonic} $00000000";
+            return AppendResolvedLabelOperand(coreLine, "$00000000", labelWasCommaOperand);
+        }
+
+        private bool TryParseLa(
+            string line,
+            int lineNumber,
+            Stack<string> scopeStack,
+            Dictionary<string, uint> labelMap,
+            uint currentAddress,
+            out LaSyntaxItem? item)
+        {
+            item = null;
+            var laMatch = LaRegex.Match(line);
+            if (!laMatch.Success) return false;
+
+            string rawReg = laMatch.Groups[1].Value;
+            string? reg = NormalizeDirectiveGpr(rawReg, lineNumber, line);
+            if (reg is null) return true;
+
+            string labelRef = laMatch.Groups[2].Value.ToLowerInvariant();
+            string? qualified = ResolveLabel(labelRef, scopeStack, labelMap);
+            if (qualified == null)
+            {
+                AddDiagnostic(CdsDiagnosticSeverity.Error, lineNumber,
+                    $"unresolved label reference ':{labelRef}' in '{line}'", line,
+                    $":{labelRef}", "CDS0012");
+                item = BuildLa(lineNumber, line, reg, labelRef, 0u, currentAddress);
+            }
+            else
+            {
+                uint addr = labelMap[qualified];
+                item = BuildLa(lineNumber, line, reg, qualified, addr, currentAddress);
+            }
+
+            return true;
+        }
+
+        private string? NormalizeDirectiveGpr(string token, int lineNumber, string lineText)
+        {
+            string? normalized = CdsRegisters.NormalizeGpr(token);
+            if (normalized is not null) return normalized.TrimStart('$');
+
+            AddDiagnostic(CdsDiagnosticSeverity.Error, lineNumber,
+                $"unrecognized GPR register '{token}'", lineText, token, "CDS0013");
+            return null;
         }
 
         // -----------------------------------------------------------------------

@@ -294,17 +294,10 @@ itoa_loop:
     addiu $t0, $t0, 1
     bne  $a0, $zero, :itoa_loop
     nop
-    j    :itoa_finish
+    j    :itoa_maybe_sign
     nop
-itoa_negative:
-    subu $a0, $zero, $a0       // negate: use subu instead of negu
-    addi $t3, $zero, 1
-    sb   $45, 0($t0)           // write '-' character
-    addiu $t0, $t0, 1
-    addiu $t1, $t1, 1
-    j    :itoa_loop
-    nop
-    // optionally prepend '-' for negatives
+itoa_maybe_sign:
+    // Append '-' before reversing so it becomes the leading character.
     beq  $t1, $zero, :itoa_finish
     nop
     addiu $t8, $zero, 45      // '-'

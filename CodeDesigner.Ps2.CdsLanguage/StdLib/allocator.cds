@@ -18,7 +18,8 @@ lib_heap_init:
     addi  $v0, $zero, 0
     beq   $a0, $zero, :heap_init_fail
     addiu $t0, $a0, 0
-    sw    $t0, 0(_heap_state)        // store cur
+    la    $t9, :_heap_state        // load heap-state storage address
+    sw    $t0, 0($t9)              // store cur
     addu  $t1, $a0, $a1
     sw    $t1, 4($t9)              // end = base + size
     addi  $v0, $zero, 1

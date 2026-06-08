@@ -1640,13 +1640,16 @@ export class SocketClient {
      * @param labels Optional pre-resolved pointer-manager labels (e.g. from PointerManagerProvider.getResolvedLabels()).
      *               These are injected into the compiler so CDS source can reference them as `:seal.health` or `@seal.health`.
      */
-    public async compileCds(sourceCode: string, labels?: LabelEntry[]): Promise<{ results: InstructionResult[]; sidecars: CdsSidecarResult[] }> {
+    public async compileCds(sourceCode: string, labels?: LabelEntry[], filePath?: string): Promise<{ results: InstructionResult[]; sidecars: CdsSidecarResult[] }> {
         const command: CommandMessage = {
             Command: 'COMPILECDS',
             Data: sourceCode
         };
         if (labels && labels.length > 0) {
             command.Labels = labels;
+        }
+        if (filePath) {
+            command.FilePath = filePath;
         }
 
         const response = await this.sendCommand(command);
@@ -1664,13 +1667,16 @@ export class SocketClient {
         };
     }
 
-    public async validateCds(sourceCode: string, labels?: LabelEntry[]): Promise<{ success: boolean; message?: string; diagnostics: CdsDiagnostic[] }> {
+    public async validateCds(sourceCode: string, labels?: LabelEntry[], filePath?: string): Promise<{ success: boolean; message?: string; diagnostics: CdsDiagnostic[] }> {
         const command: CommandMessage = {
             Command: 'VALIDATECDS',
             Data: sourceCode
         };
         if (labels && labels.length > 0) {
             command.Labels = labels;
+        }
+        if (filePath) {
+            command.FilePath = filePath;
         }
 
         const response = await this.sendCommand(command);
