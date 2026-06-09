@@ -10,6 +10,7 @@ import {
 } from '@angular/core';
 import { getVsCodeApi } from '../shared/vscode-api';
 import { PageHeaderComponent } from '../shared/page-header.component';
+import { IconComponent } from '../shared/icon.component';
 import './cheats-editor-page.css';
 
 /** A game that owns cheat lists — mirrors CheatGameInfo on the C# side. */
@@ -61,7 +62,7 @@ const CODE_TOKEN_RE = /[0-9A-Fa-f?*]+|\s+|\S+/g;
 @Component({
   selector: 'app-cheats-editor-page',
   standalone: true,
-  imports: [PageHeaderComponent],
+  imports: [PageHeaderComponent, IconComponent],
   encapsulation: ViewEncapsulation.None,
   template: `
     <div class="ce-shell">
@@ -126,10 +127,23 @@ const CODE_TOKEN_RE = /[0-9A-Fa-f?*]+|\s+|\S+/g;
                   title="Add a new cheat list">＋ Build</button>
           <button class="ce-btn" [disabled]="!selectedBuildId()" (click)="deleteBuild()"
                   title="Delete the selected cheat list">🗑 Delete</button>
-          <button class="ce-btn" [disabled]="busy()" (click)="bulkImport()"
-                  title="Bulk-import cheats from a CheatCodeArchive folder">⤵ Import</button>
+          <button class="ce-btn ce-icon-btn" [disabled]="busy()" (click)="refreshArchive()"
+                  title="Refresh cheats from the project's CheatCodeArchive submodule">
+            <app-icon name="refreshcw" [size]="13" /><span>Refresh</span>
+          </button>
+          <button class="ce-btn ce-icon-btn" [disabled]="busy()" (click)="bulkImport()"
+                  title="Bulk-import cheats from a selected CheatCodeArchive folder">
+            <app-icon name="download" [size]="13" /><span>Import</span>
+          </button>
         </div>
       </div>
+
+      @if (busy()) {
+        <div class="ce-refresh-bar">
+          <div class="ce-refresh-bar-inner"></div>
+          <span class="ce-refresh-text">Refreshing CheatCodeArchive… this can take several minutes</span>
+        </div>
+      }
 
       <!-- ══ Panel 2 — editor ══════════════════════════════════════════ -->
       <div class="ce-panel ce-panel-mid">
@@ -427,6 +441,11 @@ export class CheatsEditorPageComponent implements AfterViewInit {
     const b = this.selectedBuild();
     if (!b) { return; }
     this.vscode.postMessage({ type: 'deleteBuild', cheatListId: b.id });
+  }
+
+  refreshArchive(): void {
+    this.busy.set(true);
+    this.vscode.postMessage({ type: 'refreshArchive' });
   }
 
   bulkImport(): void {

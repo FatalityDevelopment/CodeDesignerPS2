@@ -4107,7 +4107,7 @@ export class SocketClient {
     /** CHEATEDITOR_IMPORT — runs the bulk cheat importer against an archive folder. */
     public async cheatEditorImport(archiveRoot: string): Promise<string> {
         const response = await this.sendCommand(
-            { Command: 'CHEATEDITOR_IMPORT', FilePath: archiveRoot }, 600000);
+            { Command: 'CHEATEDITOR_IMPORT', FilePath: archiveRoot }, 3600000);
         if (!response.Success) { throw new Error(response.Error || 'CHEATEDITOR_IMPORT failed'); }
         return response.Message ?? 'Import complete.';
     }

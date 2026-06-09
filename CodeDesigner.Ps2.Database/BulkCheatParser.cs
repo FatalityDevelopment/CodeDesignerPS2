@@ -10,35 +10,23 @@ using Microsoft.EntityFrameworkCore;
 
 namespace CodeDesigner.Ps2.Database;
 
+public sealed class BulkCheatImportResult
+{
+    public int FilesProcessed { get; set; }
+    public int FilesImported { get; set; }
+    public int FilesSkipped { get; set; }
+    public int CheatLists { get; set; }
+    public int Cheats { get; set; }
+}
+
 /// <summary>
-/// Walks the <c>Database/MEMORY-PS2-*/</c> folders inside the CheatCodeArchive
-/// checkout and upserts all PS2 cheat data into the database.
+/// Walks the <c>Database/</c> folders inside the CheatCodeArchive checkout and
+/// upserts all PS2 cheat data into the database.
 /// </summary>
-/// <remarks>
-/// CMP file format reference:
-/// <code>
-///   ^1 = HASH: XXXXXXXX          ← CRC / hash (optional)
-///   ^2 = GameID: SLUS_202.65     ← disc serial (optional)
-///   ^3 = NAME: Game Title        ← game name
-///   !Section Name:               ← category header
-///   +Cheat Name                  ← cheat entry
-///   %Credits: Author             ← author (optional, follows the cheat name)
-///   $XXXXXXXX YYYYYYYY           ← code line (address + data)
-///   !!                           ← end of section
-/// </code>
-/// </remarks>
 public class BulkCheatParser
 {
-    // PS2 sub-folders to process inside Database/.
-    private static readonly string[] Ps2Folders =
-    [
-        "MEMORY-PS2-CODEBREAKER",
-        "MEMORY-PS2-GSHI-DB",
-        "MEMORY-PS2-CMP",
-        "MEMORY-PS2-XPLODER-DB-[EU]",
-    ];
+    private const string DefaultSection = "Others";
 
-    // Friendly source label keyed on folder name (prefix match).
     private static readonly Dictionary<string, string> SourceLabels = new(StringComparer.OrdinalIgnoreCase)
     {
         ["MEMORY-PS2-CODEBREAKER"]     = "CodeBreaker",
@@ -47,26 +35,34 @@ public class BulkCheatParser
         ["MEMORY-PS2-XPLODER-DB-[EU]"] = "Xploder (EU)",
     };
 
-    // Region in filename: e.g. "(NTSC-U)", "(Pal-M6)", "(PAL)"
     private static readonly Regex RegionInFilename =
-        new(@"\((?<region>[A-Za-z]+-[A-Za-z0-9]+)\)", RegexOptions.Compiled);
+        new(@"\((?<region>[A-Za-z]+(?:-[A-Za-z0-9]+)?)\)", RegexOptions.Compiled);
 
-    // Header lines: "^N = KEY: value"
+    private static readonly Regex Serial =
+        new(@"\b(?<serial>S(?:L|C|I|P|C)?(?:US|ES|PS|PM|ED|CM|CD|EC|EA|UC|JA|KS)[-_ ]?\d{3}[\._ -]?\d{2})\b",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     private static readonly Regex HeaderLine =
-        new(@"^\^[0-9]+\s*=\s*(?<key>[A-Za-z]+):\s*(?<value>.+)$", RegexOptions.Compiled);
+        new(@"^(?:\^[0-9]+\s*=\s*)?(?<key>NAME|GAME|TITLE|GAMEID|GAME ID|SERIAL|HASH|CRC|REGION)\s*[:=]\s*(?<value>.+)$",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
-    // Code lines: "$XXXXXXXX YYYYYYYY"
-    private static readonly Regex CodeLine =
-        new(@"^\$(?<code>[0-9A-Fa-f]{8}\s+[0-9A-Fa-f]{8})\s*$", RegexOptions.Compiled);
+    private static readonly Regex CmpCodeLine =
+        new(@"^\$\s*(?<code>[0-9A-Fa-f?*]{8}\s+[0-9A-Fa-f?*]{8}(?:\s+[0-9A-Fa-f?*]{1,8})*)\s*$",
+            RegexOptions.Compiled);
+
+    private static readonly Regex PlainCodeLine =
+        new(@"^(?<code>[0-9A-Fa-f?*]{8}(?:\s+[0-9A-Fa-f?*]{1,8}){1,3})\s*$",
+            RegexOptions.Compiled);
+
+    private static readonly Regex SectionMarker =
+        new(@"^\[--SectionStart:(?<name>.*)--\]$", RegexOptions.Compiled);
+
+    private static readonly Regex BracketLine =
+        new(@"^\[(?<label>.+)\]$", RegexOptions.Compiled);
 
     private readonly CodeDesignerDbContext _db;
     private readonly string _archiveRoot;
 
-    /// <param name="db">Database context to write into.</param>
-    /// <param name="archiveRoot">
-    /// Absolute path to the root of the CheatCodeArchive checkout
-    /// (the directory that contains the <c>Database/</c> folder).
-    /// </param>
     public BulkCheatParser(CodeDesignerDbContext db, string archiveRoot)
     {
         _db = db;
@@ -74,102 +70,110 @@ public class BulkCheatParser
     }
 
     /// <summary>
-    /// Run the full import. Existing records matched by disc + source title are
-    /// replaced; new records are inserted.
+    /// Run the full import. Existing records matched by game + source-list title
+    /// are replaced; new records are inserted.
     /// </summary>
-    public async Task RunAsync(CancellationToken ct = default)
+    public async Task<BulkCheatImportResult> RunAsync(CancellationToken ct = default)
     {
-        var dbRoot = Path.Combine(_archiveRoot, "Database");
-        if (!Directory.Exists(dbRoot))
-            throw new DirectoryNotFoundException(
-                $"CheatCodeArchive Database folder not found: {dbRoot}");
+        var dbRoot = ResolveDatabaseRoot(_archiveRoot);
+        var caches = await LoadCachesAsync(ct);
+        var pendingCheatLists = new Dictionary<string, CheatList>(StringComparer.OrdinalIgnoreCase);
+        var result = new BulkCheatImportResult();
 
-        // Pre-load lookup caches to avoid per-row DB queries.
+        foreach (var filePath in Directory.EnumerateFiles(dbRoot, "*.txt", SearchOption.AllDirectories))
+        {
+            ct.ThrowIfCancellationRequested();
+            result.FilesProcessed++;
+            pendingCheatLists.Clear();
+
+            try
+            {
+                await ProcessFileAsync(
+                    dbRoot, filePath,
+                    caches.RegionCache, caches.GameCache,
+                    caches.DiscsBySerial, caches.DiscsByRegion,
+                    caches.CheatListCache, pendingCheatLists,
+                    ct);
+
+                if (pendingCheatLists.Count == 0)
+                    continue;
+
+                await _db.SaveChangesAsync(ct);
+                foreach (var (key, cl) in pendingCheatLists)
+                    caches.CheatListCache[key] = cl;
+                result.FilesImported++;
+            }
+            catch (Exception ex)
+            {
+                result.FilesSkipped++;
+                Console.Error.WriteLine($"[BulkCheatParser] Skipping {filePath}: {FormatException(ex)}");
+
+                // A failed SaveChanges leaves the current DbContext graph in an
+                // unknown state. Clear it and rebuild caches from already-committed
+                // rows so one bad archive file never poisons the rest of the import.
+                _db.ChangeTracker.Clear();
+                caches = await LoadCachesAsync(ct);
+            }
+        }
+
+        result.CheatLists = await _db.CheatLists.CountAsync(ct);
+        result.Cheats = await _db.Cheats.CountAsync(ct);
+        return result;
+    }
+
+    private async Task<ImportCaches> LoadCachesAsync(CancellationToken ct)
+    {
         var regionCache = await _db.GameRegions
             .ToDictionaryAsync(r => r.Name, StringComparer.OrdinalIgnoreCase, ct);
-        var gameCache = await _db.Games
-            .ToDictionaryAsync(g => g.Title, StringComparer.OrdinalIgnoreCase, ct);
+        var gameCache = (await _db.Games.ToListAsync(ct))
+            .GroupBy(g => g.Title, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
 
-        // Pre-load disc caches keyed by (game title + serial) and (game title + region name).
         var discsBySerial = new Dictionary<string, GameDisc>(StringComparer.OrdinalIgnoreCase);
         var discsByRegion = new Dictionary<string, GameDisc>(StringComparer.OrdinalIgnoreCase);
-        foreach (var disc in await _db.GameDiscs
-                     .Include(d => d.Game)
-                     .Include(d => d.GameRegion)
-                     .ToListAsync(ct))
+        foreach (var disc in await _db.GameDiscs.Include(d => d.Game).Include(d => d.GameRegion).ToListAsync(ct))
         {
             if (disc.Serial != null)
                 discsBySerial[$"{disc.Game.Title}||{disc.Serial}"] = disc;
             discsByRegion[$"{disc.Game.Title}||{disc.GameRegion.Name}"] = disc;
         }
 
-        // Pre-load cheat list cache (no cheats included — they are bulk-deleted on re-import).
-        var cheatListCache = await _db.CheatLists
-            .ToDictionaryAsync(cl => (cl.GameDiscId, cl.Title), ct);
+        var cheatListCache = (await _db.CheatLists
+                .Include(cl => cl.Game)
+                .Where(cl => cl.Game != null)
+                .ToListAsync(ct))
+            .GroupBy(cl => $"{cl.Game!.Title}||{cl.Title}", StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
 
-        // Tracks cheat lists staged but not yet saved in the current folder pass.
-        // Key: "{gameTitle}||{listTitle}" — used to avoid duplicates within a folder.
-        var pendingCheatLists = new Dictionary<string, CheatList>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var folderName in Ps2Folders)
-        {
-            var folderPath = Path.Combine(dbRoot, folderName);
-            if (!Directory.Exists(folderPath))
-                continue;
-
-            var source = SourceLabels.TryGetValue(folderName, out var lbl) ? lbl : folderName;
-
-            pendingCheatLists.Clear();
-
-            foreach (var filePath in Directory.EnumerateFiles(folderPath, "*.txt"))
-            {
-                try
-                {
-                    await ProcessFileAsync(
-                        filePath, source,
-                        regionCache, gameCache,
-                        discsBySerial, discsByRegion,
-                        cheatListCache, pendingCheatLists,
-                        ct);
-                }
-                catch (Exception ex)
-                {
-                    // Log and continue — a bad file must not abort the whole import.
-                    Console.Error.WriteLine(
-                        $"[BulkCheatParser] Skipping {filePath}: {ex.Message}");
-                }
-            }
-
-            await _db.SaveChangesAsync(ct);
-
-            // Merge newly persisted cheat lists into the main cache so that
-            // subsequent folders can find them by their now-assigned disc Id.
-            foreach (var cl in pendingCheatLists.Values)
-                cheatListCache[(cl.GameDiscId, cl.Title)] = cl;
-        }
+        return new ImportCaches(regionCache, gameCache, discsBySerial, discsByRegion, cheatListCache);
     }
 
-    // ── File processing ──────────────────────────────────────────────────────
+    private static string ResolveDatabaseRoot(string archiveRoot)
+    {
+        if (Directory.Exists(Path.Combine(archiveRoot, "Database")))
+            return Path.Combine(archiveRoot, "Database");
+        if (string.Equals(Path.GetFileName(archiveRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)),
+                "Database", StringComparison.OrdinalIgnoreCase) && Directory.Exists(archiveRoot))
+            return archiveRoot;
+        throw new DirectoryNotFoundException($"CheatCodeArchive Database folder not found under: {archiveRoot}");
+    }
 
     private async Task ProcessFileAsync(
+        string dbRoot,
         string filePath,
-        string source,
         Dictionary<string, GameRegion> regionCache,
         Dictionary<string, Game> gameCache,
         Dictionary<string, GameDisc> discsBySerial,
         Dictionary<string, GameDisc> discsByRegion,
-        Dictionary<(int? discId, string title), CheatList> cheatListCache,
+        Dictionary<string, CheatList> cheatListCache,
         Dictionary<string, CheatList> pendingCheatLists,
         CancellationToken ct)
     {
         var parsed = ParseFile(filePath);
-        if (string.IsNullOrWhiteSpace(parsed.Name))
+        if (string.IsNullOrWhiteSpace(parsed.Name) || parsed.Cheats.Count == 0)
             return;
 
-        // Resolve region.
-        var regionName = ResolveRegionName(
-            parsed.RegionHint ?? RegionFromFilename(Path.GetFileName(filePath)),
-            parsed.Serial);
+        var regionName = Truncate(ResolveRegionName(parsed.RegionHint ?? RegionFromFilename(Path.GetFileName(filePath)), parsed.Serial), 64);
         var region = GetOrCreate(regionCache, regionName, () =>
         {
             var r = new GameRegion { Name = regionName };
@@ -177,31 +181,24 @@ public class BulkCheatParser
             return r;
         });
 
-        // Resolve game.
-        var game = GetOrCreate(gameCache, parsed.Name, () =>
+        var gameTitle = CleanTitle(parsed.Name!);
+        var game = GetOrCreate(gameCache, gameTitle, () =>
         {
-            var g = new Game { Title = parsed.Name };
+            var g = new Game { Title = gameTitle };
             _db.Games.Add(g);
             return g;
         });
 
-        // Resolve disc via in-memory cache (no DB hit).
         var disc = ResolveDisc(game, region, parsed.Serial, parsed.Hash, discsBySerial, discsByRegion);
-
-        // CheatList title encodes the source so multiple databases don't collide.
-        var listTitle = $"[{source}] {parsed.Name} [{regionName}]";
+        var source = SourceFor(dbRoot, filePath);
+        var listTitle = BuildListTitle(source, game.Title, regionName);
+        var listKey = $"{game.Title}||{listTitle}";
 
         CheatList cheatList;
-
-        // 1. Check the in-folder pending cache first so two files that resolve to
-        //    the same disc+title within one folder don't create duplicate lists.
-        var pendingKey = $"{game.Title}||{listTitle}";
-        if (pendingCheatLists.TryGetValue(pendingKey, out var pendingList))
+        if (pendingCheatLists.TryGetValue(listKey, out var pendingList))
         {
             cheatList = pendingList;
             cheatList.UpdatedAt = DateTime.UtcNow;
-            // Detach the previously staged cheats so they are not double-inserted.
-            // ToList() snapshots the collection before we clear it on the next line.
             foreach (var c in cheatList.Cheats.ToList())
             {
                 foreach (var line in c.CheatLines)
@@ -210,29 +207,20 @@ public class BulkCheatParser
             }
             cheatList.Cheats.Clear();
         }
-        // 2. Check the pre-loaded DB cache (only valid for discs that already have an Id).
-        else if (disc.Id > 0 && cheatListCache.TryGetValue((disc.Id, listTitle), out var existingList))
+        else if (cheatListCache.TryGetValue(listKey, out var existingList))
         {
             cheatList = existingList;
+            cheatList.Game = game;
+            cheatList.GameDisc = disc;
             cheatList.UpdatedAt = DateTime.UtcNow;
-            // Bulk-delete existing cheats without loading them into memory.
-            // CheatLines are removed first so the delete is explicit and order-safe
-            // even though the Cheat->CheatLine FK cascade would also remove them.
-            var cheatIds = await _db.Cheats
+            var oldCheats = await _db.Cheats
+                .Include(c => c.CheatLines)
                 .Where(c => c.CheatListId == cheatList.Id)
-                .Select(c => c.Id)
                 .ToListAsync(ct);
-            if (cheatIds.Count > 0)
-            {
-                await _db.CheatLines
-                    .Where(cl => cheatIds.Contains(cl.CheatId))
-                    .ExecuteDeleteAsync(ct);
-                await _db.Cheats
-                    .Where(c => c.CheatListId == cheatList.Id)
-                    .ExecuteDeleteAsync(ct);
-            }
+            if (oldCheats.Count > 0)
+                _db.Cheats.RemoveRange(oldCheats);
+            pendingCheatLists[listKey] = cheatList;
         }
-        // 3. No match anywhere — create a brand-new list.
         else
         {
             cheatList = new CheatList
@@ -244,7 +232,7 @@ public class BulkCheatParser
                 UpdatedAt = DateTime.UtcNow,
             };
             _db.CheatLists.Add(cheatList);
-            pendingCheatLists[pendingKey] = cheatList;
+            pendingCheatLists[listKey] = cheatList;
         }
 
         int sortOrder = 0;
@@ -253,19 +241,16 @@ public class BulkCheatParser
             var cheat = new Cheat
             {
                 Label = entry.Name,
-                Author = string.IsNullOrWhiteSpace(entry.Author) ? null : entry.Author,
-                Section = string.IsNullOrWhiteSpace(entry.Section) ? null : entry.Section,
+                Author = string.IsNullOrWhiteSpace(entry.Author) ? null : Truncate(entry.Author, 256),
+                Description = string.IsNullOrWhiteSpace(entry.Description) ? null : entry.Description.Trim(),
+                Section = string.IsNullOrWhiteSpace(entry.Section) ? DefaultSection : Truncate(entry.Section, 256),
                 IsEnabled = false,
                 SortOrder = sortOrder++,
             };
 
             int lineOrder = 0;
-            foreach (var code in entry.Codes)
-                cheat.CheatLines.Add(new CheatLine
-                {
-                    Code = code.ToUpperInvariant(),
-                    SortOrder = lineOrder++,
-                });
+            foreach (var code in entry.Codes.Distinct(StringComparer.OrdinalIgnoreCase))
+                cheat.CheatLines.Add(new CheatLine { Code = code.ToUpperInvariant(), SortOrder = lineOrder++ });
 
             cheatList.Cheats.Add(cheat);
         }
@@ -280,10 +265,8 @@ public class BulkCheatParser
         Dictionary<string, GameDisc> discsByRegion)
     {
         GameDisc? disc = null;
-
         if (!string.IsNullOrWhiteSpace(serial))
             discsBySerial.TryGetValue($"{game.Title}||{serial}", out disc);
-
         disc ??= discsByRegion.GetValueOrDefault($"{game.Title}||{region.Name}");
 
         if (disc is null)
@@ -292,118 +275,116 @@ public class BulkCheatParser
             {
                 Game = game,
                 GameRegion = region,
-                Serial = string.IsNullOrWhiteSpace(serial) ? null : serial,
-                CRC = string.IsNullOrWhiteSpace(hash) ? null : hash.ToUpperInvariant(),
+                Serial = string.IsNullOrWhiteSpace(serial) ? null : Truncate(serial, 32),
+                CRC = string.IsNullOrWhiteSpace(hash) ? null : Truncate(hash.ToUpperInvariant(), 16),
             };
             _db.GameDiscs.Add(disc);
-            // Cache the new disc so subsequent files within this import run
-            // for the same game + serial/region resolve to the same object.
             if (disc.Serial != null)
                 discsBySerial[$"{game.Title}||{disc.Serial}"] = disc;
             discsByRegion[$"{game.Title}||{region.Name}"] = disc;
         }
         else
         {
-            // Fill in missing fields if we now have them.
             if (disc.CRC is null && !string.IsNullOrWhiteSpace(hash))
-                disc.CRC = hash.ToUpperInvariant();
+                disc.CRC = Truncate(hash.ToUpperInvariant(), 16);
             if (disc.Serial is null && !string.IsNullOrWhiteSpace(serial))
             {
-                disc.Serial = serial;
-                discsBySerial[$"{game.Title}||{serial}"] = disc;
+                disc.Serial = Truncate(serial, 32);
+                discsBySerial[$"{game.Title}||{disc.Serial}"] = disc;
             }
         }
-
         return disc;
     }
 
-    // ── CMP plain-text parser ────────────────────────────────────────────────
-
     private static ParsedFile ParseFile(string path)
     {
-        var result = new ParsedFile();
+        var result = new ParsedFile { Name = TitleFromPath(path) };
         ParsedCheat? current = null;
-        string? currentSection = null;
+        string currentSection = DefaultSection;
+        var pendingDescription = new List<string>();
+        string? pendingName = null;
+        var generated = 1;
 
         foreach (var rawLine in File.ReadLines(path))
         {
-            var line = rawLine.TrimEnd();
-
-            // Skip blank lines and comment lines.
-            if (string.IsNullOrWhiteSpace(line) || line.TrimStart().StartsWith('\\'))
+            var line = rawLine.Trim();
+            if (line.Length == 0)
                 continue;
 
-            // Header: ^N = KEY: value
-            if (line.StartsWith('^'))
+            if (TryApplyHeader(line, result))
+                continue;
+
+            if (TryReadComment(line, out var comment))
             {
-                var m = HeaderLine.Match(line);
-                if (m.Success)
-                {
-                    var key = m.Groups["key"].Value.ToUpperInvariant();
-                    var val = m.Groups["value"].Value.Trim();
-                    switch (key)
-                    {
-                        case "NAME":   result.Name = val; break;
-                        case "GAMEID": result.Serial = NormalizeSerial(val); break;
-                        case "HASH":   result.Hash = val; break;
-                    }
-                }
+                ApplyComment(comment, current, pendingDescription);
                 continue;
             }
 
-            // Section header: !Section Name:
-            if (line.StartsWith('!'))
+            var section = TryReadSection(line);
+            if (section is not null)
             {
                 CommitCheat(result, current);
                 current = null;
-                currentSection = line.Length > 1 ? line[1..].TrimEnd(':').Trim() : null;
+                pendingName = null;
+                currentSection = section.Length == 0 ? DefaultSection : section;
+                pendingDescription.Clear();
                 continue;
             }
 
-            // Section end: !!
             if (line == "!!")
             {
                 CommitCheat(result, current);
                 current = null;
-                currentSection = null;
+                currentSection = DefaultSection;
+                pendingName = null;
+                pendingDescription.Clear();
                 continue;
             }
 
-            // Cheat entry: +Cheat Name
-            if (line.StartsWith('+'))
+            if (TryReadCheatName(line, out var explicitName))
             {
                 CommitCheat(result, current);
-                current = new ParsedCheat
-                {
-                    Name = line[1..].Trim(),
-                    Section = currentSection,
-                };
+                current = NewCheat(explicitName, currentSection, pendingDescription);
+                pendingDescription.Clear();
+                pendingName = null;
                 continue;
             }
 
-            if (current is null)
-                continue;
-
-            // Author: %Credits: name  or  %Credit: name
-            if (line.StartsWith('%'))
+            if (TryReadAuthor(line, out var author))
             {
-                var colon = line.IndexOf(':');
-                if (colon >= 0)
+                if (current is not null)
+                    current.Author = Append(current.Author, author);
+                else
+                    pendingDescription.Add($"Author: {author}");
+                continue;
+            }
+
+            if (TryReadCode(line, out var code))
+            {
+                if (current is null)
                 {
-                    var author = line[(colon + 1)..].Trim();
-                    current.Author = string.IsNullOrEmpty(current.Author)
-                        ? author
-                        : current.Author + ", " + author;
+                    current = NewCheat(pendingName ?? $"Code {generated++}", currentSection, pendingDescription);
+                    pendingDescription.Clear();
+                    pendingName = null;
                 }
+                current.Codes.Add(code);
                 continue;
             }
 
-            // Code line: $XXXXXXXX YYYYYYYY
-            if (line.StartsWith('$'))
+            if (current is not null && current.Codes.Count > 0)
             {
-                var m = CodeLine.Match(line);
-                if (m.Success)
-                    current.Codes.Add(m.Groups["code"].Value);
+                CommitCheat(result, current);
+                current = NewCheat(line, currentSection, pendingDescription);
+                pendingDescription.Clear();
+                pendingName = null;
+            }
+            else if (current is not null)
+            {
+                current.Description = Append(current.Description, line, Environment.NewLine);
+            }
+            else
+            {
+                pendingName = line;
             }
         }
 
@@ -411,32 +392,209 @@ public class BulkCheatParser
         return result;
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
+    private static bool TryApplyHeader(string line, ParsedFile result)
+    {
+        var m = HeaderLine.Match(line.TrimStart('^'));
+        if (!m.Success)
+            m = HeaderLine.Match(line);
+        if (!m.Success)
+        {
+            var sm = Serial.Match(line);
+            if (sm.Success && result.Serial is null)
+                result.Serial = NormalizeSerial(sm.Groups["serial"].Value);
+            return false;
+        }
+
+        var key = m.Groups["key"].Value.Replace(" ", string.Empty).ToUpperInvariant();
+        var val = m.Groups["value"].Value.Trim();
+        switch (key)
+        {
+            case "NAME":
+            case "GAME":
+            case "TITLE": result.Name = val; break;
+            case "GAMEID":
+            case "SERIAL": result.Serial = NormalizeSerial(val); break;
+            case "HASH":
+            case "CRC": result.Hash = Regex.Replace(val, @"[^0-9A-Fa-f]", string.Empty); break;
+            case "REGION": result.RegionHint = NormalizeRegion(val); break;
+        }
+        return true;
+    }
+
+    private static bool TryReadComment(string line, out string comment)
+    {
+        comment = string.Empty;
+        var trimmed = line.TrimStart();
+        if (trimmed.StartsWith("//", StringComparison.Ordinal))
+            comment = trimmed[2..].Trim();
+        else if (trimmed.StartsWith('\\') || trimmed.StartsWith(';'))
+            comment = trimmed[1..].Trim();
+        else if (trimmed.StartsWith('#'))
+            comment = trimmed[1..].Trim();
+        return comment.Length > 0;
+    }
+
+    private static void ApplyComment(string comment, ParsedCheat? current, List<string> pendingDescription)
+    {
+        if (TryReadAuthor(comment, out var author))
+        {
+            if (current is not null)
+                current.Author = Append(current.Author, author);
+            else
+                pendingDescription.Add($"Author: {author}");
+            return;
+        }
+
+        if (comment.StartsWith("Description:", StringComparison.OrdinalIgnoreCase))
+            comment = comment[12..].Trim();
+
+        if (current is not null)
+            current.Description = Append(current.Description, comment, Environment.NewLine);
+        else
+            pendingDescription.Add(comment);
+    }
+
+    private static string? TryReadSection(string line)
+    {
+        var sectionMatch = SectionMarker.Match(line);
+        if (sectionMatch.Success)
+            return sectionMatch.Groups["name"].Value.Trim();
+
+        if (line.StartsWith('!') && line != "!!")
+            return line[1..].TrimEnd(':').Trim();
+
+        if (line.EndsWith(':') && !HeaderLine.IsMatch(line) && !PlainCodeLine.IsMatch(line))
+            return line.TrimEnd(':').Trim();
+
+        return null;
+    }
+
+    private static bool TryReadCheatName(string line, out string name)
+    {
+        name = string.Empty;
+        if (line.StartsWith('+'))
+        {
+            name = line[1..].Trim();
+            return name.Length > 0;
+        }
+
+        var bracket = BracketLine.Match(line);
+        if (bracket.Success && !Serial.IsMatch(line))
+        {
+            name = bracket.Groups["label"].Value.Trim();
+            return name.Length > 0;
+        }
+
+        return false;
+    }
+
+    private static bool TryReadAuthor(string line, out string author)
+    {
+        author = string.Empty;
+        var m = Regex.Match(line, @"^(?:%\s*)?(?:Credits?|Author|By)\s*[:=]\s*(?<author>.+)$", RegexOptions.IgnoreCase);
+        if (!m.Success)
+            return false;
+        author = m.Groups["author"].Value.Trim();
+        return author.Length > 0;
+    }
+
+    private static bool TryReadCode(string line, out string code)
+    {
+        code = string.Empty;
+        var stripped = StripInlineComment(line).Trim();
+        var cmp = CmpCodeLine.Match(stripped);
+        var plain = cmp.Success ? cmp : PlainCodeLine.Match(stripped);
+        if (!plain.Success)
+            return false;
+        code = Regex.Replace(plain.Groups["code"].Value, @"\s+", " ").ToUpperInvariant();
+        return code.Length <= 32;
+    }
+
+    private static string StripInlineComment(string line)
+    {
+        var idx = line.IndexOf("//", StringComparison.Ordinal);
+        return idx < 0 ? line : line[..idx];
+    }
+
+    private static ParsedCheat NewCheat(string name, string section, List<string> pendingDescription)
+    {
+        var cheat = new ParsedCheat
+        {
+            Name = CleanCheatName(name),
+            Section = string.IsNullOrWhiteSpace(section) ? DefaultSection : section,
+        };
+        foreach (var note in pendingDescription.Where(n => !string.IsNullOrWhiteSpace(n)))
+        {
+            if (TryReadAuthor(note, out var author))
+                cheat.Author = Append(cheat.Author, author);
+            else
+                cheat.Description = Append(cheat.Description, note, Environment.NewLine);
+        }
+        return cheat;
+    }
 
     private static void CommitCheat(ParsedFile file, ParsedCheat? cheat)
     {
-        if (cheat is not null && !string.IsNullOrWhiteSpace(cheat.Name))
+        if (cheat is not null && !string.IsNullOrWhiteSpace(cheat.Name) && cheat.Codes.Count > 0)
             file.Cheats.Add(cheat);
     }
 
-    /// <summary>
-    /// Derive a normalised region name from filename, then fall back to the
-    /// serial prefix if no region was explicit in the filename.
-    /// </summary>
+    private static string BuildListTitle(string source, string gameTitle, string regionName)
+    {
+        var prefix = $"[{source}] ";
+        var suffix = $" [{regionName}]";
+        var maxGameTitleLength = Math.Max(1, 512 - prefix.Length - suffix.Length);
+        return prefix + Truncate(gameTitle, maxGameTitleLength) + suffix;
+    }
+
+    private static string FormatException(Exception ex)
+    {
+        var messages = new List<string>();
+        for (var cur = ex; cur is not null; cur = cur.InnerException)
+            messages.Add(cur.Message);
+        return string.Join(" -> ", messages);
+    }
+
+    private static string SourceFor(string dbRoot, string filePath)
+    {
+        var rel = Path.GetRelativePath(dbRoot, filePath);
+        var top = rel.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).FirstOrDefault() ?? "Archive";
+        return SourceLabels.TryGetValue(top, out var label) ? label : top;
+    }
+
+    private static string TitleFromPath(string path)
+    {
+        var title = Path.GetFileNameWithoutExtension(path);
+        if (title.EndsWith(".CMP", StringComparison.OrdinalIgnoreCase))
+            title = title[..^4];
+        title = RegionInFilename.Replace(title, string.Empty);
+        title = Serial.Replace(title, string.Empty);
+        title = Regex.Replace(title, @"\s+", " ").Trim(' ', '-', '_');
+        return string.IsNullOrWhiteSpace(title) ? "Unknown Game" : title;
+    }
+
+    private static string CleanTitle(string title)
+    {
+        title = Regex.Replace(title, @"\s+", " ").Trim();
+        return Truncate(title, 512);
+    }
+
+    private static string CleanCheatName(string name)
+    {
+        name = Regex.Replace(name, @"\s+", " ").Trim();
+        return Truncate(string.IsNullOrWhiteSpace(name) ? "Untitled Cheat" : name, 512);
+    }
+
     private static string RegionFromFilename(string fileName)
     {
         var m = RegionInFilename.Match(fileName);
-        if (!m.Success)
-            return string.Empty;
-
-        return NormalizeRegion(m.Groups["region"].Value);
+        return m.Success ? NormalizeRegion(m.Groups["region"].Value) : string.Empty;
     }
 
-    private static string ResolveRegionName(string fromFile, string? serial)
+    private static string ResolveRegionName(string? fromFile, string? serial)
     {
         if (!string.IsNullOrWhiteSpace(fromFile))
-            return fromFile;
-
+            return NormalizeRegion(fromFile);
         if (!string.IsNullOrWhiteSpace(serial))
         {
             var prefix = serial.Length >= 4 ? serial[..4].ToUpperInvariant() : string.Empty;
@@ -448,62 +606,66 @@ public class BulkCheatParser
                 _ => "Unknown",
             };
         }
-
         return "Unknown";
     }
 
     private static string NormalizeRegion(string raw)
     {
-        // Strip market sub-code: "PAL-M6" → "PAL", "Ntsc-U" → "NTSC-U"
-        var upper = raw.ToUpperInvariant();
-        if (upper.StartsWith("NTSC-U"))  return "NTSC-U";
-        if (upper.StartsWith("NTSC-J"))  return "NTSC-J";
-        if (upper.StartsWith("NTSC"))    return "NTSC-U";
-        if (upper.StartsWith("PAL"))     return "PAL";
-        return raw;
+        var upper = raw.Trim().ToUpperInvariant();
+        if (upper.StartsWith("NTSC-U")) return "NTSC-U";
+        if (upper.StartsWith("NTSC-J")) return "NTSC-J";
+        if (upper.StartsWith("NTSC")) return "NTSC-U";
+        if (upper.StartsWith("PAL")) return "PAL";
+        return string.IsNullOrWhiteSpace(raw) ? "Unknown" : raw.Trim();
     }
 
-    /// <summary>
-    /// Normalises serial numbers to a consistent "SLUS-20265" hyphen format,
-    /// removing embedded dots from the underscore variant "SLUS_202.65".
-    /// </summary>
     private static string NormalizeSerial(string raw)
     {
-        // "SLUS_202.65" → "SLUS-20265"
-        var s = raw.Replace('_', '-').Replace(".", string.Empty).Trim().ToUpperInvariant();
+        var match = Serial.Match(raw);
+        var s = match.Success ? match.Groups["serial"].Value : raw;
+        s = s.Replace('_', '-').Replace(".", string.Empty).Replace(" ", string.Empty).Trim().ToUpperInvariant();
+        if (s.Length >= 8 && s[4] != '-')
+            s = s.Insert(4, "-");
         return s;
     }
 
-    private static TEntity GetOrCreate<TEntity>(
-        Dictionary<string, TEntity> cache,
-        string key,
-        Func<TEntity> factory)
+    private static string? Append(string? left, string right, string separator = ", ")
+        => string.IsNullOrWhiteSpace(left) ? right.Trim() : left + separator + right.Trim();
+
+    private static string Truncate(string value, int max)
+        => value.Length <= max ? value : value[..max];
+
+    private static TEntity GetOrCreate<TEntity>(Dictionary<string, TEntity> cache, string key, Func<TEntity> factory)
     {
         if (cache.TryGetValue(key, out var existing))
             return existing;
-
         var created = factory();
         cache[key] = created;
         return created;
     }
 
-    // ── Internal DTOs ─────────────────────────────────────────────────────────
+    private sealed record ImportCaches(
+        Dictionary<string, GameRegion> RegionCache,
+        Dictionary<string, Game> GameCache,
+        Dictionary<string, GameDisc> DiscsBySerial,
+        Dictionary<string, GameDisc> DiscsByRegion,
+        Dictionary<string, CheatList> CheatListCache);
 
     private sealed class ParsedFile
     {
-        public string? Name        { get; set; }
-        public string? Serial      { get; set; }
-        public string? Hash        { get; set; }
-        public string? RegionHint  { get; set; }
+        public string? Name { get; set; }
+        public string? Serial { get; set; }
+        public string? Hash { get; set; }
+        public string? RegionHint { get; set; }
         public List<ParsedCheat> Cheats { get; } = [];
     }
 
     private sealed class ParsedCheat
     {
-        public string Name     { get; set; } = string.Empty;
-        public string? Author  { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public string? Author { get; set; }
+        public string? Description { get; set; }
         public string? Section { get; set; }
         public List<string> Codes { get; } = [];
     }
 }
-

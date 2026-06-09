@@ -347,6 +347,8 @@ namespace CodeDesigner.Ps2.Bridge.Services
                     {
                         c.Label,
                         c.Section,
+                        c.Description,
+                        c.Author,
                         Lines = c.CheatLines.OrderBy(l => l.SortOrder).Select(l => l.Code).ToList(),
                     })
                     .ToList();
@@ -354,9 +356,11 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 var entries = cheats
                     .Select(c => new CheatFileEntry
                     {
-                        Label     = c.Label,
-                        Section   = c.Section,
-                        CodeLines = c.Lines,
+                        Label       = c.Label,
+                        Section     = c.Section,
+                        Description = c.Description,
+                        Author      = c.Author,
+                        CodeLines   = c.Lines,
                     })
                     .ToList();
 
@@ -392,8 +396,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 if (list == null)
                     return Responses.Error($"Cheat list {cheatListId} not found.");
 
-                // Carry over metadata (author / enabled / notes) the text format
-                // does not represent, matched on section + label.
+                // Carry over any metadata omitted by older text, matched on section + label.
                 var oldMeta = list.Cheats
                     .GroupBy(c => MetaKey(c.Section, c.Label))
                     .ToDictionary(g => g.Key, g => g.First());
@@ -406,14 +409,16 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 {
                     var cheat = new DbCheat
                     {
-                        Label     = entry.Label,
-                        Section   = entry.Section,
-                        SortOrder = sortOrder++,
+                        Label       = entry.Label,
+                        Section     = entry.Section,
+                        Description = string.IsNullOrWhiteSpace(entry.Description) ? null : entry.Description.Trim(),
+                        Author      = string.IsNullOrWhiteSpace(entry.Author) ? null : entry.Author.Trim(),
+                        SortOrder   = sortOrder++,
                     };
                     if (oldMeta.TryGetValue(MetaKey(entry.Section, entry.Label), out var prev))
                     {
-                        cheat.Author      = prev.Author;
-                        cheat.Description = prev.Description;
+                        cheat.Author      ??= prev.Author;
+                        cheat.Description ??= prev.Description;
                         cheat.IsEnabled   = prev.IsEnabled;
                     }
 
@@ -520,15 +525,16 @@ namespace CodeDesigner.Ps2.Bridge.Services
             try
             {
                 var parser = new BulkCheatParser(_ctx.Db, archiveRoot!);
-                parser.RunAsync().GetAwaiter().GetResult();
+                var result = parser.RunAsync().GetAwaiter().GetResult();
 
-                var lists  = _ctx.Db.CheatLists.Count();
-                var cheats = _ctx.Db.Cheats.Count();
+                var skipped = result.FilesSkipped > 0
+                    ? $" Skipped {result.FilesSkipped} file(s); see the bridge console for details."
+                    : string.Empty;
                 return JsonSerializer.Serialize(new CommandResponse
                 {
                     Success = true,
                     Command = "CHEATEDITOR_IMPORT",
-                    Message = $"Bulk import complete — {lists} cheat list(s), {cheats} cheat(s) in the database.",
+                    Message = $"Bulk import complete — imported {result.FilesImported}/{result.FilesProcessed} file(s), {result.CheatLists} cheat list(s), {result.Cheats} cheat(s) in the database.{skipped}",
                 });
             }
             catch (Exception ex) { return Responses.Error($"CHEATEDITOR_IMPORT error: {ex.Message}"); }
