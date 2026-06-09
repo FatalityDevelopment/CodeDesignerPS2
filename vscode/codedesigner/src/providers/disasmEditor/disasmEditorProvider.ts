@@ -86,6 +86,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
    * the symbols panel is opened after a page reload without requiring a re-scan.
    */
   private _panelScanCache: Map<vscode.WebviewPanel, PanelScanCache> = new Map();
+  private _filePanels: Map<vscode.WebviewPanel, { fileData: Buffer; lastStartIndex: number }> = new Map();
 
   /**
    * All breakpoints the user has toggled across all live panels.  Persisted here
@@ -581,6 +582,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
    * Used to resolve the per-game labels.json path for user-created labels.
    */
   public setCurrentGame(gameName: string, workspaceRoot: string, gameSerial?: string, gameDiscId?: number | null): void {
+    const previousContext = `${this._currentGameSerial}|${this._currentGameDiscId ?? ''}`;
     this._currentGameName   = gameName;
     this._workspaceRoot     = workspaceRoot;
     this._currentGameSerial = gameSerial ?? '';
@@ -594,6 +596,11 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     // Reset the active label set when the game changes — it will be re-established
     // when the label manager refreshes or the user selects a set.
     this._activeSetName = null;
+
+    const nextContext = `${this._currentGameSerial}|${this._currentGameDiscId ?? ''}`;
+    if (nextContext !== previousContext) {
+      void this._refreshOpenFileDisasmPages();
+    }
   }
 
   /**
@@ -806,12 +813,14 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       // the bridge apply any persisted DataFormatOverrides so the response
       // rows have variable byte length (.byte/.half/.word/.dword/.qword/.float/.double).
       const hexCode = hexInstructions.join(' ');
-      // Passing undefined gameId tells the backend to skip DataFormatOverrides
-      // for this page — used for goto loads so an unaligned override layout
-      // doesn't shift the row the user is trying to land on.
-      const gameId = bypassOverrides ? undefined : (this._currentGameSerial || undefined);
+      // Goto page probes can explicitly skip DataFormatOverrides so an
+      // unaligned override layout doesn't shift the row the user is trying to
+      // land on. Normal disassembly still calls the backend without a game id
+      // when the serial is unknown; the bridge maps that to the persisted
+      // disc-less override scope instead of silently ignoring saved formats.
+      const gameId = this._currentGameSerial || undefined;
       console.log(`[DISASM] Disassembling ${hexInstructions.length} instructions starting at 0x${startAddr.toString(16)}`);
-      const results = await this.socketClient.disassemble(hexCode, startAddr, gameId);
+      const results = await this.socketClient.disassemble(hexCode, startAddr, gameId, bypassOverrides);
       console.log(`[DISASM] Received ${results.length} results from backend`);
 
       // Convert results to row format.  Each result carries its own Address
@@ -913,6 +922,9 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       enableScripts: true,
       localResourceRoots: [this._extensionUri]
     };
+    webviewPanel.onDidDispose(() => {
+      this._filePanels.delete(webviewPanel);
+    });
 
     // Track both async preconditions: file loaded + webview ready.
     // init is sent only when both are satisfied (order-independent).
@@ -929,6 +941,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         baseAddress: DisasmEditorProvider.BASE_ADDRESS,
       });
       console.log(`[DISASM] Sending first page and hex view`);
+      this._filePanels.set(webviewPanel, { fileData: data, lastStartIndex: 0 });
       await this.sendDisasmPage(webviewPanel, data, 0);
       this.sendHexView(webviewPanel, data,
         DisasmEditorProvider.BASE_ADDRESS,
@@ -966,7 +979,10 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
           message.length || DisasmEditorProvider.INSTRUCTION_SIZE
         );
       } else if (message.type === "requestPage") {
-        await this.sendDisasmPage(webviewPanel, fileData, message.startIndex);
+        const startIndex = message.startIndex as number;
+        const info = this._filePanels.get(webviewPanel);
+        if (info) { info.lastStartIndex = startIndex; }
+        await this.sendDisasmPage(webviewPanel, fileData, startIndex, message.bypassOverrides === true);
       } else if (message.type === "search") {
         await this.handleSearch(webviewPanel, message.query, message.mode,
           DisasmEditorProvider.BASE_ADDRESS, fileData.length, undefined, fileData);
@@ -3168,6 +3184,71 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     await this.sendDisasmPage(webviewPanel, fileData, startIndex ?? pageStart);
   }
 
+  private async _refreshOpenFileDisasmPages(): Promise<void> {
+    for (const [panel, info] of this._filePanels) {
+      if (!panel.visible) { continue; }
+      await this.sendDisasmPage(panel, info.fileData, info.lastStartIndex);
+    }
+  }
+
+  private annotateWordRowsFromFileData(rows: DisassembledRow[], fileData: Buffer): void {
+    for (const row of rows) {
+      if (row.dataFormatKind !== 'word') { continue; }
+
+      const address = parseInt(row.addr, 16);
+      const value = this._parseWordValue(row.args);
+      const inline = Number.isFinite(address) ? this._readAsciiFromFile(fileData, address) : undefined;
+      const pointed = value !== undefined ? this._readAsciiFromFile(fileData, value) : undefined;
+
+      if (inline) {
+        row.comment = row.comment || inline;
+      } else if (pointed && value !== undefined) {
+        const target = `0x${value.toString(16).toUpperCase().padStart(8, '0')}`;
+        const pointedText = pointed.slice(3);
+        row.comment = row.comment
+          ? (row.comment.includes('"') ? row.comment : `${row.comment} ${pointedText}`)
+          : `-> ${target} ${pointedText}`;
+      }
+    }
+  }
+
+  private _parseWordValue(args: string): number | undefined {
+    const match = args.match(/(?:0x|\$)([0-9a-f]{8})/i);
+    if (!match) { return undefined; }
+    const value = parseInt(match[1], 16);
+    return Number.isFinite(value) ? value >>> 0 : undefined;
+  }
+
+  private _readAsciiFromFile(fileData: Buffer, address: number): string | undefined {
+    const offset = (address >>> 0) - DisasmEditorProvider.BASE_ADDRESS;
+    if (offset < 0 || offset >= fileData.length) { return undefined; }
+
+    const chars: number[] = [];
+    const max = Math.min(fileData.length, offset + 256);
+    for (let i = offset; i < max; i++) {
+      const b = fileData[i];
+      if (b === 0) {
+        return chars.length >= 3
+          ? `-> "${this._escapeCommentString(Buffer.from(chars).toString('latin1'))}"`
+          : undefined;
+      }
+      if (!this._isAsciiStringChar(b)) { return undefined; }
+      chars.push(b);
+    }
+
+    return chars.length >= 3
+      ? `-> "${this._escapeCommentString(Buffer.from(chars).toString('latin1'))}..."`
+      : undefined;
+  }
+
+  private _isAsciiStringChar(b: number): boolean {
+    return (b >= 0x20 && b <= 0x7E) || b === 0x09 || b === 0x0A || b === 0x0D;
+  }
+
+  private _escapeCommentString(text: string): string {
+    return text.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  }
+
   /** Round <c>address</c> down to the nearest PAGE_SIZE * INSTRUCTION_SIZE boundary, expressed as an instruction index. */
   private _pageStartForAddress(address: number): number {
     const offset = address - DisasmEditorProvider.BASE_ADDRESS;
@@ -3178,7 +3259,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   private async sendDisasmPage(
     webviewPanel: vscode.WebviewPanel,
     fileData: Buffer,
-    startIndex: number
+    startIndex: number,
+    bypassOverrides = false
   ): Promise<void> {
     console.log(`[DISASM] sendDisasmPage called: startIndex=${startIndex}`);
     const startOffset = startIndex * DisasmEditorProvider.INSTRUCTION_SIZE;
@@ -3192,7 +3274,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     const startAddr = DisasmEditorProvider.BASE_ADDRESS + startOffset;
 
     console.log(`[DISASM] Calling disassembleWithBackend...`);
-    const rows = await this.disassembleWithBackend(startAddr, slice);
+    const rows = await this.disassembleWithBackend(startAddr, slice, bypassOverrides);
+    this.annotateWordRowsFromFileData(rows, fileData);
     console.log(`[DISASM] Got ${rows.length} disassembled rows`);
 
     // Comments are now provided by the backend analyzer, no need to call analyzePointers

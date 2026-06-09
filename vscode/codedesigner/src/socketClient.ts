@@ -193,6 +193,8 @@ interface CommandMessage {
     DataFormatKind?: string;
     /** Batch override payload for SETDATAFORMATS. */
     DataFormatOverrides?: Array<Omit<DataFormatOverrideInfo, 'id'>>;
+    /** DISASSEMBLE-only: ignore persisted data-format overrides for stable 4-byte page probes. */
+    SkipDataFormatOverrides?: boolean;
 }
 
 /**
@@ -1707,7 +1709,7 @@ export class SocketClient {
      * @param gameId - Optional game/disc identifier so the bridge can apply
      *                 any persisted data-format overrides for the range.
      */
-    public async disassemble(hexCode: string, startAddress?: number, gameId?: string): Promise<InstructionResult[]> {
+    public async disassemble(hexCode: string, startAddress?: number, gameId?: string, skipDataFormatOverrides = false): Promise<InstructionResult[]> {
         const command: CommandMessage = {
             Command: 'DISASSEMBLE',
             Data: hexCode
@@ -1719,6 +1721,9 @@ export class SocketClient {
         }
         if (gameId) {
             command.GameId = gameId;
+        }
+        if (skipDataFormatOverrides) {
+            command.SkipDataFormatOverrides = true;
         }
 
         const response = await this.sendCommand(command);

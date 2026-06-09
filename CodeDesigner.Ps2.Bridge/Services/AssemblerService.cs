@@ -21,7 +21,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
             reg.Add(c => HandleCompileCds(c.Data, c.Labels),                    "COMPILECDS");
             reg.Add(c => HandleValidateCds(c.Data, c.Labels),                   "VALIDATECDS");
             reg.Add(c => HandleCdsPatch(c.Data, c.Labels),                      "CDSPATCH");
-            reg.Add(c => HandleDisassemble(c.Data, c.Address, c.GameId),        "DISASSEMBLE");
+            reg.Add(c => HandleDisassemble(c.Data, c.Address, c.GameId, c.SkipDataFormatOverrides == true), "DISASSEMBLE");
         }
 
 
@@ -702,7 +702,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
         /// length is reported in <see cref="InstructionResult.ByteLength"/>.
         /// </para>
         /// </summary>
-        private string HandleDisassemble(string? hexCode, uint? startAddress = null, string? gameId = null)
+        private string HandleDisassemble(string? hexCode, uint? startAddress = null, string? gameId = null, bool skipDataFormatOverrides = false)
         {
             try
             {
@@ -752,13 +752,43 @@ namespace CodeDesigner.Ps2.Bridge.Services
 
                 // ── Pull overrides for the requested window ───────────────────
                 IReadOnlyList<Database.Entities.DataFormatOverride> overrides = System.Array.Empty<Database.Entities.DataFormatOverride>();
-                if (!string.IsNullOrWhiteSpace(gameId))
+                if (!skipDataFormatOverrides)
                 {
                     try
                     {
-                        overrides = _ctx.DataFormatRepo
+                        // Query even when gameId is null/empty. The repository
+                        // treats that as the disc-less scope used by file-only
+                        // disassembly, so user-applied formats saved before a
+                        // game serial is known are still persistent. When a game
+                        // id is known, also include non-overlapping disc-less
+                        // rows as a migration fallback for overrides created
+                        // before the serial finished resolving.
+                        var scoped = _ctx.DataFormatRepo
                             .GetInRangeAsync(gameId, rangeStart, rangeEnd)
                             .GetAwaiter().GetResult();
+
+                        if (string.IsNullOrWhiteSpace(gameId))
+                        {
+                            overrides = scoped;
+                        }
+                        else
+                        {
+                            var fallback = _ctx.DataFormatRepo
+                                .GetInRangeAsync(null, rangeStart, rangeEnd)
+                                .GetAwaiter().GetResult();
+
+                            var merged = new List<Database.Entities.DataFormatOverride>(scoped);
+                            foreach (var candidate in fallback)
+                            {
+                                long candidateEnd = candidate.Address + candidate.Length;
+                                bool overlapsScoped = scoped.Any(existing =>
+                                    existing.Address < candidateEnd
+                                    && existing.Address + existing.Length > candidate.Address);
+                                if (!overlapsScoped) merged.Add(candidate);
+                            }
+
+                            overrides = merged.OrderBy(o => o.Address).ToList();
+                        }
                     }
                     catch
                     {
@@ -862,7 +892,9 @@ namespace CodeDesigner.Ps2.Bridge.Services
                             if (ovr.Kind == Database.Entities.DataFormatKind.Word)
                             {
                                 uint val = BitConverter.ToUInt32(byteBuf, byteIndex);
-                                cmt = TryResolvePointerComment(val, analysisBus)
+                                cmt = TryResolveInlineAsciiString(byteBuf, byteIndex, byteBuf.Length - byteIndex)
+                                      ?? TryResolveInlineAsciiString(byteBuf, byteIndex, unit)
+                                      ?? TryResolvePointerComment(val, analysisBus)
                                       ?? (LooksLikeRamPointer(val) ? $"-> 0x{val:X8}" : null);
                             }
                             else if (ovr.Kind == Database.Entities.DataFormatKind.Byte
@@ -1378,7 +1410,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
                         if (sb.Length < 3) return $"-> {target}";
                         return $"-> {target} \"{EscapeCommentString(sb.ToString())}\"";
                     }
-                    if (b < 0x20 || b > 0x7E) return $"-> {target}";
+                    if (!StringScanner.IsAsciiStringChar(b)) return $"-> {target}";
                     sb.Append((char)b);
                 }
                 if (sb.Length >= 3)
