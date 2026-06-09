@@ -326,6 +326,12 @@ app-cheats-editor-page {
 
 .ce-syn-command { color: var(--ce-syn-command); font-weight: 700; }
 .ce-syn-address { color: var(--ce-syn-address); }
+.ce-cheat-address-link {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
 .ce-syn-data-hi { color: var(--ce-syn-data-hi); }
 .ce-syn-data-lo { color: var(--ce-syn-data-lo); }
 .ce-syn-comment { color: var(--ce-syn-comment); font-style: italic; }

@@ -94,6 +94,9 @@ export class CheatsEditorProvider {
             case 'viewInDebugger':
                 this._viewInDebugger(webview, msg);
                 break;
+            case 'gotoCheatAddress':
+                this._gotoCheatAddress(webview, msg);
+                break;
             case 'bootstrapError':
                 getOutputChannel().error('[CheatsEditor] Bootstrap error: ' + msg['error']);
                 break;
@@ -255,6 +258,21 @@ export class CheatsEditorProvider {
             message: labels.length > 0
                 ? `Showing ${labels.length} cheat address annotation(s) in debugger.`
                 : 'View in debugger is on, but no cheat address annotations were found.',
+            busy: false,
+        });
+    }
+
+
+    private _gotoCheatAddress(webview: vscode.Webview, msg: Record<string, unknown>): void {
+        const token = (msg['addressToken'] as string | undefined)?.trim() ?? '';
+        if (!/^[0-9A-Fa-f]{8}$/.test(token)) { return; }
+
+        const target = this._cheatAddressAliases(token)[0];
+        const address = parseInt(target, 16) >>> 0;
+        this.disasmEditorProvider?.navigateToAddress(address, 'user');
+        webview.postMessage({
+            type: 'cheatStatus',
+            message: `Debugger goto 0x${target}.`,
             busy: false,
         });
     }

@@ -155,7 +155,7 @@ const CODE_TOKEN_RE = /[0-9A-Fa-f?*]+|\s+|\S+/g;
         <div class="ce-editor-wrap">
           <pre #highlighter class="ce-editor-highlight" aria-hidden="true" [innerHTML]="highlightedHtml()"></pre>
           <textarea #editor class="ce-editor" spellcheck="false"
-                    [value]="editorText()" (input)="onEditorInput($event)" (scroll)="syncEditorScroll()"
+                    [value]="editorText()" (input)="onEditorInput($event)" (click)="onEditorClick()" (scroll)="syncEditorScroll()"
                     [disabled]="!selectedBuildId()"
                     placeholder="Select a cheat list to edit…"></textarea>
         </div>
@@ -442,6 +442,14 @@ export class CheatsEditorPageComponent implements AfterViewInit {
     queueMicrotask(() => this.syncEditorScroll());
   }
 
+  onEditorClick(): void {
+    setTimeout(() => {
+      const token = this.cheatAddressTokenAtCaret();
+      if (!token) { return; }
+      this.vscode.postMessage({ type: 'gotoCheatAddress', addressToken: token });
+    }, 0);
+  }
+
   syncEditorScroll(): void {
     const editor = this.editorRef()?.nativeElement;
     const highlighter = this.highlighterRef()?.nativeElement;
@@ -568,6 +576,27 @@ export class CheatsEditorPageComponent implements AfterViewInit {
     this.editorText.set(text.slice(0, this.convertSelStart) + result + text.slice(this.convertSelEnd));
   }
 
+
+  private cheatAddressTokenAtCaret(): string | null {
+    const ta = this.editorRef()?.nativeElement;
+    if (!ta || !this.selectedBuildId()) { return null; }
+
+    const text = this.editorText();
+    const caret = ta.selectionStart;
+    const lineStart = text.lastIndexOf('\n', Math.max(0, caret - 1)) + 1;
+    const nextNewline = text.indexOf('\n', caret);
+    const lineEnd = nextNewline < 0 ? text.length : nextNewline;
+    const line = text.slice(lineStart, lineEnd);
+
+    const code = this.stripComments(line, false).code;
+    const first = code.match(/^\s*([0-9A-Fa-f]{8})(?=\s|$)/);
+    if (!first?.[1] || first.index === undefined) { return null; }
+
+    const tokenStart = lineStart + first[0].indexOf(first[1]);
+    const tokenEnd = tokenStart + first[1].length;
+    return caret >= tokenStart && caret <= tokenEnd ? first[1].toUpperCase() : null;
+  }
+
   // ── Syntax highlighting / comments ──────────────────────────────────────
 
   private stripComments(raw: string, inBlockComment: boolean): { code: string; inBlockComment: boolean } {
@@ -683,8 +712,12 @@ export class CheatsEditorPageComponent implements AfterViewInit {
 
   private renderCodeToken(token: string, index: number): string {
     if (index === 0) {
-      return this.span('ce-syn-command', token.slice(0, 2)) +
+      const rendered = this.span('ce-syn-command', token.slice(0, 2)) +
         this.span('ce-syn-address', token.slice(2));
+      if (/^[0-9A-Fa-f]{8}$/.test(token)) {
+        return `<span class="ce-cheat-address-link" title="Go to 0x${this.escapeHtml(token)} in debugger">${rendered}</span>`;
+      }
+      return rendered;
     }
 
     if (index === 1) {
