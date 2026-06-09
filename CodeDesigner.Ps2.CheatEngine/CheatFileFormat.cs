@@ -14,6 +14,8 @@ namespace CodeDesigner.Ps2.CheatEngine
     {
         public string Label { get; set; } = string.Empty;
         public string? Section { get; set; }
+        public string? Description { get; set; }
+        public string? Author { get; set; }
         public List<string> CodeLines { get; set; } = new();
     }
 
@@ -76,6 +78,8 @@ namespace CodeDesigner.Ps2.CheatEngine
                 first = false;
 
                 sb.Append('[').Append(entry.Label).AppendLine("]");
+                AppendCommentLines(sb, "Description", entry.Description);
+                AppendCommentLines(sb, "Author", entry.Author);
                 foreach (var code in entry.CodeLines)
                     sb.AppendLine(code);
                 sb.AppendLine();
@@ -100,6 +104,19 @@ namespace CodeDesigner.Ps2.CheatEngine
             foreach (var raw in lines)
             {
                 lineNo++;
+                var commentMeta = TryReadCommentMetadata(raw);
+                if (commentMeta is not null)
+                {
+                    if (current is null)
+                        continue;
+
+                    if (string.Equals(commentMeta.Value.Key, "Author", StringComparison.OrdinalIgnoreCase))
+                        current.Author = AppendMetadata(current.Author, commentMeta.Value.Value, ", ");
+                    else
+                        current.Description = AppendMetadata(current.Description, commentMeta.Value.Value, Environment.NewLine);
+                    continue;
+                }
+
                 var line = StripComments(raw, ref inBlockComment).Trim();
                 if (line.Length == 0)
                     continue;
@@ -145,6 +162,33 @@ namespace CodeDesigner.Ps2.CheatEngine
 
             return result;
         }
+
+        private static void AppendCommentLines(StringBuilder sb, string key, string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return;
+
+            var lines = value.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+            foreach (var line in lines)
+                sb.Append("// ").Append(key).Append(": ").AppendLine(line.Trim());
+        }
+
+        private static (string Key, string Value)? TryReadCommentMetadata(string raw)
+        {
+            var trimmed = raw.TrimStart();
+            if (!trimmed.StartsWith("//", StringComparison.Ordinal))
+                return null;
+
+            var comment = trimmed[2..].Trim();
+            var match = Regex.Match(comment, @"^(?<key>Description|Author)\s*:\s*(?<value>.+)$", RegexOptions.IgnoreCase);
+            if (!match.Success)
+                return null;
+
+            return (match.Groups["key"].Value, match.Groups["value"].Value.Trim());
+        }
+
+        private static string AppendMetadata(string? existing, string value, string separator)
+            => string.IsNullOrWhiteSpace(existing) ? value : existing + separator + value;
 
         private static string StripComments(string line, ref bool inBlockComment)
         {

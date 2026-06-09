@@ -82,6 +82,9 @@ export class CheatsEditorProvider {
             case 'deleteBuild':
                 await this._deleteBuild(webview, msg['cheatListId'] as number);
                 break;
+            case 'refreshArchive':
+                await this._refreshArchive(webview);
+                break;
             case 'bulkImport':
                 await this._bulkImport(webview);
                 break;
@@ -189,6 +192,18 @@ export class CheatsEditorProvider {
         }
     }
 
+    private async _refreshArchive(webview: vscode.Webview): Promise<void> {
+        const archiveRoot = await this._findDefaultArchiveRoot();
+        if (!archiveRoot) {
+            webview.postMessage({
+                type: 'cheatError',
+                message: 'CheatCodeArchive submodule was not found. Initialise it or use Import to pick the archive folder.',
+            });
+            return;
+        }
+        await this._runImport(webview, archiveRoot, 'Refreshing cheats from CheatCodeArchive…');
+    }
+
     private async _bulkImport(webview: vscode.Webview): Promise<void> {
         const uris = await vscode.window.showOpenDialog({
             canSelectFiles:   false,
@@ -200,14 +215,38 @@ export class CheatsEditorProvider {
             webview.postMessage({ type: 'cheatStatus', message: '', busy: false });
             return;
         }
+        await this._runImport(webview, uris[0].fsPath, 'Importing cheats…');
+    }
+
+    private async _runImport(webview: vscode.Webview, archiveRoot: string, progressMessage: string): Promise<void> {
         try {
-            webview.postMessage({ type: 'cheatStatus', message: 'Importing cheats…', busy: true });
-            const message = await this.socketClient.cheatEditorImport(uris[0].fsPath);
+            webview.postMessage({ type: 'cheatStatus', message: progressMessage, busy: true });
+            const message = await this.socketClient.cheatEditorImport(archiveRoot);
             await this._sendGames(webview);
+            if (this._currentGameId !== undefined) {
+                await this._sendBuilds(webview, this._currentGameId);
+            }
             webview.postMessage({ type: 'cheatStatus', message, busy: false });
         } catch (err: unknown) {
             this._sendError(webview, err);
         }
+    }
+
+    private async _findDefaultArchiveRoot(): Promise<string | undefined> {
+        const candidates: vscode.Uri[] = [];
+        for (const folder of vscode.workspace.workspaceFolders ?? []) {
+            candidates.push(vscode.Uri.joinPath(folder.uri, 'CheatCodeArchive'));
+        }
+        candidates.push(vscode.Uri.joinPath(this.extensionUri, '..', '..', 'CheatCodeArchive'));
+
+        for (const candidate of candidates) {
+            try {
+                const dbFolder = vscode.Uri.joinPath(candidate, 'Database');
+                const stat = await vscode.workspace.fs.stat(dbFolder);
+                if (stat.type & vscode.FileType.Directory) { return candidate.fsPath; }
+            } catch { /* keep looking */ }
+        }
+        return undefined;
     }
 
     private async _sendCover(webview: vscode.Webview, serial: string | undefined): Promise<void> {

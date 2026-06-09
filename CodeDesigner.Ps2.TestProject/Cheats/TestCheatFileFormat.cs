@@ -54,5 +54,30 @@ namespace CodeDesigner.Ps2.TestProject
             CollectionAssert.AreEqual(new[] { "2028BE20 3C0367FA" }, result.Entries[1].CodeLines);
         }
 
+        [TestMethod]
+        public void SerializeAndParse_PreservesDescriptionAndAuthorComments()
+        {
+            var text = CheatFileFormat.Serialize(new[]
+            {
+                new CheatFileEntry
+                {
+                    Label = "Infinite Health",
+                    Section = "Player",
+                    Description = "Keeps health full.",
+                    Author = "Archivist",
+                    CodeLines = new() { "2028BE20 3C0344FA" },
+                },
+            });
+
+            StringAssert.Contains(text, "// Description: Keeps health full.");
+            StringAssert.Contains(text, "// Author: Archivist");
+
+            var result = CheatFileFormat.Parse(text);
+
+            Assert.IsTrue(result.IsValid, string.Join("\n", result.Errors));
+            Assert.AreEqual("Keeps health full.", result.Entries.Single().Description);
+            Assert.AreEqual("Archivist", result.Entries.Single().Author);
+        }
+
     }
 }
