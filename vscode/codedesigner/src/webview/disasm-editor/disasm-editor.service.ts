@@ -55,6 +55,8 @@ export interface DisasmEditorState {
   symLabels: SymLabel[];
   /** Live-resolved labels from the Pointer Manager, keyed by normalised address. */
   pointerLabels: SymLabel[];
+  /** Transient cheat-list annotations supplied by the Cheats Editor. */
+  cheatLabels: SymLabel[];
 }
 
 // ── Event payloads ────────────────────────────────────────────────────────────
@@ -118,6 +120,7 @@ export class DisasmEditorService implements OnDestroy {
     pcAddress: undefined,
     symLabels: [],
     pointerLabels: [],
+    cheatLabels: [],
   };
 
   // ── Events the component (and future sub-components) subscribe to ─────────
@@ -133,6 +136,8 @@ export class DisasmEditorService implements OnDestroy {
   readonly analysisUpdated$         = new Subject<Record<string, string>>();
   /** Fired when live-resolved Pointer Manager labels arrive. */
   readonly pointerLabelsUpdated$    = new Subject<void>();
+  /** Fired when transient Cheats Editor address annotations arrive. */
+  readonly cheatLabelsUpdated$      = new Subject<void>();
   /** Fired when the extension host instructs this panel to navigate to an address. */
   readonly gotoAddressReceived$     = new Subject<{ address: number }>();
   /** Fired when another panel syncs its goto-input value to this panel. */
@@ -164,6 +169,7 @@ export class DisasmEditorService implements OnDestroy {
       this._bridge.on<Record<string, unknown>>('symbols').subscribe(msg => this._onSymbols(msg)),
       this._bridge.on<Record<string, unknown>>('labelsUpdated').subscribe(msg => this._onLabelsUpdated(msg)),
       this._bridge.on<Record<string, unknown>>('pointerLabelsUpdated').subscribe(msg => this._onPointerLabelsUpdated(msg)),
+      this._bridge.on<Record<string, unknown>>('cheatLabelsUpdated').subscribe(msg => this._onCheatLabelsUpdated(msg)),
       this._bridge.on<Record<string, unknown>>('gotoAddress').subscribe(msg => this.gotoAddressReceived$.next({ address: msg['address'] as number })),
       this._bridge.on<Record<string, unknown>>('syncGotoInput').subscribe(msg => this.syncGotoInputReceived$.next({ value: msg['value'] as string })),
       this._bridge.on<Record<string, unknown>>('gotoRegionNotFound').subscribe(msg => this.gotoRegionNotFoundReceived$.next({ address: msg['address'] as number })),
@@ -523,5 +529,11 @@ export class DisasmEditorService implements OnDestroy {
     this.state.pointerLabels = labels;
     this.signals.pointerLabels.set(labels);
     this.pointerLabelsUpdated$.next();
+  }
+
+  private _onCheatLabelsUpdated(msg: Record<string, unknown>): void {
+    const labels = (msg['labels'] as SymLabel[] | undefined) ?? [];
+    this.state.cheatLabels = labels;
+    this.cheatLabelsUpdated$.next();
   }
 }

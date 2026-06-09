@@ -88,6 +88,7 @@ export class DisasmRowComponent {
 
   /** Pointer label map for resolving address labels */
   readonly pointerLabelMap = input<Map<string, string>>(new Map());
+  readonly cheatLabelMap = input<Map<string, string>>(new Map());
 
   /** Fixed-position full-comment tooltip state. */
   protected readonly commentTooltipVisible = signal(false);
@@ -189,35 +190,17 @@ export class DisasmRowComponent {
 
   protected readonly labelHtml = computed(() => {
     const row = this.data();
-    // Label precedence: server/user labels take priority over pointer-manager labels
+    // Label precedence: server/user labels take priority over pointer-manager labels.
     const rawLabel = row.label || this.pointerLabelMap().get(row.addr) || '';
-    if (!rawLabel) return '';
+    const cheat = this.cheatText();
+    const parts: string[] = [];
 
-    // FNC_ prefix → render with function label class
-    if (rawLabel.startsWith('FNC_')) {
-      const escaped = this.escapeHtml(rawLabel);
-      return `<span class="lm-label-fnc">${escaped}</span>`;
+    if (rawLabel) { parts.push(this.renderLabelText(rawLabel)); }
+    if (cheat) {
+      parts.push(`<span class="cheat-label-annotation" title="Transient cheat-list overlay">⚡ ${this.escapeHtml(cheat)}</span>`);
     }
 
-    // Array / linked-list element label → Name[i] subscript styling
-    const arrayMatch = rawLabel.match(/^(.*?)(\[\d+\])$/);
-    if (arrayMatch) {
-      const base = this.escapeHtml(arrayMatch[1]);
-      const idx  = this.escapeHtml(arrayMatch[2]);
-      return this.highlightSearch(`${base}<span class="lm-label-idx">${idx}</span>`, 'label');
-    }
-
-    // String label → truncate long content, show full text as title tooltip
-    const strMatch = rawLabel.match(/^(.*?): "(.*)"$/);
-    if (strMatch) {
-      const labelPart  = this.escapeHtml(strMatch[1]);
-      const strContent = strMatch[2];
-      const display    = strContent.length > 40 ? strContent.slice(0, 37) + '…' : strContent;
-      const full       = this.escapeHtml(rawLabel);
-      return `<span class="lm-label-str" title="${full}">${labelPart}: &quot;${this.escapeHtml(display)}&quot;</span>`;
-    }
-
-    return this.highlightSearch(rawLabel, 'label');
+    return parts.join(' ');
   });
 
   protected readonly opHtml = computed(() =>
@@ -241,11 +224,11 @@ export class DisasmRowComponent {
   });
 
   protected readonly commentHtml = computed(() =>
-    this.highlightSearch(this.colorizeComment(this.data().comment || ''), 'comment')
+    this.highlightSearch(this.combinedCommentHtml(), 'comment')
   );
 
   protected readonly commentTooltipHtml = computed(() =>
-    this.colorizeComment(this.data().comment || '')
+    this.combinedCommentHtml()
   );
 
   protected readonly hasCommentTooltip = computed(() =>
@@ -296,6 +279,43 @@ export class DisasmRowComponent {
   // ═══════════════════════════════════════════════════════════════════════════
   // Utility Methods
   // ═══════════════════════════════════════════════════════════════════════════
+
+  private combinedCommentHtml(): string {
+    const comment = this.data().comment || '';
+    return comment.trim().length > 0 ? this.colorizeComment(comment) : '';
+  }
+
+  private renderLabelText(rawLabel: string): string {
+    // FNC_ prefix → render with function label class
+    if (rawLabel.startsWith('FNC_')) {
+      const escaped = this.escapeHtml(rawLabel);
+      return `<span class="lm-label-fnc">${escaped}</span>`;
+    }
+
+    // Array / linked-list element label → Name[i] subscript styling
+    const arrayMatch = rawLabel.match(/^(.*?)(\[\d+\])$/);
+    if (arrayMatch) {
+      const base = this.escapeHtml(arrayMatch[1]);
+      const idx  = this.escapeHtml(arrayMatch[2]);
+      return this.highlightSearch(`${base}<span class="lm-label-idx">${idx}</span>`, 'label');
+    }
+
+    // String label → truncate long content, show full text as title tooltip
+    const strMatch = rawLabel.match(/^(.*?): "(.*)"$/);
+    if (strMatch) {
+      const labelPart  = this.escapeHtml(strMatch[1]);
+      const strContent = strMatch[2];
+      const display    = strContent.length > 40 ? strContent.slice(0, 37) + '…' : strContent;
+      const full       = this.escapeHtml(rawLabel);
+      return `<span class="lm-label-str" title="${full}">${labelPart}: &quot;${this.escapeHtml(display)}&quot;</span>`;
+    }
+
+    return this.highlightSearch(rawLabel, 'label');
+  }
+
+  private cheatText(): string {
+    return this.cheatLabelMap().get(this.data().addr) ?? '';
+  }
 
   private positionFullComment(event: MouseEvent): void {
     const margin = 12;

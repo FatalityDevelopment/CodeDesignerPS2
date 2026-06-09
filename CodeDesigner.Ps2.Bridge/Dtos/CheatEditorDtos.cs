@@ -61,4 +61,57 @@ namespace CodeDesigner.Ps2.Bridge
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public string? UpdatedAt { get; set; }
     }
+
+    /// <summary>Compact summary of a section inside a cheat list, for low-token browsing.</summary>
+    public class CheatSectionInfo
+    {
+        [JsonPropertyName("listId")]
+        public int ListId { get; set; }
+
+        [JsonPropertyName("section")]
+        public string Section { get; set; } = string.Empty;
+
+        [JsonPropertyName("cheatCount")]
+        public int CheatCount { get; set; }
+
+        [JsonPropertyName("codeLineCount")]
+        public int CodeLineCount { get; set; }
+
+        [JsonPropertyName("firstCheatLabel")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? FirstCheatLabel { get; set; }
+    }
+
+    /// <summary>Compact cheat search hit returned to MCP clients before fetching full code bodies.</summary>
+    public class CheatSearchResultInfo
+    {
+        [JsonPropertyName("gameId")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public int? GameId { get; set; }
+
+        [JsonPropertyName("gameTitle")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? GameTitle { get; set; }
+
+        [JsonPropertyName("listId")]
+        public int ListId { get; set; }
+
+        [JsonPropertyName("listTitle")]
+        public string ListTitle { get; set; } = string.Empty;
+
+        [JsonPropertyName("cheatId")]
+        public int CheatId { get; set; }
+
+        [JsonPropertyName("label")]
+        public string Label { get; set; } = string.Empty;
+
+        [JsonPropertyName("section")]
+        public string Section { get; set; } = string.Empty;
+
+        [JsonPropertyName("codeLineCount")]
+        public int CodeLineCount { get; set; }
+
+        [JsonPropertyName("matchedFields")]
+        public List<string> MatchedFields { get; set; } = [];
+    }
 }

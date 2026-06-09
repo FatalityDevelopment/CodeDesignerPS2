@@ -18,6 +18,31 @@ public sealed class LabelListSetsTool(IEmulatorBridge bridge)
         => CdText.Message(await bridge.SendAsync(new { Command = "GETLABELSETS", GameId = gameId }, ct));
 }
 
+
+[CdTool("label_search_sets", ToolDomain.Labels, ToolRisk.ReadOnly,
+    "Search label-set names and count matching labels inside each set. Use before fetching full sets to keep token usage low. Risk: read-only.")]
+public sealed class LabelSearchSetsTool(IEmulatorBridge bridge)
+{
+    [ToolEntryPoint] public async Task<string> InvokeAsync(
+        [Description("Game identifier. Prefer numeric GameDisc.Id or SCUS/SLUS serial.")]
+        string gameId,
+        [Description("Optional case-insensitive query for set names or label names/comments/types inside sets.")]
+        string? query = null,
+        [Description("Maximum sets to return. Default 50, capped by the bridge.")]
+        int? maxCount = null,
+        CancellationToken ct = default)
+    {
+        var take = maxCount is > 0 ? Math.Min(maxCount.Value, 500) : (int?)null;
+        return CdText.Message(await bridge.SendAsync(new
+        {
+            Command = "SEARCHLABELSETS",
+            GameId = gameId,
+            Query = query,
+            MaxCount = take,
+        }, ct));
+    }
+}
+
 [CdTool("label_create_set", ToolDomain.Labels, ToolRisk.MutatesDatabase,
     "Create a new, empty label set. Risk: writes database.")]
 public sealed class LabelCreateSetTool(IEmulatorBridge bridge)
@@ -81,6 +106,37 @@ public sealed class LabelListFunctionsTool(IEmulatorBridge bridge)
         => CdFormat.LabelsFiltered(
             await bridge.SendAsync(new { Command = "GETLABELS" }, ct),
             name => name.StartsWith("FNC_", StringComparison.Ordinal));
+}
+
+
+[CdTool("label_search", ToolDomain.Labels, ToolRisk.ReadOnly,
+    "Search labels by name, address, comment, value type, or label type across a game/set. Returns compact hits; fetch full set only when needed. Risk: read-only.")]
+public sealed class LabelSearchTool(IEmulatorBridge bridge)
+{
+    [ToolEntryPoint] public async Task<string> InvokeAsync(
+        [Description("Search text for label name/address/comment/value type. May be omitted if type is provided.")]
+        string? query = null,
+        [Description("Game identifier. Required unless setName is 'Built-in'. Prefer numeric GameDisc.Id or SCUS/SLUS serial.")]
+        string? gameId = null,
+        [Description("Optional label set name to scope search. Use 'Built-in' to search only built-in labels.")]
+        string? setName = null,
+        [Description("Optional label type filter, e.g. Function, String, Struct, Array, LinkedList, Address.")]
+        string? type = null,
+        [Description("Maximum labels to return. Default 100, capped by the bridge.")]
+        int? maxCount = null,
+        CancellationToken ct = default)
+    {
+        var take = maxCount is > 0 ? Math.Min(maxCount.Value, 500) : (int?)null;
+        return CdText.Message(await bridge.SendAsync(new
+        {
+            Command = "SEARCHLABELS",
+            GameId = gameId,
+            SetName = setName,
+            Query = query,
+            SearchMode = type,
+            MaxCount = take,
+        }, ct));
+    }
 }
 
 [CdTool("label_delete", ToolDomain.Labels, ToolRisk.MutatesDatabase,

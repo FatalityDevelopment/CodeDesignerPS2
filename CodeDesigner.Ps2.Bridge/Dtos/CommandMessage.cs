@@ -199,6 +199,8 @@ namespace CodeDesigner.Ps2.Bridge
         public int? CheatGameId { get; set; }
         /// <summary>CheatList row ID for the cheats editor (CHEATEDITOR_GET / SAVE / DELETE).</summary>
         public int? CheatListId { get; set; }
+        /// <summary>Optional section/category filter for cheats editor searches and section reads.</summary>
+        public string? CheatSection { get; set; }
 
         // Memory Manager fields (MCPMEMORY_LIST / MCPMEMORY_GET / MCPMEMORY_ADD / MCPMEMORY_UPDATE / MCPMEMORY_DELETE / MCPMEMORY_IMPORT / MCPMEMORY_EXPORT)
         /// <summary>Database row ID of the MCP memory entry to operate on.</summary>
