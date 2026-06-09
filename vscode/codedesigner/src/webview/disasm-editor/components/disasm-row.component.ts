@@ -232,7 +232,7 @@ export class DisasmRowComponent {
   );
 
   protected readonly hasCommentTooltip = computed(() =>
-    (this.data().comment || '').trim().length > 0
+    (this.data().comment || '').trim().length > 0 || this.cheatText().length > 0
   );
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -542,6 +542,7 @@ export class DisasmRowComponent {
 
     add(this.data().label);
     for (const label of this.pointerLabelMap().values()) { add(label); }
+    for (const label of this.cheatLabelMap().values()) { add(label); }
     for (const entry of this.state.symLabels()) { add(entry.label); }
 
     return Array.from(labels).sort((a, b) => b.length - a.length);
