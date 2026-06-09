@@ -759,11 +759,36 @@ namespace CodeDesigner.Ps2.Bridge.Services
                         // Query even when gameId is null/empty. The repository
                         // treats that as the disc-less scope used by file-only
                         // disassembly, so user-applied formats saved before a
-                        // game serial is known are still persistent. Explicit
-                        // goto probes use SkipDataFormatOverrides instead.
-                        overrides = _ctx.DataFormatRepo
+                        // game serial is known are still persistent. When a game
+                        // id is known, also include non-overlapping disc-less
+                        // rows as a migration fallback for overrides created
+                        // before the serial finished resolving.
+                        var scoped = _ctx.DataFormatRepo
                             .GetInRangeAsync(gameId, rangeStart, rangeEnd)
                             .GetAwaiter().GetResult();
+
+                        if (string.IsNullOrWhiteSpace(gameId))
+                        {
+                            overrides = scoped;
+                        }
+                        else
+                        {
+                            var fallback = _ctx.DataFormatRepo
+                                .GetInRangeAsync(null, rangeStart, rangeEnd)
+                                .GetAwaiter().GetResult();
+
+                            var merged = new List<Database.Entities.DataFormatOverride>(scoped);
+                            foreach (var candidate in fallback)
+                            {
+                                long candidateEnd = candidate.Address + candidate.Length;
+                                bool overlapsScoped = scoped.Any(existing =>
+                                    existing.Address < candidateEnd
+                                    && existing.Address + existing.Length > candidate.Address);
+                                if (!overlapsScoped) merged.Add(candidate);
+                            }
+
+                            overrides = merged.OrderBy(o => o.Address).ToList();
+                        }
                     }
                     catch
                     {
