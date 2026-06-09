@@ -202,6 +202,16 @@ app-cheats-editor-page {
   white-space: nowrap;
 }
 
+.ce-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ce-icon-btn app-icon {
+  flex: 0 0 auto;
+}
+
 .ce-btn:hover:not(:disabled) {
   background: var(--vscode-button-secondaryHoverBackground, rgba(255,255,255,0.15));
 }

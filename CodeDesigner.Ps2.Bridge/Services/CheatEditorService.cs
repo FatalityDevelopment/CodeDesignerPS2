@@ -347,6 +347,8 @@ namespace CodeDesigner.Ps2.Bridge.Services
                     {
                         c.Label,
                         c.Section,
+                        c.Description,
+                        c.Author,
                         Lines = c.CheatLines.OrderBy(l => l.SortOrder).Select(l => l.Code).ToList(),
                     })
                     .ToList();
@@ -354,9 +356,11 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 var entries = cheats
                     .Select(c => new CheatFileEntry
                     {
-                        Label     = c.Label,
-                        Section   = c.Section,
-                        CodeLines = c.Lines,
+                        Label       = c.Label,
+                        Section     = c.Section,
+                        Description = c.Description,
+                        Author      = c.Author,
+                        CodeLines   = c.Lines,
                     })
                     .ToList();
 
@@ -392,8 +396,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 if (list == null)
                     return Responses.Error($"Cheat list {cheatListId} not found.");
 
-                // Carry over metadata (author / enabled / notes) the text format
-                // does not represent, matched on section + label.
+                // Carry over any metadata omitted by older text, matched on section + label.
                 var oldMeta = list.Cheats
                     .GroupBy(c => MetaKey(c.Section, c.Label))
                     .ToDictionary(g => g.Key, g => g.First());
@@ -406,14 +409,16 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 {
                     var cheat = new DbCheat
                     {
-                        Label     = entry.Label,
-                        Section   = entry.Section,
-                        SortOrder = sortOrder++,
+                        Label       = entry.Label,
+                        Section     = entry.Section,
+                        Description = string.IsNullOrWhiteSpace(entry.Description) ? null : entry.Description.Trim(),
+                        Author      = string.IsNullOrWhiteSpace(entry.Author) ? null : entry.Author.Trim(),
+                        SortOrder   = sortOrder++,
                     };
                     if (oldMeta.TryGetValue(MetaKey(entry.Section, entry.Label), out var prev))
                     {
-                        cheat.Author      = prev.Author;
-                        cheat.Description = prev.Description;
+                        cheat.Author      ??= prev.Author;
+                        cheat.Description ??= prev.Description;
                         cheat.IsEnabled   = prev.IsEnabled;
                     }
 
