@@ -40,6 +40,7 @@ import { DisasmRowComponent } from './disasm-row.component';
         [globalIndex]="pageStart() + windowStart() + i"
         [localIndex]="windowStart() + i"
         [pointerLabelMap]="pointerLabelMap()"
+        [cheatLabelMap]="cheatLabelMap()"
         (select)="onRowSelect($event)"
         (edit)="editRow.emit($event)"
         (contextMenu)="contextMenu.emit($event)"
@@ -98,6 +99,9 @@ export class VirtualGridComponent implements AfterViewInit {
 
   /** Pointer label map for address resolution */
   readonly pointerLabelMap = input<Map<string, string>>(new Map());
+
+  /** Transient cheat annotations keyed by row address. */
+  readonly cheatLabelMap = input<Map<string, string>>(new Map());
 
   /** Scroll position and viewport size for windowed rendering */
   private readonly scrollTop = signal(0);

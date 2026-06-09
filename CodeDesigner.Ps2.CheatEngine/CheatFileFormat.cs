@@ -51,9 +51,10 @@ namespace CodeDesigner.Ps2.CheatEngine
         private static readonly Regex BracketLine =
             new(@"^\[(?<label>.+)\]$", RegexOptions.Compiled);
 
-        // A code line is one or more groups of hex digits separated by whitespace.
+        // A code line is one or more groups of hex digits, with optional question-mark or
+        // asterisk placeholder characters, separated by whitespace.
         private static readonly Regex CodeLine =
-            new(@"^[0-9A-Fa-f]+(\s+[0-9A-Fa-f]+)*$", RegexOptions.Compiled);
+            new(@"^[0-9A-Fa-f?*]+(\s+[0-9A-Fa-f?*]+)*$", RegexOptions.Compiled);
 
         /// <summary>Builds the editor text for a set of cheat entries, grouped by section.</summary>
         public static string Serialize(IEnumerable<CheatFileEntry> entries)
@@ -94,11 +95,12 @@ namespace CodeDesigner.Ps2.CheatEngine
             string? currentSection = null;
             CheatFileEntry? current = null;
             int lineNo = 0;
+            bool inBlockComment = false;
 
             foreach (var raw in lines)
             {
                 lineNo++;
-                var line = raw.Trim();
+                var line = StripComments(raw, ref inBlockComment).Trim();
                 if (line.Length == 0)
                     continue;
 
@@ -131,7 +133,7 @@ namespace CodeDesigner.Ps2.CheatEngine
 
                 if (!CodeLine.IsMatch(line))
                 {
-                    result.Errors.Add($"Line {lineNo}: \"{line}\" is not a valid hex code line.");
+                    result.Errors.Add($"Line {lineNo}: \"{line}\" is not a valid code line (hex digits plus ? or * placeholders).");
                     continue;
                 }
 
@@ -142,6 +144,37 @@ namespace CodeDesigner.Ps2.CheatEngine
                 result.Errors.Add($"Cheat \"{entry.Label}\" has no code lines.");
 
             return result;
+        }
+
+        private static string StripComments(string line, ref bool inBlockComment)
+        {
+            var sb = new StringBuilder();
+            for (int i = 0; i < line.Length;)
+            {
+                if (inBlockComment)
+                {
+                    var end = line.IndexOf("*/", i, StringComparison.Ordinal);
+                    if (end < 0)
+                        return sb.ToString();
+                    i = end + 2;
+                    inBlockComment = false;
+                    continue;
+                }
+
+                if (i + 1 < line.Length && line[i] == '/' && line[i + 1] == '/')
+                    break;
+
+                if (i + 1 < line.Length && line[i] == '/' && line[i + 1] == '*')
+                {
+                    inBlockComment = true;
+                    i += 2;
+                    continue;
+                }
+
+                sb.Append(line[i]);
+                i++;
+            }
+            return sb.ToString();
         }
     }
 }

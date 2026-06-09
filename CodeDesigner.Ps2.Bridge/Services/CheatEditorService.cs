@@ -28,6 +28,11 @@ namespace CodeDesigner.Ps2.Bridge.Services
             reg.Add(_ => HandleGames(),                              "CHEATEDITOR_GAMES",  "CHEATEDITORGAMES");
             reg.Add(c => HandleLists(c.CheatGameId),                 "CHEATEDITOR_LISTS",  "CHEATEDITORLISTS");
             reg.Add(c => HandleGet(c.CheatListId),                   "CHEATEDITOR_GET",    "CHEATEDITORGET");
+            reg.Add(c => HandleSections(c.CheatListId, c.Query),     "CHEATEDITOR_SECTIONS", "CHEATEDITORSECTIONS");
+            reg.Add(c => HandleGetSection(c.CheatListId, c.CheatSection, c.Query, c.MaxCount),
+                                                                      "CHEATEDITOR_GET_SECTION", "CHEATEDITORGETSECTION");
+            reg.Add(c => HandleSearch(c.CheatGameId, c.CheatListId, c.CheatSection, c.Query, c.MaxCount),
+                                                                      "CHEATEDITOR_SEARCH", "CHEATEDITORSEARCH");
             reg.Add(c => HandleSave(c.CheatListId, c.Data),          "CHEATEDITOR_SAVE",   "CHEATEDITORSAVE");
             reg.Add(c => HandleCreate(c.CheatGameId, c.GameTitle),   "CHEATEDITOR_CREATE", "CHEATEDITORCREATE");
             reg.Add(c => HandleDelete(c.CheatListId),                "CHEATEDITOR_DELETE", "CHEATEDITORDELETE");
@@ -129,6 +134,200 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 })
                 .OrderBy(cl => cl.Title, StringComparer.OrdinalIgnoreCase)
                 .ToList();
+        }
+
+        // ── CHEATEDITOR_SECTIONS ──────────────────────────────────────────────
+
+        private const string DefaultSection = "Others";
+
+        private string HandleSections(int? cheatListId, string? query)
+        {
+            if (_ctx.Db == null)
+                return Responses.Error("Database is not available");
+            if (cheatListId == null)
+                return Responses.Error("CheatListId is required for CHEATEDITOR_SECTIONS");
+
+            try
+            {
+                var q = query?.Trim();
+                var rows = _ctx.Db.Cheats
+                    .AsNoTracking()
+                    .Where(c => c.CheatListId == cheatListId.Value)
+                    .OrderBy(c => c.SortOrder)
+                    .Select(c => new
+                    {
+                        c.Label,
+                        c.Section,
+                        c.SortOrder,
+                        CodeLineCount = c.CheatLines.Count,
+                    })
+                    .ToList();
+
+                var sections = rows
+                    .GroupBy(c => NormalizeSection(c.Section), StringComparer.OrdinalIgnoreCase)
+                    .Select(g => new CheatSectionInfo
+                    {
+                        ListId          = cheatListId.Value,
+                        Section         = g.Key,
+                        CheatCount      = g.Count(),
+                        CodeLineCount   = g.Sum(c => c.CodeLineCount),
+                        FirstCheatLabel = g.OrderBy(c => c.SortOrder).Select(c => c.Label).FirstOrDefault(),
+                    })
+                    .Where(s => string.IsNullOrWhiteSpace(q) ||
+                                s.Section.Contains(q, StringComparison.OrdinalIgnoreCase))
+                    .OrderBy(s => rows.FindIndex(c => string.Equals(NormalizeSection(c.Section), s.Section, StringComparison.OrdinalIgnoreCase)))
+                    .ToList();
+
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success             = true,
+                    Command             = "CHEATEDITOR_SECTIONS",
+                    CheatEditorSections = sections,
+                });
+            }
+            catch (Exception ex) { return Responses.Error($"CHEATEDITOR_SECTIONS error: {ex.Message}"); }
+        }
+
+        // ── CHEATEDITOR_GET_SECTION ───────────────────────────────────────────
+
+        private string HandleGetSection(int? cheatListId, string? section, string? query, ushort? maxCount)
+        {
+            if (_ctx.Db == null)
+                return Responses.Error("Database is not available");
+            if (cheatListId == null)
+                return Responses.Error("CheatListId is required for CHEATEDITOR_GET_SECTION");
+            if (string.IsNullOrWhiteSpace(section))
+                return Responses.Error("CheatSection is required for CHEATEDITOR_GET_SECTION");
+
+            try
+            {
+                int take = ClampTake(maxCount, 200);
+                var targetSection = NormalizeSection(section);
+                var q = query?.Trim();
+
+                var cheats = _ctx.Db.Cheats
+                    .AsNoTracking()
+                    .Where(c => c.CheatListId == cheatListId.Value)
+                    .OrderBy(c => c.SortOrder)
+                    .Select(c => new
+                    {
+                        c.Label,
+                        c.Section,
+                        c.Description,
+                        Lines = c.CheatLines.OrderBy(l => l.SortOrder).Select(l => l.Code).ToList(),
+                    })
+                    .ToList()
+                    .Where(c => string.Equals(NormalizeSection(c.Section), targetSection, StringComparison.OrdinalIgnoreCase))
+                    .Where(c => string.IsNullOrWhiteSpace(q) ||
+                                c.Label.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                                (c.Description?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                                c.Lines.Any(line => line.Contains(q, StringComparison.OrdinalIgnoreCase)))
+                    .Take(take)
+                    .Select(c => new CheatFileEntry
+                    {
+                        Label     = c.Label,
+                        Section   = NormalizeSection(c.Section),
+                        CodeLines = c.Lines,
+                    })
+                    .ToList();
+
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success = true,
+                    Command = "CHEATEDITOR_GET_SECTION",
+                    Data    = CheatFileFormat.Serialize(cheats),
+                });
+            }
+            catch (Exception ex) { return Responses.Error($"CHEATEDITOR_GET_SECTION error: {ex.Message}"); }
+        }
+
+        // ── CHEATEDITOR_SEARCH ────────────────────────────────────────────────
+
+        private string HandleSearch(int? gameId, int? cheatListId, string? section, string? query, ushort? maxCount)
+        {
+            if (_ctx.Db == null)
+                return Responses.Error("Database is not available");
+            if (string.IsNullOrWhiteSpace(query) && string.IsNullOrWhiteSpace(section))
+                return Responses.Error("Query or CheatSection is required for CHEATEDITOR_SEARCH");
+
+            try
+            {
+                int take = ClampTake(maxCount, 50);
+                var q = query?.Trim();
+                var sectionFilter = string.IsNullOrWhiteSpace(section) ? null : NormalizeSection(section);
+
+                var cheatsQuery = _ctx.Db.Cheats
+                    .AsNoTracking()
+                    .Where(c => cheatListId == null || c.CheatListId == cheatListId.Value)
+                    .Where(c => gameId == null || c.CheatList.GameId == gameId.Value);
+
+                if (sectionFilter != null)
+                {
+                    var sectionLower = sectionFilter.ToLowerInvariant();
+                    cheatsQuery = cheatsQuery.Where(c =>
+                        (string.IsNullOrEmpty(c.Section) ? DefaultSection : c.Section).ToLower() == sectionLower);
+                }
+
+                if (!string.IsNullOrWhiteSpace(q))
+                {
+                    var qLower = q.ToLowerInvariant();
+                    cheatsQuery = cheatsQuery.Where(c =>
+                        c.Label.ToLower().Contains(qLower) ||
+                        (c.Section != null && c.Section.ToLower().Contains(qLower)) ||
+                        (c.Description != null && c.Description.ToLower().Contains(qLower)) ||
+                        c.CheatLines.Any(l => l.Code.ToLower().Contains(qLower)));
+                }
+
+                var rows = cheatsQuery
+                    .OrderBy(c => c.CheatList.Game!.Title)
+                    .ThenBy(c => c.CheatList.Title)
+                    .ThenBy(c => c.SortOrder)
+                    .Take(take)
+                    .Select(c => new
+                    {
+                        CheatId       = c.Id,
+                        c.Label,
+                        c.Section,
+                        c.Description,
+                        c.CheatListId,
+                        ListTitle     = c.CheatList.Title,
+                        GameId        = c.CheatList.GameId,
+                        GameTitle     = c.CheatList.Game != null ? c.CheatList.Game.Title : null,
+                        CodeLineCount = c.CheatLines.Count,
+                        CodeLines     = c.CheatLines.OrderBy(l => l.SortOrder).Select(l => l.Code).ToList(),
+                    })
+                    .ToList()
+                    .Select(c =>
+                    {
+                        var matched = string.IsNullOrWhiteSpace(q)
+                            ? new List<string>()
+                            : MatchedFields(c.Label, c.Description, NormalizeSection(c.Section), c.CodeLines, q);
+                        if (sectionFilter != null && !matched.Contains("section"))
+                            matched.Add("section");
+
+                        return new CheatSearchResultInfo
+                        {
+                            GameId        = c.GameId,
+                            GameTitle     = c.GameTitle,
+                            ListId        = c.CheatListId,
+                            ListTitle     = c.ListTitle,
+                            CheatId       = c.CheatId,
+                            Label         = c.Label,
+                            Section       = NormalizeSection(c.Section),
+                            CodeLineCount = c.CodeLineCount,
+                            MatchedFields = matched,
+                        };
+                    })
+                    .ToList();
+
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success                  = true,
+                    Command                  = "CHEATEDITOR_SEARCH",
+                    CheatEditorSearchResults = rows,
+                });
+            }
+            catch (Exception ex) { return Responses.Error($"CHEATEDITOR_SEARCH error: {ex.Message}"); }
         }
 
         // ── CHEATEDITOR_GET ───────────────────────────────────────────────────
@@ -336,6 +535,31 @@ namespace CodeDesigner.Ps2.Bridge.Services
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────
+
+        private static string NormalizeSection(string? section)
+            => string.IsNullOrWhiteSpace(section) ? DefaultSection : section.Trim();
+
+        private static int ClampTake(ushort? maxCount, int fallback)
+            => Math.Clamp(maxCount is { } m && m > 0 ? m : fallback, 1, 500);
+
+        private static List<string> MatchedFields(
+            string label, string? description, string section, IReadOnlyList<string> codeLines, string? query)
+        {
+            var matches = new List<string>();
+            if (string.IsNullOrWhiteSpace(query))
+                return matches;
+
+            if (label.Contains(query, StringComparison.OrdinalIgnoreCase))
+                matches.Add("label");
+            if (section.Contains(query, StringComparison.OrdinalIgnoreCase))
+                matches.Add("section");
+            if (description?.Contains(query, StringComparison.OrdinalIgnoreCase) == true)
+                matches.Add("description");
+            if (codeLines.Any(line => line.Contains(query, StringComparison.OrdinalIgnoreCase)))
+                matches.Add("code");
+
+            return matches;
+        }
 
         private static string MetaKey(string? section, string label) =>
             (section ?? string.Empty).ToLowerInvariant() + "|" + label.ToLowerInvariant();

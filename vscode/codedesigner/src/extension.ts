@@ -450,7 +450,7 @@ export function activate(context: vscode.ExtensionContext) {
 	// ── PS2 Cheats editor ───────────────────────────────────────────────────
 	// Three-panel cheat-code editor; also opened from the compatibility
 	// browser's per-game Cheats button (passing the game title to pre-select).
-	const cheatsEditorProvider = new CheatsEditorProvider(context.extensionUri, socketClient);
+	const cheatsEditorProvider = new CheatsEditorProvider(context.extensionUri, socketClient, editorProvider);
 	const openCheatsEditorCommand = vscode.commands.registerCommand(
 		'codedesigner.openCheatsEditor',
 		(gameTitle?: string) => cheatsEditorProvider.open(gameTitle),

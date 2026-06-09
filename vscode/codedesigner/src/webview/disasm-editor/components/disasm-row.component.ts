@@ -88,6 +88,7 @@ export class DisasmRowComponent {
 
   /** Pointer label map for resolving address labels */
   readonly pointerLabelMap = input<Map<string, string>>(new Map());
+  readonly cheatLabelMap = input<Map<string, string>>(new Map());
 
   /** Fixed-position full-comment tooltip state. */
   protected readonly commentTooltipVisible = signal(false);
@@ -241,15 +242,15 @@ export class DisasmRowComponent {
   });
 
   protected readonly commentHtml = computed(() =>
-    this.highlightSearch(this.colorizeComment(this.data().comment || ''), 'comment')
+    this.highlightSearch(this.combinedCommentHtml(), 'comment')
   );
 
   protected readonly commentTooltipHtml = computed(() =>
-    this.colorizeComment(this.data().comment || '')
+    this.combinedCommentHtml()
   );
 
   protected readonly hasCommentTooltip = computed(() =>
-    (this.data().comment || '').trim().length > 0
+    (this.data().comment || '').trim().length > 0 || this.cheatText().length > 0
   );
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -296,6 +297,23 @@ export class DisasmRowComponent {
   // ═══════════════════════════════════════════════════════════════════════════
   // Utility Methods
   // ═══════════════════════════════════════════════════════════════════════════
+
+  private combinedCommentHtml(): string {
+    const parts: string[] = [];
+    const comment = this.data().comment || '';
+    if (comment.trim().length > 0) { parts.push(this.colorizeComment(comment)); }
+
+    const cheat = this.cheatText();
+    if (cheat.length > 0) {
+      parts.push(`<span class="cheat-annotation" title="Transient cheat-list overlay">⚡ ${this.escapeHtml(cheat)}</span>`);
+    }
+
+    return parts.join(' ');
+  }
+
+  private cheatText(): string {
+    return this.cheatLabelMap().get(this.data().addr) ?? '';
+  }
 
   private positionFullComment(event: MouseEvent): void {
     const margin = 12;
@@ -522,6 +540,7 @@ export class DisasmRowComponent {
 
     add(this.data().label);
     for (const label of this.pointerLabelMap().values()) { add(label); }
+    for (const label of this.cheatLabelMap().values()) { add(label); }
     for (const entry of this.state.symLabels()) { add(entry.label); }
 
     return Array.from(labels).sort((a, b) => b.length - a.length);
