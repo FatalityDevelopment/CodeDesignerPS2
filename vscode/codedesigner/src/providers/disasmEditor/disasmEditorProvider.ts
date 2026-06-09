@@ -102,6 +102,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   private _structLabels: LabelEntry[] = [];
   /** Labels derived from enabled archive cheats from the CheatCodeArchive. */
   private _archiveLabels: LabelEntry[] = [];
+  /** In-memory cheat annotations from the currently viewed cheat editor list. */
+  private _cheatOverlayLabels: LabelEntry[] = [];
   /** Current game (ISO) name — used to resolve the per-game labels.json path. */
   private _currentGameName: string = '';
   /** PS2 serial of the currently loaded game (e.g. "SCUS-97275"). Empty when unknown. Used for snapshot filename matching and as a label-manager fallback. */
@@ -298,6 +300,24 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       socketClient.onLabelUpdate((event: AiLabelUpdateEvent) => {
         this._handleAiLabelUpdate(event);
       });
+    }
+  }
+
+
+  /**
+   * Set transient cheat annotations from the Cheats Editor and broadcast them to
+   * all debugger/disassembly panels. These labels are intentionally not merged
+   * into the persisted label list; closing or toggling the cheat list off clears
+   * the overlay without touching database-backed labels.
+   */
+  public setCheatOverlay(labels: LabelEntry[], sourceTitle: string = '', revealDebugger: boolean = false): void {
+    this._cheatOverlayLabels = labels;
+    const message = { type: 'cheatLabelsUpdated', labels, sourceTitle };
+    for (const p of this._livePanels) {
+      p.webview.postMessage(message);
+    }
+    if (revealDebugger && this._livePanels.length > 0) {
+      this._livePanels[0].reveal(undefined, false);
     }
   }
 
@@ -1304,6 +1324,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 if (this._pointerLabels.length > 0 || this._structLabels.length > 0) {
                     existingInfo.panel.webview.postMessage({ type: 'pointerLabelsUpdated', labels: this._mergedPointerAndStructLabels() });
                 }
+                existingInfo.panel.webview.postMessage({ type: 'cheatLabelsUpdated', labels: this._cheatOverlayLabels });
             }
             return;
         }
@@ -1373,6 +1394,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 if (this._pointerLabels.length > 0 || this._structLabels.length > 0) {
                     panel.webview.postMessage({ type: 'pointerLabelsUpdated', labels: this._mergedPointerAndStructLabels() });
                 }
+                panel.webview.postMessage({ type: 'cheatLabelsUpdated', labels: this._cheatOverlayLabels });
                 // Sync the Follow AI toggle state so the toolbar button reflects
                 // the current setting even when the panel was just opened.
                 panel.webview.postMessage({ type: 'followAiState', enabled: this._followAiEnabled });

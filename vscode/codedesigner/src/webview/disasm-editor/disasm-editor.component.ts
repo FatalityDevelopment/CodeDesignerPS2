@@ -65,6 +65,9 @@ export class DisasmEditorComponent implements AfterViewInit {
   /** Pointer label map for address resolution */
   protected readonly gridPointerLabelMap = signal(new Map<string, string>());
 
+  /** Transient cheat annotations keyed by address. */
+  protected readonly gridCheatLabelMap = signal(new Map<string, string>());
+
   // Virtual grid actions (set by initEditorLogic)
   private readonly gridRuntime = {
     selectRow: null as ((globalIndex: number) => void) | null,
@@ -1312,6 +1315,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     state: DisasmEditorService['state'];
     getPageStart: (index: number) => number;
     pointerLabelMap: Map<string, string>;
+    cheatLabelMap: Map<string, string>;
   }): void {
     if (!this.useVirtualGrid()) { return; }
     const state = params.state;
@@ -1379,6 +1383,7 @@ export class DisasmEditorComponent implements AfterViewInit {
 
     // Pass the same map reference so the signal only changes when rebuildPointerLabelMap() fires
     this.gridPointerLabelMap.set(params.pointerLabelMap);
+    this.gridCheatLabelMap.set(params.cheatLabelMap);
   }
 
   private updateHexForRow(params: {
@@ -1427,6 +1432,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     state: DisasmEditorService['state'];
     getPageStart: (index: number) => number;
     pointerLabelMap: Map<string, string>;
+    cheatLabelMap: Map<string, string>;
     signals: EditorState;
     getLocalIndex: (index: number) => number;
     scrollBlock?: ScrollLogicalPosition | null;
@@ -1437,6 +1443,7 @@ export class DisasmEditorComponent implements AfterViewInit {
       state: params.state,
       getPageStart: params.getPageStart,
       pointerLabelMap: params.pointerLabelMap,
+      cheatLabelMap: params.cheatLabelMap,
     });
     this.updateCursor({
       state: params.state,
@@ -1485,6 +1492,17 @@ export class DisasmEditorComponent implements AfterViewInit {
       pointerLabelMap.set(key, entry.label);
     }
     return pointerLabelMap;
+  }
+
+  private buildCheatLabelMap(cheatLabels: DisasmEditorService['state']['cheatLabels']): Map<string, string> {
+    const grouped = new Map<string, string[]>();
+    for (const entry of cheatLabels) {
+      const key = entry.address.replace(/^0x/i, '').toUpperCase().padStart(8, '0');
+      const existing = grouped.get(key) ?? [];
+      if (!existing.includes(entry.label)) { existing.push(entry.label); }
+      grouped.set(key, existing);
+    }
+    return new Map(Array.from(grouped.entries()).map(([key, labels]) => [key, labels.join(' • ')]));
   }
 
   private pushNavHistory(params: {
@@ -1919,6 +1937,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     syncEditorSignals: () => void;
     handleSearchResults: (matches: SearchMatch[]) => void;
     rebuildPointerLabelMap: () => void;
+    rebuildCheatLabelMap: () => void;
     vscode: ReturnType<typeof getVsCodeApi>;
     requestRefresh: () => void;
   }): void {
@@ -2033,6 +2052,11 @@ export class DisasmEditorComponent implements AfterViewInit {
 
     params.svc.pointerLabelsUpdated$.subscribe(() => {
       params.rebuildPointerLabelMap();
+      params.renderDisassembly(null);
+    });
+
+    params.svc.cheatLabelsUpdated$.subscribe(() => {
+      params.rebuildCheatLabelMap();
       params.renderDisassembly(null);
     });
 
@@ -2439,6 +2463,11 @@ export class DisasmEditorComponent implements AfterViewInit {
       pointerLabelMap = this.buildPointerLabelMap(state.pointerLabels);
     };
 
+    let cheatLabelMap = new Map<string, string>();
+    const rebuildCheatLabelMap = () => {
+      cheatLabelMap = this.buildCheatLabelMap(state.cheatLabels);
+    };
+
     const focusGrid = () => this.focusVirtualGrid();
 
     const syncEditorSignals = () => this.syncEditorSignals(state, signals);
@@ -2456,6 +2485,7 @@ export class DisasmEditorComponent implements AfterViewInit {
       state,
       getPageStart,
       pointerLabelMap,
+      cheatLabelMap,
       signals,
       getLocalIndex,
       scrollBlock,
@@ -2586,6 +2616,7 @@ export class DisasmEditorComponent implements AfterViewInit {
       syncEditorSignals,
       handleSearchResults: (matches: SearchMatch[]) => handleSearchResults(matches),
       rebuildPointerLabelMap,
+      rebuildCheatLabelMap,
       vscode,
       requestRefresh: () => performLiveRefresh({ vscode, state, getPageStart }),
     });

@@ -4708,3 +4708,8 @@ app-icon,
 .ctx-menu-separator {
     background: var(--vscode-menu-separatorBackground, var(--cd-panel-border));
 }
+
+.cheat-annotation {
+    color: #e8a030;
+    font-weight: 700;
+}

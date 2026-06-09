@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { getOutputChannel } from '../../extension';
-import { SocketClient } from '../../socketClient';
+import { SocketClient, type LabelEntry } from '../../socketClient';
+import type { DisasmEditorProvider } from '../disasmEditor/disasmEditorProvider';
 import { getNonce, getWebviewErrorHandlerScript } from '../../utils/nonce';
 import { applyCodeDesignerPanelIcon } from '../../utils/webviewPanel';
 
@@ -19,6 +20,7 @@ export class CheatsEditorProvider {
     constructor(
         private readonly extensionUri: vscode.Uri,
         private readonly socketClient: SocketClient,
+        private readonly disasmEditorProvider?: DisasmEditorProvider,
     ) {}
 
     /** Open (or reveal) the cheats editor, optionally pre-selecting a game by title. */
@@ -88,6 +90,9 @@ export class CheatsEditorProvider {
                 break;
             case 'convert':
                 await this._convert(webview, msg);
+                break;
+            case 'viewInDebugger':
+                this._viewInDebugger(webview, msg);
                 break;
             case 'bootstrapError':
                 getOutputChannel().error('[CheatsEditor] Bootstrap error: ' + msg['error']);
@@ -227,6 +232,107 @@ export class CheatsEditorProvider {
         } catch (err: unknown) {
             this._sendError(webview, err);
         }
+    }
+
+
+    private _viewInDebugger(webview: vscode.Webview, msg: Record<string, unknown>): void {
+        const enabled = msg['enabled'] === true;
+        const title = (msg['title'] as string | undefined)?.trim() || 'Current cheat list';
+
+        if (!enabled) {
+            this.disasmEditorProvider?.setCheatOverlay([], title);
+            if (msg['silent'] !== true) {
+                webview.postMessage({ type: 'cheatStatus', message: 'Cheat debugger overlay hidden.', busy: false });
+            }
+            return;
+        }
+
+        const text = (msg['text'] as string | undefined) ?? '';
+        const labels = this._parseCheatOverlayLabels(text);
+        this.disasmEditorProvider?.setCheatOverlay(labels, title, true);
+        webview.postMessage({
+            type: 'cheatStatus',
+            message: labels.length > 0
+                ? `Showing ${labels.length} cheat address annotation(s) in debugger.`
+                : 'View in debugger is on, but no cheat address annotations were found.',
+            busy: false,
+        });
+    }
+
+    private _parseCheatOverlayLabels(text: string): LabelEntry[] {
+        const labels: LabelEntry[] = [];
+        const lines = text.split(/\r?\n/);
+        let currentCheat = '';
+        let inBlockComment = false;
+        const seen = new Set<string>();
+
+        for (const raw of lines) {
+            const stripped = this._stripCheatComments(raw, inBlockComment);
+            inBlockComment = stripped.inBlockComment;
+            const line = stripped.code.trim();
+            if (!line) { continue; }
+            if (/^\[--SectionStart:.*--\]$/.test(line)) { continue; }
+
+            const header = line.match(/^\[(.+)\]$/);
+            if (header) {
+                currentCheat = header[1].trim();
+                continue;
+            }
+
+            if (!currentCheat) { continue; }
+            const firstToken = line.split(/\s+/)[0] ?? '';
+            if (!/^[0-9A-Fa-f]{8}$/.test(firstToken)) { continue; }
+
+            for (const address of this._cheatAddressAliases(firstToken)) {
+                const key = `${address.toUpperCase()}\u0000${currentCheat}`;
+                if (seen.has(key)) { continue; }
+                seen.add(key);
+                labels.push({ address: `0x${address.toUpperCase()}`, label: currentCheat });
+            }
+        }
+
+        return labels;
+    }
+
+    private _cheatAddressAliases(addressToken: string): string[] {
+        const raw = addressToken.toUpperCase();
+        const commandStripped = raw.slice(2).padStart(8, '0');
+        const aliases = [commandStripped, raw];
+        const unique = new Set<string>();
+        for (const alias of aliases) {
+            const value = parseInt(alias, 16) >>> 0;
+            unique.add(value.toString(16).toUpperCase().padStart(8, '0'));
+            if (value < 0x20000000) {
+                unique.add((value + 0x20000000).toString(16).toUpperCase().padStart(8, '0'));
+                unique.add((value + 0x80000000).toString(16).toUpperCase().padStart(8, '0'));
+                unique.add((value + 0xA0000000).toString(16).toUpperCase().padStart(8, '0'));
+            }
+        }
+        return Array.from(unique);
+    }
+
+    private _stripCheatComments(raw: string, inBlockComment: boolean): { code: string; inBlockComment: boolean } {
+        let code = '';
+        for (let i = 0; i < raw.length;) {
+            if (inBlockComment) {
+                const end = raw.indexOf('*/', i);
+                if (end < 0) { return { code, inBlockComment: true }; }
+                i = end + 2;
+                inBlockComment = false;
+                continue;
+            }
+
+            if (raw.startsWith('//', i)) { break; }
+            if (raw.startsWith('/*', i)) {
+                inBlockComment = true;
+                i += 2;
+                continue;
+            }
+
+            code += raw[i];
+            i++;
+        }
+        return { code, inBlockComment };
     }
 
     private _sendError(webview: vscode.Webview, err: unknown): void {

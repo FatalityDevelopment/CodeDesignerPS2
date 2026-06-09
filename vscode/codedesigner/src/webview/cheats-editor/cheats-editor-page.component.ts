@@ -65,7 +65,17 @@ const CODE_TOKEN_RE = /[0-9A-Fa-f?*]+|\s+|\S+/g;
   encapsulation: ViewEncapsulation.None,
   template: `
     <div class="ce-shell">
-      <app-page-header icon="sparkles" title="Cheats" subtitle="Cheat code editor" />
+      <app-page-header icon="sparkles" title="Cheats" subtitle="Cheat code editor">
+        <div page-header-actions class="ce-header-actions">
+          <label class="ce-debug-toggle" [class.enabled]="debugViewEnabled()" title="Display this cheat list's addresses in the debugger">
+            <input type="checkbox"
+                   [checked]="debugViewEnabled()"
+                   [disabled]="!selectedBuildId()"
+                   (change)="onDebugViewToggle($event)" />
+            <span>View in debugger</span>
+          </label>
+        </div>
+      </app-page-header>
       <!-- ══ Panel 1 — games & builds ══════════════════════════════════ -->
       <div class="ce-panel ce-panel-left">
         <div class="ce-panel-head">Cheats</div>
@@ -230,11 +240,13 @@ export class CheatsEditorPageComponent implements AfterViewInit {
   readonly busy = signal(false);
   readonly statusMsg = signal('');
   readonly statusIsError = signal(false);
+  readonly debugViewEnabled = signal(false);
 
   private readonly coverMap = signal<Record<string, string>>({});
   private readonly coverRequested = new Set<string>();
   /** A game title to pre-select once the game list arrives. */
   private pendingGameTitle: string | null = null;
+  private debuggerPostTimer: ReturnType<typeof setTimeout> | undefined;
 
   // ── Derived state ──────────────────────────────────────────────────────
 
@@ -335,9 +347,7 @@ export class CheatsEditorPageComponent implements AfterViewInit {
           // Drop the selection if the build it pointed at no longer exists.
           if (this.selectedBuildId() !== null &&
               !builds.some(b => b.id === this.selectedBuildId())) {
-            this.selectedBuildId.set(null);
-            this.editorText.set('');
-            this.loadedText.set('');
+            this.clearEditorSelection();
           }
           break;
         }
@@ -345,6 +355,7 @@ export class CheatsEditorPageComponent implements AfterViewInit {
           this.selectedBuildId.set((data['cheatListId'] as number) ?? null);
           this.editorText.set((data['text'] as string) ?? '');
           this.loadedText.set((data['text'] as string) ?? '');
+          this.postDebuggerCheats();
           break;
         case 'cheatStatus':
           this.statusMsg.set((data['message'] as string) ?? '');
@@ -387,18 +398,14 @@ export class CheatsEditorPageComponent implements AfterViewInit {
     this.gameSearch.set((e.target as HTMLInputElement).value);
     this.selectedGameId.set(null);
     this.builds.set([]);
-    this.selectedBuildId.set(null);
-    this.editorText.set('');
-    this.loadedText.set('');
+    this.clearEditorSelection();
   }
 
   selectGame(g: CheatGame): void {
     this.selectedGameId.set(g.gameId);
     this.gameSearch.set('');
     this.builds.set([]);
-    this.selectedBuildId.set(null);
-    this.editorText.set('');
-    this.loadedText.set('');
+    this.clearEditorSelection();
     if (g.coverSerial) { this.requestCover(g.coverSerial); }
     this.vscode.postMessage({ type: 'selectGame', gameId: g.gameId });
   }
@@ -431,6 +438,7 @@ export class CheatsEditorPageComponent implements AfterViewInit {
 
   onEditorInput(e: Event): void {
     this.editorText.set((e.target as HTMLTextAreaElement).value);
+    this.scheduleDebuggerPost();
     queueMicrotask(() => this.syncEditorScroll());
   }
 
@@ -451,6 +459,43 @@ export class CheatsEditorPageComponent implements AfterViewInit {
       return;
     }
     this.vscode.postMessage({ type: 'saveBuild', cheatListId: b.id, text: this.editorText() });
+    this.postDebuggerCheats();
+  }
+
+  onDebugViewToggle(e: Event): void {
+    const enabled = (e.target as HTMLInputElement).checked;
+    this.debugViewEnabled.set(enabled);
+    this.postDebuggerCheats();
+  }
+
+  private clearEditorSelection(): void {
+    this.selectedBuildId.set(null);
+    this.editorText.set('');
+    this.loadedText.set('');
+    this.debugViewEnabled.set(false);
+    this.postDebuggerCheats(false, true);
+  }
+
+  private scheduleDebuggerPost(): void {
+    if (!this.debugViewEnabled()) { return; }
+    if (this.debuggerPostTimer !== undefined) { clearTimeout(this.debuggerPostTimer); }
+    this.debuggerPostTimer = setTimeout(() => {
+      this.debuggerPostTimer = undefined;
+      this.postDebuggerCheats();
+    }, 250);
+  }
+
+  private postDebuggerCheats(forceEnabled?: boolean, silent = false): void {
+    const enabled = forceEnabled ?? this.debugViewEnabled();
+    const build = this.selectedBuild();
+    this.vscode.postMessage({
+      type: 'viewInDebugger',
+      enabled: enabled && !!build,
+      cheatListId: build?.id ?? this.selectedBuildId(),
+      title: build?.title ?? '',
+      text: enabled && build ? this.editorText() : '',
+      silent,
+    });
   }
 
   insertSection(): void {
