@@ -806,12 +806,14 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       // the bridge apply any persisted DataFormatOverrides so the response
       // rows have variable byte length (.byte/.half/.word/.dword/.qword/.float/.double).
       const hexCode = hexInstructions.join(' ');
-      // Passing undefined gameId tells the backend to skip DataFormatOverrides
-      // for this page — used for goto loads so an unaligned override layout
-      // doesn't shift the row the user is trying to land on.
-      const gameId = bypassOverrides ? undefined : (this._currentGameSerial || undefined);
+      // Goto page probes can explicitly skip DataFormatOverrides so an
+      // unaligned override layout doesn't shift the row the user is trying to
+      // land on. Normal disassembly still calls the backend without a game id
+      // when the serial is unknown; the bridge maps that to the persisted
+      // disc-less override scope instead of silently ignoring saved formats.
+      const gameId = this._currentGameSerial || undefined;
       console.log(`[DISASM] Disassembling ${hexInstructions.length} instructions starting at 0x${startAddr.toString(16)}`);
-      const results = await this.socketClient.disassemble(hexCode, startAddr, gameId);
+      const results = await this.socketClient.disassemble(hexCode, startAddr, gameId, bypassOverrides);
       console.log(`[DISASM] Received ${results.length} results from backend`);
 
       // Convert results to row format.  Each result carries its own Address
