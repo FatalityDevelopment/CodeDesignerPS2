@@ -867,7 +867,9 @@ namespace CodeDesigner.Ps2.Bridge.Services
                             if (ovr.Kind == Database.Entities.DataFormatKind.Word)
                             {
                                 uint val = BitConverter.ToUInt32(byteBuf, byteIndex);
-                                cmt = TryResolvePointerComment(val, analysisBus)
+                                cmt = TryResolveInlineAsciiString(byteBuf, byteIndex, byteBuf.Length - byteIndex)
+                                      ?? TryResolveInlineAsciiString(byteBuf, byteIndex, unit)
+                                      ?? TryResolvePointerComment(val, analysisBus)
                                       ?? (LooksLikeRamPointer(val) ? $"-> 0x{val:X8}" : null);
                             }
                             else if (ovr.Kind == Database.Entities.DataFormatKind.Byte
@@ -1383,7 +1385,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
                         if (sb.Length < 3) return $"-> {target}";
                         return $"-> {target} \"{EscapeCommentString(sb.ToString())}\"";
                     }
-                    if (b < 0x20 || b > 0x7E) return $"-> {target}";
+                    if (!StringScanner.IsAsciiStringChar(b)) return $"-> {target}";
                     sb.Append((char)b);
                 }
                 if (sb.Length >= 3)
