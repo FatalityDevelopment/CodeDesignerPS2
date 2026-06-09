@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using MgrEntry = CodeDesigner.Ps2.LabelManager.Models.LabelEntry;
 using MgrSet   = CodeDesigner.Ps2.LabelManager.Models.LabelSet;
 using MgrType  = CodeDesigner.Ps2.LabelManager.Models.LabelType;
@@ -28,6 +29,8 @@ namespace CodeDesigner.Ps2.Bridge.Services
         public void Register(CommandRegistry reg)
         {
             reg.Add(c => HandleGetLabelSets(c.WorkspaceDir, c.GameId),                                                    "GETLABELSETS");
+            reg.Add(c => HandleSearchLabelSets(c.GameId, c.Query, c.MaxCount),                                           "SEARCHLABELSETS");
+            reg.Add(c => HandleSearchLabels(c.GameId, c.SetName, c.Query, c.SearchMode, c.MaxCount),                     "SEARCHLABELS");
             reg.Add(c => HandleGetLabelSet(c.WorkspaceDir, c.GameId, c.SetName),                                          "GETLABELSET");
             reg.Add(c => HandleSetActiveLabelSet(c.WorkspaceDir, c.GameId, c.SetName),                                    "SETACTIVELABELSET");
             reg.Add(c => HandleCreateLabelSet(c.WorkspaceDir, c.GameId, c.SetName),                                       "CREATELABELSET");
@@ -55,6 +58,74 @@ namespace CodeDesigner.Ps2.Bridge.Services
             error = null;
             return value.Trim();
         }
+
+        private static int ClampTake(ushort? maxCount, int fallback)
+            => Math.Clamp(maxCount is { } m && m > 0 ? m : fallback, 1, 500);
+
+        private static bool LabelMatches(string name, string address, string? comment, string? valueType, string type, string query)
+            => name.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+               address.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+               type.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+               (comment?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false) ||
+               (valueType?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false);
+
+        private static List<string> MatchedLabelFields(
+            string name, string address, string? comment, string? valueType, string type, string? query, string? typeFilter)
+        {
+            var matches = new List<string>();
+            if (!string.IsNullOrWhiteSpace(query))
+            {
+                if (name.Contains(query, StringComparison.OrdinalIgnoreCase)) matches.Add("name");
+                if (address.Contains(query, StringComparison.OrdinalIgnoreCase)) matches.Add("address");
+                if (type.Contains(query, StringComparison.OrdinalIgnoreCase)) matches.Add("type");
+                if (comment?.Contains(query, StringComparison.OrdinalIgnoreCase) == true) matches.Add("comment");
+                if (valueType?.Contains(query, StringComparison.OrdinalIgnoreCase) == true) matches.Add("valueType");
+            }
+            if (!string.IsNullOrWhiteSpace(typeFilter) && !matches.Contains("type")) matches.Add("type");
+            return matches;
+        }
+
+        private void AddBuiltInSetSearchResult(List<LabelSetSearchResultInfo> results, string? query)
+        {
+            var entries = _ctx.LabelMgr.BuiltIn.Entries;
+            int matching = string.IsNullOrWhiteSpace(query)
+                ? entries.Count
+                : entries.Count(e => LabelMatches(e.Name, e.Address, e.Comment, e.ValueType, e.Type.ToString(), query));
+            if (string.IsNullOrWhiteSpace(query) ||
+                "Built-in".Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                matching > 0)
+            {
+                results.Add(new LabelSetSearchResultInfo
+                {
+                    SetName            = "Built-in",
+                    IsBuiltIn          = true,
+                    IsSystem           = true,
+                    EntryCount         = entries.Count,
+                    MatchingLabelCount = matching,
+                });
+            }
+        }
+
+        private IEnumerable<LabelSearchResultInfo> SearchBuiltInLabels(string? query, string? typeFilter)
+            => _ctx.LabelMgr.BuiltIn.Entries
+                .Where(e => string.IsNullOrWhiteSpace(typeFilter) ||
+                            string.Equals(e.Type.ToString(), typeFilter, StringComparison.OrdinalIgnoreCase))
+                .Where(e => string.IsNullOrWhiteSpace(query) ||
+                            LabelMatches(e.Name, e.Address, e.Comment, e.ValueType, e.Type.ToString(), query))
+                .OrderBy(e => e.Address, StringComparer.OrdinalIgnoreCase)
+                .Select(e => new LabelSearchResultInfo
+                {
+                    SetName       = "Built-in",
+                    Address       = e.Address,
+                    ParentAddress = e.ParentAddress,
+                    Name          = e.Name,
+                    Type          = e.Type.ToString(),
+                    Comment       = e.Comment,
+                    ValueType     = e.ValueType,
+                    Hidden        = e.Hidden,
+                    Dynamic       = e.Dynamic,
+                    MatchedFields = MatchedLabelFields(e.Name, e.Address, e.Comment, e.ValueType, e.Type.ToString(), query, typeFilter),
+                });
 
         /// <summary>Convert a LabelManager entry to the wire payload.</summary>
         private static LabelManagerEntry ToWireEntry(MgrEntry e) => new()
@@ -202,6 +273,175 @@ namespace CodeDesigner.Ps2.Bridge.Services
             catch (Exception ex)
             {
                 return Responses.Error($"GETLABELSETS failed: {ex.Message}");
+            }
+        }
+
+        // ── SEARCHLABELSETS ──────────────────────────────────────────────────
+
+        private string HandleSearchLabelSets(string? gameId, string? query, ushort? maxCount)
+        {
+            gameId = RequireParam(gameId, "GameId", out var e1);
+            if (gameId is null) return Responses.Error(e1!);
+
+            try
+            {
+                int take = ClampTake(maxCount, 50);
+                var q = query?.Trim();
+                var discId = _ctx.LabelRepo.ResolveGameDiscIdAsync(gameId).GetAwaiter().GetResult();
+                if (discId is null) return Responses.Error($"Game '{gameId}' not found.");
+
+                var results = new List<LabelSetSearchResultInfo>();
+                AddBuiltInSetSearchResult(results, q);
+
+                var dbSets = _ctx.Db.LabelSets
+                    .AsNoTracking()
+                    .Where(s => s.GameDiscId == discId && !s.IsBuiltIn)
+                    .Select(s => new
+                    {
+                        s.GameDiscId,
+                        s.SetName,
+                        s.IsBuiltIn,
+                        s.IsSystem,
+                        Labels = s.Labels.Select(l => new
+                        {
+                            l.Name,
+                            l.Address,
+                            l.Comment,
+                            l.ValueType,
+                            l.Type,
+                        }).ToList(),
+                    })
+                    .ToList()
+                    .Select(s => new LabelSetSearchResultInfo
+                    {
+                        GameDiscId         = s.GameDiscId,
+                        SetName            = s.SetName,
+                        IsBuiltIn          = s.IsBuiltIn,
+                        IsSystem           = s.IsSystem,
+                        EntryCount         = s.Labels.Count,
+                        MatchingLabelCount = string.IsNullOrWhiteSpace(q)
+                            ? s.Labels.Count
+                            : s.Labels.Count(l => LabelMatches(l.Name, l.Address, l.Comment, l.ValueType, l.Type.ToString(), q)),
+                    })
+                    .Where(s => string.IsNullOrWhiteSpace(q) ||
+                                s.SetName.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                                s.MatchingLabelCount > 0)
+                    .OrderByDescending(s => s.IsBuiltIn)
+                    .ThenByDescending(s => s.IsSystem)
+                    .ThenBy(s => s.SetName, StringComparer.OrdinalIgnoreCase)
+                    .Take(take)
+                    .ToList();
+
+                results.AddRange(dbSets);
+                results = results.Take(take).ToList();
+
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success               = true,
+                    Command               = "SEARCHLABELSETS",
+                    LabelSetSearchResults = results,
+                });
+            }
+            catch (Exception ex)
+            {
+                return Responses.Error($"SEARCHLABELSETS failed: {ex.Message}");
+            }
+        }
+
+        // ── SEARCHLABELS ──────────────────────────────────────────────────────
+
+        private string HandleSearchLabels(string? gameId, string? setName, string? query, string? type, ushort? maxCount)
+        {
+            if (string.IsNullOrWhiteSpace(query) && string.IsNullOrWhiteSpace(type))
+                return Responses.Error("Query or SearchMode (label type) is required for SEARCHLABELS");
+
+            try
+            {
+                int take = ClampTake(maxCount, 100);
+                var q = query?.Trim();
+                var typeFilter = type?.Trim();
+                var results = new List<LabelSearchResultInfo>();
+
+                if (setName?.Equals("Built-in", StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    results.AddRange(SearchBuiltInLabels(q, typeFilter));
+                    return JsonSerializer.Serialize(new CommandResponse
+                    {
+                        Success            = true,
+                        Command            = "SEARCHLABELS",
+                        LabelSearchResults = results.Take(take).ToList(),
+                    });
+                }
+
+                gameId = RequireParam(gameId, "GameId", out var e1);
+                if (gameId is null) return Responses.Error(e1!);
+
+                var discId = _ctx.LabelRepo.ResolveGameDiscIdAsync(gameId).GetAwaiter().GetResult();
+                if (discId is null) return Responses.Error($"Game '{gameId}' not found.");
+
+                var labelsQuery = _ctx.Db.Labels
+                    .AsNoTracking()
+                    .Where(l => l.LabelSet.GameDiscId == discId)
+                    .Where(l => string.IsNullOrWhiteSpace(setName) || l.LabelSet.SetName == setName);
+
+                if (!string.IsNullOrWhiteSpace(q))
+                {
+                    var qLower = q.ToLowerInvariant();
+                    labelsQuery = labelsQuery.Where(l =>
+                        l.Name.ToLower().Contains(qLower) ||
+                        l.Address.ToLower().Contains(qLower) ||
+                        (l.Comment != null && l.Comment.ToLower().Contains(qLower)) ||
+                        (l.ValueType != null && l.ValueType.ToLower().Contains(qLower)));
+                }
+
+                var dbResults = labelsQuery
+                    .OrderBy(l => l.LabelSet.SetName)
+                    .ThenBy(l => l.Address)
+                    .Select(l => new
+                    {
+                        l.LabelSet.GameDiscId,
+                        l.LabelSet.SetName,
+                        l.Address,
+                        ParentAddress = l.Parent != null ? l.Parent.Address : null,
+                        l.Name,
+                        l.Type,
+                        l.Comment,
+                        l.ValueType,
+                        l.Hidden,
+                        l.Dynamic,
+                    })
+                    .ToList()
+                    .Where(l => string.IsNullOrWhiteSpace(typeFilter) ||
+                                string.Equals(l.Type.ToString(), typeFilter, StringComparison.OrdinalIgnoreCase))
+                    .Select(l => new LabelSearchResultInfo
+                    {
+                        GameDiscId    = l.GameDiscId,
+                        SetName       = l.SetName,
+                        Address       = l.Address,
+                        ParentAddress = l.ParentAddress,
+                        Name          = l.Name,
+                        Type          = l.Type.ToString(),
+                        Comment       = l.Comment,
+                        ValueType     = l.ValueType,
+                        Hidden        = l.Hidden,
+                        Dynamic       = l.Dynamic,
+                        MatchedFields = MatchedLabelFields(l.Name, l.Address, l.Comment, l.ValueType, l.Type.ToString(), q, typeFilter),
+                    })
+                    .Take(take - results.Count)
+                    .ToList();
+
+                results.AddRange(dbResults);
+
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success            = true,
+                    Command            = "SEARCHLABELS",
+                    LabelSearchResults = results.Take(take).ToList(),
+                });
+            }
+            catch (Exception ex)
+            {
+                return Responses.Error($"SEARCHLABELS failed: {ex.Message}");
             }
         }
 

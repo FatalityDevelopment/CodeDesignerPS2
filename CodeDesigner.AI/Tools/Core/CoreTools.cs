@@ -112,7 +112,7 @@ public sealed class SessionInitTool(
         sb.AppendLine("Core rules:");
         sb.AppendLine("  - this IS session_start — always call it first, every session, before any other tool");
         sb.AppendLine("  - navigate the VS Code UI with navigate_to so the user always sees the current focus");
-        sb.AppendLine("  - prefer label tools (label_list / label_resolve_strings / get_functions) over query_db for label lookups");
+        sb.AppendLine("  - prefer label tools (label_search / label_search_sets / label_list / get_functions) over query_db for label lookups");
         sb.AppendLine("  - get_threads / get_modules / get_registers / call stack need the emulator PAUSED (hit a breakpoint first)");
         sb.AppendLine("  - pad input is press THEN release: set the button to 1, advance frames, then set it back to 0");
         sb.AppendLine("  - preview the screen with pcsx2_save_screenshot; reserve the GS stream for deeper analysis");

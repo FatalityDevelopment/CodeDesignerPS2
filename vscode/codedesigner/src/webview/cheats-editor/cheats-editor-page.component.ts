@@ -50,6 +50,7 @@ const CONVERT_FORMATS = [
 const SECTION_RE = /^\[--SectionStart:(.*)--\]$/;
 const BRACKET_RE = /^\[(.+)\]$/;
 const CODE_RE = /^[0-9A-Fa-f?*]+(\s+[0-9A-Fa-f?*]+)*$/;
+const CODE_TOKEN_RE = /[0-9A-Fa-f?*]+|\s+|\S+/g;
 
 /**
  * Three-panel PS2 cheat-code editor:
@@ -141,10 +142,13 @@ const CODE_RE = /^[0-9A-Fa-f?*]+(\s+[0-9A-Fa-f?*]+)*$/;
           </div>
         }
 
-        <textarea #editor class="ce-editor" spellcheck="false"
-                  [value]="editorText()" (input)="onEditorInput($event)"
-                  [disabled]="!selectedBuildId()"
-                  placeholder="Select a cheat list to edit…"></textarea>
+        <div class="ce-editor-wrap">
+          <pre #highlighter class="ce-editor-highlight" aria-hidden="true" [innerHTML]="highlightedHtml()"></pre>
+          <textarea #editor class="ce-editor" spellcheck="false"
+                    [value]="editorText()" (input)="onEditorInput($event)" (scroll)="syncEditorScroll()"
+                    [disabled]="!selectedBuildId()"
+                    placeholder="Select a cheat list to edit…"></textarea>
+        </div>
 
         @if (!valid() && errors().length) {
           <div class="ce-errors">
@@ -205,6 +209,7 @@ const CODE_RE = /^[0-9A-Fa-f?*]+(\s+[0-9A-Fa-f?*]+)*$/;
 export class CheatsEditorPageComponent implements AfterViewInit {
   private readonly vscode = getVsCodeApi();
   private readonly editorRef = viewChild<ElementRef<HTMLTextAreaElement>>('editor');
+  private readonly highlighterRef = viewChild<ElementRef<HTMLPreElement>>('highlighter');
 
   readonly formats = CONVERT_FORMATS;
 
@@ -258,18 +263,22 @@ export class CheatsEditorPageComponent implements AfterViewInit {
     let section = DEFAULT_SECTION;
     let current: ParsedCheat | null = null;
 
-    lines.forEach((raw, idx) => {
-      const line = raw.trim();
-      if (!line) { return; }
+    let inBlockComment = false;
 
-      const sm = SECTION_RE.exec(line);
+    lines.forEach((raw, idx) => {
+      const line = this.stripComments(raw, inBlockComment);
+      inBlockComment = line.inBlockComment;
+      const code = line.code.trim();
+      if (!code) { return; }
+
+      const sm = SECTION_RE.exec(code);
       if (sm) {
         section = sm[1].trim() || DEFAULT_SECTION;
         if (!sections.includes(section)) { sections.push(section); }
         current = null;
         return;
       }
-      const bm = BRACKET_RE.exec(line);
+      const bm = BRACKET_RE.exec(code);
       if (bm) {
         if (!sections.includes(section)) { sections.push(section); }
         current = { label: bm[1].trim(), section, codeCount: 0, lineIndex: idx };
@@ -277,11 +286,11 @@ export class CheatsEditorPageComponent implements AfterViewInit {
         return;
       }
       if (!current) {
-        errors.push(`Line ${idx + 1}: code "${line}" before any [cheat] header.`);
+        errors.push(`Line ${idx + 1}: code "${code}" before any [cheat] header.`);
         return;
       }
-      if (!CODE_RE.test(line)) {
-        errors.push(`Line ${idx + 1}: "${line}" is not a valid code line (hex digits plus ? or * placeholders).`);
+      if (!CODE_RE.test(code)) {
+        errors.push(`Line ${idx + 1}: "${code}" is not a valid code line (hex digits plus ? or * placeholders).`);
         return;
       }
       current.codeCount++;
@@ -297,6 +306,7 @@ export class CheatsEditorPageComponent implements AfterViewInit {
   readonly sections = computed(() => this.parsed().sections);
   readonly errors = computed(() => this.parsed().errors);
   readonly valid = computed(() => this.parsed().errors.length === 0);
+  readonly highlightedHtml = computed(() => this.renderHighlightedText(this.editorText()));
   readonly cheatsInSection = computed(() =>
     this.parsed().cheats.filter(c => c.section === this.selectedSection()));
 
@@ -421,6 +431,15 @@ export class CheatsEditorPageComponent implements AfterViewInit {
 
   onEditorInput(e: Event): void {
     this.editorText.set((e.target as HTMLTextAreaElement).value);
+    queueMicrotask(() => this.syncEditorScroll());
+  }
+
+  syncEditorScroll(): void {
+    const editor = this.editorRef()?.nativeElement;
+    const highlighter = this.highlighterRef()?.nativeElement;
+    if (!editor || !highlighter) { return; }
+    highlighter.scrollTop = editor.scrollTop;
+    highlighter.scrollLeft = editor.scrollLeft;
   }
 
   save(): void {
@@ -467,6 +486,7 @@ export class CheatsEditorPageComponent implements AfterViewInit {
     // Approximate scroll so the selected cheat is visible.
     const lineHeight = ta.scrollHeight / Math.max(1, lines.length);
     ta.scrollTop = Math.max(0, lineHeight * c.lineIndex - ta.clientHeight / 3);
+    this.syncEditorScroll();
   }
 
   // ── Convert ────────────────────────────────────────────────────────────
@@ -501,6 +521,150 @@ export class CheatsEditorPageComponent implements AfterViewInit {
     if (!result) { return; }
     const text = this.editorText();
     this.editorText.set(text.slice(0, this.convertSelStart) + result + text.slice(this.convertSelEnd));
+  }
+
+  // ── Syntax highlighting / comments ──────────────────────────────────────
+
+  private stripComments(raw: string, inBlockComment: boolean): { code: string; inBlockComment: boolean } {
+    let code = '';
+    for (let i = 0; i < raw.length;) {
+      if (inBlockComment) {
+        const end = raw.indexOf('*/', i);
+        if (end < 0) { return { code, inBlockComment: true }; }
+        i = end + 2;
+        inBlockComment = false;
+        continue;
+      }
+
+      if (raw.startsWith('//', i)) { break; }
+      if (raw.startsWith('/*', i)) {
+        inBlockComment = true;
+        i += 2;
+        continue;
+      }
+
+      code += raw[i];
+      i++;
+    }
+    return { code, inBlockComment };
+  }
+
+  private renderHighlightedText(text: string): string {
+    const lines = text.split(/\r?\n/);
+    let inBlockComment = false;
+    return lines.map(line => {
+      const rendered = this.renderHighlightedLine(line, inBlockComment);
+      inBlockComment = rendered.inBlockComment;
+      return rendered.html || '&nbsp;';
+    }).join('\n');
+  }
+
+  private renderHighlightedLine(raw: string, inBlockComment: boolean): { html: string; inBlockComment: boolean } {
+    let html = '';
+    let codeText = '';
+
+    const flushCode = (): void => {
+      if (!codeText) { return; }
+      html += this.renderCodeSegment(codeText);
+      codeText = '';
+    };
+
+    for (let i = 0; i < raw.length;) {
+      if (inBlockComment) {
+        const end = raw.indexOf('*/', i);
+        const comment = end < 0 ? raw.slice(i) : raw.slice(i, end + 2);
+        html += `<span class="ce-syn-comment">${this.escapeHtml(comment)}</span>`;
+        if (end < 0) { return { html, inBlockComment: true }; }
+        i = end + 2;
+        inBlockComment = false;
+        continue;
+      }
+
+      if (raw.startsWith('//', i)) {
+        flushCode();
+        html += `<span class="ce-syn-comment">${this.escapeHtml(raw.slice(i))}</span>`;
+        break;
+      }
+
+      if (raw.startsWith('/*', i)) {
+        flushCode();
+        const end = raw.indexOf('*/', i + 2);
+        const comment = end < 0 ? raw.slice(i) : raw.slice(i, end + 2);
+        html += `<span class="ce-syn-comment">${this.escapeHtml(comment)}</span>`;
+        if (end < 0) { return { html, inBlockComment: true }; }
+        i = end + 2;
+        continue;
+      }
+
+      codeText += raw[i];
+      i++;
+    }
+
+    flushCode();
+    return { html, inBlockComment };
+  }
+
+  private renderCodeSegment(segment: string): string {
+    const trimmed = segment.trim();
+    if (!trimmed) { return this.escapeHtml(segment); }
+
+    const section = SECTION_RE.exec(trimmed);
+    if (section) {
+      return this.wrapWithOriginalSpacing(segment, `<span class="ce-syn-section">${this.escapeHtml(trimmed)}</span>`);
+    }
+
+    const header = BRACKET_RE.exec(trimmed);
+    if (header) {
+      return this.wrapWithOriginalSpacing(segment, `<span class="ce-syn-label">${this.escapeHtml(trimmed)}</span>`);
+    }
+
+    if (CODE_RE.test(trimmed)) {
+      return this.renderCodeLineSegment(segment);
+    }
+
+    return this.escapeHtml(segment);
+  }
+
+  private renderCodeLineSegment(segment: string): string {
+    let tokenIndex = 0;
+    return (segment.match(CODE_TOKEN_RE) ?? []).map(token => {
+      if (/^\s+$/.test(token)) { return this.escapeHtml(token); }
+      if (!/^[0-9A-Fa-f?*]+$/.test(token)) { return this.escapeHtml(token); }
+      const rendered = this.renderCodeToken(token, tokenIndex);
+      tokenIndex++;
+      return rendered;
+    }).join('');
+  }
+
+  private renderCodeToken(token: string, index: number): string {
+    if (index === 0) {
+      return this.span('ce-syn-command', token.slice(0, 2)) +
+        this.span('ce-syn-address', token.slice(2));
+    }
+
+    if (index === 1) {
+      return this.span('ce-syn-data-hi', token.slice(0, 4)) +
+        this.span('ce-syn-data-lo', token.slice(4));
+    }
+
+    return this.span('ce-syn-address', token);
+  }
+
+  private wrapWithOriginalSpacing(original: string, inner: string): string {
+    const prefix = original.match(/^\s*/)?.[0] ?? '';
+    const suffix = original.match(/\s*$/)?.[0] ?? '';
+    return this.escapeHtml(prefix) + inner + this.escapeHtml(suffix);
+  }
+
+  private span(cls: string, text: string): string {
+    return text ? `<span class="${cls}">${this.escapeHtml(text)}</span>` : '';
+  }
+
+  private escapeHtml(text: string): string {
+    return text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
   }
 
   // ── Covers ─────────────────────────────────────────────────────────────

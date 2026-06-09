@@ -95,11 +95,12 @@ namespace CodeDesigner.Ps2.CheatEngine
             string? currentSection = null;
             CheatFileEntry? current = null;
             int lineNo = 0;
+            bool inBlockComment = false;
 
             foreach (var raw in lines)
             {
                 lineNo++;
-                var line = raw.Trim();
+                var line = StripComments(raw, ref inBlockComment).Trim();
                 if (line.Length == 0)
                     continue;
 
@@ -143,6 +144,37 @@ namespace CodeDesigner.Ps2.CheatEngine
                 result.Errors.Add($"Cheat \"{entry.Label}\" has no code lines.");
 
             return result;
+        }
+
+        private static string StripComments(string line, ref bool inBlockComment)
+        {
+            var sb = new StringBuilder();
+            for (int i = 0; i < line.Length;)
+            {
+                if (inBlockComment)
+                {
+                    var end = line.IndexOf("*/", i, StringComparison.Ordinal);
+                    if (end < 0)
+                        return sb.ToString();
+                    i = end + 2;
+                    inBlockComment = false;
+                    continue;
+                }
+
+                if (i + 1 < line.Length && line[i] == '/' && line[i + 1] == '/')
+                    break;
+
+                if (i + 1 < line.Length && line[i] == '/' && line[i + 1] == '*')
+                {
+                    inBlockComment = true;
+                    i += 2;
+                    continue;
+                }
+
+                sb.Append(line[i]);
+                i++;
+            }
+            return sb.ToString();
         }
     }
 }
