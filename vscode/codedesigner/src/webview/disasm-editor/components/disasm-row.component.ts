@@ -626,7 +626,7 @@ export class DisasmRowComponent {
     return ch !== undefined && /[A-Za-z0-9_]/.test(ch);
   }
 
-  /** Highlight search matches within text */
+  /** Highlight search matches within text or pre-rendered row HTML. */
   private highlightSearch(text: string, field: string): string {
     const query = this.state.searchQuery();
     if (!query || !text) return text;
@@ -636,16 +636,78 @@ export class DisasmRowComponent {
       m => m.instructionIndex === this.globalIndex() && m.field === field
     );
 
-    if (!match) return text;
+    if (!match || match.length <= 0) return text;
 
     const isCurrent = this.isCurrentMatch();
     const highlightClass = isCurrent ? 'search-current-highlight' : 'search-match-highlight';
 
-    const before = text.substring(0, match.start);
-    const highlighted = text.substring(match.start, match.start + match.length);
-    const after = text.substring(match.start + match.length);
+    return this.wrapVisibleTextRange(text, match.start, match.length, highlightClass);
+  }
 
-    return `${before}<span class="${highlightClass}">${highlighted}</span>${after}`;
+  /**
+   * Wrap a range expressed in visible text offsets without splitting HTML tags.
+   *
+   * Search offsets are calculated against raw row fields, while several cells
+   * are rendered with syntax-coloring spans before search highlighting runs. A
+   * direct substring insert can therefore land inside an existing tag and leave
+   * literal fragments such as </span> visible in the webview. This scanner copies
+   * tags as markup, counts text/entities as visible characters, and only opens
+   * or closes the search span at visible-character boundaries.
+   */
+  private wrapVisibleTextRange(html: string, start: number, length: number, className: string): string {
+    const safeStart = Math.max(0, start);
+    const safeEnd = Math.max(safeStart, safeStart + length);
+    let visibleIndex = 0;
+    let output = '';
+    let highlightOpen = false;
+
+    const openHighlight = () => {
+      if (!highlightOpen) {
+        output += `<span class="${className}">`;
+        highlightOpen = true;
+      }
+    };
+
+    const closeHighlight = () => {
+      if (highlightOpen) {
+        output += '</span>';
+        highlightOpen = false;
+      }
+    };
+
+    for (let i = 0; i < html.length;) {
+      if (visibleIndex >= safeEnd) {
+        closeHighlight();
+      } else if (visibleIndex >= safeStart) {
+        openHighlight();
+      }
+
+      if (html[i] === '<') {
+        const tagEnd = html.indexOf('>', i + 1);
+        if (tagEnd >= 0) {
+          output += html.slice(i, tagEnd + 1);
+          i = tagEnd + 1;
+          continue;
+        }
+      }
+
+      if (html[i] === '&') {
+        const entityMatch = html.slice(i).match(/^&(?:#\d+|#x[0-9a-f]+|[a-z][a-z0-9]+);/i);
+        if (entityMatch) {
+          output += entityMatch[0];
+          i += entityMatch[0].length;
+          visibleIndex++;
+          continue;
+        }
+      }
+
+      output += html[i];
+      i++;
+      visibleIndex++;
+    }
+
+    closeHighlight();
+    return output;
   }
 
   /** Escape HTML special characters for safe innerHTML insertion. */

@@ -164,8 +164,8 @@ export class DisasmEditorComponent implements AfterViewInit {
   private lastGridState: { pageStart: number; p1: DisasmRow[] | undefined; p2: DisasmRow[] | undefined } | null = null;
   /** Last synced breakpoints size — avoids creating a new Set on every live-refresh tick. */
   private _lastBreakpointsSize = -1;
-  /** Last synced search-matches length — avoids creating a new Array on every tick. */
-  private _lastSearchMatchesLength = -1;
+  /** Last synced search-matches array identity — avoids creating a new Array on every tick. */
+  private _lastSearchMatchesRef: SearchMatch[] | null = null;
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Edit Overlay State (Phase 10)
@@ -1301,12 +1301,14 @@ export class DisasmEditorComponent implements AfterViewInit {
     signals.breakpointHitAddress.set(state.breakpointHitAddress);
     signals.searchQuery.set(state.searchQuery ?? '');
     signals.searchMode.set(state.searchMode as SearchMode);
-    // Same guard for searchMatches — only spread into a new array when the
-    // result count changes so isSearchMatch() does not re-run every tick.
-    const matchLen = state.searchMatches?.length ?? 0;
-    if (matchLen !== this._lastSearchMatchesLength) {
-      this._lastSearchMatchesLength = matchLen;
-      signals.searchMatches.set([...(state.searchMatches ?? [])]);
+    // Keep search matches synchronized whenever a new result array arrives.
+    // Guarding only on length made repeated searches with the same number of
+    // hits keep stale match offsets, so row-level highlighting could lag until
+    // another navigation event forced more state changes.
+    const searchMatches = state.searchMatches ?? [];
+    if (searchMatches !== this._lastSearchMatchesRef) {
+      this._lastSearchMatchesRef = searchMatches;
+      signals.searchMatches.set([...searchMatches]);
     }
     signals.currentMatchIndex.set(state.currentMatch);
   }
@@ -1573,8 +1575,16 @@ export class DisasmEditorComponent implements AfterViewInit {
     params.state.currentMatch = params.matchIndex;
     const match = params.state.searchMatches[params.matchIndex];
     params.state.cursor = match.instructionIndex;
+
+    // Search navigation is expected to reveal the selected hit immediately.
+    // When the target page is not cached yet, preserve that scroll intent for
+    // the async pageLoaded handler; otherwise the first hit can be selected in
+    // state while the grid remains visually parked on the old page until the
+    // user presses Next/Previous.
+    this.pendingPageScrollBlock = 'center';
     if (params.checkAndLoadPage()) {
-      params.updateCursor();
+      this.pendingPageScrollBlock = null;
+      params.updateCursor('center');
     }
     params.syncEditorSignals();
   }
