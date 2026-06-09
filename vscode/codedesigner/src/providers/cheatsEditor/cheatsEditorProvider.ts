@@ -221,7 +221,11 @@ export class CheatsEditorProvider {
     private async _runImport(webview: vscode.Webview, archiveRoot: string, progressMessage: string): Promise<void> {
         try {
             webview.postMessage({ type: 'cheatStatus', message: progressMessage, busy: true });
-            const message = await this.socketClient.cheatEditorImport(archiveRoot);
+            const message = await vscode.window.withProgress({
+                location: vscode.ProgressLocation.Notification,
+                title: progressMessage,
+                cancellable: false,
+            }, async () => this.socketClient.cheatEditorImport(archiveRoot));
             await this._sendGames(webview);
             if (this._currentGameId !== undefined) {
                 await this._sendBuilds(webview, this._currentGameId);

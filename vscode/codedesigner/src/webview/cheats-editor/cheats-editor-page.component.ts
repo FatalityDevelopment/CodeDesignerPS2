@@ -138,6 +138,13 @@ const CODE_TOKEN_RE = /[0-9A-Fa-f?*]+|\s+|\S+/g;
         </div>
       </div>
 
+      @if (busy()) {
+        <div class="ce-refresh-bar">
+          <div class="ce-refresh-bar-inner"></div>
+          <span class="ce-refresh-text">Refreshing CheatCodeArchive… this can take several minutes</span>
+        </div>
+      }
+
       <!-- ══ Panel 2 — editor ══════════════════════════════════════════ -->
       <div class="ce-panel ce-panel-mid">
         <div class="ce-panel-head">

@@ -10,6 +10,15 @@ using Microsoft.EntityFrameworkCore;
 
 namespace CodeDesigner.Ps2.Database;
 
+public sealed class BulkCheatImportResult
+{
+    public int FilesProcessed { get; set; }
+    public int FilesImported { get; set; }
+    public int FilesSkipped { get; set; }
+    public int CheatLists { get; set; }
+    public int Cheats { get; set; }
+}
+
 /// <summary>
 /// Walks the <c>Database/</c> folders inside the CheatCodeArchive checkout and
 /// upserts all PS2 cheat data into the database.
@@ -64,14 +73,61 @@ public class BulkCheatParser
     /// Run the full import. Existing records matched by game + source-list title
     /// are replaced; new records are inserted.
     /// </summary>
-    public async Task RunAsync(CancellationToken ct = default)
+    public async Task<BulkCheatImportResult> RunAsync(CancellationToken ct = default)
     {
         var dbRoot = ResolveDatabaseRoot(_archiveRoot);
+        var caches = await LoadCachesAsync(ct);
+        var pendingCheatLists = new Dictionary<string, CheatList>(StringComparer.OrdinalIgnoreCase);
+        var result = new BulkCheatImportResult();
 
+        foreach (var filePath in Directory.EnumerateFiles(dbRoot, "*.txt", SearchOption.AllDirectories))
+        {
+            ct.ThrowIfCancellationRequested();
+            result.FilesProcessed++;
+            pendingCheatLists.Clear();
+
+            try
+            {
+                await ProcessFileAsync(
+                    dbRoot, filePath,
+                    caches.RegionCache, caches.GameCache,
+                    caches.DiscsBySerial, caches.DiscsByRegion,
+                    caches.CheatListCache, pendingCheatLists,
+                    ct);
+
+                if (pendingCheatLists.Count == 0)
+                    continue;
+
+                await _db.SaveChangesAsync(ct);
+                foreach (var (key, cl) in pendingCheatLists)
+                    caches.CheatListCache[key] = cl;
+                result.FilesImported++;
+            }
+            catch (Exception ex)
+            {
+                result.FilesSkipped++;
+                Console.Error.WriteLine($"[BulkCheatParser] Skipping {filePath}: {FormatException(ex)}");
+
+                // A failed SaveChanges leaves the current DbContext graph in an
+                // unknown state. Clear it and rebuild caches from already-committed
+                // rows so one bad archive file never poisons the rest of the import.
+                _db.ChangeTracker.Clear();
+                caches = await LoadCachesAsync(ct);
+            }
+        }
+
+        result.CheatLists = await _db.CheatLists.CountAsync(ct);
+        result.Cheats = await _db.Cheats.CountAsync(ct);
+        return result;
+    }
+
+    private async Task<ImportCaches> LoadCachesAsync(CancellationToken ct)
+    {
         var regionCache = await _db.GameRegions
             .ToDictionaryAsync(r => r.Name, StringComparer.OrdinalIgnoreCase, ct);
-        var gameCache = await _db.Games
-            .ToDictionaryAsync(g => g.Title, StringComparer.OrdinalIgnoreCase, ct);
+        var gameCache = (await _db.Games.ToListAsync(ct))
+            .GroupBy(g => g.Title, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
 
         var discsBySerial = new Dictionary<string, GameDisc>(StringComparer.OrdinalIgnoreCase);
         var discsByRegion = new Dictionary<string, GameDisc>(StringComparer.OrdinalIgnoreCase);
@@ -86,34 +142,10 @@ public class BulkCheatParser
                 .Include(cl => cl.Game)
                 .Where(cl => cl.Game != null)
                 .ToListAsync(ct))
-            .ToDictionary(cl => $"{cl.Game!.Title}||{cl.Title}", StringComparer.OrdinalIgnoreCase);
+            .GroupBy(cl => $"{cl.Game!.Title}||{cl.Title}", StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
 
-        var pendingCheatLists = new Dictionary<string, CheatList>(StringComparer.OrdinalIgnoreCase);
-        var processed = 0;
-
-        foreach (var filePath in Directory.EnumerateFiles(dbRoot, "*.txt", SearchOption.AllDirectories))
-        {
-            ct.ThrowIfCancellationRequested();
-            try
-            {
-                await ProcessFileAsync(
-                    dbRoot, filePath,
-                    regionCache, gameCache,
-                    discsBySerial, discsByRegion,
-                    cheatListCache, pendingCheatLists,
-                    ct);
-                processed++;
-
-                if (processed % 100 == 0)
-                    await FlushPendingAsync(cheatListCache, pendingCheatLists, ct);
-            }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine($"[BulkCheatParser] Skipping {filePath}: {ex.Message}");
-            }
-        }
-
-        await FlushPendingAsync(cheatListCache, pendingCheatLists, ct);
+        return new ImportCaches(regionCache, gameCache, discsBySerial, discsByRegion, cheatListCache);
     }
 
     private static string ResolveDatabaseRoot(string archiveRoot)
@@ -124,17 +156,6 @@ public class BulkCheatParser
                 "Database", StringComparison.OrdinalIgnoreCase) && Directory.Exists(archiveRoot))
             return archiveRoot;
         throw new DirectoryNotFoundException($"CheatCodeArchive Database folder not found under: {archiveRoot}");
-    }
-
-    private async Task FlushPendingAsync(
-        Dictionary<string, CheatList> cheatListCache,
-        Dictionary<string, CheatList> pendingCheatLists,
-        CancellationToken ct)
-    {
-        await _db.SaveChangesAsync(ct);
-        foreach (var (key, cl) in pendingCheatLists)
-            cheatListCache[key] = cl;
-        pendingCheatLists.Clear();
     }
 
     private async Task ProcessFileAsync(
@@ -152,7 +173,7 @@ public class BulkCheatParser
         if (string.IsNullOrWhiteSpace(parsed.Name) || parsed.Cheats.Count == 0)
             return;
 
-        var regionName = ResolveRegionName(parsed.RegionHint ?? RegionFromFilename(Path.GetFileName(filePath)), parsed.Serial);
+        var regionName = Truncate(ResolveRegionName(parsed.RegionHint ?? RegionFromFilename(Path.GetFileName(filePath)), parsed.Serial), 64);
         var region = GetOrCreate(regionCache, regionName, () =>
         {
             var r = new GameRegion { Name = regionName };
@@ -170,7 +191,7 @@ public class BulkCheatParser
 
         var disc = ResolveDisc(game, region, parsed.Serial, parsed.Hash, discsBySerial, discsByRegion);
         var source = SourceFor(dbRoot, filePath);
-        var listTitle = $"[{source}] {game.Title} [{regionName}]";
+        var listTitle = BuildListTitle(source, game.Title, regionName);
         var listKey = $"{game.Title}||{listTitle}";
 
         CheatList cheatList;
@@ -192,12 +213,12 @@ public class BulkCheatParser
             cheatList.Game = game;
             cheatList.GameDisc = disc;
             cheatList.UpdatedAt = DateTime.UtcNow;
-            var cheatIds = await _db.Cheats.Where(c => c.CheatListId == cheatList.Id).Select(c => c.Id).ToListAsync(ct);
-            if (cheatIds.Count > 0)
-            {
-                await _db.CheatLines.Where(cl => cheatIds.Contains(cl.CheatId)).ExecuteDeleteAsync(ct);
-                await _db.Cheats.Where(c => c.CheatListId == cheatList.Id).ExecuteDeleteAsync(ct);
-            }
+            var oldCheats = await _db.Cheats
+                .Include(c => c.CheatLines)
+                .Where(c => c.CheatListId == cheatList.Id)
+                .ToListAsync(ct);
+            if (oldCheats.Count > 0)
+                _db.Cheats.RemoveRange(oldCheats);
             pendingCheatLists[listKey] = cheatList;
         }
         else
@@ -254,8 +275,8 @@ public class BulkCheatParser
             {
                 Game = game,
                 GameRegion = region,
-                Serial = string.IsNullOrWhiteSpace(serial) ? null : serial,
-                CRC = string.IsNullOrWhiteSpace(hash) ? null : hash.ToUpperInvariant(),
+                Serial = string.IsNullOrWhiteSpace(serial) ? null : Truncate(serial, 32),
+                CRC = string.IsNullOrWhiteSpace(hash) ? null : Truncate(hash.ToUpperInvariant(), 16),
             };
             _db.GameDiscs.Add(disc);
             if (disc.Serial != null)
@@ -265,11 +286,11 @@ public class BulkCheatParser
         else
         {
             if (disc.CRC is null && !string.IsNullOrWhiteSpace(hash))
-                disc.CRC = hash.ToUpperInvariant();
+                disc.CRC = Truncate(hash.ToUpperInvariant(), 16);
             if (disc.Serial is null && !string.IsNullOrWhiteSpace(serial))
             {
-                disc.Serial = serial;
-                discsBySerial[$"{game.Title}||{serial}"] = disc;
+                disc.Serial = Truncate(serial, 32);
+                discsBySerial[$"{game.Title}||{disc.Serial}"] = disc;
             }
         }
         return disc;
@@ -518,6 +539,22 @@ public class BulkCheatParser
             file.Cheats.Add(cheat);
     }
 
+    private static string BuildListTitle(string source, string gameTitle, string regionName)
+    {
+        var prefix = $"[{source}] ";
+        var suffix = $" [{regionName}]";
+        var maxGameTitleLength = Math.Max(1, 512 - prefix.Length - suffix.Length);
+        return prefix + Truncate(gameTitle, maxGameTitleLength) + suffix;
+    }
+
+    private static string FormatException(Exception ex)
+    {
+        var messages = new List<string>();
+        for (var cur = ex; cur is not null; cur = cur.InnerException)
+            messages.Add(cur.Message);
+        return string.Join(" -> ", messages);
+    }
+
     private static string SourceFor(string dbRoot, string filePath)
     {
         var rel = Path.GetRelativePath(dbRoot, filePath);
@@ -528,6 +565,8 @@ public class BulkCheatParser
     private static string TitleFromPath(string path)
     {
         var title = Path.GetFileNameWithoutExtension(path);
+        if (title.EndsWith(".CMP", StringComparison.OrdinalIgnoreCase))
+            title = title[..^4];
         title = RegionInFilename.Replace(title, string.Empty);
         title = Serial.Replace(title, string.Empty);
         title = Regex.Replace(title, @"\s+", " ").Trim(' ', '-', '_');
@@ -604,6 +643,13 @@ public class BulkCheatParser
         cache[key] = created;
         return created;
     }
+
+    private sealed record ImportCaches(
+        Dictionary<string, GameRegion> RegionCache,
+        Dictionary<string, Game> GameCache,
+        Dictionary<string, GameDisc> DiscsBySerial,
+        Dictionary<string, GameDisc> DiscsByRegion,
+        Dictionary<string, CheatList> CheatListCache);
 
     private sealed class ParsedFile
     {

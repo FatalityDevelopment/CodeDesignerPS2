@@ -31,7 +31,7 @@ app-cheats-editor-page {
 .ce-shell {
   display: grid;
   grid-template-columns: 270px 1fr 270px;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   width: 100vw;
   height: 100vh;
   min-width: 0;
@@ -43,6 +43,7 @@ app-cheats-editor-page {
 .ce-shell > app-page-header { grid-column: 1 / -1; }
 
 .ce-panel {
+  grid-row: 3;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -379,6 +380,7 @@ app-cheats-editor-page {
 /* ── Status line ──────────────────────────────────────────────────────────── */
 .ce-status {
   grid-column: 1 / -1;
+  grid-row: 4;
   min-width: 0;
   padding: 5px 14px;
   font-size: 12px;
@@ -428,4 +430,45 @@ app-cheats-editor-page {
 .ce-debug-toggle input {
   margin: 0;
   accent-color: #e8a030;
+}
+
+/* ── Long-running archive refresh indicator ─────────────────────────────── */
+.ce-refresh-bar {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  position: relative;
+  height: 22px;
+  margin: 0;
+  background: var(--vscode-editor-background, #1e1e1e);
+  border-bottom: 1px solid var(--vscode-panel-border, #3e3e42);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.ce-refresh-bar-inner {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  width: 30%;
+  background: linear-gradient(90deg, transparent, #264f78, #3794ff, #264f78, transparent);
+  animation: ce-refresh-slide 1.5s ease-in-out infinite;
+}
+
+@keyframes ce-refresh-slide {
+  0% { left: -30%; }
+  100% { left: 100%; }
+}
+
+.ce-refresh-text {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--vscode-foreground, #ddd);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  pointer-events: none;
 }

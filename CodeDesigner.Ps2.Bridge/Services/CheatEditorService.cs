@@ -525,15 +525,16 @@ namespace CodeDesigner.Ps2.Bridge.Services
             try
             {
                 var parser = new BulkCheatParser(_ctx.Db, archiveRoot!);
-                parser.RunAsync().GetAwaiter().GetResult();
+                var result = parser.RunAsync().GetAwaiter().GetResult();
 
-                var lists  = _ctx.Db.CheatLists.Count();
-                var cheats = _ctx.Db.Cheats.Count();
+                var skipped = result.FilesSkipped > 0
+                    ? $" Skipped {result.FilesSkipped} file(s); see the bridge console for details."
+                    : string.Empty;
                 return JsonSerializer.Serialize(new CommandResponse
                 {
                     Success = true,
                     Command = "CHEATEDITOR_IMPORT",
-                    Message = $"Bulk import complete — {lists} cheat list(s), {cheats} cheat(s) in the database.",
+                    Message = $"Bulk import complete — imported {result.FilesImported}/{result.FilesProcessed} file(s), {result.CheatLists} cheat list(s), {result.Cheats} cheat(s) in the database.{skipped}",
                 });
             }
             catch (Exception ex) { return Responses.Error($"CHEATEDITOR_IMPORT error: {ex.Message}"); }
