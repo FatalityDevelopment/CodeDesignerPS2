@@ -21,7 +21,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
             reg.Add(c => HandleCompileCds(c.Data, c.Labels),                    "COMPILECDS");
             reg.Add(c => HandleValidateCds(c.Data, c.Labels),                   "VALIDATECDS");
             reg.Add(c => HandleCdsPatch(c.Data, c.Labels),                      "CDSPATCH");
-            reg.Add(c => HandleDisassemble(c.Data, c.Address, c.GameId),        "DISASSEMBLE");
+            reg.Add(c => HandleDisassemble(c.Data, c.Address, c.GameId, c.SkipDataFormatOverrides == true), "DISASSEMBLE");
         }
 
 
@@ -702,7 +702,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
         /// length is reported in <see cref="InstructionResult.ByteLength"/>.
         /// </para>
         /// </summary>
-        private string HandleDisassemble(string? hexCode, uint? startAddress = null, string? gameId = null)
+        private string HandleDisassemble(string? hexCode, uint? startAddress = null, string? gameId = null, bool skipDataFormatOverrides = false)
         {
             try
             {
@@ -752,10 +752,15 @@ namespace CodeDesigner.Ps2.Bridge.Services
 
                 // ── Pull overrides for the requested window ───────────────────
                 IReadOnlyList<Database.Entities.DataFormatOverride> overrides = System.Array.Empty<Database.Entities.DataFormatOverride>();
-                if (!string.IsNullOrWhiteSpace(gameId))
+                if (!skipDataFormatOverrides)
                 {
                     try
                     {
+                        // Query even when gameId is null/empty. The repository
+                        // treats that as the disc-less scope used by file-only
+                        // disassembly, so user-applied formats saved before a
+                        // game serial is known are still persistent. Explicit
+                        // goto probes use SkipDataFormatOverrides instead.
                         overrides = _ctx.DataFormatRepo
                             .GetInRangeAsync(gameId, rangeStart, rangeEnd)
                             .GetAwaiter().GetResult();

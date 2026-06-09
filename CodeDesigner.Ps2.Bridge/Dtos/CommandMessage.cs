@@ -377,6 +377,13 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         public string? DataFormatKind { get; set; }
 
+        /// <summary>
+        /// When true, DISASSEMBLE ignores persisted data-format overrides even
+        /// when the address range has matching database rows. Used by goto page
+        /// probes that need a stable 4-byte instruction grid.
+        /// </summary>
+        public bool? SkipDataFormatOverrides { get; set; }
+
         // ── Weapon-generation fields (ZIPPER_LIST_WEAPONS, ZIPPER_GET_WEAPON_TEMPLATE,
         //    ZIPPER_WRITE_WEAPON, ZIPPER_WEAPON_TEXTURE_PNG) ─────────────────
         /// <summary>Name of the source weapon entry inside the archive.</summary>
