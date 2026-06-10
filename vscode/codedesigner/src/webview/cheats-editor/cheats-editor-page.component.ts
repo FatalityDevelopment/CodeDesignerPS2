@@ -52,6 +52,7 @@ const SECTION_RE = /^\[--SectionStart:(.*)--\]$/;
 const BRACKET_RE = /^\[(.+)\]$/;
 const CODE_RE = /^[0-9A-Fa-f?*]+(\s+[0-9A-Fa-f?*]+)*$/;
 const CODE_TOKEN_RE = /[0-9A-Fa-f?*]+|\s+|\S+/g;
+const MAX_HIGHLIGHTED_CHEAT_TEXT_CHARS = 200_000;
 
 /**
  * Three-panel PS2 cheat-code editor:
@@ -167,9 +168,11 @@ const CODE_TOKEN_RE = /[0-9A-Fa-f?*]+|\s+|\S+/g;
         }
 
         <div class="ce-editor-wrap">
-          <pre #highlighter class="ce-editor-highlight" aria-hidden="true" [innerHTML]="highlightedHtml()"></pre>
-          <textarea #editor class="ce-editor" spellcheck="false"
-                    [value]="editorText()" (input)="onEditorInput($event)" (click)="onEditorClick()" (scroll)="syncEditorScroll()"
+          @if (!highlightDisabled()) {
+            <pre #highlighter class="ce-editor-highlight" aria-hidden="true" [innerHTML]="highlightedHtml()"></pre>
+          }
+          <textarea #editor class="ce-editor" [class.highlight-disabled]="highlightDisabled()" spellcheck="false" wrap="off"
+                    [value]="editorText()" (input)="onEditorInput($event)" (click)="onEditorClick($event)" (scroll)="syncEditorScroll()"
                     [disabled]="!selectedBuildId()"
                     placeholder="Select a cheat list to edit…"></textarea>
         </div>
@@ -332,7 +335,8 @@ export class CheatsEditorPageComponent implements AfterViewInit {
   readonly sections = computed(() => this.parsed().sections);
   readonly errors = computed(() => this.parsed().errors);
   readonly valid = computed(() => this.parsed().errors.length === 0);
-  readonly highlightedHtml = computed(() => this.renderHighlightedText(this.editorText()));
+  readonly highlightDisabled = computed(() => this.editorText().length > MAX_HIGHLIGHTED_CHEAT_TEXT_CHARS);
+  readonly highlightedHtml = computed(() => this.highlightDisabled() ? '' : this.renderHighlightedText(this.editorText()));
   readonly cheatsInSection = computed(() =>
     this.parsed().cheats.filter(c => c.section === this.selectedSection()));
 
@@ -461,20 +465,20 @@ export class CheatsEditorPageComponent implements AfterViewInit {
     queueMicrotask(() => this.syncEditorScroll());
   }
 
-  onEditorClick(): void {
-    setTimeout(() => {
-      const token = this.cheatAddressTokenAtCaret();
-      if (!token) { return; }
-      this.vscode.postMessage({ type: 'gotoCheatAddress', addressToken: token });
-    }, 0);
+  onEditorClick(event: Event): void {
+    if (!(event instanceof MouseEvent)) { return; }
+    const token = this.cheatAddressTokenAtCaret();
+    if (token) { this.gotoCheatAddress(token); }
   }
 
   syncEditorScroll(): void {
     const editor = this.editorRef()?.nativeElement;
     const highlighter = this.highlighterRef()?.nativeElement;
-    if (!editor || !highlighter) { return; }
-    highlighter.scrollTop = editor.scrollTop;
-    highlighter.scrollLeft = editor.scrollLeft;
+    if (!editor) { return; }
+    if (highlighter) {
+      highlighter.scrollTop = editor.scrollTop;
+      highlighter.scrollLeft = editor.scrollLeft;
+    }
   }
 
   save(): void {
@@ -596,9 +600,13 @@ export class CheatsEditorPageComponent implements AfterViewInit {
   }
 
 
+  private gotoCheatAddress(token: string): void {
+    this.vscode.postMessage({ type: 'gotoCheatAddress', addressToken: token });
+  }
+
   private cheatAddressTokenAtCaret(): string | null {
     const ta = this.editorRef()?.nativeElement;
-    if (!ta || !this.selectedBuildId()) { return null; }
+    if (!ta || !this.selectedBuildId() || ta.selectionStart !== ta.selectionEnd) { return null; }
 
     const text = this.editorText();
     const caret = ta.selectionStart;
@@ -609,7 +617,7 @@ export class CheatsEditorPageComponent implements AfterViewInit {
 
     const code = this.stripComments(line, false).code;
     const first = code.match(/^\s*([0-9A-Fa-f]{8})(?=\s|$)/);
-    if (!first?.[1] || first.index === undefined) { return null; }
+    if (!first?.[1]) { return null; }
 
     const tokenStart = lineStart + first[0].indexOf(first[1]);
     const tokenEnd = tokenStart + first[1].length;
