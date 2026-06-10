@@ -169,7 +169,7 @@ const CODE_TOKEN_RE = /[0-9A-Fa-f?*]+|\s+|\S+/g;
         <div class="ce-editor-wrap">
           <pre #highlighter class="ce-editor-highlight" aria-hidden="true" [innerHTML]="highlightedHtml()"></pre>
           <textarea #editor class="ce-editor" spellcheck="false"
-                    [value]="editorText()" (input)="onEditorInput($event)" (click)="onEditorClick()" (scroll)="syncEditorScroll()"
+                    [value]="editorText()" (input)="onEditorInput($event)" (click)="onEditorClick($event)" (scroll)="syncEditorScroll()"
                     [disabled]="!selectedBuildId()"
                     placeholder="Select a cheat list to edit…"></textarea>
         </div>
@@ -261,6 +261,7 @@ export class CheatsEditorPageComponent implements AfterViewInit {
   /** A game title to pre-select once the game list arrives. */
   private pendingGameTitle: string | null = null;
   private debuggerPostTimer: ReturnType<typeof setTimeout> | undefined;
+  private measureCanvas: HTMLCanvasElement | undefined;
 
   // ── Derived state ──────────────────────────────────────────────────────
 
@@ -461,12 +462,12 @@ export class CheatsEditorPageComponent implements AfterViewInit {
     queueMicrotask(() => this.syncEditorScroll());
   }
 
-  onEditorClick(): void {
-    setTimeout(() => {
-      const token = this.cheatAddressTokenAtCaret();
-      if (!token) { return; }
+  onEditorClick(event: Event): void {
+    if (!(event instanceof MouseEvent)) { return; }
+    const token = this.cheatAddressTokenFromMouseEvent(event);
+    if (token) {
       this.vscode.postMessage({ type: 'gotoCheatAddress', addressToken: token });
-    }, 0);
+    }
   }
 
   syncEditorScroll(): void {
@@ -596,24 +597,126 @@ export class CheatsEditorPageComponent implements AfterViewInit {
   }
 
 
-  private cheatAddressTokenAtCaret(): string | null {
+  private cheatAddressTokenFromMouseEvent(event: MouseEvent): string | null {
     const ta = this.editorRef()?.nativeElement;
     if (!ta || !this.selectedBuildId()) { return null; }
 
+    const metrics = this.editorMetrics(ta);
+    if (!metrics) { return null; }
+
+    const rect = ta.getBoundingClientRect();
+    const x = event.clientX - rect.left + ta.scrollLeft - metrics.paddingLeft;
+    const y = event.clientY - rect.top + ta.scrollTop - metrics.paddingTop;
+    if (x < 0 || y < 0) { return null; }
+
+    const lines = this.editorText().split(/\r?\n/);
+    const lineIndex = Math.floor(y / metrics.lineHeight);
+    if (lineIndex < 0 || lineIndex >= lines.length) { return null; }
+
+    const column = Math.floor(x / metrics.charWidth);
+    let lineStart = 0;
+    for (let i = 0; i < lineIndex; i++) {
+      lineStart += lines[i].length + 1;
+    }
+
+    const hit = this.firstCheatAddressTokenOnLine(lineStart, lineStart + lines[lineIndex].length);
+    if (!hit) { return null; }
+
+    const tokenStartColumn = hit.start - lineStart;
+    const tokenEndColumn = hit.end - lineStart;
+    return column >= tokenStartColumn && column <= tokenEndColumn ? hit.token : null;
+  }
+
+  private editorMetrics(ta: HTMLTextAreaElement): {
+    lineHeight: number;
+    charWidth: number;
+    paddingLeft: number;
+    paddingTop: number;
+  } | null {
+    const style = getComputedStyle(ta);
+    const fontSize = parseFloat(style.fontSize);
+    const lineHeight = style.lineHeight === 'normal'
+      ? fontSize * 1.5
+      : parseFloat(style.lineHeight);
+    if (!Number.isFinite(lineHeight) || lineHeight <= 0) { return null; }
+
+    if (!this.measureCanvas) { this.measureCanvas = document.createElement('canvas'); }
+    const ctx = this.measureCanvas.getContext('2d');
+    if (!ctx) { return null; }
+    ctx.font = style.font;
+    const charWidth = ctx.measureText('0').width;
+    if (!Number.isFinite(charWidth) || charWidth <= 0) { return null; }
+
+    return {
+      lineHeight,
+      charWidth,
+      paddingLeft: parseFloat(style.paddingLeft) || 0,
+      paddingTop: parseFloat(style.paddingTop) || 0,
+    };
+  }
+
+  private firstCheatAddressTokenOnLine(lineStart: number, lineEnd: number): { token: string; start: number; end: number } | null {
     const text = this.editorText();
-    const caret = ta.selectionStart;
-    const lineStart = text.lastIndexOf('\n', Math.max(0, caret - 1)) + 1;
-    const nextNewline = text.indexOf('\n', caret);
-    const lineEnd = nextNewline < 0 ? text.length : nextNewline;
-    const line = text.slice(lineStart, lineEnd);
+    let inBlockComment = this.isInBlockCommentAtOffset(text, lineStart);
+    let i = lineStart;
 
-    const code = this.stripComments(line, false).code;
-    const first = code.match(/^\s*([0-9A-Fa-f]{8})(?=\s|$)/);
-    if (!first?.[1] || first.index === undefined) { return null; }
+    while (i < lineEnd) {
+      if (inBlockComment) {
+        const end = text.indexOf('*/', i);
+        if (end < 0 || end >= lineEnd) { return null; }
+        i = end + 2;
+        inBlockComment = false;
+        continue;
+      }
 
-    const tokenStart = lineStart + first[0].indexOf(first[1]);
-    const tokenEnd = tokenStart + first[1].length;
-    return caret >= tokenStart && caret <= tokenEnd ? first[1].toUpperCase() : null;
+      if (text.startsWith('//', i)) { return null; }
+      if (text.startsWith('/*', i)) {
+        inBlockComment = true;
+        i += 2;
+        continue;
+      }
+      if (/\s/.test(text[i])) {
+        i++;
+        continue;
+      }
+
+      const start = i;
+      while (i < lineEnd && /[0-9A-Fa-f?*]/.test(text[i])) { i++; }
+      const token = text.slice(start, i);
+      if (/^[0-9A-Fa-f]{8}$/.test(token) && (i >= lineEnd || /\s/.test(text[i]))) {
+        return { token: token.toUpperCase(), start, end: i };
+      }
+      return null;
+    }
+
+    return null;
+  }
+
+  private isInBlockCommentAtOffset(text: string, offset: number): boolean {
+    let inBlockComment = false;
+    for (let i = 0; i < offset;) {
+      if (inBlockComment) {
+        const end = text.indexOf('*/', i);
+        if (end < 0 || end >= offset) { return true; }
+        i = end + 2;
+        inBlockComment = false;
+        continue;
+      }
+
+      if (text.startsWith('//', i)) {
+        const end = text.indexOf('\n', i);
+        if (end < 0 || end >= offset) { return false; }
+        i = end + 1;
+        continue;
+      }
+      if (text.startsWith('/*', i)) {
+        inBlockComment = true;
+        i += 2;
+        continue;
+      }
+      i++;
+    }
+    return inBlockComment;
   }
 
   // ── Syntax highlighting / comments ──────────────────────────────────────
