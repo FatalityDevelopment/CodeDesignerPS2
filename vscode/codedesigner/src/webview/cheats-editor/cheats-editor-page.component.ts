@@ -42,6 +42,15 @@ interface ParsedCheat {
   lineIndex: number;
 }
 
+interface VisibleAddressLink {
+  key: string;
+  token: string;
+  top: number;
+  left: number;
+  width: number;
+  height: number;
+}
+
 const DEFAULT_SECTION = 'Others';
 const CONVERT_FORMATS = [
   'Raw', 'ActionReplay1', 'ActionReplay2', 'ActionReplayMax',
@@ -175,6 +184,18 @@ const MAX_HIGHLIGHTED_CHEAT_TEXT_CHARS = 200_000;
                     [value]="editorText()" (input)="onEditorInput($event)" (click)="onEditorClick($event)" (scroll)="syncEditorScroll()"
                     [disabled]="!selectedBuildId()"
                     placeholder="Select a cheat list to edit…"></textarea>
+          <div class="ce-address-link-layer" aria-hidden="true">
+            @for (link of visibleAddressLinks(); track link.key) {
+              <button type="button" class="ce-address-hitbox" tabindex="-1"
+                      [style.top.px]="link.top"
+                      [style.left.px]="link.left"
+                      [style.width.px]="link.width"
+                      [style.height.px]="link.height"
+                      [title]="'Go to 0x' + link.token + ' in debugger'"
+                      (mousedown)="$event.preventDefault()"
+                      (click)="onAddressLinkClick($event, link.token)"></button>
+            }
+          </div>
         </div>
 
         @if (!valid() && errors().length) {
@@ -258,12 +279,17 @@ export class CheatsEditorPageComponent implements AfterViewInit {
   readonly statusMsg = signal('');
   readonly statusIsError = signal(false);
   readonly debugViewEnabled = signal(false);
+  readonly visibleAddressLinks = signal<VisibleAddressLink[]>([]);
 
   private readonly coverMap = signal<Record<string, string>>({});
   private readonly coverRequested = new Set<string>();
   /** A game title to pre-select once the game list arrives. */
   private pendingGameTitle: string | null = null;
   private debuggerPostTimer: ReturnType<typeof setTimeout> | undefined;
+  private measureCanvas: HTMLCanvasElement | undefined;
+  private addressLinkFrame: number | undefined;
+  private lineStartCacheText = '';
+  private lineStartCache: number[] = [0];
 
   // ── Derived state ──────────────────────────────────────────────────────
 
@@ -373,6 +399,7 @@ export class CheatsEditorPageComponent implements AfterViewInit {
           this.selectedBuildId.set((data['cheatListId'] as number) ?? null);
           this.editorText.set((data['text'] as string) ?? '');
           this.loadedText.set((data['text'] as string) ?? '');
+          this.scheduleVisibleAddressLinkRefresh();
           this.postDebuggerCheats();
           break;
         case 'cheatStatus':
@@ -462,6 +489,7 @@ export class CheatsEditorPageComponent implements AfterViewInit {
   onEditorInput(e: Event): void {
     this.editorText.set((e.target as HTMLTextAreaElement).value);
     this.scheduleDebuggerPost();
+    this.scheduleVisibleAddressLinkRefresh();
     queueMicrotask(() => this.syncEditorScroll());
   }
 
@@ -504,6 +532,7 @@ export class CheatsEditorPageComponent implements AfterViewInit {
     this.editorText.set('');
     this.loadedText.set('');
     this.debugViewEnabled.set(false);
+    this.visibleAddressLinks.set([]);
     this.postDebuggerCheats(false, true);
   }
 
@@ -608,20 +637,186 @@ export class CheatsEditorPageComponent implements AfterViewInit {
     const ta = this.editorRef()?.nativeElement;
     if (!ta || !this.selectedBuildId() || ta.selectionStart !== ta.selectionEnd) { return null; }
 
+    const metrics = this.editorMetrics(ta);
+    if (!metrics) { return null; }
+
+    const rect = ta.getBoundingClientRect();
+    const x = event.clientX - rect.left + ta.scrollLeft - metrics.paddingLeft;
+    const y = event.clientY - rect.top + ta.scrollTop - metrics.paddingTop;
+    if (x < 0 || y < 0) { return null; }
+
+    const lines = this.editorText().split(/\r?\n/);
+    const lineIndex = Math.floor(y / metrics.lineHeight);
+    if (lineIndex < 0 || lineIndex >= lines.length) { return null; }
+
+    const column = Math.floor(x / metrics.charWidth);
+    let lineStart = 0;
+    for (let i = 0; i < lineIndex; i++) {
+      lineStart += lines[i].length + 1;
+    }
+
+    const hit = this.firstCheatAddressTokenOnLine(lineStart, lineStart + lines[lineIndex].length);
+    if (!hit) { return null; }
+
+    const tokenStartColumn = hit.start - lineStart;
+    const tokenEndColumn = hit.end - lineStart;
+    return column >= tokenStartColumn && column <= tokenEndColumn ? hit.token : null;
+  }
+
+  private editorMetrics(ta: HTMLTextAreaElement): {
+    lineHeight: number;
+    charWidth: number;
+    paddingLeft: number;
+    paddingTop: number;
+  } | null {
+    const style = getComputedStyle(ta);
+    const fontSize = parseFloat(style.fontSize);
+    const lineHeight = style.lineHeight === 'normal'
+      ? fontSize * 1.5
+      : parseFloat(style.lineHeight);
+    if (!Number.isFinite(lineHeight) || lineHeight <= 0) { return null; }
+
+    if (!this.measureCanvas) { this.measureCanvas = document.createElement('canvas'); }
+    const ctx = this.measureCanvas.getContext('2d');
+    if (!ctx) { return null; }
+    ctx.font = style.font;
+    const charWidth = ctx.measureText('0').width;
+    if (!Number.isFinite(charWidth) || charWidth <= 0) { return null; }
+
+    return {
+      lineHeight,
+      charWidth,
+      paddingLeft: parseFloat(style.paddingLeft) || 0,
+      paddingTop: parseFloat(style.paddingTop) || 0,
+    };
+  }
+
+  private firstCheatAddressTokenOnLine(lineStart: number, lineEnd: number): { token: string; start: number; end: number } | null {
     const text = this.editorText();
     const caret = ta.selectionStart;
-    const lineStart = text.lastIndexOf('\n', Math.max(0, caret - 1)) + 1;
+    const caretLineStart = text.lastIndexOf('\n', Math.max(0, caret - 1)) + 1;
     const nextNewline = text.indexOf('\n', caret);
-    const lineEnd = nextNewline < 0 ? text.length : nextNewline;
-    const line = text.slice(lineStart, lineEnd);
+    let lineEnd = nextNewline < 0 ? text.length : nextNewline;
+    if (lineEnd > caretLineStart && text[lineEnd - 1] === '\r') { lineEnd--; }
 
     const code = this.stripComments(line, false).code;
     const first = code.match(/^\s*([0-9A-Fa-f]{8})(?=\s|$)/);
     if (!first?.[1]) { return null; }
 
-    const tokenStart = lineStart + first[0].indexOf(first[1]);
-    const tokenEnd = tokenStart + first[1].length;
-    return caret >= tokenStart && caret <= tokenEnd ? first[1].toUpperCase() : null;
+  private scheduleVisibleAddressLinkRefresh(): void {
+    if (this.addressLinkFrame !== undefined) { cancelAnimationFrame(this.addressLinkFrame); }
+    this.addressLinkFrame = requestAnimationFrame(() => {
+      this.addressLinkFrame = undefined;
+      this.refreshVisibleAddressLinks();
+    });
+  }
+
+  private refreshVisibleAddressLinks(): void {
+    const ta = this.editorRef()?.nativeElement;
+    if (!ta || !this.selectedBuildId()) {
+      this.visibleAddressLinks.set([]);
+      return;
+    }
+
+    const metrics = this.editorMetrics(ta);
+    if (!metrics) {
+      this.visibleAddressLinks.set([]);
+      return;
+    }
+
+    const text = this.editorText();
+    const lineStarts = this.getLineStarts(text);
+    const firstLine = Math.max(0, Math.floor(ta.scrollTop / metrics.lineHeight) - ADDRESS_LINK_VERTICAL_BUFFER_LINES);
+    const lastLine = Math.min(
+      lineStarts.length - 1,
+      Math.ceil((ta.scrollTop + ta.clientHeight) / metrics.lineHeight) + ADDRESS_LINK_VERTICAL_BUFFER_LINES,
+    );
+    const links: VisibleAddressLink[] = [];
+
+    for (let lineIndex = firstLine; lineIndex <= lastLine; lineIndex++) {
+      const visibleLineStart = lineStarts[lineIndex];
+      const nextLineStart = lineStarts[lineIndex + 1] ?? text.length + 1;
+      let lineEnd = Math.min(text.length, nextLineStart - 1);
+      if (lineEnd > visibleLineStart && text[lineEnd - 1] === '\r') { lineEnd--; }
+
+      const hit = this.firstCheatAddressTokenOnLine(text.slice(visibleLineStart, lineEnd), visibleLineStart);
+      if (!hit) { continue; }
+
+      const column = hit.start - visibleLineStart;
+      const top = (lineIndex * metrics.lineHeight) - ta.scrollTop + metrics.paddingTop;
+      const left = (column * metrics.charWidth) - ta.scrollLeft + metrics.paddingLeft;
+      const width = (hit.end - hit.start) * metrics.charWidth;
+      if (top + metrics.lineHeight < 0 || top > ta.clientHeight || left + width < 0 || left > ta.clientWidth) { continue; }
+
+      links.push({
+        key: `${lineIndex}:${hit.token}:${hit.start}`,
+        token: hit.token,
+        top,
+        left,
+        width,
+        height: metrics.lineHeight,
+      });
+    }
+
+    this.visibleAddressLinks.set(links);
+  }
+
+  private getLineStarts(text: string): number[] {
+    if (text === this.lineStartCacheText) { return this.lineStartCache; }
+
+    const starts = [0];
+    for (let i = 0; i < text.length; i++) {
+      if (text.charCodeAt(i) === 10) { starts.push(i + 1); }
+    }
+    this.lineStartCacheText = text;
+    this.lineStartCache = starts;
+    return starts;
+  }
+
+  private editorMetrics(ta: HTMLTextAreaElement): {
+    lineHeight: number;
+    charWidth: number;
+    paddingLeft: number;
+    paddingTop: number;
+  } | null {
+    const style = getComputedStyle(ta);
+    const fontSize = parseFloat(style.fontSize);
+    const lineHeight = style.lineHeight === 'normal'
+      ? fontSize * 1.5
+      : parseFloat(style.lineHeight);
+    if (!Number.isFinite(lineHeight) || lineHeight <= 0) { return null; }
+
+    if (!this.measureCanvas) { this.measureCanvas = document.createElement('canvas'); }
+    const ctx = this.measureCanvas.getContext('2d');
+    if (!ctx) { return null; }
+    ctx.font = style.font;
+    const charWidth = ctx.measureText('0').width;
+    if (!Number.isFinite(charWidth) || charWidth <= 0) { return null; }
+
+    return {
+      lineHeight,
+      charWidth,
+      paddingLeft: parseFloat(style.paddingLeft) || 0,
+      paddingTop: parseFloat(style.paddingTop) || 0,
+    };
+  }
+
+  private firstCheatAddressTokenOnLine(line: string, absoluteLineStart: number): { token: string; start: number; end: number } | null {
+    let i = 0;
+    while (i < line.length && /\s/.test(line[i])) { i++; }
+    if (line.startsWith('//', i) || line.startsWith('/*', i)) { return null; }
+
+    const startColumn = i;
+    while (i < line.length && /[0-9A-Fa-f?*]/.test(line[i])) { i++; }
+    const token = line.slice(startColumn, i);
+    if (!/^[0-9A-Fa-f]{8}$/.test(token)) { return null; }
+    if (i < line.length && !/\s/.test(line[i])) { return null; }
+
+    return {
+      token: token.toUpperCase(),
+      start: absoluteLineStart + startColumn,
+      end: absoluteLineStart + i,
+    };
   }
 
   // ── Syntax highlighting / comments ──────────────────────────────────────
