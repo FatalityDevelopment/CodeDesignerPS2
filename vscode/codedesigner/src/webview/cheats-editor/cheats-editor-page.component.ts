@@ -702,12 +702,12 @@ export class CheatsEditorPageComponent implements AfterViewInit {
   private firstCheatAddressTokenOnLine(lineStart: number, lineEnd: number): { token: string; start: number; end: number } | null {
     const text = this.editorText();
     const caret = ta.selectionStart;
-    const lineStart = text.lastIndexOf('\n', Math.max(0, caret - 1)) + 1;
+    const caretLineStart = text.lastIndexOf('\n', Math.max(0, caret - 1)) + 1;
     const nextNewline = text.indexOf('\n', caret);
     let lineEnd = nextNewline < 0 ? text.length : nextNewline;
-    if (lineEnd > lineStart && text[lineEnd - 1] === '\r') { lineEnd--; }
+    if (lineEnd > caretLineStart && text[lineEnd - 1] === '\r') { lineEnd--; }
 
-    const hit = this.firstCheatAddressTokenOnLine(text.slice(lineStart, lineEnd), lineStart);
+    const hit = this.firstCheatAddressTokenOnLine(text.slice(caretLineStart, lineEnd), caretLineStart);
     return hit && caret >= hit.start && caret <= hit.end ? hit.token : null;
   }
 
@@ -742,15 +742,15 @@ export class CheatsEditorPageComponent implements AfterViewInit {
     const links: VisibleAddressLink[] = [];
 
     for (let lineIndex = firstLine; lineIndex <= lastLine; lineIndex++) {
-      const lineStart = lineStarts[lineIndex];
+      const visibleLineStart = lineStarts[lineIndex];
       const nextLineStart = lineStarts[lineIndex + 1] ?? text.length + 1;
       let lineEnd = Math.min(text.length, nextLineStart - 1);
-      if (lineEnd > lineStart && text[lineEnd - 1] === '\r') { lineEnd--; }
+      if (lineEnd > visibleLineStart && text[lineEnd - 1] === '\r') { lineEnd--; }
 
-      const hit = this.firstCheatAddressTokenOnLine(text.slice(lineStart, lineEnd), lineStart);
+      const hit = this.firstCheatAddressTokenOnLine(text.slice(visibleLineStart, lineEnd), visibleLineStart);
       if (!hit) { continue; }
 
-      const column = hit.start - lineStart;
+      const column = hit.start - visibleLineStart;
       const top = (lineIndex * metrics.lineHeight) - ta.scrollTop + metrics.paddingTop;
       const left = (column * metrics.charWidth) - ta.scrollLeft + metrics.paddingLeft;
       const width = (hit.end - hit.start) * metrics.charWidth;
@@ -809,7 +809,7 @@ export class CheatsEditorPageComponent implements AfterViewInit {
     };
   }
 
-  private firstCheatAddressTokenOnLine(line: string, lineStart: number): { token: string; start: number; end: number } | null {
+  private firstCheatAddressTokenOnLine(line: string, absoluteLineStart: number): { token: string; start: number; end: number } | null {
     let i = 0;
     while (i < line.length && /\s/.test(line[i])) { i++; }
     if (line.startsWith('//', i) || line.startsWith('/*', i)) { return null; }
@@ -822,8 +822,8 @@ export class CheatsEditorPageComponent implements AfterViewInit {
 
     return {
       token: token.toUpperCase(),
-      start: lineStart + startColumn,
-      end: lineStart + i,
+      start: absoluteLineStart + startColumn,
+      end: absoluteLineStart + i,
     };
   }
 
