@@ -62,7 +62,6 @@ const BRACKET_RE = /^\[(.+)\]$/;
 const CODE_RE = /^[0-9A-Fa-f?*]+(\s+[0-9A-Fa-f?*]+)*$/;
 const CODE_TOKEN_RE = /[0-9A-Fa-f?*]+|\s+|\S+/g;
 const MAX_HIGHLIGHTED_CHEAT_TEXT_CHARS = 200_000;
-const ADDRESS_LINK_VERTICAL_BUFFER_LINES = 4;
 
 /**
  * Three-panel PS2 cheat-code editor:
@@ -500,12 +499,6 @@ export class CheatsEditorPageComponent implements AfterViewInit {
     if (token) { this.gotoCheatAddress(token); }
   }
 
-  onAddressLinkClick(event: MouseEvent, token: string): void {
-    event.preventDefault();
-    event.stopPropagation();
-    this.gotoCheatAddress(token);
-  }
-
   syncEditorScroll(): void {
     const editor = this.editorRef()?.nativeElement;
     const highlighter = this.highlighterRef()?.nativeElement;
@@ -514,7 +507,6 @@ export class CheatsEditorPageComponent implements AfterViewInit {
       highlighter.scrollTop = editor.scrollTop;
       highlighter.scrollLeft = editor.scrollLeft;
     }
-    this.scheduleVisibleAddressLinkRefresh();
   }
 
   save(): void {
@@ -643,7 +635,7 @@ export class CheatsEditorPageComponent implements AfterViewInit {
 
   private cheatAddressTokenAtCaret(): string | null {
     const ta = this.editorRef()?.nativeElement;
-    if (!ta || !this.selectedBuildId()) { return null; }
+    if (!ta || !this.selectedBuildId() || ta.selectionStart !== ta.selectionEnd) { return null; }
 
     const metrics = this.editorMetrics(ta);
     if (!metrics) { return null; }
@@ -707,9 +699,9 @@ export class CheatsEditorPageComponent implements AfterViewInit {
     let lineEnd = nextNewline < 0 ? text.length : nextNewline;
     if (lineEnd > caretLineStart && text[lineEnd - 1] === '\r') { lineEnd--; }
 
-    const hit = this.firstCheatAddressTokenOnLine(text.slice(caretLineStart, lineEnd), caretLineStart);
-    return hit && caret >= hit.start && caret <= hit.end ? hit.token : null;
-  }
+    const code = this.stripComments(line, false).code;
+    const first = code.match(/^\s*([0-9A-Fa-f]{8})(?=\s|$)/);
+    if (!first?.[1]) { return null; }
 
   private scheduleVisibleAddressLinkRefresh(): void {
     if (this.addressLinkFrame !== undefined) { cancelAnimationFrame(this.addressLinkFrame); }
