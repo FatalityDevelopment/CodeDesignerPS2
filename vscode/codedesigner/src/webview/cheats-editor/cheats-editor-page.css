@@ -326,6 +326,34 @@ app-cheats-editor-page {
   background: transparent;
 }
 
+.ce-editor.highlight-disabled {
+  color: var(--vscode-editor-foreground, var(--vscode-foreground));
+  background: var(--vscode-editor-background);
+}
+
+.ce-address-link-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.ce-address-hitbox {
+  position: absolute;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.ce-address-hitbox:hover {
+  background: color-mix(in srgb, var(--vscode-textLink-activeForeground, #3794ff) 18%, transparent);
+  outline: 1px solid var(--vscode-textLink-activeForeground, #3794ff);
+}
+
 .ce-editor::placeholder {
   color: var(--vscode-input-placeholderForeground, var(--vscode-descriptionForeground));
 }
@@ -333,6 +361,10 @@ app-cheats-editor-page {
 .ce-editor::selection {
   color: transparent;
   background: var(--vscode-editor-selectionBackground, rgba(38,79,120,0.65));
+}
+
+.ce-editor.highlight-disabled::selection {
+  color: var(--vscode-editor-foreground, var(--vscode-foreground));
 }
 
 .ce-syn-command { color: var(--ce-syn-command); font-weight: 700; }

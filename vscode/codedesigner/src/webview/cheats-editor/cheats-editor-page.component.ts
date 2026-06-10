@@ -42,6 +42,15 @@ interface ParsedCheat {
   lineIndex: number;
 }
 
+interface VisibleAddressLink {
+  key: string;
+  token: string;
+  top: number;
+  left: number;
+  width: number;
+  height: number;
+}
+
 const DEFAULT_SECTION = 'Others';
 const CONVERT_FORMATS = [
   'Raw', 'ActionReplay1', 'ActionReplay2', 'ActionReplayMax',
@@ -52,6 +61,8 @@ const SECTION_RE = /^\[--SectionStart:(.*)--\]$/;
 const BRACKET_RE = /^\[(.+)\]$/;
 const CODE_RE = /^[0-9A-Fa-f?*]+(\s+[0-9A-Fa-f?*]+)*$/;
 const CODE_TOKEN_RE = /[0-9A-Fa-f?*]+|\s+|\S+/g;
+const MAX_HIGHLIGHTED_CHEAT_TEXT_CHARS = 200_000;
+const ADDRESS_LINK_VERTICAL_BUFFER_LINES = 4;
 
 /**
  * Three-panel PS2 cheat-code editor:
@@ -167,11 +178,25 @@ const CODE_TOKEN_RE = /[0-9A-Fa-f?*]+|\s+|\S+/g;
         }
 
         <div class="ce-editor-wrap">
-          <pre #highlighter class="ce-editor-highlight" aria-hidden="true" [innerHTML]="highlightedHtml()"></pre>
-          <textarea #editor class="ce-editor" spellcheck="false"
+          @if (!highlightDisabled()) {
+            <pre #highlighter class="ce-editor-highlight" aria-hidden="true" [innerHTML]="highlightedHtml()"></pre>
+          }
+          <textarea #editor class="ce-editor" [class.highlight-disabled]="highlightDisabled()" spellcheck="false" wrap="off"
                     [value]="editorText()" (input)="onEditorInput($event)" (click)="onEditorClick($event)" (scroll)="syncEditorScroll()"
                     [disabled]="!selectedBuildId()"
                     placeholder="Select a cheat list to edit…"></textarea>
+          <div class="ce-address-link-layer" aria-hidden="true">
+            @for (link of visibleAddressLinks(); track link.key) {
+              <button type="button" class="ce-address-hitbox" tabindex="-1"
+                      [style.top.px]="link.top"
+                      [style.left.px]="link.left"
+                      [style.width.px]="link.width"
+                      [style.height.px]="link.height"
+                      [title]="'Go to 0x' + link.token + ' in debugger'"
+                      (mousedown)="$event.preventDefault()"
+                      (click)="onAddressLinkClick($event, link.token)"></button>
+            }
+          </div>
         </div>
 
         @if (!valid() && errors().length) {
@@ -255,6 +280,7 @@ export class CheatsEditorPageComponent implements AfterViewInit {
   readonly statusMsg = signal('');
   readonly statusIsError = signal(false);
   readonly debugViewEnabled = signal(false);
+  readonly visibleAddressLinks = signal<VisibleAddressLink[]>([]);
 
   private readonly coverMap = signal<Record<string, string>>({});
   private readonly coverRequested = new Set<string>();
@@ -262,6 +288,9 @@ export class CheatsEditorPageComponent implements AfterViewInit {
   private pendingGameTitle: string | null = null;
   private debuggerPostTimer: ReturnType<typeof setTimeout> | undefined;
   private measureCanvas: HTMLCanvasElement | undefined;
+  private addressLinkFrame: number | undefined;
+  private lineStartCacheText = '';
+  private lineStartCache: number[] = [0];
 
   // ── Derived state ──────────────────────────────────────────────────────
 
@@ -333,7 +362,8 @@ export class CheatsEditorPageComponent implements AfterViewInit {
   readonly sections = computed(() => this.parsed().sections);
   readonly errors = computed(() => this.parsed().errors);
   readonly valid = computed(() => this.parsed().errors.length === 0);
-  readonly highlightedHtml = computed(() => this.renderHighlightedText(this.editorText()));
+  readonly highlightDisabled = computed(() => this.editorText().length > MAX_HIGHLIGHTED_CHEAT_TEXT_CHARS);
+  readonly highlightedHtml = computed(() => this.highlightDisabled() ? '' : this.renderHighlightedText(this.editorText()));
   readonly cheatsInSection = computed(() =>
     this.parsed().cheats.filter(c => c.section === this.selectedSection()));
 
@@ -370,6 +400,7 @@ export class CheatsEditorPageComponent implements AfterViewInit {
           this.selectedBuildId.set((data['cheatListId'] as number) ?? null);
           this.editorText.set((data['text'] as string) ?? '');
           this.loadedText.set((data['text'] as string) ?? '');
+          this.scheduleVisibleAddressLinkRefresh();
           this.postDebuggerCheats();
           break;
         case 'cheatStatus':
@@ -459,23 +490,31 @@ export class CheatsEditorPageComponent implements AfterViewInit {
   onEditorInput(e: Event): void {
     this.editorText.set((e.target as HTMLTextAreaElement).value);
     this.scheduleDebuggerPost();
+    this.scheduleVisibleAddressLinkRefresh();
     queueMicrotask(() => this.syncEditorScroll());
   }
 
   onEditorClick(event: Event): void {
     if (!(event instanceof MouseEvent)) { return; }
-    const token = this.cheatAddressTokenFromMouseEvent(event);
-    if (token) {
-      this.vscode.postMessage({ type: 'gotoCheatAddress', addressToken: token });
-    }
+    const token = this.cheatAddressTokenAtCaret();
+    if (token) { this.gotoCheatAddress(token); }
+  }
+
+  onAddressLinkClick(event: MouseEvent, token: string): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.gotoCheatAddress(token);
   }
 
   syncEditorScroll(): void {
     const editor = this.editorRef()?.nativeElement;
     const highlighter = this.highlighterRef()?.nativeElement;
-    if (!editor || !highlighter) { return; }
-    highlighter.scrollTop = editor.scrollTop;
-    highlighter.scrollLeft = editor.scrollLeft;
+    if (!editor) { return; }
+    if (highlighter) {
+      highlighter.scrollTop = editor.scrollTop;
+      highlighter.scrollLeft = editor.scrollLeft;
+    }
+    this.scheduleVisibleAddressLinkRefresh();
   }
 
   save(): void {
@@ -501,6 +540,7 @@ export class CheatsEditorPageComponent implements AfterViewInit {
     this.editorText.set('');
     this.loadedText.set('');
     this.debugViewEnabled.set(false);
+    this.visibleAddressLinks.set([]);
     this.postDebuggerCheats(false, true);
   }
 
@@ -597,7 +637,11 @@ export class CheatsEditorPageComponent implements AfterViewInit {
   }
 
 
-  private cheatAddressTokenFromMouseEvent(event: MouseEvent): string | null {
+  private gotoCheatAddress(token: string): void {
+    this.vscode.postMessage({ type: 'gotoCheatAddress', addressToken: token });
+  }
+
+  private cheatAddressTokenAtCaret(): string | null {
     const ta = this.editorRef()?.nativeElement;
     if (!ta || !this.selectedBuildId()) { return null; }
 
@@ -657,66 +701,130 @@ export class CheatsEditorPageComponent implements AfterViewInit {
 
   private firstCheatAddressTokenOnLine(lineStart: number, lineEnd: number): { token: string; start: number; end: number } | null {
     const text = this.editorText();
-    let inBlockComment = this.isInBlockCommentAtOffset(text, lineStart);
-    let i = lineStart;
+    const caret = ta.selectionStart;
+    const lineStart = text.lastIndexOf('\n', Math.max(0, caret - 1)) + 1;
+    const nextNewline = text.indexOf('\n', caret);
+    let lineEnd = nextNewline < 0 ? text.length : nextNewline;
+    if (lineEnd > lineStart && text[lineEnd - 1] === '\r') { lineEnd--; }
 
-    while (i < lineEnd) {
-      if (inBlockComment) {
-        const end = text.indexOf('*/', i);
-        if (end < 0 || end >= lineEnd) { return null; }
-        i = end + 2;
-        inBlockComment = false;
-        continue;
-      }
-
-      if (text.startsWith('//', i)) { return null; }
-      if (text.startsWith('/*', i)) {
-        inBlockComment = true;
-        i += 2;
-        continue;
-      }
-      if (/\s/.test(text[i])) {
-        i++;
-        continue;
-      }
-
-      const start = i;
-      while (i < lineEnd && /[0-9A-Fa-f?*]/.test(text[i])) { i++; }
-      const token = text.slice(start, i);
-      if (/^[0-9A-Fa-f]{8}$/.test(token) && (i >= lineEnd || /\s/.test(text[i]))) {
-        return { token: token.toUpperCase(), start, end: i };
-      }
-      return null;
-    }
-
-    return null;
+    const hit = this.firstCheatAddressTokenOnLine(text.slice(lineStart, lineEnd), lineStart);
+    return hit && caret >= hit.start && caret <= hit.end ? hit.token : null;
   }
 
-  private isInBlockCommentAtOffset(text: string, offset: number): boolean {
-    let inBlockComment = false;
-    for (let i = 0; i < offset;) {
-      if (inBlockComment) {
-        const end = text.indexOf('*/', i);
-        if (end < 0 || end >= offset) { return true; }
-        i = end + 2;
-        inBlockComment = false;
-        continue;
-      }
+  private scheduleVisibleAddressLinkRefresh(): void {
+    if (this.addressLinkFrame !== undefined) { cancelAnimationFrame(this.addressLinkFrame); }
+    this.addressLinkFrame = requestAnimationFrame(() => {
+      this.addressLinkFrame = undefined;
+      this.refreshVisibleAddressLinks();
+    });
+  }
 
-      if (text.startsWith('//', i)) {
-        const end = text.indexOf('\n', i);
-        if (end < 0 || end >= offset) { return false; }
-        i = end + 1;
-        continue;
-      }
-      if (text.startsWith('/*', i)) {
-        inBlockComment = true;
-        i += 2;
-        continue;
-      }
-      i++;
+  private refreshVisibleAddressLinks(): void {
+    const ta = this.editorRef()?.nativeElement;
+    if (!ta || !this.selectedBuildId()) {
+      this.visibleAddressLinks.set([]);
+      return;
     }
-    return inBlockComment;
+
+    const metrics = this.editorMetrics(ta);
+    if (!metrics) {
+      this.visibleAddressLinks.set([]);
+      return;
+    }
+
+    const text = this.editorText();
+    const lineStarts = this.getLineStarts(text);
+    const firstLine = Math.max(0, Math.floor(ta.scrollTop / metrics.lineHeight) - ADDRESS_LINK_VERTICAL_BUFFER_LINES);
+    const lastLine = Math.min(
+      lineStarts.length - 1,
+      Math.ceil((ta.scrollTop + ta.clientHeight) / metrics.lineHeight) + ADDRESS_LINK_VERTICAL_BUFFER_LINES,
+    );
+    const links: VisibleAddressLink[] = [];
+
+    for (let lineIndex = firstLine; lineIndex <= lastLine; lineIndex++) {
+      const lineStart = lineStarts[lineIndex];
+      const nextLineStart = lineStarts[lineIndex + 1] ?? text.length + 1;
+      let lineEnd = Math.min(text.length, nextLineStart - 1);
+      if (lineEnd > lineStart && text[lineEnd - 1] === '\r') { lineEnd--; }
+
+      const hit = this.firstCheatAddressTokenOnLine(text.slice(lineStart, lineEnd), lineStart);
+      if (!hit) { continue; }
+
+      const column = hit.start - lineStart;
+      const top = (lineIndex * metrics.lineHeight) - ta.scrollTop + metrics.paddingTop;
+      const left = (column * metrics.charWidth) - ta.scrollLeft + metrics.paddingLeft;
+      const width = (hit.end - hit.start) * metrics.charWidth;
+      if (top + metrics.lineHeight < 0 || top > ta.clientHeight || left + width < 0 || left > ta.clientWidth) { continue; }
+
+      links.push({
+        key: `${lineIndex}:${hit.token}:${hit.start}`,
+        token: hit.token,
+        top,
+        left,
+        width,
+        height: metrics.lineHeight,
+      });
+    }
+
+    this.visibleAddressLinks.set(links);
+  }
+
+  private getLineStarts(text: string): number[] {
+    if (text === this.lineStartCacheText) { return this.lineStartCache; }
+
+    const starts = [0];
+    for (let i = 0; i < text.length; i++) {
+      if (text.charCodeAt(i) === 10) { starts.push(i + 1); }
+    }
+    this.lineStartCacheText = text;
+    this.lineStartCache = starts;
+    return starts;
+  }
+
+  private editorMetrics(ta: HTMLTextAreaElement): {
+    lineHeight: number;
+    charWidth: number;
+    paddingLeft: number;
+    paddingTop: number;
+  } | null {
+    const style = getComputedStyle(ta);
+    const fontSize = parseFloat(style.fontSize);
+    const lineHeight = style.lineHeight === 'normal'
+      ? fontSize * 1.5
+      : parseFloat(style.lineHeight);
+    if (!Number.isFinite(lineHeight) || lineHeight <= 0) { return null; }
+
+    if (!this.measureCanvas) { this.measureCanvas = document.createElement('canvas'); }
+    const ctx = this.measureCanvas.getContext('2d');
+    if (!ctx) { return null; }
+    ctx.font = style.font;
+    const charWidth = ctx.measureText('0').width;
+    if (!Number.isFinite(charWidth) || charWidth <= 0) { return null; }
+
+    return {
+      lineHeight,
+      charWidth,
+      paddingLeft: parseFloat(style.paddingLeft) || 0,
+      paddingTop: parseFloat(style.paddingTop) || 0,
+    };
+  }
+
+  private firstCheatAddressTokenOnLine(line: string, lineStart: number): { token: string; start: number; end: number } | null {
+    let i = 0;
+    while (i < line.length && /\s/.test(line[i])) { i++; }
+    if (line.startsWith('//', i) || line.startsWith('/*', i)) { return null; }
+
+    const startColumn = i;
+    while (i < line.length && /[0-9A-Fa-f?*]/.test(line[i])) { i++; }
+    const token = line.slice(startColumn, i);
+    if (!/^[0-9A-Fa-f]{8}$/.test(token)) { return null; }
+    if (i < line.length && !/\s/.test(line[i])) { return null; }
+
+    return {
+      token: token.toUpperCase(),
+      start: lineStart + startColumn,
+      end: lineStart + i,
+    };
   }
 
   // ── Syntax highlighting / comments ──────────────────────────────────────
