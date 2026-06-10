@@ -645,6 +645,61 @@ export class CheatsEditorPageComponent implements AfterViewInit {
     const ta = this.editorRef()?.nativeElement;
     if (!ta || !this.selectedBuildId()) { return null; }
 
+    const metrics = this.editorMetrics(ta);
+    if (!metrics) { return null; }
+
+    const rect = ta.getBoundingClientRect();
+    const x = event.clientX - rect.left + ta.scrollLeft - metrics.paddingLeft;
+    const y = event.clientY - rect.top + ta.scrollTop - metrics.paddingTop;
+    if (x < 0 || y < 0) { return null; }
+
+    const lines = this.editorText().split(/\r?\n/);
+    const lineIndex = Math.floor(y / metrics.lineHeight);
+    if (lineIndex < 0 || lineIndex >= lines.length) { return null; }
+
+    const column = Math.floor(x / metrics.charWidth);
+    let lineStart = 0;
+    for (let i = 0; i < lineIndex; i++) {
+      lineStart += lines[i].length + 1;
+    }
+
+    const hit = this.firstCheatAddressTokenOnLine(lineStart, lineStart + lines[lineIndex].length);
+    if (!hit) { return null; }
+
+    const tokenStartColumn = hit.start - lineStart;
+    const tokenEndColumn = hit.end - lineStart;
+    return column >= tokenStartColumn && column <= tokenEndColumn ? hit.token : null;
+  }
+
+  private editorMetrics(ta: HTMLTextAreaElement): {
+    lineHeight: number;
+    charWidth: number;
+    paddingLeft: number;
+    paddingTop: number;
+  } | null {
+    const style = getComputedStyle(ta);
+    const fontSize = parseFloat(style.fontSize);
+    const lineHeight = style.lineHeight === 'normal'
+      ? fontSize * 1.5
+      : parseFloat(style.lineHeight);
+    if (!Number.isFinite(lineHeight) || lineHeight <= 0) { return null; }
+
+    if (!this.measureCanvas) { this.measureCanvas = document.createElement('canvas'); }
+    const ctx = this.measureCanvas.getContext('2d');
+    if (!ctx) { return null; }
+    ctx.font = style.font;
+    const charWidth = ctx.measureText('0').width;
+    if (!Number.isFinite(charWidth) || charWidth <= 0) { return null; }
+
+    return {
+      lineHeight,
+      charWidth,
+      paddingLeft: parseFloat(style.paddingLeft) || 0,
+      paddingTop: parseFloat(style.paddingTop) || 0,
+    };
+  }
+
+  private firstCheatAddressTokenOnLine(lineStart: number, lineEnd: number): { token: string; start: number; end: number } | null {
     const text = this.editorText();
     const caret = ta.selectionStart;
     const caretLineStart = text.lastIndexOf('\n', Math.max(0, caret - 1)) + 1;
