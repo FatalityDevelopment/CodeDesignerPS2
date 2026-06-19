@@ -124,17 +124,40 @@ public class ScertPacket
         Payload     = Array.Empty<byte>(),
     };
 
-    /// <summary>SERVER_ECHO — keepalive reply or version-probe reply.</summary>
+    /// <summary>SERVER_ECHO — used only on the new-protocol (v &gt; 108) post-connect path.</summary>
     public static ScertPacket CreateServerEcho() => new()
     {
         MessageType = RT_MSG_TYPE.RT_MSG_SERVER_ECHO,
         Payload     = Array.Empty<byte>(),
     };
 
-    /// <summary>Echo back a RT_MSG_CLIENT_ECHO payload.</summary>
+    /// <summary>
+    /// CLIENT_ECHO keepalive — byte-for-byte match of the 2012 retail SOCOM II MAS capture.
+    ///
+    /// The retail Medius server pings idle PS2 clients with a CLIENT_ECHO (0x05) carrying a
+    /// single 0xA5 byte, encrypted under <see cref="CipherContext.RcClientSession"/>.
+    /// SHA1(0xA5)[0..3] = 4F B8 CF EA; OR-ing the context-3 bits into byte[3] yields the
+    /// constant hash 4F B8 CF 6A seen on every echo in the reference captures
+    /// (Join_Medley / Join_US_East / Masquarr_logoff_SII).
+    ///
+    /// This replaces the old empty-payload SERVER_ECHO (0x1F) keepalive, which was the wrong
+    /// message type/length/context — SOCOM II rejected it and popped "Disconnected from
+    /// Network" on the persona screen the instant the keepalive fired.
+    /// </summary>
+    public static ScertPacket CreateClientEcho(byte[]? payload = null) => new()
+    {
+        MessageType = RT_MSG_TYPE.RT_MSG_CLIENT_ECHO,
+        Payload     = payload ?? new byte[] { 0xA5 },
+    };
+
+    /// <summary>
+    /// Mirror a client's CLIENT_ECHO back verbatim. The 2012 captures show the server
+    /// replying to a C-&gt;S CLIENT_ECHO with the same CLIENT_ECHO (0x05) and identical
+    /// hash — NOT a SERVER_ECHO. Send under <see cref="CipherContext.RcClientSession"/>.
+    /// </summary>
     public static ScertPacket CreateEchoResponse(ReadOnlySpan<byte> echoData) => new()
     {
-        MessageType = RT_MSG_TYPE.RT_MSG_SERVER_ECHO,
+        MessageType = RT_MSG_TYPE.RT_MSG_CLIENT_ECHO,
         Payload     = echoData.ToArray(),
     };
 

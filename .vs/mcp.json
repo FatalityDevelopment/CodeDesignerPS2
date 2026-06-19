@@ -2,7 +2,7 @@
   "servers": {
     "CodeDesigner": {
       "type": "stdio",
-      "command": "%LOCALAPPDATA%\\CodeDesigner\\AI\\CodeDesigner.AI.exe",
+      "command": ""command": "C:\\Users\\tholu\\AppData\\Local\\CodeDesigner\\AI\\CodeDesigner.AI.exe",
       "args": ["--profile", "all"]
     }
   }

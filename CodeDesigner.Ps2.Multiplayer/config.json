@@ -1,7 +1,7 @@
 {
   "Online": {
     "BindAddress": "0.0.0.0",
-    "ServerIp": "192.168.2.89",
+    "ServerIp": "192.168.229.108",
     "MuisPort": 10071,
     "MasPort": 10077,
     "MlsPort": 10075,
@@ -14,7 +14,7 @@
     "DnasCertPath": "",
     "DnasKeyPath": "",
     "MaxClients": 1000,
-    "AllowedAppIds": [10472],
+    "AllowedAppIds": [ 10472 ],
     "AutoCreateAccounts": true,
     "ClientTimeoutSeconds": 60,
     "UniverseName": "Code Designer PS2 Multiplayer",

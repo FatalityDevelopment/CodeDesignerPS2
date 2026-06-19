@@ -400,3 +400,11 @@ website/obj\\Debug/
 /vscode/codedesigner/snapshots/SCUS-97275/labels/SOCOM2_r0004.json
 /vscode/codedesigner/snapshots/SOCOM II - U.S. Navy SEALs/labels/SOCOM2_r0004.json
 /CodeDesigner.Ps2.CdsLanguage/StdLib/.vscode/mcp.json
+/CodeDesigner.Ps2.Bridge/NuGet/v3-cache/670c1461c29885f9aa22c281d8b7da90845b38e4$ps_api.nuget.org_v3_index.json
+/CodeDesigner.AI.Tests/NuGet/v3-cache/670c1461c29885f9aa22c281d8b7da90845b38e4$ps_api.nuget.org_v3_index.json
+/CodeDesigner.Ps2.CdsLanguage/StdLib/snapshots/1/labels
+/CodeDesigner.Ps2.CdsLanguage/StdLib/snapshots/1060/labels
+/CodeDesigner.Ps2.CdsLanguage/StdLib/snapshots/SCUS-97275/labels/CodeDesigner labels.json
+/CodeDesigner.Ps2.CdsLanguage/StdLib/snapshots/SCUS-97275/labels/SOCOM2_r0004.json
+*.json
+/CodeDesigner.Ps2.CdsLanguage/StdLib/emu-settings.json

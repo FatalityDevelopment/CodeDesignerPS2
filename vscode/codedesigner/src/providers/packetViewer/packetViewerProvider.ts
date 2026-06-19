@@ -405,10 +405,10 @@ export class PacketViewerProvider {
         const type = msg['type'] as string | undefined;
 
         if (type === 'ready') {
-            // Send the resolved Medius port map first so the dissector can label
-            // packets correctly from the very first capture frame.
-            this._sendConfig(webview);
-            // Try to send initial adapter status
+            // Try to send initial adapter status. Port-map config no longer
+            // needs to be pushed to the webview — protocol dissection now
+            // lives on the bridge (CodeDesigner.Ps2.Multiplayer.PacketDissector),
+            // which loads its own config from Multiplayer/config.json.
             await this._sendStatus(webview);
             return;
         }
@@ -476,7 +476,7 @@ export class PacketViewerProvider {
 
                 case 'disassemble': {
                     const data = action['data'] as string;
-                    const text = await this.socketClient.netDisassemble(data);
+                    const { text } = await this.socketClient.netDisassemble(data);
                     webview.postMessage({ type: 'packetViewerMessage', message: text });
                     break;
                 }
@@ -503,15 +503,34 @@ export class PacketViewerProvider {
                         });
                         break;
                     }
-                    // Shape packets to match CapturedPacket expected by addCapturedPackets.
-                    const packets = rawPackets.map(p => ({
+                    // Shape packets to match CapturedPacket expected by addCapturedPackets,
+                    // dissecting each frame through the bridge so the table + tree view
+                    // get the same canonical decoding that live-captured packets get.
+                    // The webview no longer has its own dissector — all proto / Medius
+                    // logic lives in CodeDesigner.Ps2.Multiplayer.Protocol.PacketDissector.
+                    const dissected = await Promise.all(rawPackets.map(p =>
+                        this.socketClient.netDisassemble(p.data)
+                            .then(r => ({ layers: r.layers, row: r.row }))
+                            .catch(err => {
+                                getOutputChannel().warn(`[PacketViewer] dissect failed: ${err}`);
+                                return { layers: undefined, row: undefined };
+                            })
+                    ));
+                    const packets = rawPackets.map((p, i) => ({
                         direction:     p.direction,
                         directionName: p.direction === 0 ? 'TX' : 'RX',
                         timestampUs:   p.timestampUs,
                         length:        Math.floor(Buffer.from(p.data, 'base64').length),
                         data:          p.data,
+                        layers:        dissected[i].layers,
                     }));
-                    webview.postMessage({ type: 'packetViewerPcapLoaded', packets, filename: filePath.split(/[\\/]/).pop() ?? filePath });
+                    const parsedRows = dissected.map((d, i) => d.row ?? { no: i + 1, time: '', dir: '', server: '', src: '', dst: '', proto: '', len: packets[i].length, info: '' });
+                    webview.postMessage({
+                        type: 'packetViewerPcapLoaded',
+                        packets,
+                        parsedRows,
+                        filename: filePath.split(/[\\/]/).pop() ?? filePath,
+                    });
                     break;
                 }
 
@@ -545,11 +564,6 @@ export class PacketViewerProvider {
     }
 
     // ── Data helpers ──────────────────────────────────────────────────────────
-
-    private _sendConfig(webview: vscode.Webview): void {
-        const ports = loadMediusPorts();
-        webview.postMessage({ type: 'packetViewerConfig', ports });
-    }
 
     private async _sendStatus(webview: vscode.Webview): Promise<void> {
         try {

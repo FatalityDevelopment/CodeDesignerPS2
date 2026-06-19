@@ -267,9 +267,18 @@ namespace CodeDesigner.Ps2.Bridge
         /// <summary>Pre-parsed packet rows returned by NETRECVCAPTURE (one row per packet).</summary>
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public List<ParsedPacketRow>? ParsedPacketRows { get; set; }
+        /// <summary>Single ParsedPacketRow returned by NETDISASSEMBLE for one frame (used by pcap-load).</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public ParsedPacketRow? ParsedPacketRow { get; set; }
         /// <summary>Packet dissection text returned by NETDISASSEMBLE.</summary>
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public string? DissectionText { get; set; }
+        /// <summary>
+        /// Structured layer tree returned by NETDISASSEMBLE / NETRECVCAPTURE.
+        /// Replaces the per-packet TS parser the webview previously carried.
+        /// </summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public List<CodeDesigner.Ps2.Multiplayer.Protocol.DissectedLayer>? DissectionLayers { get; set; }
         /// <summary>Injection success flag returned by NETINJECT / NETINJECTTX.</summary>
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public bool? InjectionSuccess { get; set; }
@@ -512,6 +521,14 @@ namespace CodeDesigner.Ps2.Bridge
         /// <summary>Raw Ethernet frame bytes as base64-encoded string.</summary>
         [System.Text.Json.Serialization.JsonPropertyName("data")]
         public string Data { get; set; } = string.Empty;
+        /// <summary>
+        /// Pre-computed layer tree for this packet (Ethernet/IPv4/TCP/SCERT/Medius).
+        /// Populated by the bridge so the webview's tree view + hex highlighting
+        /// can render instantly on click without an extra round-trip.
+        /// </summary>
+        [System.Text.Json.Serialization.JsonPropertyName("layers")]
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public List<CodeDesigner.Ps2.Multiplayer.Protocol.DissectedLayer>? Layers { get; set; }
     }
 
     /// <summary>

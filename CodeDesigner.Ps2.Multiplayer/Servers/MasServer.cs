@@ -2,6 +2,7 @@ using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 using CodeDesigner.Ps2.Multiplayer.Config;
+using CodeDesigner.Ps2.Multiplayer.Crypto;
 using CodeDesigner.Ps2.Multiplayer.Models;
 using CodeDesigner.Ps2.Multiplayer.Protocol;
 using CodeDesigner.Ps2.Multiplayer.Storage;
@@ -88,6 +89,10 @@ public class MasServer : BaseMediusTcpServer
                     await HandleGetWorldSecurityLevelAsync(packet, state, tcp, ct);
                     break;
 
+                case MediusLobbyMessageId.SetLocalizationParams:
+                    await HandleSetLocalizationParamsAsync(packet, state, tcp, ct);
+                    break;
+
                 default:
                     _log.LogInformation("[MAS] Unhandled lobby msg 0x{Type:X2} payload={Hex}",
                         packet.MessageType, BitConverter.ToString(packet.Payload).Replace("-", " "));
@@ -141,11 +146,28 @@ public class MasServer : BaseMediusTcpServer
         _log.LogInformation("[MAS] SessionBegin msgId={MsgId} -> key={Key}",
             BitConverter.ToString(msgId).Replace("-", ""), state.SessionKey);
 
-        // Old Medius SessionBeginResponse: [messageId: 21][status: 4][sessionKey: 17]
+        // SessionBeginResponse — wire format ported from horizon-server-public-extended
+        // MediusSessionBeginResponse.Serialize():
+        //   [messageId : 21 bytes]
+        //   [padding   : 3 bytes]   ← was missing
+        //   [status    : 4 bytes int]
+        //   [sessionKey: 17 bytes]
+        //   [padding   : 1 byte for AppId∈{10694,21064}, else 3 bytes]
+        //   = 48 bytes for SOCOM II (AppId 10472 — uses the 3-byte trailing pad)
+        //
+        // The leading 3-byte pad was missing in the previous implementation;
+        // its absence shifted every later field by 3 bytes which means the
+        // client read its session key from the wrong position and may have
+        // parsed status as garbage. Hard to say which mattered most to the
+        // client, but the wire size now matches horizon (107 bytes vs the
+        // old 101 the user captured).
+        bool isShortPaddingApp = state.AppId == 10694 || state.AppId == 21064;
         var w = new MediusWriter();
-        w.Write(msgId);                                                       // messageId echo (21 bytes)
-        w.Write((int)MediusCallbackStatus.MediusSuccess);                     // StatusCode (4 bytes)
-        w.WriteString(state.SessionKey, MediusConstants.SESSIONKEY_MAXLEN);  // SessionKey (17 bytes)
+        w.Write(msgId);                                                       // 21
+        w.WritePadding(3);                                                    // 3
+        w.Write((int)MediusCallbackStatus.MediusSuccess);                     // 4
+        w.WriteString(state.SessionKey, MediusConstants.SESSIONKEY_MAXLEN);   // 17
+        w.WritePadding(isShortPaddingApp ? 1 : 3);                            // 1 or 3
 
         await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.SessionBeginResponse, w.ToArray()), ct);
     }
@@ -219,16 +241,62 @@ public class MasServer : BaseMediusTcpServer
         state.Status      = PlayerStatus.InAuthWorld;
         status            = MediusCallbackStatus.MediusSuccess;
 
-        // Old Medius AccountLoginResponse: [messageId:21][status:4][accountId:4][accountName:32][sessionKey:17][mlsAddr:20]
+        // AccountLoginResponse — wire format ported from horizon-server
+        // RT.Models.Lobby.MediusAccountLoginResponse + RT.Models.Misc.NetConnectionInfo:
+        //
+        //   [messageId:21][padding:3][status:4][accountId:4][accountType:4][worldId:4]
+        //   [ConnInfo.Type:4]
+        //   [ConnInfo.MLS NetAddress: type(4)+ip(16)+port(uint:4)=24]
+        //   [ConnInfo.NAT NetAddress: type(4)+ip(16)+port(uint:4)=24]
+        //   [ConnInfo.WorldID:4]
+        //   [ConnInfo.ServerKey:64]
+        //   [ConnInfo.SessionKey:17]
+        //   [ConnInfo.AccessKey:17]
+        //   = 21+3+4+4+4+4+154 = 194 bytes total (v ≤ 108)
+        //
+        // Crucially the **port is uint (4 bytes)**, not ushort — the old
+        // 20-byte MlsAddr block we wrote here was misaligned and the client
+        // ended up reading random bytes as the MLS port (e.g. 10077 vs 10075),
+        // which is why SOCOM II connected to a phantom port and disconnected.
+        //
+        // ServerKey MUST be the real server RSA public modulus (matches horizon's
+        // Login(): ConnectInfo.ServerKey = Program.GlobalAuthPublic for account
+        // login). After auth, SOCOM II uses this key to RSA-encrypt CRYPTKEY_PUBLIC
+        // for the follow-on lobby connection — a zero key leaves it unable to bring
+        // up that connection and it drops with "Disconnected from Network" right
+        // after AccountLoginResponse. All our servers share Ps2Rsa.ServerKey, and
+        // the MAS handshake already proved the client expects this modulus.
+        const int defaultWorldId = 1;
         var w = new MediusWriter();
-        w.Write(msgId);
-        w.Write((int)status);
-        w.Write(account.AccountId);
-        w.WriteString(account.AccountName, MediusConstants.ACCOUNTNAME_MAXLEN);
-        w.WriteString(state.SessionKey, MediusConstants.SESSIONKEY_MAXLEN);
-        w.WriteMlsAddress(_config.ServerIp, _config.MlsPort);
+        w.Write(msgId);                                                                    // 21
+        w.WritePadding(3);                                                                  // 3
+        w.Write((int)status);                                                               // 4
+        w.Write(account.AccountId);                                                         // 4
+        w.Write((int)MediusAccountType.MediusMasterAccount);                                // 4
+        w.Write(defaultWorldId);                                                            // 4
+        // Lobby address points back at the MAS port, NOT a separate MlsPort.
+        // 2012 retail captures (create_Masquarr.pcap) show SOCOM II doing auth AND
+        // lobby on a single connection — it never opens a second port. Handing it a
+        // different lobby endpoint (10075) made it tear down the MAS connection to
+        // chase that port and then give up ("Disconnected from Network"). Pointing
+        // lobby at the current endpoint keeps the client on the MAS connection, where
+        // it proceeds to send ChannelList/GetAnnouncements etc.
+        w.WriteNetConnectionInfo(                                                           // 154
+            NetConnectionType.ClientServerTCP,
+            mls: (NetAddressType.External,   _config.ServerIp, _config.MlsPort),
+            nat: (NetAddressType.NATService, _config.ServerIp, _config.NatPort),
+            worldId: defaultWorldId,
+            serverKey: Ps2Rsa.ServerKey.GetPublicKey(),
+            sessionKey: state.SessionKey,
+            accessKey: state.SessionKey);
 
-        await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.AccountLoginResponse, w.ToArray()), ct);
+        // Encrypt the login response (RcServerSession). Horizon serializes Medius messages
+        // with SkipEncryption=false by default and every retail SERVER_APP in the 2012
+        // captures is [ENC]. SOCOM II tolerates plaintext for the early handshake responses
+        // (SessionBegin/Version), but its login-completion path appears to require the
+        // AccountLoginResponse encrypted — a plaintext one is parsed but then rejected,
+        // and the client drops without transitioning to the lobby.
+        await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.AccountLoginResponse, w.ToArray()), state, ct);
     }
 
     private async Task HandleAnonymousLoginAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
@@ -243,16 +311,27 @@ public class MasServer : BaseMediusTcpServer
         state.AccountName = "Anonymous";
         state.Status      = PlayerStatus.InAuthWorld;
 
-        // Old Medius AnonymousLoginResponse: [messageId:21][status:4][accountId:4][accountName:32][sessionKey:17][mlsAddr:20]
+        // AnonymousLoginResponse — same layout as AccountLoginResponse
+        // (see comment in HandleAccountLoginAsync for the full wire-format
+        // breakdown). AccountId = -1 matches horizon's anonymous convention.
+        const int defaultWorldId = 1;
         var w = new MediusWriter();
-        w.Write(msgId);
-        w.Write((int)MediusCallbackStatus.MediusSuccess);
-        w.Write(0);                                                           // AccountId = 0 for anon
-        w.WriteString("Anonymous", MediusConstants.ACCOUNTNAME_MAXLEN);
-        w.WriteString(state.SessionKey, MediusConstants.SESSIONKEY_MAXLEN);
-        w.WriteMlsAddress(_config.ServerIp, _config.MlsPort);
+        w.Write(msgId);                                                                    // 21
+        w.WritePadding(3);                                                                  // 3
+        w.Write((int)MediusCallbackStatus.MediusSuccess);                                   // 4
+        w.Write(-1);                                                                        // 4  AccountId
+        w.Write((int)MediusAccountType.MediusMasterAccount);                                // 4
+        w.Write(defaultWorldId);                                                            // 4
+        w.WriteNetConnectionInfo(                                                           // 154
+            NetConnectionType.ClientServerTCP,
+            mls: (NetAddressType.External,   _config.ServerIp, _config.MlsPort),  // separate MLS endpoint
+            nat: (NetAddressType.NATService, _config.ServerIp, _config.NatPort),
+            worldId: defaultWorldId,
+            serverKey: Ps2Rsa.ServerKey.GetPublicKey(),  // real RSA modulus — see HandleAccountLoginAsync
+            sessionKey: state.SessionKey,
+            accessKey: state.SessionKey);
 
-        await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.AnonymousLoginResponse, w.ToArray()), ct);
+        await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.AnonymousLoginResponse, w.ToArray()), state, ct);  // encrypted — see HandleAccountLoginAsync
     }
 
     private async Task HandleAccountRegistrationAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
@@ -266,13 +345,26 @@ public class MasServer : BaseMediusTcpServer
 
         _log.LogInformation("[MAS] AccountRegistration: user={User}", username);
 
+        // AccountRegistrationResponse — wire layout ported from horizon-server
+        // RT.Models.Lobby.MediusAccountRegistrationResponse.Serialize():
+        //   [messageId:21][padding:3][status:4][accountId:4] = 32 bytes total
+        //
+        // The 3-byte padding after msgId is critical — same shift bug we
+        // fixed in SessionBeginResponse and the login responses. Without it
+        // the client reads StatusCode from where we wrote padding (= 0 = a
+        // success-like value), then AccountID from where StatusCode would
+        // be, then garbage, and bounces back to login mid-handshake.
+
         if (_store.GetAccountByName(username) != null)
         {
-            // Old Medius AccountRegistrationResponse: [messageId:21][status:4][accountId:4]
+            // Use MediusAccountAlreadyExists (-999), not MediusAccountLoggedIn (-997).
+            // The latter means "the account is currently in a session" — which is
+            // misleading when the real reason is "the name is already taken".
             var wFail = new MediusWriter();
-            wFail.Write(msgId);
-            wFail.Write((int)MediusCallbackStatus.MediusAccountLoggedIn);
-            wFail.Write(0);  // accountId placeholder
+            wFail.Write(msgId);                                                  // 21
+            wFail.WritePadding(3);                                                // 3
+            wFail.Write((int)MediusCallbackStatus.MediusAccountAlreadyExists);    // 4
+            wFail.Write(0);                                                       // 4 — AccountID placeholder
             await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.AccountRegistrationResponse, wFail.ToArray()), ct);
             return;
         }
@@ -281,9 +373,10 @@ public class MasServer : BaseMediusTcpServer
         _log.LogInformation("[MAS] Registered account '{User}' id={Id}", username, account.AccountId);
 
         var w = new MediusWriter();
-        w.Write(msgId);
-        w.Write((int)MediusCallbackStatus.MediusSuccess);
-        w.Write(account.AccountId);
+        w.Write(msgId);                                                          // 21
+        w.WritePadding(3);                                                       // 3
+        w.Write((int)MediusCallbackStatus.MediusSuccess);                        // 4
+        w.Write(account.AccountId);                                              // 4
 
         await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.AccountRegistrationResponse, w.ToArray()), ct);
     }
@@ -299,10 +392,11 @@ public class MasServer : BaseMediusTcpServer
         state.AccountName = string.Empty;
         state.Status      = PlayerStatus.Disconnected;
 
-        // Old Medius AccountLogoutResponse: [messageId:21][status:4]
+        // AccountLogoutResponse — horizon layout: [msgId:21][pad:3][status:4] = 28 bytes
         var w = new MediusWriter();
-        w.Write(msgId);
-        w.Write((int)MediusCallbackStatus.MediusSuccess);
+        w.Write(msgId);                                     // 21
+        w.WritePadding(3);                                  // 3
+        w.Write((int)MediusCallbackStatus.MediusSuccess);   // 4
 
         await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.AccountLogoutResponse, w.ToArray()), ct);
     }
@@ -331,17 +425,28 @@ public class MasServer : BaseMediusTcpServer
         state.AccountName = account.AccountName;
         state.Status      = PlayerStatus.InAuthWorld;
 
-        // Old Medius TicketLoginResponse: [messageId:21][status:4][accountId:4][accountType:4]
-        //   [accessKey:17][sessionKey:17][mlsAddr:20][worldId:4]
+        // TicketLoginResponse — wire format ported from horizon-server
+        // RT.Models.Lobby.MediusTicketLoginResponse. Same NetConnectionInfo
+        // shape as AccountLogin/AnonymousLogin (see HandleAccountLoginAsync
+        // for the full byte-by-byte breakdown). The ticket flavour populates
+        // ConnInfo.AccessKey with the token, not the session key, so the
+        // client can present it to MLS.
+        const int defaultWorldId = 1;
         var w = new MediusWriter();
-        w.Write(msgId);
-        w.Write((int)MediusCallbackStatus.MediusSuccess);
-        w.Write(account.AccountId);
-        w.Write((int)0);                                                       // AccountType = MasterAccount
-        w.WriteString(state.SessionKey, MediusConstants.SESSIONKEY_MAXLEN);  // AccessKey (17 bytes)
-        w.WriteString(state.SessionKey, MediusConstants.SESSIONKEY_MAXLEN);  // SessionKey (17 bytes)
-        w.WriteMlsAddress(_config.ServerIp, _config.MlsPort);
-        w.Write((int)1);                                                       // WorldID = 1
+        w.Write(msgId);                                                                    // 21
+        w.WritePadding(3);                                                                  // 3
+        w.Write((int)MediusCallbackStatus.MediusSuccess);                                   // 4
+        w.Write(account.AccountId);                                                         // 4
+        w.Write((int)MediusAccountType.MediusMasterAccount);                                // 4
+        w.Write(defaultWorldId);                                                            // 4
+        w.WriteNetConnectionInfo(                                                           // 154
+            NetConnectionType.ClientServerTCP,
+            mls: (NetAddressType.External,   _config.ServerIp, _config.MlsPort),
+            nat: (NetAddressType.NATService, _config.ServerIp, _config.NatPort),
+            worldId: defaultWorldId,
+            serverKey: null,
+            sessionKey: state.SessionKey,
+            accessKey: state.SessionKey);   // reuse session key as token placeholder
 
         await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.TicketLoginResponse, w.ToArray()), ct);
     }
@@ -356,30 +461,89 @@ public class MasServer : BaseMediusTcpServer
         // Strip port if present
         var ip = endpoint.Contains(':') ? endpoint[..endpoint.LastIndexOf(':')] : endpoint;
 
-        // Old Medius GetMyIPResponse: [messageId:21][status:4][ip:16]
+        // GetMyIPResponse — horizon layout: [msgId:21][pad:3][status:4][ip:20]
+        // IP field is 20 bytes (IP_MAXLEN) — matches MediusConstants.IP_MAXLEN.
         var w = new MediusWriter();
-        w.Write(msgId);
-        w.Write((int)MediusCallbackStatus.MediusSuccess);
-        w.WriteString(ip, MediusConstants.IP_MAXLEN);
+        w.Write(msgId);                                     // 21
+        w.WritePadding(3);                                  // 3
+        w.Write((int)MediusCallbackStatus.MediusSuccess);   // 4
+        w.WriteString(ip, MediusConstants.IP_MAXLEN);       // 20
 
         await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.GetMyIPResponse, w.ToArray()), ct);
     }
 
     private async Task HandleVersionServerAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
     {
-        _log.LogInformation("[MAS] VersionServer received — sending Policy prompt");
+        // Old-Medius request payload: [messageId:21][sessionKey:17]. Echo the
+        // messageId back in the response — the client correlates request →
+        // response by it and disconnects if it doesn't see its own bytes.
+        byte[] msgId = packet.Payload.Length >= MediusConstants.MESSAGEID_MAXLEN
+            ? packet.Payload[..MediusConstants.MESSAGEID_MAXLEN]
+            : new byte[MediusConstants.MESSAGEID_MAXLEN];
 
-        // After VersionServer the server pushes policy to prompt the client to proceed
-        // to the account login screen. This is server-initiated (no client msgId to echo).
-        // Text field is exactly 72 bytes padded to match the real server's 79-byte RT payload.
-        const string policyText = "Welcome to CodeDesigner Medius Server.\r\nPlay fair!";
+        // VersionServer (0x86) is the client asking what version we are; the
+        // expected response is VersionServerResponse (0x87). Wire format
+        // ported from horizon-server-public-extended's
+        // MediusVersionServerResponse.Serialize:
+        //
+        //   [messageId : 21 bytes (MESSAGEID_MAXLEN)]
+        //   [version   : 56 bytes (VERSIONSERVER_MAXLEN), NUL-padded ASCII]
+        //   = 77 bytes total
+        //
+        // CRITICAL: no padding, no status code on the wire — the StatusCode
+        // field exists on the class but is not serialized. An earlier
+        // attempt added 3 padding bytes + a 4-byte status field, which made
+        // SOCOM II read garbage where it expected the version string and
+        // drop the connection right after.
+        _log.LogInformation("[MAS] VersionServer -> VersionServerResponse");
 
+        const int VERSIONSERVER_MAXLEN = 56;
         var w = new MediusWriter();
-        w.Write((int)MediusCallbackStatus.MediusSuccess);  // status (4 bytes)
-        w.Write((byte)1);                                   // last = true (1 byte)
-        w.WriteString(policyText, 72);                      // text — 72 bytes, NOT POLICY_MAXLEN
+        w.Write(msgId);                                       // 21 bytes
+        w.WriteString("CodeDesigner Medius 1.0.0", VERSIONSERVER_MAXLEN); // 56 bytes
 
-        await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.PolicyResponse, w.ToArray()), ct);
+        await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.VersionServerResponse, w.ToArray()), ct);
+
+        // DELIBERATELY NOT pushing PolicyResponse here.
+        //
+        // History: an earlier version pushed an UNSOLICITED PolicyResponse
+        // right after VersionServerResponse. With both the malformed (77-byte)
+        // AND the horizon-correct (288-byte) layouts the client always sent
+        // RT_MSG_CLIENT_DISCONNECT seconds later — empirically SOCOM II
+        // expects to *request* Policy explicitly (case MediusLobbyMessageId.Policy
+        // in the dispatcher above), not have it pushed. Pushing it leaves the
+        // login UI in a stuck state where pressing Connect just replays the
+        // same broken Session+Version sequence instead of submitting auth.
+        //
+        // If the client wants Policy, HandlePolicyAsync handles the request.
+        // Keep MAS quiet here and let the periodic SERVER_ECHO keepalive
+        // (see BaseMediusTcpServer.RunKeepAliveLoopAsync) hold the session
+        // open while the user types credentials.
+    }
+
+    private async Task HandleSetLocalizationParamsAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
+    {
+        // Request layout (SOCOM II, 48-byte payload): [messageId:21][sessionKey:17][params:10]
+        // where params = language/encoding/timezone ints. We don't persist them — the client
+        // only needs the ack to advance its login state machine.
+        byte[] msgId = packet.Payload.Length >= MediusConstants.MESSAGEID_MAXLEN
+            ? packet.Payload[..MediusConstants.MESSAGEID_MAXLEN]
+            : new byte[MediusConstants.MESSAGEID_MAXLEN];
+
+        _log.LogInformation("[MAS] SetLocalizationParams -> SetLocalizationParamsResponse");
+
+        // The 2012 create_Masquarr capture shows the retail MAS server answering
+        // SetLocalizationParams with a 30-byte SERVER_APP (= 2-byte header + 28-byte body):
+        //   [messageId:21][padding:3][status:4]
+        // SOCOM II sends SetLocalizationParams bundled with DnasSignaturePost + AccountLogin
+        // at "Connect", and will not complete login until it sees this ack — leaving it
+        // unhandled produced an immediate disconnect right after AccountLoginResponse.
+        var w = new MediusWriter();
+        w.Write(msgId);                                     // 21
+        w.WritePadding(3);                                  // 3
+        w.Write((int)MediusCallbackStatus.MediusSuccess);   // 4
+
+        await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.SetLocalizationParamsResponse, w.ToArray()), ct);
     }
 
     private async Task HandleGetWorldSecurityLevelAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
@@ -390,12 +554,13 @@ public class MasServer : BaseMediusTcpServer
 
         _log.LogInformation("[MAS] GetWorldSecurityLevel -> GetWorldSecurityLevelResponse");
 
-        // MediusGetWorldSecurityLevelResponse: [messageId:21][statusCode:4][securityLevel:4]
-        // securityLevel = 0 (MediusWorldSecurityLevelNone) — no security required
+        // GetWorldSecurityLevelResponse — horizon layout:
+        //   [msgId:21][pad:3][status:4][securityLevel:4] = 32 bytes
         var w = new MediusWriter();
-        w.Write(msgId);
-        w.Write((int)MediusCallbackStatus.MediusSuccess);
-        w.Write((int)0);  // MediusWorldSecurityLevelNone
+        w.Write(msgId);                                     // 21
+        w.WritePadding(3);                                  // 3
+        w.Write((int)MediusCallbackStatus.MediusSuccess);   // 4
+        w.Write(0);                                         // 4 — MediusWorldSecurityLevelNone
 
         await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.GetWorldSecurityLevelResponse, w.ToArray()), ct);
     }
@@ -408,12 +573,16 @@ public class MasServer : BaseMediusTcpServer
 
         const string policyText = "Welcome to CodeDesigner Medius Server.\r\nPlay fair, have fun!";
 
-        // Old Medius PolicyResponse: [messageId:21][status:4][endFlag:1][policy:256]
+        // PolicyResponse — same layout horizon uses (see HandleVersionServerAsync
+        // for the byte-by-byte breakdown). Critical: policy text comes BEFORE
+        // EndOfText byte, not after — the previous order swapped those.
         var w = new MediusWriter();
-        w.Write(msgId);
-        w.Write((int)MediusCallbackStatus.MediusSuccess);
-        w.Write((byte)1);  // last = true
-        w.WriteString(policyText, MediusConstants.POLICY_MAXLEN);
+        w.Write(msgId);                                                   // 21
+        w.WritePadding(3);                                                // 3
+        w.Write((int)MediusCallbackStatus.MediusSuccess);                 // 4
+        w.WriteString(policyText, MediusConstants.POLICY_MAXLEN);         // 256
+        w.Write((byte)1);                                                 // 1 — EndOfText
+        w.WritePadding(3);                                                // 3
 
         await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.PolicyResponse, w.ToArray()), ct);
     }
@@ -424,13 +593,24 @@ public class MasServer : BaseMediusTcpServer
 
     private async Task SendLoginFailure(TcpClient tcp, MediusCallbackStatus status, byte[]? msgId, CancellationToken ct)
     {
+        // Same response shape as the success path so the client's parser
+        // doesn't choke on the size; only StatusCode differs. The MLS/NAT
+        // addresses are zeroed since there's nowhere for the client to go.
         var w = new MediusWriter();
-        w.Write(msgId ?? new byte[MediusConstants.MESSAGEID_MAXLEN]);   // messageId echo (21 bytes)
-        w.Write((int)status);
-        w.Write(0);                                                       // AccountId
-        w.WriteString("", MediusConstants.ACCOUNTNAME_MAXLEN);           // AccountName
-        w.WriteString("", MediusConstants.SESSIONKEY_MAXLEN);            // SessionKey
-        w.WritePadding(20);                                               // MLS address placeholder
+        w.Write(msgId ?? new byte[MediusConstants.MESSAGEID_MAXLEN]);   // 21
+        w.WritePadding(3);                                                // 3
+        w.Write((int)status);                                              // 4
+        w.Write(0);                                                        // 4 AccountId
+        w.Write((int)MediusAccountType.MediusMasterAccount);               // 4
+        w.Write(0);                                                        // 4 MediusWorldID
+        w.WriteNetConnectionInfo(                                          // 154
+            NetConnectionType.None,
+            mls: null,
+            nat: null,
+            worldId: 0,
+            serverKey: null,
+            sessionKey: "",
+            accessKey: "");
 
         await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.AccountLoginResponse, w.ToArray()), ct);
     }
@@ -447,11 +627,128 @@ public class MasServer : BaseMediusTcpServer
     }
 }
 
+/// <summary>
+/// NetAddressType values match horizon-server's RT.Common.NetAddressType.
+/// Used inside <see cref="MediusWriterExtensions.WriteNetAddress"/> entries.
+/// </summary>
+internal enum NetAddressType : int
+{
+    None                       = 0,
+    External                   = 1,
+    Internal                   = 2,
+    NATService                 = 3,
+    BinaryExternal             = 4,
+    BinaryInternal             = 5,
+    BinaryExternalVport        = 6,
+    BinaryInternalVport        = 7,
+    BinaryNATServices          = 8,
+}
+
+/// <summary>
+/// NetConnectionType values match horizon-server's RT.Common.NetConnectionType.
+/// </summary>
+internal enum NetConnectionType : int
+{
+    None                            = 0,
+    ClientServerTCP                 = 1,
+    PeerToPeerUDP                   = 2,
+    ClientServerTCPAuxUDP           = 3,
+    ClientListenerTCP               = 4,
+}
+
 // ---------------------------------------------------------------------------
 // Extension helpers for MediusWriter (keeps them near where they are used)
 // ---------------------------------------------------------------------------
 internal static class MediusWriterExtensions
 {
+    /// <summary>
+    /// Write a single NetAddress block (24 bytes):
+    ///   [type:4 int LE][address:16 ASCII null-padded][port:4 uint LE]
+    /// Matches horizon-server RT.Models.Misc.NetAddress.Serialize().
+    /// </summary>
+    public static void WriteNetAddress(this MediusWriter w, NetAddressType type, string address, int port)
+    {
+        w.Write((int)type);
+        w.WriteString(address, 16);          // NET_MAX_NETADDRESS_LENGTH
+        w.Write((uint)port);                  // uint, NOT ushort — critical!
+    }
+
+    /// <summary>
+    /// Write the fixed-size NetAddressList block (48 bytes for 2 entries).
+    /// Pass null for an unused slot — writes a zero-filled NetAddress.
+    /// </summary>
+    public static void WriteNetAddressList(this MediusWriter w,
+        (NetAddressType type, string address, int port)? slot0,
+        (NetAddressType type, string address, int port)? slot1)
+    {
+        if (slot0 is var s0 && s0 is not null) w.WriteNetAddress(s0.Value.type, s0.Value.address, s0.Value.port);
+        else                                    w.WriteNetAddress(NetAddressType.None, "", 0);
+        if (slot1 is var s1 && s1 is not null) w.WriteNetAddress(s1.Value.type, s1.Value.address, s1.Value.port);
+        else                                    w.WriteNetAddress(NetAddressType.None, "", 0);
+    }
+
+    /// <summary>
+    /// Write the 64-byte RSA_KEY block (16 uint dwords). For login responses
+    /// that don't need a real server key, pass null to emit zeros.
+    /// </summary>
+    public static void WriteRsaKey(this MediusWriter w, byte[]? key)
+    {
+        const int sizeDwords = 16;
+        if (key == null || key.Length == 0)
+        {
+            for (int i = 0; i < sizeDwords; i++) w.Write((uint)0);
+            return;
+        }
+        for (int i = 0; i < sizeDwords; i++)
+        {
+            uint v = 0;
+            for (int b = 0; b < 4; b++)
+            {
+                int idx = i * 4 + b;
+                if (idx < key.Length) v |= (uint)key[idx] << (b * 8);
+            }
+            w.Write(v);
+        }
+    }
+
+    /// <summary>
+    /// Write the full NetConnectionInfo block as PS2-era (MediusVersion ≤ 108)
+    /// clients expect it. Layout matches horizon-server RT.Models.Misc.NetConnectionInfo.Serialize():
+    ///
+    ///   [Type:4 int]
+    ///   [AddressList: 2 × NetAddress = 48 bytes]
+    ///   [WorldID:4 int]
+    ///   [ServerKey: 64 bytes RSA_KEY]
+    ///   [SessionKey:17 ASCII]
+    ///   [AccessKey:17 ASCII]
+    ///   (no extra padding when MediusVersion ≤ 108)
+    ///
+    /// Total = 154 bytes.
+    /// </summary>
+    public static void WriteNetConnectionInfo(this MediusWriter w,
+        NetConnectionType type,
+        (NetAddressType, string, int)? mls,
+        (NetAddressType, string, int)? nat,
+        int worldId,
+        byte[]? serverKey,
+        string sessionKey,
+        string accessKey)
+    {
+        w.Write((int)type);
+        w.WriteNetAddressList(mls, nat);
+        w.Write(worldId);
+        w.WriteRsaKey(serverKey);
+        w.WriteString(sessionKey, MediusConstants.SESSIONKEY_MAXLEN);
+        w.WriteString(accessKey,  MediusConstants.NET_ACCESS_KEY_LEN);
+
+        // EXPERIMENT: emit the 2 trailing bytes horizon writes only for MediusVersion > 108.
+        // SessionBeginResponse (no ConnInfo) is accepted, but the AccountLoginResponse is the
+        // ONLY message we send that carries a NetConnectionInfo — and SOCOM II rejects it
+        // every time. If the PS2 parser expects those 2 bytes, our block is a 2-byte short
+        // read here and nowhere else, which fits the symptom exactly. Total = 156 bytes.
+        w.WritePadding(2);
+    }
+
     /// <summary>
     /// Write an MLS connection address block:
     /// [ip string 16 bytes][port 2 bytes][pad 2 bytes]

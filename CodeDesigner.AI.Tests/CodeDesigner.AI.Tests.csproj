@@ -19,6 +19,7 @@
     <ProjectReference Include="..\CodeDesigner.AI.Abstractions\CodeDesigner.AI.Abstractions.csproj" />
     <ProjectReference Include="..\CodeDesigner.AI\CodeDesigner.AI.csproj" />
     <ProjectReference Include="..\CodeDesigner.Ps2.FileFormats\CodeDesigner.Ps2.FileFormats.csproj" />
+    <ProjectReference Include="..\CodeDesigner.Ps2.Multiplayer\CodeDesigner.Ps2.Multiplayer.csproj" />
   </ItemGroup>
 
   <ItemGroup>

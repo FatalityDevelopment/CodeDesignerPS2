@@ -357,6 +357,14 @@ namespace CodeDesigner.Ps2.Bridge
         public ushort? NetFilterPort { get; set; }
         /// <summary>IPv4 address for NETSETFILTER type 3 (dotted decimal, e.g. "192.168.1.1").</summary>
         public string? NetFilterIP { get; set; }
+        /// <summary>64-byte RC4 working key (base64) for NETDECRYPTSCERT.</summary>
+        public string? NetWorkingKey { get; set; }
+        /// <summary>Medius payload bytes (base64) for MEDIUSDECODE — bytes AFTER the class+type prefix.</summary>
+        public string? MediusPayload { get; set; }
+        /// <summary>NetMessageClass byte for MEDIUSDECODE (0=DME, 1=Lobby, 2=App, 4=LobbyExt, 5=LobbyAuth).</summary>
+        public byte? MediusClass { get; set; }
+        /// <summary>Medius message type byte for MEDIUSDECODE.</summary>
+        public byte? MediusType { get; set; }
         // CDS Cheat Engine fields (INJECTCHEATENGINE / UPDATECHEATENGINE / REMOVECHEATENGINE)
         /// <summary>Hook address — the instruction to replace with a jump to the cheat engine.</summary>
         public uint? HookAddress { get; set; }

@@ -128,7 +128,7 @@ public sealed class NetInjectTxTool(IEmulatorBridge bridge)
 }
 
 [CdTool("net_disassemble", ToolDomain.Network, ToolRisk.ReadOnly,
-    "Dissect a raw Ethernet frame and return a layered text summary (Ethernet/ARP/IPv4/ICMP/TCP/UDP). Risk: read-only.")]
+    "Dissect a raw Ethernet frame into a structured layer tree (Ethernet/ARP/IPv4/ICMP/TCP/UDP/SCERT/Medius) with field-level Medius decoding. Risk: read-only.")]
 public sealed class NetDisassembleTool(IEmulatorBridge bridge)
 {
     [ToolEntryPoint]
@@ -137,6 +137,64 @@ public sealed class NetDisassembleTool(IEmulatorBridge bridge)
         CancellationToken ct = default)
     {
         var json = await bridge.SendAsync(new { Command = "NETDISASSEMBLE", NetFrameData = frameBase64 }, ct);
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("Error", out var err)) return $"Error: {err.GetString()}";
+            if (root.TryGetProperty("DissectionText", out var t)) return t.GetString() ?? json;
+            return CdText.Message(json);
+        }
+        catch { return json; }
+    }
+}
+
+[CdTool("net_decrypt_scert", ToolDomain.Network, ToolRisk.ReadOnly,
+    "Decrypt every encrypted SCERT record in a captured Ethernet frame using an RC4 session key, then dissect to layers + fields. Risk: read-only.")]
+public sealed class NetDecryptScertTool(IEmulatorBridge bridge)
+{
+    [ToolEntryPoint]
+    public async Task<string> InvokeAsync(
+        [Description("Raw Ethernet frame bytes as a base64 string. Carries one or more SCERT records, some encrypted (high bit of type byte set).")] string frameBase64,
+        [Description("64-byte RC4 working key as a base64 string — the same key the client and server used for this SCERT session.")] string workingKeyBase64,
+        CancellationToken ct = default)
+    {
+        var json = await bridge.SendAsync(new
+        {
+            Command       = "NETDECRYPTSCERT",
+            NetFrameData  = frameBase64,
+            NetWorkingKey = workingKeyBase64,
+        }, ct);
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("Error", out var err)) return $"Error: {err.GetString()}";
+            if (root.TryGetProperty("DissectionText", out var t)) return t.GetString() ?? json;
+            return CdText.Message(json);
+        }
+        catch { return json; }
+    }
+}
+
+[CdTool("medius_decode", ToolDomain.Network, ToolRisk.ReadOnly,
+    "Decode a raw Medius payload (bytes after the class+type prefix) against the registered struct schema. Returns named fields. Risk: read-only.")]
+public sealed class MediusDecodeTool(IEmulatorBridge bridge)
+{
+    [ToolEntryPoint]
+    public async Task<string> InvokeAsync(
+        [Description("Medius payload bytes as a base64 string — the bytes AFTER the class+type prefix.")] string payloadBase64,
+        [Description("NetMessageClass byte: 0=DME, 1=Lobby, 2=Application, 3=LobbyReport, 4=LobbyExt, 5=LobbyAuth.")] int msgClass,
+        [Description("Medius message type byte (e.g. 0x07 = AccountLogin in the Lobby class).")] int msgType,
+        CancellationToken ct = default)
+    {
+        var json = await bridge.SendAsync(new
+        {
+            Command       = "MEDIUSDECODE",
+            MediusPayload = payloadBase64,
+            MediusClass   = (byte)msgClass,
+            MediusType    = (byte)msgType,
+        }, ct);
         try
         {
             using var doc = JsonDocument.Parse(json);

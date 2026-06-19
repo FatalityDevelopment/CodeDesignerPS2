@@ -126,6 +126,17 @@ public abstract class BaseMediusTcpServer
 
         await OnClientConnectedAsync(state, tcp);
 
+        // Server-initiated keepalive. SOCOM II's idle timer fires after a stretch
+        // of server silence and pops "Disconnected from Network" on the persona
+        // screen mid-typing. RunKeepAliveLoopAsync pings the client with the exact
+        // CLIENT_ECHO (0x05, payload 0xA5, RcClientSession) heartbeat the 2012 retail
+        // MAS server used — see ScertPacket.CreateClientEcho. The earlier empty
+        // SERVER_ECHO (0x1F) keepalive was the wrong message type and itself caused
+        // the disconnect the moment it fired. The cancellation token kills the loop
+        // the moment HandleClientAsync exits.
+        using var keepAliveCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        _ = RunKeepAliveLoopAsync(state, tcp, keepAliveCts.Token);
+
         var stream = tcp.GetStream();
         var buffer = new byte[8192];
         var pending = new List<byte>(8192);
@@ -157,7 +168,17 @@ public abstract class BaseMediusTcpServer
                     if (packet.IsEncrypted && packet.Hash != null && state.CryptKeyReceived)
                         PS2_RC4.Decrypt(state.SessionRc4Key, packet.Hash, packet.Payload);
 
-                    await DispatchPacketAsync(packet, state, tcp, ct);
+                    // Isolate handler faults: a single malformed message must not tear down
+                    // the connection (and drop every message queued behind it). Log and move on.
+                    try
+                    {
+                        await DispatchPacketAsync(packet, state, tcp, ct);
+                    }
+                    catch (Exception ex) when (!ct.IsCancellationRequested)
+                    {
+                        _log.LogWarning("[{Name}] Handler error for {Type} from {Id}: {Msg}",
+                            ServerName, packet.MessageType, state.ConnectionId, ex.Message);
+                    }
                 }
             }
         }
@@ -219,7 +240,9 @@ public abstract class BaseMediusTcpServer
                 break;
 
             case RT_MSG_TYPE.RT_MSG_CLIENT_ECHO:
-                await SendPacketAsync(tcp, ScertPacket.CreateEchoResponse(packet.Payload), state, ct);
+                // Mirror the client's heartbeat back as CLIENT_ECHO under RcClientSession,
+                // exactly as the 2012 retail MAS server does (same type + hash 4F B8 CF 6A).
+                await SendPacketAsync(tcp, ScertPacket.CreateEchoResponse(packet.Payload), state, CipherContext.RcClientSession, ct);
                 break;
 
             case RT_MSG_TYPE.RT_MSG_CLIENT_APP_TOSERVER:
@@ -436,6 +459,57 @@ public abstract class BaseMediusTcpServer
             _log.LogDebug("[{Name}] CLIENT_CONNECT_READY_TCP from already-established session {Id}", ServerName, state.ConnectionId);
         }
     }
+
+    /// <summary>
+    /// Background loop that sends a SERVER_ECHO every <see cref="KeepAliveInterval"/>
+    /// once the SCERT session is established. Prevents PS2 clients from dropping
+    /// the connection while the user is idle (e.g. typing a username at the
+    /// login screen).
+    /// </summary>
+    /// <remarks>
+    /// The 2012 retail captures (Masquarr_logoff_SII.pcap row [0001]) show the MAS server
+    /// pinging idle clients with a CLIENT_ECHO (0x05) carrying a single 0xA5 byte under
+    /// CipherContext.RcClientSession — hash 4F B8 CF 6A. SOCOM II resets its idle timer on
+    /// receipt and stays on the persona screen. The previous empty SERVER_ECHO (0x1F)
+    /// keepalive used the wrong message type/context and was itself the trigger for the
+    /// "Disconnected from Network" drop. Use <see cref="ScertPacket.CreateClientEcho"/>.
+    /// </remarks>
+    private async Task RunKeepAliveLoopAsync(MediusClientState state, TcpClient tcp, CancellationToken ct)
+    {
+        try
+        {
+            while (!ct.IsCancellationRequested && tcp.Connected)
+            {
+                await Task.Delay(KeepAliveInterval, ct);
+                if (!tcp.Connected) return;
+                if (!state.IsSessionEstablished) continue;
+
+                // Skip if the client sent us anything recently — only ping
+                // when traffic has truly gone quiet, to avoid stepping on
+                // legitimate exchanges.
+                if (DateTime.UtcNow - state.LastMessageAt < KeepAliveInterval) continue;
+
+                try
+                {
+                    await SendPacketAsync(tcp, ScertPacket.CreateClientEcho(), state, CipherContext.RcClientSession, ct);
+                    _log.LogDebug("[{Name}] -> CLIENT_ECHO (keepalive) to {Id}", ServerName, state.ConnectionId);
+                }
+                catch (Exception ex) when (!ct.IsCancellationRequested)
+                {
+                    _log.LogDebug("[{Name}] Keepalive ECHO send failed for {Id}: {Msg}", ServerName, state.ConnectionId, ex.Message);
+                    return;
+                }
+            }
+        }
+        catch (OperationCanceledException) { /* shutdown */ }
+    }
+
+    /// <summary>
+    /// How often the server pings idle clients with SERVER_ECHO. PS2 idle
+    /// timers fire around ~15-30s of total silence depending on the title;
+    /// a 5s cadence leaves margin for a dropped packet on noisy networks.
+    /// </summary>
+    protected virtual TimeSpan KeepAliveInterval => TimeSpan.FromSeconds(5);
 
     // -------------------------------------------------------------------------
     // Helpers

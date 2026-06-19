@@ -18,56 +18,70 @@ public class MediusReader
     public int Position => _pos;
     public int Remaining => _data.Length - _pos;
 
-    public byte   ReadByte()  { var v = _data[_pos]; _pos++; return v; }
+    // All reads are bounds-safe: if the field runs past the end of the buffer the cursor
+    // still advances by the field width (so later fields stay aligned) but the missing
+    // bytes read as zero. A short or unexpected message must never throw — an exception
+    // here kills the whole TCP connection and drops every message queued behind it
+    // (this is exactly what crashed the MLS lobby flow: PlayerInfo's 64-byte read ran off
+    // a 44-byte payload → IndexOutOfRange → disconnect at the community screen).
+    private bool InBounds(int count) => _pos >= 0 && _pos + count <= _data.Length;
+
+    public byte   ReadByte()  { var v = InBounds(1) ? _data[_pos] : (byte)0; _pos++; return v; }
     public sbyte  ReadSByte() { return (sbyte)ReadByte(); }
 
     public short  ReadInt16()
     {
-        var v = (short)(_data[_pos] | (_data[_pos + 1] << 8));
+        var v = InBounds(2) ? (short)(_data[_pos] | (_data[_pos + 1] << 8)) : (short)0;
         _pos += 2;
         return v;
     }
 
     public ushort ReadUInt16()
     {
-        var v = (ushort)(_data[_pos] | (_data[_pos + 1] << 8));
+        var v = InBounds(2) ? (ushort)(_data[_pos] | (_data[_pos + 1] << 8)) : (ushort)0;
         _pos += 2;
         return v;
     }
 
     public int ReadInt32()
     {
-        var v = _data[_pos] | (_data[_pos + 1] << 8) | (_data[_pos + 2] << 16) | (_data[_pos + 3] << 24);
+        var v = InBounds(4)
+            ? _data[_pos] | (_data[_pos + 1] << 8) | (_data[_pos + 2] << 16) | (_data[_pos + 3] << 24)
+            : 0;
         _pos += 4;
         return v;
     }
 
     public uint ReadUInt32()
     {
-        var v = (uint)(_data[_pos] | (_data[_pos + 1] << 8) | (_data[_pos + 2] << 16) | (_data[_pos + 3] << 24));
+        var v = InBounds(4)
+            ? (uint)(_data[_pos] | (_data[_pos + 1] << 8) | (_data[_pos + 2] << 16) | (_data[_pos + 3] << 24))
+            : 0u;
         _pos += 4;
         return v;
     }
 
-    /// <summary>Read a fixed-length null-terminated ASCII string.</summary>
+    /// <summary>Read a fixed-length null-terminated ASCII string (bounds-safe).</summary>
     public string ReadString(int maxLength)
     {
-        int end = _pos + maxLength;
+        // Clamp the readable window to what's actually in the buffer.
+        int avail   = Math.Max(0, Math.Min(maxLength, _data.Length - _pos));
         int nullIdx = -1;
-        for (int i = _pos; i < end && i < _data.Length; i++)
+        for (int i = 0; i < avail; i++)
         {
-            if (_data[i] == 0) { nullIdx = i; break; }
+            if (_data[_pos + i] == 0) { nullIdx = i; break; }
         }
-        int strLen = nullIdx >= 0 ? nullIdx - _pos : maxLength;
-        var result = Encoding.ASCII.GetString(_data, _pos, strLen);
-        _pos += maxLength;
+        int strLen = nullIdx >= 0 ? nullIdx : avail;
+        var result = strLen > 0 ? Encoding.ASCII.GetString(_data, _pos, strLen) : string.Empty;
+        _pos += maxLength;   // advance the full field width even if it ran past the end
         return result;
     }
 
     public byte[] ReadBytes(int count)
     {
         var v = new byte[count];
-        Buffer.BlockCopy(_data, _pos, v, 0, count);
+        int n = Math.Max(0, Math.Min(count, _data.Length - _pos));
+        if (n > 0) Buffer.BlockCopy(_data, _pos, v, 0, n);
         _pos += count;
         return v;
     }

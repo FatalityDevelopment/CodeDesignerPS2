@@ -35,6 +35,7 @@
     <ProjectReference Include="..\CodeDesigner.Ps2.HddManager\CodeDesigner.Ps2.HddManager.csproj" />
     <ProjectReference Include="..\CodeDesigner.Ps2.IsoManager\CodeDesigner.Ps2.IsoManager.csproj" />
     <ProjectReference Include="..\CodeDesigner.Ps2.LabelManager\CodeDesigner.Ps2.LabelManager.csproj" />
+    <ProjectReference Include="..\CodeDesigner.Ps2.Multiplayer\CodeDesigner.Ps2.Multiplayer.csproj" />
     <ProjectReference Include="..\CodeDesigner.Ps2.Recompiler\CodeDesigner.Ps2.Recompiler.csproj" />
     <ProjectReference Include="..\CodeDesigner.Ps2.FileFormats\CodeDesigner.Ps2.FileFormats.csproj" />
     <ProjectReference Include="..\CodeDesigner.Ps2.DiscordPresence\CodeDesigner.Ps2.DiscordPresence.csproj" />

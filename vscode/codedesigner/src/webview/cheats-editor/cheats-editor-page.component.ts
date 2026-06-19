@@ -62,6 +62,7 @@ const BRACKET_RE = /^\[(.+)\]$/;
 const CODE_RE = /^[0-9A-Fa-f?*]+(\s+[0-9A-Fa-f?*]+)*$/;
 const CODE_TOKEN_RE = /[0-9A-Fa-f?*]+|\s+|\S+/g;
 const MAX_HIGHLIGHTED_CHEAT_TEXT_CHARS = 200_000;
+const ADDRESS_LINK_VERTICAL_BUFFER_LINES = 5;
 
 /**
  * Three-panel PS2 cheat-code editor:
@@ -641,8 +642,9 @@ export class CheatsEditorPageComponent implements AfterViewInit {
     if (!metrics) { return null; }
 
     const rect = ta.getBoundingClientRect();
-    const x = event.clientX - rect.left + ta.scrollLeft - metrics.paddingLeft;
-    const y = event.clientY - rect.top + ta.scrollTop - metrics.paddingTop;
+    const mouseEvent = event as MouseEvent;
+    const x = mouseEvent.clientX - rect.left + ta.scrollLeft - metrics.paddingLeft;
+    const y = mouseEvent.clientY - rect.top + ta.scrollTop - metrics.paddingTop;
     if (x < 0 || y < 0) { return null; }
 
     const lines = this.editorText().split(/\r?\n/);
@@ -655,7 +657,7 @@ export class CheatsEditorPageComponent implements AfterViewInit {
       lineStart += lines[i].length + 1;
     }
 
-    const hit = this.firstCheatAddressTokenOnLine(lineStart, lineStart + lines[lineIndex].length);
+    const hit = this.firstCheatAddressTokenOnLine(lines[lineIndex], lineStart);
     if (!hit) { return null; }
 
     const tokenStartColumn = hit.start - lineStart;
@@ -690,18 +692,6 @@ export class CheatsEditorPageComponent implements AfterViewInit {
       paddingTop: parseFloat(style.paddingTop) || 0,
     };
   }
-
-  private firstCheatAddressTokenOnLine(lineStart: number, lineEnd: number): { token: string; start: number; end: number } | null {
-    const text = this.editorText();
-    const caret = ta.selectionStart;
-    const caretLineStart = text.lastIndexOf('\n', Math.max(0, caret - 1)) + 1;
-    const nextNewline = text.indexOf('\n', caret);
-    let lineEnd = nextNewline < 0 ? text.length : nextNewline;
-    if (lineEnd > caretLineStart && text[lineEnd - 1] === '\r') { lineEnd--; }
-
-    const code = this.stripComments(line, false).code;
-    const first = code.match(/^\s*([0-9A-Fa-f]{8})(?=\s|$)/);
-    if (!first?.[1]) { return null; }
 
   private scheduleVisibleAddressLinkRefresh(): void {
     if (this.addressLinkFrame !== undefined) { cancelAnimationFrame(this.addressLinkFrame); }
@@ -771,34 +761,6 @@ export class CheatsEditorPageComponent implements AfterViewInit {
     this.lineStartCacheText = text;
     this.lineStartCache = starts;
     return starts;
-  }
-
-  private editorMetrics(ta: HTMLTextAreaElement): {
-    lineHeight: number;
-    charWidth: number;
-    paddingLeft: number;
-    paddingTop: number;
-  } | null {
-    const style = getComputedStyle(ta);
-    const fontSize = parseFloat(style.fontSize);
-    const lineHeight = style.lineHeight === 'normal'
-      ? fontSize * 1.5
-      : parseFloat(style.lineHeight);
-    if (!Number.isFinite(lineHeight) || lineHeight <= 0) { return null; }
-
-    if (!this.measureCanvas) { this.measureCanvas = document.createElement('canvas'); }
-    const ctx = this.measureCanvas.getContext('2d');
-    if (!ctx) { return null; }
-    ctx.font = style.font;
-    const charWidth = ctx.measureText('0').width;
-    if (!Number.isFinite(charWidth) || charWidth <= 0) { return null; }
-
-    return {
-      lineHeight,
-      charWidth,
-      paddingLeft: parseFloat(style.paddingLeft) || 0,
-      paddingTop: parseFloat(style.paddingTop) || 0,
-    };
   }
 
   private firstCheatAddressTokenOnLine(line: string, absoluteLineStart: number): { token: string; start: number; end: number } | null {

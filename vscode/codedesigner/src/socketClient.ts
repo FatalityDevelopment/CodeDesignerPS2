@@ -4481,14 +4481,26 @@ export class SocketClient {
         return { packets, parsedRows };
     }
 
-    /** NETDISASSEMBLE — dissects a raw Ethernet frame and returns human-readable text. */
-    public async netDisassemble(frameBase64: string): Promise<string> {
+    /**
+     * NETDISASSEMBLE — dissect a raw Ethernet frame against the canonical bridge
+     * dissector. Returns the flat human-readable text, the structured layer
+     * tree, and a pre-built ParsedPacketRow for table hydration.
+     */
+    public async netDisassemble(frameBase64: string): Promise<{
+        text: string;
+        layers: DissectedLayer[];
+        row?: ParsedPacketRow;
+    }> {
         const r = await this.sendCommand({
             Command: 'NETDISASSEMBLE',
             NetFrameData: frameBase64,
         } as CommandMessage);
         if (!r.Success) { throw new Error(r.Error || 'NETDISASSEMBLE failed'); }
-        return r.DissectionText ?? '';
+        return {
+            text:   r.DissectionText   ?? '',
+            layers: (r as { DissectionLayers?: DissectedLayer[] }).DissectionLayers ?? [],
+            row:    (r as { ParsedPacketRow?: ParsedPacketRow }).ParsedPacketRow,
+        };
     }
 
     /** NETGETSTATS — returns TX/RX counters and capture queue statistics. */
@@ -4627,6 +4639,23 @@ export interface CapturedPacketInfo {
     timestampUs: number;
     length: number;
     data: string;
+    /** Pre-computed layer tree from the bridge dissector (populated by NETRECVCAPTURE). */
+    layers?: DissectedLayer[];
+}
+
+/** Wire payload for a single dissected field returned alongside NETDISASSEMBLE / NETRECVCAPTURE. */
+export interface DissectedField {
+    name: string;
+    value: string;
+}
+
+/** Wire payload for one protocol layer (Ethernet / IPv4 / TCP / SCERT / Medius / ...). */
+export interface DissectedLayer {
+    label: string;
+    color: string;
+    fields: DissectedField[];
+    offset: number;
+    length: number;
 }
 
 /** A pre-parsed packet table row returned alongside NETRECVCAPTURE. */

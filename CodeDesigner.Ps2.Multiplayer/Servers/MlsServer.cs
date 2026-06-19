@@ -137,6 +137,22 @@ public class MlsServer : BaseMediusTcpServer
                     await HandleVersionServerAsync(packet, state, tcp, ct);
                     break;
 
+                case MediusLobbyMessageId.SetGameListFilter0:
+                    await HandleSetGameListFilterAsync(packet, state, tcp, ct);
+                    break;
+
+                case MediusLobbyMessageId.AccountUpdateStats:
+                    await HandleAccountUpdateStatsAsync(packet, state, tcp, ct);
+                    break;
+
+                case MediusLobbyMessageId.UpdateLadderStats:
+                    await HandleUpdateLadderStatsAsync(packet, state, tcp, ct);
+                    break;
+
+                case MediusLobbyMessageId.FileListFiles:
+                    await HandleFileListFilesAsync(packet, state, tcp, ct);
+                    break;
+
                 default:
                     _log.LogDebug("[MLS] Unhandled lobby msg 0x{Type:X2}", packet.MessageType);
                     break;
@@ -425,29 +441,87 @@ public class MlsServer : BaseMediusTcpServer
         await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.JoinGameResponse, w.ToArray()), ct);
     }
 
+    // Old-proto (SOCOM II) Medius responses begin with the request's 21-byte messageID echo
+    // + 3 pad bytes + the 4-byte status, exactly like the working MAS handlers. The MLS
+    // handlers were written without this header, so SOCOM II read every reply as garbage.
+    private static byte[] MlsMsgId(MediusPacket packet) =>
+        packet.Payload.Length >= MediusConstants.MESSAGEID_MAXLEN
+            ? packet.Payload[..MediusConstants.MESSAGEID_MAXLEN]
+            : new byte[MediusConstants.MESSAGEID_MAXLEN];
+
     private async Task HandlePlayerInfoAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
     {
+        // Request: [messageId:21][sessionKey:17][accountId:4]. The client is asking about a
+        // player by account id; for the community screen it's querying itself.
         var r = new MediusReader(packet.Payload);
-        string sessionKey = r.ReadString(64);
+        byte[] msgId      = r.ReadBytes(MediusConstants.MESSAGEID_MAXLEN);
+        string sessionKey = r.ReadString(MediusConstants.SESSIONKEY_MAXLEN);
         int    accountId  = r.ReadInt32();
 
-        var account = _store.GetAccountById(accountId);
+        var account = _store.GetAccountById(accountId)
+                   ?? (state.AccountId.HasValue ? _store.GetAccountById(state.AccountId.Value) : null);
 
         var w = new MediusWriter();
+        w.Write(msgId);                                                      // 21 messageId echo
+        w.WritePadding(3);                                                   // 3
         if (account == null)
         {
-            w.Write((int)MediusCallbackStatus.MediusAccountNotFound);
-            w.Write(0);
-            w.WriteString("", 64);
+            w.Write((int)MediusCallbackStatus.MediusAccountNotFound);        // 4 status
+            w.Write(0);                                                      // accountId
+            w.WriteString("", MediusConstants.ACCOUNTNAME_MAXLEN);           // name
         }
         else
         {
             w.Write((int)MediusCallbackStatus.MediusSuccess);
             w.Write(account.AccountId);
-            w.WriteString(account.AccountName, 64);
+            w.WriteString(account.AccountName, MediusConstants.ACCOUNTNAME_MAXLEN);
         }
 
         await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.PlayerInfoResponse, w.ToArray()), ct);
+    }
+
+    // The community screen fires these off and waits on their acks before proceeding to the
+    // EULA/news. Bodies are best-effort (status-only ack with the messageID echo); refine the
+    // payloads against the working-server capture / Horizon if a specific one still stalls.
+
+    private async Task HandleSetGameListFilterAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
+    {
+        var w = new MediusWriter();
+        w.Write(MlsMsgId(packet));                           // 21
+        w.WritePadding(3);                                   // 3
+        w.Write((int)MediusCallbackStatus.MediusSuccess);    // 4
+        w.Write(1);                                          // FilterID (echoed so the client can clear it later)
+        await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.SetGameListFilterResponse0, w.ToArray()), ct);
+    }
+
+    private async Task HandleAccountUpdateStatsAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
+    {
+        var w = new MediusWriter();
+        w.Write(MlsMsgId(packet));                           // 21
+        w.WritePadding(3);                                   // 3
+        w.Write((int)MediusCallbackStatus.MediusSuccess);    // 4
+        await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.AccountUpdateStatsResponse, w.ToArray()), ct);
+    }
+
+    private async Task HandleUpdateLadderStatsAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
+    {
+        var w = new MediusWriter();
+        w.Write(MlsMsgId(packet));                           // 21
+        w.WritePadding(3);                                   // 3
+        w.Write((int)MediusCallbackStatus.MediusSuccess);    // 4
+        await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.UpdateLadderStatsResponse, w.ToArray()), ct);
+    }
+
+    private async Task HandleFileListFilesAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
+    {
+        // The game lists its server-stored weapon-profile file (e.g. WeapProfile_2.dat).
+        // We have no file store yet, so report an empty list (success + end-of-list, no entries).
+        var w = new MediusWriter();
+        w.Write(MlsMsgId(packet));                           // 21
+        w.WritePadding(3);                                   // 3
+        w.Write((int)MediusCallbackStatus.MediusNoResult);   // 4  (no files)
+        w.Write((byte)1);                                    // EndOfList
+        await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.FileListFilesResponse, w.ToArray()), ct);
     }
 
     private async Task HandleGameInfoAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)

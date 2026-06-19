@@ -17,8 +17,18 @@ import type { McpMemoryEntry, McpMemoryListResult, McpMemoryActionResult } from 
 const SNAP_PREVIEW = 5;
 /** Preview count for the History and Recent Labels lists before "show more". */
 const LIST_PREVIEW = 8;
-/** Interval for re-pinging Multiplayer servers while the Network section is open. */
-const NET_POLL_MS = 4000;
+/**
+ * Interval for re-pinging Multiplayer servers while the Network section is open.
+ *
+ * Each tick opens a short-lived TCP connection to every Medius port (MUIS, MAS,
+ * MLS, DME, NAT, DNAS, DNS) so the panel can show a green/red dot per server.
+ * That's 8 connections per tick — at the previous 4s cadence the multiplayer
+ * server was processing ~2 spurious connect/disconnect pairs every second,
+ * adding state churn and log noise alongside real PS2 client traffic. 30s is
+ * still responsive enough to spot a server going down without saturating the
+ * accept loop.
+ */
+const NET_POLL_MS = 30000;
 
 /**
  * SettingsTabComponent - Emulator settings tab content.

@@ -12,8 +12,6 @@ import { PageHeaderComponent } from '../shared/page-header.component';
 import {
     PacketViewerComponent,
     PacketViewerAction,
-    MediusPortConfig,
-    setMediusPorts,
 } from './packet-viewer.component';
 import './packet-viewer-page.css';
 
@@ -52,16 +50,6 @@ export class PacketViewerPageComponent implements AfterViewInit, OnDestroy {
             const data = event.data as { type: string; [key: string]: unknown };
             this.zone.run(() => {
                 switch (data['type']) {
-                    case 'packetViewerConfig': {
-                        const ports = data['ports'] as MediusPortConfig[] | undefined;
-                        if (Array.isArray(ports)) {
-                            setMediusPorts(ports);
-                            // Re-render any already-rendered packets so the
-                            // server column / Info column pick up new names.
-                            pv.refreshDisplay();
-                        }
-                        break;
-                    }
                     case 'packetViewerStatus':
                         pv.setStatus(data['status'] as any);
                         break;
@@ -83,7 +71,7 @@ export class PacketViewerPageComponent implements AfterViewInit, OnDestroy {
                         break;
                     case 'packetViewerPcapLoaded':
                         pv.onClear();
-                        pv.addCapturedPackets(data['packets'] as any[] ?? []);
+                        pv.addCapturedPackets(data['packets'] as any[] ?? [], data['parsedRows'] as any[] ?? []);
                         pv.recvCaptureComplete();
                         pv.setFilename(data['filename'] as string ?? '');
                         pv.showStatus(`Loaded ${(data['packets'] as any[] ?? []).length} packet(s) from file`);
