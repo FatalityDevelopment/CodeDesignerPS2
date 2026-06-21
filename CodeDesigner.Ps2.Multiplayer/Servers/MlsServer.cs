@@ -1,4 +1,5 @@
 using System.Net.Sockets;
+using System.Text.Json;
 using CodeDesigner.Ps2.Multiplayer.Config;
 using CodeDesigner.Ps2.Multiplayer.Models;
 using CodeDesigner.Ps2.Multiplayer.Protocol;
@@ -29,8 +30,87 @@ public class MlsServer : BaseMediusTcpServer
         ServerName = "MLS";
     }
 
-    public Task StartAsync(CancellationToken ct) =>
-        StartAsync(_config.BindAddress, _config.MlsPort, ct);
+    private FileSystemWatcher? _injectWatcher;
+
+    public Task StartAsync(CancellationToken ct)
+    {
+        StartInjectDropWatcher(ct);
+        return StartAsync(_config.BindAddress, _config.MlsPort, ct);
+    }
+
+    // Fire the SCERT session-established callback right after the old-proto handshake so
+    // configured binary injections go out as soon as the player reaches the lobby.
+    protected override bool PushDataAfterConnectComplete => true;
+
+    /// <summary>A player has reached the lobby — push any configured binary injections.</summary>
+    protected override async Task OnSessionEstablishedAsync(MediusClientState state, TcpClient tcp, CancellationToken ct)
+    {
+        await SendConfiguredInjectionsAsync(tcp, ct);
+    }
+
+    // ── On-demand injection: watch a drop folder for *.json manifests ─────────
+    private void StartInjectDropWatcher(CancellationToken ct)
+    {
+        var folder = _config.InjectDropFolder;
+        if (string.IsNullOrWhiteSpace(folder)) return;
+        try
+        {
+            Directory.CreateDirectory(folder);
+            _injectWatcher = new FileSystemWatcher(folder, "*.json") { EnableRaisingEvents = true };
+            _injectWatcher.Created += (_, e) => _ = HandleInjectManifestAsync(e.FullPath, ct);
+            _log.LogInformation("[MLS] Watching inject drop folder: {Folder}", folder);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning("[MLS] Could not start inject drop watcher on '{Folder}': {Msg}", folder, ex.Message);
+        }
+    }
+
+    private async Task HandleInjectManifestAsync(string path, CancellationToken ct)
+    {
+        try
+        {
+            // The file may still be being written when the event fires — retry briefly.
+            byte[] bytes = Array.Empty<byte>();
+            for (int i = 0; i < 10; i++)
+            {
+                try { bytes = await File.ReadAllBytesAsync(path, ct); if (bytes.Length > 0) break; }
+                catch (IOException) { await Task.Delay(100, ct); }
+            }
+            var inj = JsonSerializer.Deserialize<BinaryInjection>(bytes,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            if (inj == null || !TryParseAddr(inj.LoadAddress, out uint loadAddr))
+            {
+                _log.LogWarning("[MLS] Inject manifest '{P}': missing/invalid LoadAddress", Path.GetFileName(path));
+                return;
+            }
+
+            // Resolve the .bin relative to the manifest first, then the usual locations.
+            string binPath = inj.File;
+            if (!File.Exists(binPath))
+                binPath = Path.Combine(Path.GetDirectoryName(path) ?? ".", inj.File);
+            if (!File.Exists(binPath))
+            {
+                _log.LogWarning("[MLS] Inject manifest '{P}': bin not found '{F}'", Path.GetFileName(path), inj.File);
+                return;
+            }
+
+            uint? hookAddr  = TryParseAddr(inj.HookAddress, out uint h) ? h : null;
+            uint? entryAddr = TryParseAddr(inj.EntryPoint, out uint e) ? e : null;
+            var blob = await File.ReadAllBytesAsync(binPath, ct);
+
+            int n = await InjectIntoAllAsync(loadAddr, blob, hookAddr, entryAddr, inj.ChunkSize, ct);
+            _log.LogInformation("[MLS] On-demand inject '{N}' -> {Count} client(s)",
+                string.IsNullOrEmpty(inj.Name) ? Path.GetFileName(binPath) : inj.Name, n);
+
+            // Consume the manifest so it doesn't re-fire.
+            try { File.Delete(path); } catch { /* ignore */ }
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            _log.LogWarning("[MLS] Inject manifest '{P}' failed: {Msg}", Path.GetFileName(path), ex.Message);
+        }
+    }
 
     protected override Task OnClientDisconnectedAsync(MediusClientState state)
     {
@@ -449,79 +529,91 @@ public class MlsServer : BaseMediusTcpServer
             ? packet.Payload[..MediusConstants.MESSAGEID_MAXLEN]
             : new byte[MediusConstants.MESSAGEID_MAXLEN];
 
-    private async Task HandlePlayerInfoAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
+    // RESTORED to the e0c200ab "this worked" state (transcript L654: EULA prompt appeared + accepted,
+    // community screen displayed). At that point the ENTIRE MLS lobby batch was UNANSWERED — the client
+    // advanced to the EULA/community screen on its own. Every crafted reply added afterwards
+    // (PlayerInfo / SetGameListFilter / stats / FileListFiles bodies, and the SERVER_MEMORY_POKE streams)
+    // REGRESSED it back to a pre-EULA stall. So these handlers are deliberately SILENT — log only, no
+    // reply. PlayerInfo as a no-op also removes the IndexOutOfRange that caused the post-community
+    // "instant disconnect" at its source (the bounds-safe MediusReader + per-packet try/catch remain as
+    // defence-in-depth). Do NOT re-add lobby replies or poke streams here without on-hardware proof.
+    private Task HandlePlayerInfoAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
     {
-        // Request: [messageId:21][sessionKey:17][accountId:4]. The client is asking about a
-        // player by account id; for the community screen it's querying itself.
-        var r = new MediusReader(packet.Payload);
-        byte[] msgId      = r.ReadBytes(MediusConstants.MESSAGEID_MAXLEN);
-        string sessionKey = r.ReadString(MediusConstants.SESSIONKEY_MAXLEN);
-        int    accountId  = r.ReadInt32();
-
-        var account = _store.GetAccountById(accountId)
-                   ?? (state.AccountId.HasValue ? _store.GetAccountById(state.AccountId.Value) : null);
-
-        var w = new MediusWriter();
-        w.Write(msgId);                                                      // 21 messageId echo
-        w.WritePadding(3);                                                   // 3
-        if (account == null)
-        {
-            w.Write((int)MediusCallbackStatus.MediusAccountNotFound);        // 4 status
-            w.Write(0);                                                      // accountId
-            w.WriteString("", MediusConstants.ACCOUNTNAME_MAXLEN);           // name
-        }
-        else
-        {
-            w.Write((int)MediusCallbackStatus.MediusSuccess);
-            w.Write(account.AccountId);
-            w.WriteString(account.AccountName, MediusConstants.ACCOUNTNAME_MAXLEN);
-        }
-
-        await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.PlayerInfoResponse, w.ToArray()), ct);
+        _log.LogDebug("[MLS] PlayerInfo received (no reply — minimal lobby, matches the EULA-reaching state)");
+        return Task.CompletedTask;
     }
 
-    // The community screen fires these off and waits on their acks before proceeding to the
-    // EULA/news. Bodies are best-effort (status-only ack with the messageID echo); refine the
-    // payloads against the working-server capture / Horizon if a specific one still stalls.
-
-    private async Task HandleSetGameListFilterAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
+    private Task HandleSetGameListFilterAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
     {
-        var w = new MediusWriter();
-        w.Write(MlsMsgId(packet));                           // 21
-        w.WritePadding(3);                                   // 3
-        w.Write((int)MediusCallbackStatus.MediusSuccess);    // 4
-        w.Write(1);                                          // FilterID (echoed so the client can clear it later)
-        await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.SetGameListFilterResponse0, w.ToArray()), ct);
+        _log.LogDebug("[MLS] SetGameListFilter0 received (no reply — minimal lobby)");
+        return Task.CompletedTask;
     }
 
-    private async Task HandleAccountUpdateStatsAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
+    private Task HandleAccountUpdateStatsAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
     {
-        var w = new MediusWriter();
-        w.Write(MlsMsgId(packet));                           // 21
-        w.WritePadding(3);                                   // 3
-        w.Write((int)MediusCallbackStatus.MediusSuccess);    // 4
-        await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.AccountUpdateStatsResponse, w.ToArray()), ct);
+        _log.LogDebug("[MLS] AccountUpdateStats received (no reply — minimal lobby)");
+        return Task.CompletedTask;
     }
 
-    private async Task HandleUpdateLadderStatsAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
+    private Task HandleUpdateLadderStatsAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
     {
-        var w = new MediusWriter();
-        w.Write(MlsMsgId(packet));                           // 21
-        w.WritePadding(3);                                   // 3
-        w.Write((int)MediusCallbackStatus.MediusSuccess);    // 4
-        await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.UpdateLadderStatsResponse, w.ToArray()), ct);
+        _log.LogDebug("[MLS] UpdateLadderStats received (no reply — minimal lobby)");
+        return Task.CompletedTask;
     }
 
-    private async Task HandleFileListFilesAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
+    private Task HandleFileListFilesAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
     {
-        // The game lists its server-stored weapon-profile file (e.g. WeapProfile_2.dat).
-        // We have no file store yet, so report an empty list (success + end-of-list, no entries).
-        var w = new MediusWriter();
-        w.Write(MlsMsgId(packet));                           // 21
-        w.WritePadding(3);                                   // 3
-        w.Write((int)MediusCallbackStatus.MediusNoResult);   // 4  (no files)
-        w.Write((byte)1);                                    // EndOfList
-        await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.FileListFilesResponse, w.ToArray()), ct);
+        // UNANSWERED — exactly as in the L654 state that reached the EULA + community screen. The game
+        // sends FileListFiles for its weapon profile but does NOT block the lobby on the reply.
+        _log.LogDebug("[MLS] FileListFiles received (no reply — minimal lobby)");
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Write a zeroed 172-byte Medius <c>MediusFile</c> struct (Filename[128] + ServerChecksum[16]
+    /// + FileID/FileSize/CreationTimeStamp/OwnerID/GroupID (5×u32) + 4×u16 permission/op fields),
+    /// little-endian, matching Horizon's RT.Models/Misc/MediusFile.cs serializer.
+    /// </summary>
+    private static void WriteEmptyMediusFile(MediusWriter w)
+    {
+        w.WriteString("", 128);   // Filename[MEDIUS_FILE_MAX_FILENAME_LENGTH]
+        w.WritePadding(16);       // ServerChecksum[MEDIUS_FILE_CHECKSUM_NUMBYTES]
+        w.Write(0);               // FileID
+        w.Write(0);               // FileSize
+        w.Write(0);               // CreationTimeStamp
+        w.Write(0);               // OwnerID
+        w.Write(0);               // GroupID
+        w.Write((ushort)0);       // OwnerPermissionRWX
+        w.Write((ushort)0);       // GroupPermissionRWX
+        w.Write((ushort)0);       // GlobalPermissionRWX
+        w.Write((ushort)0);       // ServerOperationID
+    }
+
+    /// <summary>Read the leading NUL-terminated ASCII string of a payload (the FileListFiles filename).</summary>
+    private static string ReadLeadingString(byte[] payload)
+    {
+        int n = 0;
+        while (n < payload.Length && payload[n] != 0) n++;
+        return System.Text.Encoding.ASCII.GetString(payload, 0, n);
+    }
+
+    /// <summary>
+    /// Extract the last NUL-terminated ASCII string in a payload as a 21-byte (MESSAGEID_MAXLEN)
+    /// field. FileListFiles puts its messageID ("&lt;sessionKey&gt;.0") at the END of the request,
+    /// after the filename and a block of (largely uninitialized) fields, so the normal front-of-
+    /// payload MlsMsgId() does not apply.
+    /// </summary>
+    private static byte[] ExtractTrailingMessageId(byte[] payload)
+    {
+        var id = new byte[MediusConstants.MESSAGEID_MAXLEN];
+        int end = payload.Length;
+        while (end > 0 && payload[end - 1] == 0) end--;        // skip trailing NULs
+        if (end == 0) return id;
+        int start = end;
+        while (start > 0 && payload[start - 1] != 0) start--;  // back to start of last string
+        int len = Math.Min(end - start, MediusConstants.MESSAGEID_MAXLEN);
+        Buffer.BlockCopy(payload, start, id, 0, len);
+        return id;
     }
 
     private async Task HandleGameInfoAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
@@ -666,7 +758,8 @@ public class MlsServer : BaseMediusTcpServer
     {
         // VersionServer (0x86) is a one-way notification from the PS2 client —
         // the client advances its own state machine immediately without expecting a reply.
-        // The real server does NOT send VersionServerResponse here on MLS.
+        // The real server does NOT send VersionServerResponse here on MLS. Replying to it
+        // desyncs the lobby exchange and was the regression that broke the EULA/online screen.
         _log.LogInformation("[MLS] VersionServer received (one-way notification, no reply sent)");
         return Task.CompletedTask;
     }

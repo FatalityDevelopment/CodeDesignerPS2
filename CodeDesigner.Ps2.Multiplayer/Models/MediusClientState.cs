@@ -65,6 +65,9 @@ public class MediusClientState
     public string AccountName  { get; set; } = string.Empty;
     public PlayerStatus Status { get; set; } = PlayerStatus.Disconnected;
 
+    /// <summary>Set once the MLS lobby online-code SERVER_MEMORY_POKE stream has been replayed to this client.</summary>
+    public bool LobbyPokesSent { get; set; }
+
     // -------------------------------------------------------------------------
     // World placement
     // -------------------------------------------------------------------------

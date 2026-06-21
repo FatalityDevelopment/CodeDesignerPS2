@@ -107,4 +107,60 @@ public class MultiplayerConfig
     public string UniverseNews { get; set; } = "No news at the moment. Check back later!";
     public string UniversePatchVersion { get; set; } = "r0004";
     public string UniversePatchUrl { get; set; } = "https://example.com/patches/r0004/update.zip";
+
+    // ── Binary injection ──────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Custom binaries to push into the console over RT_MSG_SERVER_MEMORY_POKE once a
+    /// player reaches the lobby (MLS). Each entry loads a .bin at its LoadAddress and,
+    /// if HookAddress is set, writes a MIPS jump there so the injected code runs.
+    /// Empty = nothing is injected (stock behaviour). This is the same channel SOCOM II
+    /// servers use to push their online code module; here it carries YOUR binaries.
+    /// </summary>
+    public List<BinaryInjection> Injections { get; set; } = new();
+
+    /// <summary>
+    /// Folder watched for on-demand injection manifests (*.json with the same shape as
+    /// a <see cref="BinaryInjection"/> entry). Drop a manifest here and it is sent to the
+    /// connected console(s) immediately, then the manifest is consumed. Empty = disabled.
+    /// </summary>
+    public string InjectDropFolder { get; set; } = "";
+
+    /// <summary>
+    /// Path to a captured SERVER_MEMORY_POKE stream to replay verbatim once a player completes the
+    /// MLS lobby exchange — i.e. SOCOM II's online-code download. Format: a sequence of
+    /// [len:4 LE][pokePayload] records where each pokePayload is a complete [destAddr:4][size:4][data]
+    /// block (as produced by dump_pokes.py from the retail universe-community-screen capture).
+    /// The retail game ships WITHOUT online code; without this stream the client finishes the lobby
+    /// handshake then times out ("Disconnected from Network"). Empty = disabled.
+    /// </summary>
+    public string LobbyPokeStreamFile { get; set; } = "";
+}
+
+/// <summary>
+/// One binary to inject into the PS2 over SERVER_MEMORY_POKE. Addresses are EE virtual
+/// addresses written as hex strings (e.g. "0x000A0000").
+/// </summary>
+public class BinaryInjection
+{
+    /// <summary>Disable without deleting the entry.</summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>Optional label for logs.</summary>
+    public string Name { get; set; } = "";
+
+    /// <summary>Path to the .bin (absolute, or relative to the app base dir / Data/).</summary>
+    public string File { get; set; } = "";
+
+    /// <summary>EE address the blob is written to, hex (e.g. "0x000A0000").</summary>
+    public string LoadAddress { get; set; } = "";
+
+    /// <summary>Optional EE address to write a "J entry" hook at, hex. Null/empty = load only.</summary>
+    public string? HookAddress { get; set; }
+
+    /// <summary>Entry point the hook jumps to, hex. Null/empty = LoadAddress.</summary>
+    public string? EntryPoint { get; set; }
+
+    /// <summary>Bytes per SERVER_MEMORY_POKE write (retail SOCOM II uses 512).</summary>
+    public int ChunkSize { get; set; } = 512;
 }

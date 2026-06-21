@@ -573,6 +573,160 @@ public abstract class BaseMediusTcpServer
     }
 
     // -------------------------------------------------------------------------
+    // Binary injection (RT_MSG_SERVER_MEMORY_POKE)
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Build a SERVER_MEMORY_POKE payload: [destAddr:4 LE][size:4 LE][data:size].
+    /// (Matches the retail SOCOM II code-download wire format.)
+    /// </summary>
+    private static byte[] BuildPokePayload(uint addr, ReadOnlySpan<byte> data)
+    {
+        var buf = new byte[8 + data.Length];
+        BitConverter.GetBytes(addr).CopyTo(buf, 0);
+        BitConverter.GetBytes((uint)data.Length).CopyTo(buf, 4);
+        data.CopyTo(buf.AsSpan(8));
+        return buf;
+    }
+
+    /// <summary>
+    /// Stream <paramref name="blob"/> into EE memory at <paramref name="loadAddr"/> as a sequence of
+    /// SERVER_MEMORY_POKE writes (<paramref name="chunkSize"/> bytes each, default 512 like retail),
+    /// then — if <paramref name="hookAddr"/> is set — write a MIPS <c>J entry</c> there so the
+    /// injected code runs (<paramref name="entryAddr"/> defaults to <paramref name="loadAddr"/>).
+    /// Pokes are sent plaintext, matching the captured working-server stream.
+    /// </summary>
+    public async Task InjectBinaryAsync(TcpClient tcp, uint loadAddr, byte[] blob,
+        uint? hookAddr, uint? entryAddr, int chunkSize, CancellationToken ct)
+    {
+        if (blob.Length == 0) return;
+        chunkSize = Math.Clamp(chunkSize, 1, 1024);
+
+        for (int off = 0; off < blob.Length; off += chunkSize)
+        {
+            int len = Math.Min(chunkSize, blob.Length - off);
+            var poke = BuildPokePayload(loadAddr + (uint)off, blob.AsSpan(off, len));
+            await SendPacketAsync(tcp, ScertPacket.CreateMemoryPoke(poke), ct);
+        }
+
+        if (hookAddr is uint hook)
+        {
+            uint target = entryAddr ?? loadAddr;
+            uint jInstr = 0x08000000u | ((target >> 2) & 0x03FFFFFFu);          // MIPS: J target
+            var hookPoke = BuildPokePayload(hook, BitConverter.GetBytes(jInstr));
+            await SendPacketAsync(tcp, ScertPacket.CreateMemoryPoke(hookPoke), ct);
+            _log.LogInformation("[{Name}] Injected hook J 0x{Tgt:X8} @ 0x{Hook:X8}", ServerName, target, hook);
+        }
+
+        _log.LogInformation("[{Name}] Injected {Len} bytes @ 0x{Addr:X8} ({N} pokes)",
+            ServerName, blob.Length, loadAddr, (blob.Length + chunkSize - 1) / chunkSize);
+    }
+
+    /// <summary>On-demand: inject into a single tracked client by connection id. Returns false if not found.</summary>
+    public async Task<bool> InjectIntoClientAsync(string connectionId, uint loadAddr, byte[] blob,
+        uint? hookAddr, uint? entryAddr, int chunkSize, CancellationToken ct)
+    {
+        if (!Clients.TryGetValue(connectionId, out var c)) return false;
+        await InjectBinaryAsync(c.Client, loadAddr, blob, hookAddr, entryAddr, chunkSize, ct);
+        return true;
+    }
+
+    /// <summary>On-demand: inject into every currently-connected client. Returns how many received it.</summary>
+    public async Task<int> InjectIntoAllAsync(uint loadAddr, byte[] blob,
+        uint? hookAddr, uint? entryAddr, int chunkSize, CancellationToken ct)
+    {
+        int n = 0;
+        foreach (var (_, (_, client)) in Clients)
+        {
+            if (!client.Connected) continue;
+            try { await InjectBinaryAsync(client, loadAddr, blob, hookAddr, entryAddr, chunkSize, ct); n++; }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                _log.LogWarning("[{Name}] Inject to a client failed: {Msg}", ServerName, ex.Message);
+            }
+        }
+        return n;
+    }
+
+    /// <summary>
+    /// Resolve and send every enabled <see cref="MultiplayerConfig.Injections"/> entry to one client.
+    /// Called when a player reaches the lobby. Missing files are logged and skipped, not fatal.
+    /// </summary>
+    protected async Task SendConfiguredInjectionsAsync(TcpClient tcp, CancellationToken ct)
+    {
+        foreach (var inj in _config.Injections)
+        {
+            if (!inj.Enabled) continue;
+            if (!TryParseAddr(inj.LoadAddress, out uint loadAddr))
+            {
+                _log.LogWarning("[{Name}] Injection '{N}': bad LoadAddress '{A}'", ServerName, inj.Name, inj.LoadAddress);
+                continue;
+            }
+            var path = ResolveInjectPath(inj.File);
+            if (path == null) { _log.LogWarning("[{Name}] Injection '{N}': file not found '{F}'", ServerName, inj.Name, inj.File); continue; }
+
+            uint? hookAddr  = TryParseAddr(inj.HookAddress, out uint h) ? h : null;
+            uint? entryAddr = TryParseAddr(inj.EntryPoint, out uint e) ? e : null;
+            var blob = await File.ReadAllBytesAsync(path, ct);
+
+            _log.LogInformation("[{Name}] Injecting '{N}' ({Len} bytes) -> 0x{Addr:X8}", ServerName,
+                string.IsNullOrEmpty(inj.Name) ? Path.GetFileName(path) : inj.Name, blob.Length, loadAddr);
+            await InjectBinaryAsync(tcp, loadAddr, blob, hookAddr, entryAddr, inj.ChunkSize, ct);
+        }
+    }
+
+    /// <summary>
+    /// Replay a captured SERVER_MEMORY_POKE stream verbatim — SOCOM II's online-code download.
+    /// File format (from dump_pokes.py): repeated [len:4 LE][pokePayload] where each pokePayload is
+    /// already a complete [destAddr:4][size:4][data] poke block. The retail client ships WITHOUT
+    /// online code; without this stream it finishes the lobby handshake then times out.
+    /// </summary>
+    protected async Task ReplayPokeStreamAsync(TcpClient tcp, string? binPath, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(binPath)) return;
+        if (!File.Exists(binPath))
+        {
+            _log.LogWarning("[{Name}] LobbyPokeStreamFile not found: {Path}", ServerName, binPath);
+            return;
+        }
+
+        var data = await File.ReadAllBytesAsync(binPath, ct);
+        int off = 0, count = 0; long bytes = 0;
+        while (off + 4 <= data.Length)
+        {
+            int len = BitConverter.ToInt32(data, off); off += 4;
+            if (len <= 0 || off + len > data.Length) break;
+            await SendPacketAsync(tcp, ScertPacket.CreateMemoryPoke(data[off..(off + len)]), ct);
+            off += len; count++; bytes += len;
+        }
+        _log.LogInformation("[{Name}] Replayed {N} SERVER_MEMORY_POKE records ({Bytes} bytes) from {File}",
+            ServerName, count, bytes, Path.GetFileName(binPath));
+    }
+
+    /// <summary>Parse a hex/decimal EE address string ("0x000A0000" or "655360"). False on null/blank/invalid.</summary>
+    protected static bool TryParseAddr(string? s, out uint addr)
+    {
+        addr = 0;
+        if (string.IsNullOrWhiteSpace(s)) return false;
+        s = s.Trim();
+        if (s.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+            return uint.TryParse(s.AsSpan(2), System.Globalization.NumberStyles.HexNumber, null, out addr);
+        return uint.TryParse(s, out addr);
+    }
+
+    /// <summary>Resolve an injection .bin path (absolute, or relative to the app base dir / Data/). Null if missing.</summary>
+    private static string? ResolveInjectPath(string file)
+    {
+        if (string.IsNullOrWhiteSpace(file)) return null;
+        if (File.Exists(file)) return file;
+        var baseRel = Path.Combine(AppContext.BaseDirectory, file);
+        if (File.Exists(baseRel)) return baseRel;
+        var dataRel = Path.Combine(AppContext.BaseDirectory, "Data", file);
+        if (File.Exists(dataRel)) return dataRel;
+        return null;
+    }
+
+    // -------------------------------------------------------------------------
     // Abstract / virtual
     // -------------------------------------------------------------------------
 
