@@ -242,6 +242,9 @@ public abstract class BaseMediusTcpServer
             case RT_MSG_TYPE.RT_MSG_CLIENT_ECHO:
                 // Mirror the client's heartbeat back as CLIENT_ECHO under RcClientSession,
                 // exactly as the 2012 retail MAS server does (same type + hash 4F B8 CF 6A).
+                // The client now heartbeats on its own — stop the proactive keepalive so we
+                // don't out-ping it and trip the game's echo watchdog (see RunKeepAliveLoopAsync).
+                state.ClientEchoSeen = true;
                 await SendPacketAsync(tcp, ScertPacket.CreateEchoResponse(packet.Payload), state, CipherContext.RcClientSession, ct);
                 break;
 
@@ -483,6 +486,12 @@ public abstract class BaseMediusTcpServer
                 await Task.Delay(KeepAliveInterval, ct);
                 if (!tcp.Connected) return;
                 if (!state.IsSessionEstablished) continue;
+
+                // Once the client heartbeats on its own (post-login lobby), STOP pinging — the
+                // client maintains the connection and extra server pings trip its echo watchdog,
+                // dropping the lobby after a few minutes. Before that (persona screen) the client
+                // is silent, so the proactive ping is what keeps the connection alive.
+                if (state.ClientEchoSeen) continue;
 
                 // Skip if the client sent us anything recently — only ping
                 // when traffic has truly gone quiet, to avoid stepping on

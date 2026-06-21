@@ -68,6 +68,15 @@ public class MediusClientState
     /// <summary>Set once the MLS lobby online-code SERVER_MEMORY_POKE stream has been replayed to this client.</summary>
     public bool LobbyPokesSent { get; set; }
 
+    /// <summary>
+    /// Set once the client has sent its own CLIENT_ECHO heartbeat. After this the server stops its
+    /// proactive keepalive ping (the client now maintains the connection itself) and only mirrors the
+    /// client's echoes — sending extra unsolicited pings appears to trip the game's echo watchdog and
+    /// drop the lobby after a few minutes. The proactive ping is still needed BEFORE this (persona
+    /// screen, where the client is silent while the user types).
+    /// </summary>
+    public bool ClientEchoSeen { get; set; }
+
     // -------------------------------------------------------------------------
     // World placement
     // -------------------------------------------------------------------------
