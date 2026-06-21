@@ -19,6 +19,9 @@
     "ClientTimeoutSeconds": 60,
     "UniverseName": "Code Designer PS2 Multiplayer",
     "UniverseDescription": "A private server for PS2 multiplayer gaming.",
+    "UniverseNews": "Welcome! Select this universe and sign in to play online.",
+    "EulaText": "Welcome to the Code Designer server!\r\n\r\nBy playing here you agree to be respectful to other players, avoid cheating or exploits, and have fun. This is a community-run private server and is not affiliated with the original publisher.",
+    "ServerNews": "Welcome to the Code Designer server!\r\n\r\n- Servers are up and running.\r\n- Be respectful and have fun.\r\n- Check back here for the latest news and events.",
     "UniversePatchVersion": "r0004",
     "UniversePatchUrl": "https://www.code-designer.com/ps2-multiplayer",
     "LobbyPokeStreamFile": ""

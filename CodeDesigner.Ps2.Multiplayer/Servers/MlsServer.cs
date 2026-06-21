@@ -233,6 +233,66 @@ public class MlsServer : BaseMediusTcpServer
                     await HandleFileListFilesAsync(packet, state, tcp, ct);
                     break;
 
+                // ── Community-screen init batch ─────────────────────────────
+                // After the EULA/community screen the client fires its lobby-init
+                // queries (buddy list, ignore list, clans, ladders, Policy). It waits
+                // for replies to ALL of them; if any go unanswered it times out and
+                // tears down every socket ("Disconnected from network"). We answer
+                // each with the minimal valid Medius response (msgId echo + status +
+                // empty list), framed exactly like the working MAS handlers.
+                case MediusLobbyMessageId.Policy:
+                    await HandlePolicyAsync(packet, state, tcp, ct);
+                    break;
+
+                case MediusLobbyMessageId.GetMyClans:
+                    await SendEmptyLobbyListAsync(packet, tcp, MediusLobbyMessageId.GetMyClansResponse, ct);
+                    break;
+
+                case MediusLobbyMessageId.CheckMyClanInvitations:
+                    await SendEmptyLobbyListAsync(packet, tcp, MediusLobbyMessageId.CheckMyClanInvitationsResponse, ct);
+                    break;
+
+                case MediusLobbyMessageId.ClanLadderList:
+                    await SendEmptyLobbyListAsync(packet, tcp, MediusLobbyMessageId.ClanLadderListResponse, ct);
+                    break;
+
+                case MediusLobbyMessageId.LadderList_ExtraInfo0:
+                    await SendEmptyLobbyListAsync(packet, tcp, MediusLobbyMessageId.LadderList_ExtraInfoResponse, ct);
+                    break;
+
+                case MediusLobbyMessageId.LadderPosition_ExtraInfo:
+                    await SendEmptyLobbyListAsync(packet, tcp, MediusLobbyMessageId.LadderPosition_ExtraInfoResponse, ct);
+                    break;
+
+                case MediusLobbyMessageId.GetBuddyList_ExtraInfo:
+                    await SendEmptyLobbyListAsync(packet, tcp, MediusLobbyMessageId.GetBuddyList_ExtraInfoResponse, ct);
+                    break;
+
+                case MediusLobbyMessageId.GetIgnoreList:
+                    await SendEmptyLobbyListAsync(packet, tcp, MediusLobbyMessageId.GetIgnoreListResponse, ct);
+                    break;
+
+                // ── Clan info sweep (follows the init batch on the community screen) ──
+                case MediusLobbyMessageId.GetClanMemberList_ExtraInfo:
+                    await SendEmptyLobbyListAsync(packet, tcp, MediusLobbyMessageId.GetClanMemberList_ExtraInfoResponse, ct);
+                    break;
+
+                case MediusLobbyMessageId.GetClanMemberList:
+                    await SendEmptyLobbyListAsync(packet, tcp, MediusLobbyMessageId.GetClanMemberListResponse, ct);
+                    break;
+
+                case MediusLobbyMessageId.GetMyClanMessages:
+                    await SendEmptyLobbyListAsync(packet, tcp, MediusLobbyMessageId.GetMyClanMessagesResponse, ct);
+                    break;
+
+                case MediusLobbyMessageId.GetAllClanMessages:
+                    await SendEmptyLobbyListAsync(packet, tcp, MediusLobbyMessageId.GetAllClanMessagesResponse, ct);
+                    break;
+
+                case MediusLobbyMessageId.GetClanInvitationsSent:
+                    await SendEmptyLobbyListAsync(packet, tcp, MediusLobbyMessageId.GetClanInvitationsSentResponse, ct);
+                    break;
+
                 default:
                     _log.LogDebug("[MLS] Unhandled lobby msg 0x{Type:X2}", packet.MessageType);
                     break;
@@ -276,6 +336,12 @@ public class MlsServer : BaseMediusTcpServer
                 case MediusLobbyExtMessageId.WorldReport:
                     break; // server-to-server, ignore from client
 
+                case MediusLobbyExtMessageId.GetBuddyInvitations:
+                    // Part of the community-screen init batch — answer with an empty list
+                    // so the client doesn't block waiting for it.
+                    await SendEmptyLobbyExtListAsync(packet, tcp, MediusLobbyExtMessageId.GetBuddyInvitationsResponse, ct);
+                    break;
+
                 default:
                     _log.LogDebug("[MLS] Unhandled lobbyExt msg 0x{Type:X2}", packet.MessageType);
                     break;
@@ -309,12 +375,19 @@ public class MlsServer : BaseMediusTcpServer
 
     private async Task HandleGetAnnouncementsAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
     {
-        const string msg = "Welcome to CodeDesigner Medius Server!";
+        string msg = _config.ServerNews;
 
+        // Layout (old-proto GetAnnouncementsResponse): header + AnnouncementID(4) +
+        // Announcement text + AnnouncementType(4) + EndOfList. The AnnouncementID is a
+        // 4-byte field BETWEEN status and the text — on hardware, replacing it with a
+        // 1-byte EndOfList shifted the text 3 bytes and chopped "Wel" off "Welcome".
         var w = new MediusWriter();
-        w.Write((int)MediusCallbackStatus.MediusSuccess);
-        w.Write((byte)1);         // EndOfList
+        WriteMlsHeader(w, packet, MediusCallbackStatus.MediusSuccess);
+        w.Write(0);               // AnnouncementID  (4) — text must start right after this
         w.WriteString(msg, 256);  // Announcement text
+        w.Write(0);               // AnnouncementType (4)
+        w.Write((byte)1);         // EndOfList
+        w.WritePadding(3);
 
         await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.GetAnnouncementsResponse, w.ToArray()), ct);
     }
@@ -528,6 +601,75 @@ public class MlsServer : BaseMediusTcpServer
         packet.Payload.Length >= MediusConstants.MESSAGEID_MAXLEN
             ? packet.Payload[..MediusConstants.MESSAGEID_MAXLEN]
             : new byte[MediusConstants.MESSAGEID_MAXLEN];
+
+    /// <summary>
+    /// Old-proto MLS response header, matching the working MAS handlers:
+    /// [msgId echo:21][pad:3][status:4]. The client correlates the reply to its
+    /// pending request by the echoed messageID, so this prefix is mandatory.
+    /// </summary>
+    private static void WriteMlsHeader(MediusWriter w, MediusPacket packet, MediusCallbackStatus status)
+    {
+        w.Write(MlsMsgId(packet));            // 21 — messageID echo
+        w.WritePadding(3);                    // 3  — alignment
+        w.Write((int)status);                 // 4  — StatusCode
+    }
+
+    /// <summary>
+    /// Minimal "empty list" reply for a community-screen init query: header + an
+    /// end-of-list marker. Success (not an error) with no entries so the client
+    /// stops waiting and the lobby doesn't time out. Used for buddy/ignore/clan/
+    /// ladder lists, which are legitimately empty on a fresh private server.
+    /// </summary>
+    private async Task SendEmptyLobbyListAsync(MediusPacket packet, TcpClient tcp, MediusLobbyMessageId responseType, CancellationToken ct)
+    {
+        var w = new MediusWriter();
+        WriteEmptyListBody(w, packet);
+        _log.LogDebug("[MLS] -> {Resp} (empty list)", responseType);
+        await SendMediusAsync(tcp, MediusPacket.BuildLobby(responseType, w.ToArray()), ct);
+    }
+
+    /// <summary>LobbyExt-class variant of <see cref="SendEmptyLobbyListAsync"/>.</summary>
+    private async Task SendEmptyLobbyExtListAsync(MediusPacket packet, TcpClient tcp, MediusLobbyExtMessageId responseType, CancellationToken ct)
+    {
+        var w = new MediusWriter();
+        WriteEmptyListBody(w, packet);
+        _log.LogDebug("[MLS] -> {Resp} (empty list)", responseType);
+        await SendMediusAsync(tcp, MediusPacket.BuildLobbyExt(responseType, w.ToArray()), ct);
+    }
+
+    /// <summary>
+    /// Body for an empty list reply. Status = <see cref="MediusCallbackStatus.MediusNoResult"/>
+    /// (the game's own "no entries" signal — see HandleGameListAsync) so the parser does NOT
+    /// read any entry fields. CRITICAL: the minimal 32-byte form let the game read a full
+    /// list-entry struct off the end of our short reply, pulling STALE bytes from the previous
+    /// packet (the EULA/news text) into clan/buddy NAME fields → visible "bleed" in the UI and
+    /// likely garbage IDs behind the disconnect. We zero-pad past the largest entry struct so any
+    /// field the parser still touches reads clean zeros instead of leftover buffer.
+    /// </summary>
+    private static void WriteEmptyListBody(MediusWriter w, MediusPacket packet)
+    {
+        WriteMlsHeader(w, packet, MediusCallbackStatus.MediusNoResult);  // msgId + pad + status
+        w.Write((byte)1);          // EndOfList
+        w.WritePadding(3);         // align to 4
+        w.WritePadding(256);       // zero filler — keeps stale-buffer reads clean (empty names/ids)
+    }
+
+    /// <summary>
+    /// PolicyResponse (0x48) — the client requests the usage/EULA policy at the
+    /// community screen. Layout mirrors the working MAS HandlePolicyAsync and the
+    /// 0x4801 struct schema: header + Policy Message[POLICY_MAXLEN] + EndOfText.
+    /// </summary>
+    private async Task HandlePolicyAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
+    {
+        string policyText = _config.EulaText;
+
+        var w = new MediusWriter();
+        WriteMlsHeader(w, packet, MediusCallbackStatus.MediusSuccess);
+        w.WriteString(policyText, MediusConstants.POLICY_MAXLEN);   // 256
+        w.Write((byte)1);                                          // EndOfText
+        w.WritePadding(3);
+        await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.PolicyResponse, w.ToArray()), ct);
+    }
 
     // RESTORED to the e0c200ab "this worked" state (transcript L654: EULA prompt appeared + accepted,
     // community screen displayed). At that point the ENTIRE MLS lobby batch was UNANSWERED — the client

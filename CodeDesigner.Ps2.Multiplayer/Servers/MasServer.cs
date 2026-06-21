@@ -571,7 +571,7 @@ public class MasServer : BaseMediusTcpServer
             ? packet.Payload[..MediusConstants.MESSAGEID_MAXLEN]
             : new byte[MediusConstants.MESSAGEID_MAXLEN];
 
-        const string policyText = "Welcome to CodeDesigner Medius Server.\r\nPlay fair, have fun!";
+        string policyText = _config.EulaText;
 
         // PolicyResponse — same layout horizon uses (see HandleVersionServerAsync
         // for the byte-by-byte breakdown). Critical: policy text comes BEFORE

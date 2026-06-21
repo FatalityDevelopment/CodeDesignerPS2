@@ -99,12 +99,54 @@ public class MultiplayerConfig
     /// <summary>Client idle timeout in seconds.</summary>
     public int ClientTimeoutSeconds { get; set; } = 60;
 
-    /// <summary>Name of the multiplayer universe.</summary>
+    // ── On-screen text / messages ────────────────────────────────────────────
+    // Each of these maps to a DIFFERENT screen in the game's online flow. They are
+    // independent so you can word them for their context. Max length is the game's
+    // field size (~256 chars each); longer text is truncated. "\r\n" inserts a line
+    // break. The MLS texts (EULA, ServerNews) support multi-line / scrolling panels.
+
+    /// <summary>
+    /// MUIS universe-selection screen: the universe NAME shown in the server list
+    /// the player picks from before logging in. Keep it short (≤32 chars look best).
+    /// </summary>
     public string UniverseName { get; set; } = "My PS2 Multiplayer Server";
-    /// <summary>The description of the universe that gets displayed to users.</summary>
-    public string UniverseDescription { get; set; } = "Welcome to my PS2 multiplayer server!";
-    /// <summary>The news about the universe that gets displayed to users.</summary>
-    public string UniverseNews { get; set; } = "No news at the moment. Check back later!";
+
+    /// <summary>
+    /// MUIS universe-selection screen: the short DESCRIPTION shown beside the
+    /// universe name when the player highlights it in the server list.
+    /// </summary>
+    public string UniverseDescription { get; set; } = "A private PS2 online server. Pick this universe to play.";
+
+    /// <summary>
+    /// MUIS universe news (Lobby::UniverseNewsResponse, shown at universe select,
+    /// BEFORE login). This is the pre-login news tied to the universe itself — NOT
+    /// the in-lobby "SERVER NEWS" panel (that is <see cref="ServerNews"/>).
+    /// </summary>
+    public string UniverseNews { get; set; } = "Welcome! Select this universe and sign in to play online.";
+
+    /// <summary>
+    /// In-lobby usage policy / EULA text (MAS+MLS Policy → PolicyResponse). Shown as
+    /// the agreement prompt as the player enters the community screen. Use it for
+    /// house rules / terms players are accepting by playing here.
+    /// </summary>
+    public string EulaText { get; set; } =
+        "Welcome to the server!\r\n\r\n" +
+        "By playing here you agree to be respectful to other players, " +
+        "avoid cheating or exploits, and have fun. " +
+        "This is a community-run private server and is not affiliated with the original publisher.";
+
+    /// <summary>
+    /// In-lobby "SERVER NEWS" panel (MLS GetAnnouncements → GetAnnouncementsResponse),
+    /// shown on the community/main online screen AFTER login. Use it for current
+    /// announcements: events, maintenance windows, rule updates, Discord link, etc.
+    /// Supports multiple lines (the panel scrolls).
+    /// </summary>
+    public string ServerNews { get; set; } =
+        "Welcome to the server!\r\n\r\n" +
+        "- Servers are up and running.\r\n" +
+        "- Be respectful and have fun.\r\n" +
+        "- Check back here for the latest news and events.";
+
     public string UniversePatchVersion { get; set; } = "r0004";
     public string UniversePatchUrl { get; set; } = "https://example.com/patches/r0004/update.zip";
 

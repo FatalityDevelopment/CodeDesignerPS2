@@ -232,7 +232,7 @@ public class MuisServer : BaseMediusTcpServer
 
         Array.Copy(msgId, 0, payload, 0, Math.Min(msgId.Length, MediusConstants.MESSAGEID_MAXLEN));
         // StatusCode at 0x18 = 0 (zero-initialized array)
-        // News text at 0x1C..0x11B — empty is fine
+        WriteFixedAscii(payload, 0x01C, 256, _config.UniverseNews);  // News text at 0x1C..0x11B
         payload[0x11C] = 0x01;  // end-of-news flag; must be non-zero to set 0x453158
 
         return payload;
