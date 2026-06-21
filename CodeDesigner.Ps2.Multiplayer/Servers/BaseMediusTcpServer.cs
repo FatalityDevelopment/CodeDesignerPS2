@@ -59,6 +59,14 @@ public abstract class BaseMediusTcpServer
     /// </summary>
     protected virtual bool PushDataAfterConnectComplete => false;
 
+    /// <summary>
+    /// When true, after the client self-heartbeats (lobby), the keepalive loop streams a periodic
+    /// RT_MSG_SERVER_CHEAT_QUERY (anti-cheat heartbeat) instead of going silent. The official 2012
+    /// server streams these continuously in the lobby; without them the community screen soft-disconnects
+    /// (_1068_MEDIUS_DISCONNECTED_NETWORK) after ~90-120s. MLS only.
+    /// </summary>
+    protected virtual bool LobbyCheatHeartbeat => false;
+
     // -------------------------------------------------------------------------
     // Lifecycle
     // -------------------------------------------------------------------------
@@ -491,7 +499,30 @@ public abstract class BaseMediusTcpServer
                 // client maintains the connection and extra server pings trip its echo watchdog,
                 // dropping the lobby after a few minutes. Before that (persona screen) the client
                 // is silent, so the proactive ping is what keeps the connection alive.
-                if (state.ClientEchoSeen) continue;
+                // The ~90-120s community-screen drop is _1068_MEDIUS_DISCONNECTED_NETWORK (status 0x0B
+                // @0x00452790) and is NOT a generic traffic-gap timeout (traffic flows both ways the whole
+                // time yet it still fires). The leading lead is the missing anti-cheat CHEAT_QUERY stream
+                // (official 2012 server sends it continuously in the lobby). On MLS we stream it here.
+                if (state.ClientEchoSeen)
+                {
+                    if (LobbyCheatHeartbeat)
+                    {
+                        var nowUtc = DateTime.UtcNow;
+                        if (nowUtc - state.LastProactiveEchoAt < CheatHeartbeatInterval) continue;
+                        state.LastProactiveEchoAt = nowUtc;
+                        try
+                        {
+                            await SendPacketAsync(tcp, ScertPacket.CreateCheatQuery(), state, ct);
+                            _log.LogDebug("[{Name}] -> SERVER_CHEAT_QUERY (lobby anti-cheat heartbeat) to {Id}", ServerName, state.ConnectionId);
+                        }
+                        catch (Exception ex) when (!ct.IsCancellationRequested)
+                        {
+                            _log.LogDebug("[{Name}] Lobby cheat heartbeat send failed for {Id}: {Msg}", ServerName, state.ConnectionId, ex.Message);
+                            return;
+                        }
+                    }
+                    continue;
+                }
 
                 // Skip if the client sent us anything recently — only ping
                 // when traffic has truly gone quiet, to avoid stepping on
@@ -519,6 +550,9 @@ public abstract class BaseMediusTcpServer
     /// a 5s cadence leaves margin for a dropped packet on noisy networks.
     /// </summary>
     protected virtual TimeSpan KeepAliveInterval => TimeSpan.FromSeconds(5);
+
+    /// <summary>Cadence of the lobby anti-cheat CHEAT_QUERY heartbeat (when <see cref="LobbyCheatHeartbeat"/>).</summary>
+    protected virtual TimeSpan CheatHeartbeatInterval => TimeSpan.FromSeconds(15);
 
     // -------------------------------------------------------------------------
     // Helpers

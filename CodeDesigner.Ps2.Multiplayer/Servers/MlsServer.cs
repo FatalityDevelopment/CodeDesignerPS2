@@ -42,6 +42,10 @@ public class MlsServer : BaseMediusTcpServer
     // configured binary injections go out as soon as the player reaches the lobby.
     protected override bool PushDataAfterConnectComplete => true;
 
+    // CONFIRMED on hardware: streaming our 13-byte CreateCheatQuery in the MLS lobby = INSTANT disconnect
+    // (anti-cheat violation) the moment the community screen loads. So the lobby cheat heartbeat stays OFF
+    // until we have the official 29-byte real-region challenge format. (LobbyCheatHeartbeat defaults false.)
+
     /// <summary>A player has reached the lobby — push any configured binary injections.</summary>
     protected override async Task OnSessionEstablishedAsync(MediusClientState state, TcpClient tcp, CancellationToken ct)
     {
@@ -406,6 +410,11 @@ public class MlsServer : BaseMediusTcpServer
 
     private async Task HandleChannelListAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
     {
+        // ChannelList is the first community-screen init message — mark this connection as the community
+        // connection so PlayerInfo polls on it get answered (the watchdog fix), while the login-batch
+        // connection's PlayerInfo stays silent (answering it breaks the community transition).
+        state.CommunityReached = true;
+
         // Reply with the response type that MATCHES the request: ChannelList_ExtraInfo0 (0xEC)
         // must be answered with ChannelList_ExtraInfoResponse (0xED), not the basic
         // ChannelListResponse (0x2C). Old-proto correlates a reply to its request by the echoed
@@ -681,18 +690,53 @@ public class MlsServer : BaseMediusTcpServer
         await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.PolicyResponse, w.ToArray()), ct);
     }
 
-    // RESTORED to the e0c200ab "this worked" state (transcript L654: EULA prompt appeared + accepted,
-    // community screen displayed). At that point the ENTIRE MLS lobby batch was UNANSWERED — the client
-    // advanced to the EULA/community screen on its own. Every crafted reply added afterwards
-    // (PlayerInfo / SetGameListFilter / stats / FileListFiles bodies, and the SERVER_MEMORY_POKE streams)
-    // REGRESSED it back to a pre-EULA stall. So these handlers are deliberately SILENT — log only, no
-    // reply. PlayerInfo as a no-op also removes the IndexOutOfRange that caused the post-community
-    // "instant disconnect" at its source (the bounds-safe MediusReader + per-packet try/catch remain as
-    // defence-in-depth). Do NOT re-add lobby replies or poke streams here without on-hardware proof.
-    private Task HandlePlayerInfoAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
+    // Watchdog RE (SCUS-97275): the ~2-min community-screen "Disconnected from Network" is a game-side
+    // watchdog — the lobby PlayerInfo (0x31) poll's completion callback is cbIsGameAlive (fn 0x0030C620),
+    // which shows "_1067_MEDIUS_DISCONNECTED_GAME_MSG" unless the response StatusCode (offset 0x18) == 0
+    // (checked via 0x00311560 = `return status == 0 ? 1 : 0`). HOWEVER, replying to THIS login-batch
+    // PlayerInfo regressed the flow (see handler note below), so the watchdog must be addressed via the
+    // community-screen poll specifically, not here.
+    //
+    // PlayerInfo (0x31) is left UNANSWERED. Although live RE showed its completion callback is
+    // cbIsGameAlive (the disconnect-modal, game fn 0x0030C620) and that StatusCode==0 satisfies it,
+    // sending ANY PlayerInfoResponse during this initial login-batch — even with the correct queried
+    // accountId+name (acct=2/zzzzz) and StatusCode=Success — stops the game from advancing to the
+    // community-screen reconnect (the ChannelList/announcements batch never follows; it just idles on
+    // CLIENT_ECHO). The known-good baseline reaches the fully-populated community screen with PlayerInfo
+    // silent here, then soft-disconnects after ~2 min. Do NOT answer this one without a different,
+    // RE-verified approach (the community-screen PlayerInfo poll is what the watchdog rides on, and must
+    // be handled separately from this login-batch poll).
+    private async Task HandlePlayerInfoAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
     {
-        _log.LogDebug("[MLS] PlayerInfo received (no reply — minimal lobby, matches the EULA-reaching state)");
-        return Task.CompletedTask;
+        // LOGIN-batch connection (no ChannelList seen yet): stay SILENT — answering here stops the game
+        // from advancing to the community reconnect.
+        if (!state.CommunityReached)
+        {
+            _log.LogDebug("[MLS] PlayerInfo received (login batch — no reply)");
+            return;
+        }
+
+        // COMMUNITY connection: answer the poll so its cbIsGameAlive completion callback sees
+        // StatusCode==0 (MediusSuccess) and does NOT fire the ~2-min "Disconnected from Network" watchdog.
+        // Request layout: [msgId:21][sessionKey:17][pad:2][accountId:4]; echo the queried accountId + name.
+        var r = new MediusReader(packet.Payload);
+        r.Skip(MediusConstants.MESSAGEID_MAXLEN + MediusConstants.SESSIONKEY_MAXLEN + 2);
+        int accountId = r.ReadInt32();
+        if (accountId <= 0) accountId = state.AccountId ?? 0;
+        var account = _store.GetAccountById(accountId);
+        string name = account?.AccountName ?? state.AccountName ?? string.Empty;
+
+        var w = new MediusWriter();
+        WriteMlsHeader(w, packet, MediusCallbackStatus.MediusSuccess);          // msgId echo + pad + StatusCode=0 @0x18
+        w.Write(accountId);                                                     // AccountID (echo queried id)
+        w.WriteString(name, MediusConstants.ACCOUNTNAME_MAXLEN);                // 32
+        w.WritePadding(MediusConstants.ACCOUNTSTATS_MAXLEN);                    // 256 — Stats
+        w.Write((int)MediusPlayerStatus.MediusPlayerInChatWorld);              // PlayerStatus
+        w.Write((int)MediusConnectionType.Ethernet);                           // ConnectionClass
+        w.WritePadding(32);                                                     // zero filler
+
+        _log.LogDebug("[MLS] -> PlayerInfoResponse (community poll) acct={Id}/{Name}", accountId, name);
+        await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.PlayerInfoResponse, w.ToArray()), ct);
     }
 
     private Task HandleSetGameListFilterAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)

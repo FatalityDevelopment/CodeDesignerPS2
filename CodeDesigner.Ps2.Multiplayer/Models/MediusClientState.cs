@@ -77,6 +77,18 @@ public class MediusClientState
     /// </summary>
     public bool ClientEchoSeen { get; set; }
 
+    /// <summary>Last time the server sent a proactive CLIENT_ECHO ping (throttles the post-login gap-filler).</summary>
+    public DateTime LastProactiveEchoAt { get; set; } = DateTime.MinValue;
+
+    /// <summary>
+    /// True once this connection has received a community-screen init message (ChannelList). The game
+    /// uses a SEPARATE MLS connection for the post-login community screen vs. the initial login batch;
+    /// PlayerInfo (0x31) arrives on BOTH, but answering the LOGIN-batch one stops the game from advancing
+    /// to the community reconnect (confirmed on hardware). The ~2-min watchdog (cbIsGameAlive) only rides
+    /// on the community-connection PlayerInfo poll, so we answer PlayerInfo only after this flag is set.
+    /// </summary>
+    public bool CommunityReached { get; set; }
+
     // -------------------------------------------------------------------------
     // World placement
     // -------------------------------------------------------------------------
