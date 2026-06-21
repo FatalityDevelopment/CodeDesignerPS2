@@ -406,6 +406,16 @@ public class MlsServer : BaseMediusTcpServer
 
     private async Task HandleChannelListAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
     {
+        // Reply with the response type that MATCHES the request: ChannelList_ExtraInfo0 (0xEC)
+        // must be answered with ChannelList_ExtraInfoResponse (0xED), not the basic
+        // ChannelListResponse (0x2C). Old-proto correlates a reply to its request by the echoed
+        // messageID — the previous handler omitted the echo AND used the wrong type, so the
+        // client's ChannelList_ExtraInfo0 transaction never completed and the community-screen
+        // watchdog eventually timed out ("Disconnected from Network").
+        var responseType = packet.MessageType == (byte)MediusLobbyMessageId.ChannelList_ExtraInfo0
+            ? MediusLobbyMessageId.ChannelList_ExtraInfoResponse
+            : MediusLobbyMessageId.ChannelListResponse;
+
         var channels = _store.GetChannels(state.AppId).ToList();
         if (channels.Count == 0)
             channels.Add(_store.GetOrCreateDefaultChannel(state.AppId));
@@ -416,14 +426,14 @@ public class MlsServer : BaseMediusTcpServer
             bool isLast = i == channels.Count - 1;
 
             var w = new MediusWriter();
-            w.Write((int)MediusCallbackStatus.MediusSuccess);
+            WriteMlsHeader(w, packet, MediusCallbackStatus.MediusSuccess);  // msgId echo + pad + status
             w.Write((byte)(isLast ? 1 : 0));  // EndOfList
             w.Write(ch.ChannelId);
             w.WriteString(ch.ChannelName, 64);
             w.Write(ch.PlayerCount);
             w.Write(ch.MaxPlayers);
 
-            await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.ChannelListResponse, w.ToArray()), ct);
+            await SendMediusAsync(tcp, MediusPacket.BuildLobby(responseType, w.ToArray()), ct);
         }
     }
 
