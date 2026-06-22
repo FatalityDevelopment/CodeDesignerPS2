@@ -1321,13 +1321,20 @@ namespace CodeDesigner.Ps2.Bridge
             uint count = ReadU32LE(rep, 5);
             var watches = new List<PineWatchEntry>((int)count);
             int pos = 9;
-            const int WatchEntrySize = 10; // cpu(1)+start(4)+end(4)+cond(1)
+            // Per-entry wire layout (PINE.cpp MsgListWatches, WATCH_ENTRY_SIZE = 4+4+1+1+1):
+            //   start(4) end(4) cond(1) result(1) cpu(1)
+            // cpu is the raw BreakPointCpu enum: 0x01 = EE, 0x02 = IOP.
+            const int WatchEntrySize = 11;
             for (uint i = 0; i < count && pos + WatchEntrySize <= rep.Length; i++)
             {
-                byte cpu   = rep[pos];
-                uint wStart = ReadU32LE(rep, pos + 1);
-                uint wEnd   = ReadU32LE(rep, pos + 5);
-                byte cond  = rep[pos + 9];
+                uint wStart = ReadU32LE(rep, pos + 0);
+                uint wEnd   = ReadU32LE(rep, pos + 4);
+                byte cond   = rep[pos + 8];
+                // rep[pos + 9] = result (action bitmask) — not currently surfaced.
+                byte cpuRaw = rep[pos + 10];           // 0x01 = EE, 0x02 = IOP
+                // Normalize to the 0 = EE / 1 = IOP convention used by AddWatch/RemoveWatch
+                // and documented on PineWatchEntry, so consumers can keep "cpu == 0 ? EE : IOP".
+                byte cpu = (byte)(cpuRaw == 0x02 ? 1 : 0);
                 watches.Add(new PineWatchEntry(cpu, wStart, wEnd, cond));
                 pos += WatchEntrySize;
             }
