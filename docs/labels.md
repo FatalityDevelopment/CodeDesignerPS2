@@ -146,6 +146,8 @@ label_add
 
 Call: `label_add_batch gameId="SCUS-97130" labelSet="socom2-structs" entries='[...]'`
 
+Pointer/struct children should be written with `parentAddress` plus `offset`; the server resolves the parent in the same label set, stores the `ParentId`/`Offset` relationship, and builds the synthetic `0x...:+0x....` address key. If an incoming address already contains `:+`, the server coerces it into `parentAddress`/`offset` or rejects malformed/incomplete input rather than persisting a floating child label.
+
 ### Deleting a label
 
 ```
@@ -185,6 +187,17 @@ label_get_pointers
 ```
 
 The disassembly view expands the pointer inline, showing each named field at its resolved address alongside the live memory value when polling is enabled.
+
+For label-tree members rendered by the UI, prefer `label_add` / `label_add_batch` with `parentAddress` and `offset`:
+
+```json
+[
+  { "address": "0x00352F40", "name": "PlayerState", "type": "Pointer", "dynamic": true },
+  { "address": "0x00000000", "parentAddress": "0x00352F40", "offset": 0, "name": "health", "type": "Value", "valueType": "s32", "dynamic": true }
+]
+```
+
+`label_add_pointer` / `label_add_pointer_member` manage the legacy GETSTRUCTS structure list returned by `label_get_pointers`. The label-tree API above is the path that populates `ParentId`/`Offset` on label rows for the UI.
 
 ### Removing a pointer
 

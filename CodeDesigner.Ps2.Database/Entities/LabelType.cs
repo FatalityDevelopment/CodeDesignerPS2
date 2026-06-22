@@ -13,4 +13,7 @@ public enum LabelType
     ArrayOfPointers = 4,
     LinkedList     = 5,
     String         = 6,
+    Pointer        = 7,
+    Float          = 8,
+    Value          = 9,
 }

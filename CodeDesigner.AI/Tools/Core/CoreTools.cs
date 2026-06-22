@@ -293,6 +293,9 @@ public sealed class LabelAddTool(IEmulatorBridge bridge, SessionState state)
         [Description("Label name (e.g. 'scePadRead').")] string label,
         [Description("Optional comment.")] string? comment = null,
         [Description("Type: Address (default), Pointer, Function, Float, Value, String.")] string? type = null,
+        [Description("Optional parent label address for pointer/struct members. Prefer this plus offset over embedding ':+...' in address.")] string? parentAddress = null,
+        [Description("Optional byte offset from the dereferenced parent pointer. Requires parentAddress.")] int? offset = null,
+        [Description("When true, live memory value is shown for this label/member.")] bool dynamic = false,
         CancellationToken ct = default)
     {
         var addr = CdText.TryParseAddress(address);
@@ -302,7 +305,7 @@ public sealed class LabelAddTool(IEmulatorBridge bridge, SessionState state)
             Command = "ADDLABELENTRY",
             GameId = gameId,
             SetName = labelSet,
-            LabelEntry = new { address = $"0x{addr.Value:X8}", name = label, comment, type },
+            LabelEntry = new { address = $"0x{addr.Value:X8}", parentAddress, offset, name = label, comment, type, dynamic },
         }, ct);
 
         // Record on a successful response (absence of an Error field).

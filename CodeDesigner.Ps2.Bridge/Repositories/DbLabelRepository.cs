@@ -302,6 +302,53 @@ namespace CodeDesigner.Ps2.Bridge.Repositories
             return DbMapper.ToMgrSet(loaded);
         }
 
+        internal async Task<(int repaired, List<string> unresolved)> RepairOrphanMembersAsync(string gameId, string setName, bool apply)
+        {
+            var discId = await ResolveGameDiscIdAsync(gameId);
+            if (discId is null)
+                throw new InvalidOperationException($"No GameDisc found for '{gameId}'.");
+
+            var entity = await _db.LabelSets
+                                  .Include(ls => ls.Labels)
+                                  .Include(ls => ls.GameDisc)
+                                  .FirstOrDefaultAsync(ls => ls.GameDiscId == discId && ls.SetName == setName)
+                         ?? throw new InvalidOperationException($"Label set '{setName}' not found.");
+
+            int repaired = 0;
+            var unresolved = new List<string>();
+            foreach (var label in entity.Labels.Where(l => l.ParentId == null && l.Address.Contains(":+", StringComparison.Ordinal)).ToList())
+            {
+                if (!TryParseSyntheticAddress(label.Address, out var parentAddress, out int offset))
+                {
+                    unresolved.Add($"{label.Address} ({label.Name}): invalid synthetic address");
+                    continue;
+                }
+
+                var normParent = NormalizeAddress(parentAddress);
+                var parent = entity.Labels.FirstOrDefault(l =>
+                    l.Id != label.Id &&
+                    NormalizeAddress(l.Address).Equals(normParent, StringComparison.OrdinalIgnoreCase));
+                if (parent is null)
+                {
+                    unresolved.Add($"{label.Address} ({label.Name}): parent {normParent} not found");
+                    continue;
+                }
+
+                repaired++;
+                if (apply)
+                {
+                    label.ParentId = parent.Id;
+                    label.Offset = offset;
+                    label.Address = BuildSyntheticAddress(parent.Address, offset);
+                }
+            }
+
+            if (apply && repaired > 0)
+                await _db.SaveChangesAsync();
+
+            return (repaired, unresolved);
+        }
+
         /// <summary>Inserts or updates a single label entry within the named set.</summary>
         internal async Task<MgrSet> AddOrUpdateEntryAsync(string gameId, string setName, MgrEntry entry)
         {
@@ -497,6 +544,22 @@ namespace CodeDesigner.Ps2.Bridge.Repositories
             if (uint.TryParse(raw, System.Globalization.NumberStyles.HexNumber, null, out uint v))
                 return $"0x{v:X8}";
             return raw;
+        }
+
+        internal static string BuildSyntheticAddress(string parentAddress, int offset)
+            => $"{NormalizeAddress(parentAddress)}:+0x{offset:X4}";
+
+        internal static bool TryParseSyntheticAddress(string raw, out string parentAddress, out int offset)
+        {
+            parentAddress = string.Empty;
+            offset = 0;
+            int marker = raw.IndexOf(":+", StringComparison.Ordinal);
+            if (marker <= 0) return false;
+            parentAddress = raw[..marker];
+            var offsetText = raw[(marker + 2)..].Trim();
+            if (offsetText.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+                return int.TryParse(offsetText[2..], System.Globalization.NumberStyles.HexNumber, null, out offset);
+            return int.TryParse(offsetText, out offset);
         }
     }
 }

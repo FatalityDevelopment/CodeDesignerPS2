@@ -15,7 +15,7 @@ public sealed class LabelAddBatchTool(IEmulatorBridge bridge)
     public async Task<string> InvokeAsync(
         [Description("Game identifier. Prefer the numeric GameDisc.Id (most stable); the SCUS/SLUS serial (e.g. 'SCUS-97275') also works.")] string gameId,
         [Description("Label set to add the entries to (e.g. 'ai-analysis').")] string labelSet,
-        [Description("JSON array of {address, name, comment?, type?, argRegs?, returnRegs?, elementStride?, elementCount?, nodeNextOffset?, nodeSize?} entries.")] string entries,
+        [Description("JSON array of {address, parentAddress?, offset?, name, comment?, type?, valueType?, dynamic?, argRegs?, returnRegs?, elementStride?, elementCount?, nodeNextOffset?, nodeSize?} entries. Prefer parentAddress+offset for pointer/struct members; the server builds the synthetic :+ address.")] string entries,
         CancellationToken ct = default)
     {
         // The backend expects LabelEntries: list of typed objects. We pass through
@@ -37,6 +37,25 @@ public sealed class LabelAddBatchTool(IEmulatorBridge bridge)
             LabelEntries = parsed,
         }, ct));
     }
+}
+
+[CdTool("label_repair_orphan_members", ToolDomain.Labels, ToolRisk.MutatesDatabase,
+    "Repair labels whose address contains ':+...' but whose ParentId/Offset relationship is missing. Risk: writes database.")]
+public sealed class LabelRepairOrphanMembersTool(IEmulatorBridge bridge)
+{
+    [ToolEntryPoint]
+    public async Task<string> InvokeAsync(
+        [Description("Game identifier. Prefer the numeric GameDisc.Id (most stable); the SCUS/SLUS serial (e.g. 'SCUS-97275') also works.")] string gameId,
+        [Description("Label set to repair.")] string labelSet,
+        [Description("If false, only report orphan member labels without modifying them.")] bool apply = false,
+        CancellationToken ct = default)
+        => CdText.Message(await bridge.SendAsync(new
+        {
+            Command = "REPAIRLABELORPHANMEMBERS",
+            GameId = gameId,
+            SetName = labelSet,
+            Data = JsonSerializer.Serialize(new { apply }),
+        }, ct));
 }
 
 [CdTool("group_create", ToolDomain.Labels, ToolRisk.MutatesDatabase,

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
+using CodeDesigner.Ps2.Bridge.Repositories;
 using Microsoft.EntityFrameworkCore;
 using MgrEntry = CodeDesigner.Ps2.LabelManager.Models.LabelEntry;
 using MgrSet   = CodeDesigner.Ps2.LabelManager.Models.LabelSet;
@@ -38,6 +39,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
             reg.Add(c => HandleRenameLabelSet(c.WorkspaceDir, c.GameId, c.SetName, c.NewSetName),                         "RENAMELABELSET");
             reg.Add(c => HandleAddLabelEntry(c.WorkspaceDir, c.GameId, c.SetName, c.LabelEntry),                          "ADDLABELENTRY");
             reg.Add(c => HandleAddLabelEntries(c.WorkspaceDir, c.GameId, c.SetName, c.LabelEntries),                      "ADDLABELENTRIES");
+            reg.Add(c => HandleRepairOrphanMembers(c.GameId, c.SetName, c.Data),                                          "REPAIRLABELORPHANMEMBERS");
             reg.Add(c => HandleDeleteLabelEntry(c.WorkspaceDir, c.GameId, c.SetName, c.LabelEntryAddress, c.Address),     "DELETELABELENTRY");
             reg.Add(c => HandleImportLabelSet(c.WorkspaceDir, c.GameId, c.SetName, c.Data),                               "IMPORTLABELSET");
             reg.Add(c => HandleExportLabelSet(c.WorkspaceDir, c.GameId, c.SetName),                                       "EXPORTLABELSET");
@@ -166,6 +168,40 @@ namespace CodeDesigner.Ps2.Bridge.Services
             NodeNextOffset = w.NodeNextOffset,
             NodeSize       = w.NodeSize,
         };
+
+        private static MgrEntry NormalizeIncomingEntry(LabelManagerEntry wire, List<string>? notes = null, int? index = null)
+        {
+            var entry = FromWireEntry(wire);
+            string prefix = index is null ? "LabelEntry" : $"LabelEntries[{index.Value}]";
+
+            if (string.IsNullOrWhiteSpace(entry.ParentAddress) != (entry.Offset is null))
+                throw new InvalidOperationException($"{prefix} must provide parentAddress and offset together.");
+
+            if (!string.IsNullOrWhiteSpace(entry.ParentAddress) && entry.Offset is { } offset)
+            {
+                var desired = DbLabelRepository.BuildSyntheticAddress(entry.ParentAddress, offset);
+                if (!string.Equals(entry.Address, desired, StringComparison.OrdinalIgnoreCase))
+                    notes?.Add($"{prefix}: built member address '{desired}' from parentAddress/offset (was '{entry.Address}').");
+                entry.Address = desired;
+                return entry;
+            }
+
+            if (entry.Address.Contains(":+", StringComparison.Ordinal))
+            {
+                if (!string.IsNullOrWhiteSpace(entry.ParentAddress) || entry.Offset is not null)
+                    throw new InvalidOperationException($"{prefix}.Address contains ':+', but parentAddress/offset are incomplete or conflicting.");
+
+                if (!DbLabelRepository.TryParseSyntheticAddress(entry.Address, out var parentAddress, out int parsedOffset))
+                    throw new InvalidOperationException($"{prefix}.Address contains ':+', but is not a valid member address. Use parentAddress plus offset.");
+
+                entry.ParentAddress = parentAddress;
+                entry.Offset = parsedOffset;
+                entry.Address = DbLabelRepository.BuildSyntheticAddress(parentAddress, parsedOffset);
+                notes?.Add($"{prefix}: coerced synthetic address into parentAddress='{entry.ParentAddress}', offset=0x{parsedOffset:X}.");
+            }
+
+            return entry;
+        }
 
         /// <summary>Convert a LabelManager set to the wire payload.</summary>
         private static LabelSetPayload ToWireSet(MgrSet s) => new()
@@ -683,7 +719,8 @@ namespace CodeDesigner.Ps2.Bridge.Services
 
             try
             {
-                var set = _ctx.LabelRepo.AddOrUpdateEntryAsync(gameId, setName, FromWireEntry(entry)).GetAwaiter().GetResult();
+                var notes = new List<string>();
+                var set = _ctx.LabelRepo.AddOrUpdateEntryAsync(gameId, setName, NormalizeIncomingEntry(entry, notes)).GetAwaiter().GetResult();
 
                 // Keep legacy dicts in sync.  If no active set is configured yet, or
                 // the active set matches the one being written, auto-configure the
@@ -708,6 +745,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 {
                     Success  = true,
                     Command  = "ADDLABELENTRY",
+                    Message  = notes.Count == 0 ? null : string.Join(" ", notes),
                     LabelSet = ToWireSet(set),
                 });
             }
@@ -739,7 +777,8 @@ namespace CodeDesigner.Ps2.Bridge.Services
 
             try
             {
-                var mgrEntries = entries.Select(FromWireEntry).ToList();
+                var notes = new List<string>();
+                var mgrEntries = entries.Select((entry, i) => NormalizeIncomingEntry(entry, notes, i)).ToList();
                 var set = _ctx.LabelRepo.AddOrUpdateEntriesAsync(gameId, setName, mgrEntries).GetAwaiter().GetResult();
 
                 bool isActiveSet = string.Equals(_ctx.LabelMgr.ActiveSetName, setName, StringComparison.OrdinalIgnoreCase);
@@ -758,13 +797,55 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 {
                     Success  = true,
                     Command  = "ADDLABELENTRIES",
-                    Message  = $"Added/updated {entries.Count} label entries.",
+                    Message  = notes.Count == 0
+                        ? $"Added/updated {entries.Count} label entries."
+                        : $"Added/updated {entries.Count} label entries. {string.Join(" ", notes)}",
                     LabelSet = ToWireSet(set),
                 });
             }
             catch (Exception ex)
             {
                 return Responses.Error($"ADDLABELENTRIES failed: {ex.Message}");
+            }
+        }
+
+        private string HandleRepairOrphanMembers(string? gameId, string? setName, string? data)
+        {
+            gameId  = RequireParam(gameId,  "GameId",  out var e2);
+            setName = RequireParam(setName, "SetName", out var e3);
+            if (gameId is null)  return Responses.Error(e2!);
+            if (setName is null) return Responses.Error(e3!);
+
+            bool apply = false;
+            if (!string.IsNullOrWhiteSpace(data))
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(data);
+                    if (doc.RootElement.TryGetProperty("apply", out var prop) && prop.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                        apply = prop.GetBoolean();
+                }
+                catch (JsonException ex) { return Responses.Error($"invalid repair options JSON — {ex.Message}"); }
+            }
+
+            try
+            {
+                var result = _ctx.LabelRepo.RepairOrphanMembersAsync(gameId, setName, apply).GetAwaiter().GetResult();
+                var message = apply
+                    ? $"Repaired {result.repaired} orphan member label(s)."
+                    : $"Found {result.repaired} repairable orphan member label(s).";
+                if (result.unresolved.Count > 0)
+                    message += $" Unresolved: {string.Join("; ", result.unresolved)}";
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success = true,
+                    Command = "REPAIRLABELORPHANMEMBERS",
+                    Message = message,
+                });
+            }
+            catch (Exception ex)
+            {
+                return Responses.Error($"REPAIRLABELORPHANMEMBERS failed: {ex.Message}");
             }
         }
 
