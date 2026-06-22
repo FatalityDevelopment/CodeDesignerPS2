@@ -11,6 +11,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
     internal sealed class ExecutionService : ICommandService
     {
         private readonly IBridgeContext _ctx;
+        private readonly HashSet<uint> _knownBreakpoints = new();
 
         public ExecutionService(IBridgeContext ctx) => _ctx = ctx;
 
@@ -45,10 +46,51 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 // both diverge as soon as execution resumes, so any cached
                 // CpuState becomes meaningless.
                 _ctx.AnalysisState?.Invalidate();
+                if (_ctx.PineClient is not null && ResumePcsx2PastCurrentBreakpoint())
+                    return Responses.Success("Resumed");
                 _ctx.Client.Resume();
                 return Responses.Success("Resumed");
             }
             catch (Exception ex) { return Responses.Error($"Resume error: {ex.Message}"); }
+        }
+
+        /// <summary>
+        /// PCSX2's PINE debugger keeps execution breakpoints armed while paused.
+        /// If RESUME is sent while the EE PC is still on an armed breakpoint,
+        /// PCSX2 immediately reports that same breakpoint again. Mirror the
+        /// built-in emulator behavior by temporarily clearing only the current
+        /// breakpoint, single-stepping once, restoring it, then resuming unless
+        /// the step intentionally landed on another known breakpoint.
+        /// </summary>
+        private bool ResumePcsx2PastCurrentBreakpoint()
+        {
+            var pine = _ctx.PineClient;
+            if (pine is null || _knownBreakpoints.Count == 0) { return false; }
+
+            uint currentPc = AddressTranslator.NormalizeBreakpointForClient(pine.GetProgramCounter(out bool paused));
+            if (!paused || !_knownBreakpoints.Contains(currentPc)) { return false; }
+
+            bool restored = false;
+            pine.ClearBreakpoint(currentPc);
+            try
+            {
+                uint steppedPc = AddressTranslator.NormalizeBreakpointForClient(pine.Step());
+                pine.SetBreakpoint(currentPc);
+                restored = true;
+
+                // If the skip lands on a different armed breakpoint, leave
+                // PCSX2 paused so the UI reports the next breakpoint hit.
+                if (steppedPc != currentPc && _knownBreakpoints.Contains(steppedPc))
+                    return true;
+
+                pine.Resume();
+                return true;
+            }
+            finally
+            {
+                if (!restored)
+                    pine.SetBreakpoint(currentPc);
+            }
         }
 
         private string HandleStep()
@@ -117,7 +159,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
             if (address == null) return Responses.Error("BreakpointAddress is required for SETBP");
             if (_ctx.Client == null) return Responses.Error("Emulator not running — no debug client attached");
             uint normalized = AddressTranslator.NormalizeBreakpointForClient(address.Value);
-            try   { _ctx.Client.SetBreakpoint(normalized); return Responses.Success($"Breakpoint set at 0x{normalized:X8}"); }
+            try   { _ctx.Client.SetBreakpoint(normalized); _knownBreakpoints.Add(normalized); return Responses.Success($"Breakpoint set at 0x{normalized:X8}"); }
             catch (Exception ex) { return Responses.Error($"SetBreakpoint error: {ex.Message}"); }
         }
 
@@ -126,14 +168,14 @@ namespace CodeDesigner.Ps2.Bridge.Services
             if (address == null) return Responses.Error("BreakpointAddress is required for CLEARBP");
             if (_ctx.Client == null) return Responses.Error("Emulator not running — no debug client attached");
             uint normalized = AddressTranslator.NormalizeBreakpointForClient(address.Value);
-            try   { _ctx.Client.ClearBreakpoint(normalized); return Responses.Success($"Breakpoint cleared at 0x{normalized:X8}"); }
+            try   { _ctx.Client.ClearBreakpoint(normalized); _knownBreakpoints.Remove(normalized); return Responses.Success($"Breakpoint cleared at 0x{normalized:X8}"); }
             catch (Exception ex) { return Responses.Error($"ClearBreakpoint error: {ex.Message}"); }
         }
 
         private string HandleClearAllBreakpoints()
         {
             if (_ctx.Client == null) return Responses.Error("Emulator not running — no debug client attached");
-            try   { _ctx.Client.ClearAllBreakpoints(); return Responses.Success("All breakpoints cleared"); }
+            try   { _ctx.Client.ClearAllBreakpoints(); _knownBreakpoints.Clear(); return Responses.Success("All breakpoints cleared"); }
             catch (Exception ex) { return Responses.Error($"ClearAllBreakpoints error: {ex.Message}"); }
         }
 
