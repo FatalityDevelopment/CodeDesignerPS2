@@ -1,0 +1,21 @@
+{
+  "name": "codedesigner-ps2dis-electron",
+  "version": "0.1.0",
+  "description": "Electron TypeScript recreation of the classic ps2dis interface for CodeDesigner.",
+  "private": true,
+  "main": "dist/main/main.js",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc -p tsconfig.json && vite build",
+    "start": "electron ."
+  },
+  "dependencies": {
+    "@vitejs/plugin-legacy": "latest",
+    "vite": "latest"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "electron": "latest",
+    "typescript": "latest"
+  }
+}
