@@ -36,6 +36,16 @@ public abstract class BaseMediusTcpServer
 
     protected readonly ConcurrentDictionary<string, (MediusClientState State, TcpClient Client)> Clients = new();
 
+    /// <summary>
+    /// Per-connection write gate. The main receive loop and the background keepalive loop both write to
+    /// the same socket; without serialization their byte streams interleave (a keepalive/cheat write
+    /// landing mid-way through a community-batch write) and the client receives a corrupted packet and
+    /// instantly disconnects — intermittently, depending on timing. Every send acquires this gate so only
+    /// one write is ever in flight per connection. (RC4 is stateless per packet — see the decrypt path —
+    /// so only the raw write needs serializing.)
+    /// </summary>
+    private readonly ConcurrentDictionary<TcpClient, SemaphoreSlim> _sendGates = new();
+
     protected BaseMediusTcpServer(ILogger log, MultiplayerConfig config)
     {
         _log    = log;
@@ -202,6 +212,7 @@ public abstract class BaseMediusTcpServer
                     ServerName, state.ConnectionId, pending.Count,
                     BitConverter.ToString(pending.ToArray()).Replace("-", " "));
             Clients.TryRemove(state.ConnectionId, out _);
+            if (_sendGates.TryRemove(tcp, out var sendGate)) sendGate.Dispose();
             await OnClientDisconnectedAsync(state);
             tcp.Close();
             _log.LogInformation("[{Name}] Client disconnected: {Id}", ServerName, state.ConnectionId);
@@ -568,6 +579,13 @@ public abstract class BaseMediusTcpServer
     protected async Task SendPacketAsync(TcpClient tcp, ScertPacket packet, CancellationToken ct)
     {
         if (!tcp.Connected) return;
+
+        // Serialize all writes on this connection so the keepalive loop and the main loop can't
+        // interleave bytes on the wire (= corrupted packet → instant client disconnect).
+        var gate = _sendGates.GetOrAdd(tcp, static _ => new SemaphoreSlim(1, 1));
+        try { await gate.WaitAsync(ct); }
+        catch (OperationCanceledException) { return; }
+
         try
         {
             var data = packet.Serialize();
@@ -578,6 +596,10 @@ public abstract class BaseMediusTcpServer
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             _log.LogWarning("[{Name}] Send error: {Msg}", ServerName, ex.Message);
+        }
+        finally
+        {
+            gate.Release();
         }
     }
 
