@@ -754,6 +754,40 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   }
 
   /**
+   * Fetch the current PC/register snapshot and broadcast it to every live
+   * disassembly webview. Used for sidebar-driven pause actions so the editor
+   * updates immediately instead of waiting for its next polling tick.
+   */
+  public async broadcastCurrentStatus(): Promise<void> {
+    if (!this.socketClient?.isConnected()) { return; }
+    try {
+      const status = await this.socketClient.getPC();
+      const statusMsg: any = { type: 'status', ...status };
+      this._applyBreakpointHitFallback(statusMsg);
+      if (status.paused) {
+        try {
+          const regs = await this.socketClient.getRegisters();
+          statusMsg.registers = regs;
+          const sp = regs.gprLo32?.[29] ?? regs.gpr?.[29];
+          if (sp !== undefined) {
+            try {
+              const stackBuf = await this.socketClient.readMemory(sp, 512, 'ee');
+              statusMsg.stackBytes = Array.from(stackBuf);
+              statusMsg.stackBase  = sp;
+            } catch { /* ignore stack read errors */ }
+          }
+        } catch { /* ignore register fetch errors */ }
+        const hitAddr = statusMsg.breakpointHitAddress ?? status.pc;
+        this._revealPanelForAddress(hitAddr);
+      }
+      this._broadcastFullStatus(statusMsg);
+      this._firePauseStateChange(status.paused);
+    } catch (err: any) {
+      getOutputChannel().appendLine(`[STATUS] Error: ${err?.message ?? err}`);
+    }
+  }
+
+  /**
    * Returns a snapshot of all breakpoints the user has set across all live
    * panels.  Used by DisasmPanelProvider to re-register BPs with the C# server
    * on every connect/restart — before sending RESUME — so no timing dependency
@@ -2015,6 +2049,42 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         for (const p of this._livePanels) {
             p.webview.postMessage(statusMsg);
         }
+        void this._refreshLivePagesForStatus(statusMsg);
+    }
+
+    /**
+     * After a pause/breakpoint status update, proactively refresh the live
+     * disassembly/hex page that contains the reported PC.  The webview also
+     * requests this after processing the status, but doing it here makes the
+     * update deterministic when a panel has throttled timers or misses a poll.
+     */
+    private async _refreshLivePagesForStatus(statusMsg: any): Promise<void> {
+        if (!statusMsg?.paused || typeof statusMsg.pc !== 'number') { return; }
+        if (!this.socketClient?.isConnected()) { return; }
+
+        const pcInfo = classifyAddress(statusMsg.pc);
+        const physPc = pcInfo.physicalAddress >>> 0;
+        const target = this._findPanelForAddress(pcInfo.region, physPc);
+        if (!target) { return; }
+
+        const instructionIndex = Math.floor((physPc - target.physBaseAddress) / DisasmEditorProvider.INSTRUCTION_SIZE);
+        if (instructionIndex < 0) { return; }
+        const pageStart = Math.floor(instructionIndex / DisasmEditorProvider.PAGE_SIZE) * DisasmEditorProvider.PAGE_SIZE;
+
+        await this.sendLiveDisasmPage(
+            target.panel,
+            target.region,
+            target.baseAddress,
+            target.totalBytes,
+            pageStart,
+        );
+        await this.sendLiveHexView(
+            target.panel,
+            target.region,
+            target.baseAddress,
+            physPc,
+            DisasmEditorProvider.INSTRUCTION_SIZE,
+        );
     }
 
     /**

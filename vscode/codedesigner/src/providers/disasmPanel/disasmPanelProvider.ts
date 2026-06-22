@@ -2351,7 +2351,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 this._setPauseState(false);
             } else {
                 await this.socketClient.pause();
-                this._setPauseState(true);
+                await this.editorProvider.broadcastCurrentStatus();
             }
         } catch (err: any) {
             out.error(`Pause/Resume failed: ${err?.message ?? err}`);

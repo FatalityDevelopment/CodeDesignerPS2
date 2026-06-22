@@ -539,6 +539,7 @@ namespace CodeDesigner.Ps2.EmulatorCore
                 if (hadBp)
                 {
                     _scheduler.Breakpoints.Remove(phys);
+                    _scheduler.Paused = false;
                     try { _scheduler.RunSlice(1); } catch { /* ignore */ }
                     _scheduler.Breakpoints.Add(phys);
                 }
