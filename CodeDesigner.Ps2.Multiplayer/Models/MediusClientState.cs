@@ -80,6 +80,9 @@ public class MediusClientState
     /// <summary>Last time the server sent a proactive CLIENT_ECHO ping (throttles the post-login gap-filler).</summary>
     public DateTime LastProactiveEchoAt { get; set; } = DateTime.MinValue;
 
+    /// <summary>Incrementing SequenceId for the lobby anti-cheat SERVER_CHEAT_QUERY heartbeat.</summary>
+    public int CheatSeq { get; set; }
+
     /// <summary>
     /// True once this connection has received a community-screen init message (ChannelList). The game
     /// uses a SEPARATE MLS connection for the post-login community screen vs. the initial login batch;

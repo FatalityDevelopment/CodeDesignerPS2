@@ -42,9 +42,13 @@ public class MlsServer : BaseMediusTcpServer
     // configured binary injections go out as soon as the player reaches the lobby.
     protected override bool PushDataAfterConnectComplete => true;
 
-    // CONFIRMED on hardware: streaming our 13-byte CreateCheatQuery in the MLS lobby = INSTANT disconnect
-    // (anti-cheat violation) the moment the community screen loads. So the lobby cheat heartbeat stays OFF
-    // until we have the official 29-byte real-region challenge format. (LobbyCheatHeartbeat defaults false.)
+    // REQUIRED on-hardware: the 29-byte SALTED CreateSaltedCheatQuery anti-cheat heartbeat keeps the community
+    // screen alive. With it ON the client reaches the community screen and holds ~60-90s; with it OFF the client
+    // disconnects almost immediately on login. The CADENCE doesn't matter much (15s and a reactive ~2/s ping-pong
+    // both held ~60-90s), so we keep a calm 15s timer (CheatHeartbeatInterval) — no spam. The client accepts the
+    // query and replies with a salted-MD5 hash. NOTE: a SEPARATE IOP-side watchdog still cuts the session at
+    // ~60-90s regardless of cheat cadence — that's the remaining wall, not this heartbeat.
+    protected override bool LobbyCheatHeartbeat => true;
 
     /// <summary>A player has reached the lobby — push any configured binary injections.</summary>
     protected override async Task OnSessionEstablishedAsync(MediusClientState state, TcpClient tcp, CancellationToken ct)
@@ -741,7 +745,12 @@ public class MlsServer : BaseMediusTcpServer
 
     private Task HandleSetGameListFilterAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
     {
-        _log.LogDebug("[MLS] SetGameListFilter0 received (no reply — minimal lobby)");
+        // MUST stay a NO-OP for SOCOM II (v108). On-hardware 2026-06-22: sending the Horizon-style
+        // SetGameListFilterResponse0 ack REGRESSED it — the client ran the whole community batch then
+        // disconnected BEFORE its first CLIENT_ECHO (never reached the ~60-90s hold). Confirms the old
+        // archaeology note that crafted SetGameListFilter replies make SOCOM II disconnect. Horizon acks it,
+        // but Horizon targets newer Medius; v108 wants it silent. Do NOT re-add a reply here.
+        _log.LogDebug("[MLS] SetGameListFilter0 received (no reply — required for v108)");
         return Task.CompletedTask;
     }
 

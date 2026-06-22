@@ -184,6 +184,32 @@ public class ScertPacket
     };
 
     /// <summary>
+    /// RT_MSG_SERVER_CHEAT_QUERY (0x1D) — 29-byte SALTED challenge for the in-lobby
+    /// anti-cheat heartbeat. Layout is the authoritative Horizon RT.Models
+    /// RT_MSG_SERVER_CHEAT_QUERY, confirmed against the 2012 retail acceptEULA.pcap
+    /// (which streams a continuous plen=29 cheat-query exchange on the community screen):
+    ///   [QueryType:1][SequenceId:4 LE][Address:4 LE][Length:4 LE][Salt:16]
+    /// The 13-byte base is identical to <see cref="CreateCheatQuery"/> (the non-salted
+    /// variant the MUIS login handshake accepts); the trailing 16-byte salt is what the
+    /// in-game lobby anti-cheat requires (a SALTY_MD5 region-hash challenge). The PS2
+    /// hashes mem[Address..Address+Length] salted with Salt and replies 0x1D; we ignore it.
+    /// </summary>
+    public static ScertPacket CreateSaltedCheatQuery(int sequenceId, uint address, int length, byte[] salt)
+    {
+        var payload = new byte[29];
+        payload[0] = (byte)CheatQueryType.DME_SERVER_CHEAT_QUERY_SALTY_MD5_HASH; // 6
+        BitConverter.GetBytes(sequenceId).CopyTo(payload, 1);  // SequenceId : int32 LE
+        BitConverter.GetBytes(address).CopyTo(payload, 5);      // Address    : uint32 LE
+        BitConverter.GetBytes(length).CopyTo(payload, 9);       // Length     : int32 LE
+        Array.Copy(salt, 0, payload, 13, Math.Min(salt.Length, 16));
+        return new()
+        {
+            MessageType = RT_MSG_TYPE.RT_MSG_SERVER_CHEAT_QUERY,
+            Payload     = payload,
+        };
+    }
+
+    /// <summary>
     /// RT_MSG_SERVER_MEMORY_POKE (0x1E) — 14-byte payload.
     /// Sent once during the MUIS anti-cheat exchange (round 2), followed immediately
     /// by another CHEAT_QUERY in the same TCP write.

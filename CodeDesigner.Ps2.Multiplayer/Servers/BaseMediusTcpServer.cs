@@ -507,13 +507,13 @@ public abstract class BaseMediusTcpServer
                 {
                     if (LobbyCheatHeartbeat)
                     {
-                        var nowUtc = DateTime.UtcNow;
-                        if (nowUtc - state.LastProactiveEchoAt < CheatHeartbeatInterval) continue;
-                        state.LastProactiveEchoAt = nowUtc;
+                        // Fallback/kickoff only — the brisk cheat-query ping-pong is driven reactively in
+                        // HandleCheatQueryResponseAsync (retail runs it at ~50-180ms gaps). This slow timer
+                        // (re)starts the exchange if the client's responses ever stall for CheatHeartbeatInterval.
+                        if (DateTime.UtcNow - state.LastProactiveEchoAt < CheatHeartbeatInterval) continue;
                         try
                         {
-                            await SendPacketAsync(tcp, ScertPacket.CreateCheatQuery(), state, ct);
-                            _log.LogDebug("[{Name}] -> SERVER_CHEAT_QUERY (lobby anti-cheat heartbeat) to {Id}", ServerName, state.ConnectionId);
+                            await SendSaltedCheatQueryAsync(state, tcp, ct);
                         }
                         catch (Exception ex) when (!ct.IsCancellationRequested)
                         {
@@ -551,8 +551,14 @@ public abstract class BaseMediusTcpServer
     /// </summary>
     protected virtual TimeSpan KeepAliveInterval => TimeSpan.FromSeconds(5);
 
-    /// <summary>Cadence of the lobby anti-cheat CHEAT_QUERY heartbeat (when <see cref="LobbyCheatHeartbeat"/>).</summary>
+    /// <summary>Cadence of the lobby anti-cheat CHEAT_QUERY heartbeat (when <see cref="LobbyCheatHeartbeat"/>).
+    /// 15s holds the community screen ~60-90s; faster cadences didn't extend it, so keep it calm (no spam).</summary>
     protected virtual TimeSpan CheatHeartbeatInterval => TimeSpan.FromSeconds(15);
+
+    /// <summary>EE region the lobby CHEAT_QUERY asks the client to hash. Must be readable/resident — the
+    /// SCUS-97275 main ELF loads at 0x00100000, so 0x00100000+0x1000 is always-present game code.</summary>
+    protected virtual uint CheatQueryAddress => 0x00100000;
+    protected virtual int  CheatQueryLength  => 0x1000;
 
     // -------------------------------------------------------------------------
     // Helpers
@@ -800,10 +806,29 @@ public abstract class BaseMediusTcpServer
 
     /// <summary>
     /// Called when the PS2 sends an anti-cheat response (RT_MSG_SERVER_CHEAT_QUERY 0x1D).
-    /// Override in MUIS to drive the 3-round cheat exchange before sending universe data.
+    /// MUIS overrides this to drive the 3-round login cheat exchange. For the in-lobby anti-cheat
+    /// (<see cref="LobbyCheatHeartbeat"/> servers, i.e. MLS) the client's salted-hash response is simply
+    /// acknowledged here; the next challenge is issued on the steady <see cref="CheatHeartbeatInterval"/>
+    /// timer in <see cref="RunKeepAliveLoopAsync"/>. (A faster reactive ping-pong was tried and did NOT
+    /// extend the ~60-90s community-screen hold beyond the 15s-timer version — the remaining drop is a
+    /// separate IOP-side watchdog — so we keep the calm cadence and don't spam.)
     /// </summary>
     protected virtual Task HandleCheatQueryResponseAsync(ScertPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
         => Task.CompletedTask;
+
+    /// <summary>
+    /// Sends one 29-byte salted RT_MSG_SERVER_CHEAT_QUERY (lobby anti-cheat challenge) and stamps the time.
+    /// Driven by the keepalive loop on the <see cref="CheatHeartbeatInterval"/> cadence.
+    /// </summary>
+    protected async Task SendSaltedCheatQueryAsync(MediusClientState state, TcpClient tcp, CancellationToken ct)
+    {
+        state.LastProactiveEchoAt = DateTime.UtcNow;
+        var salt = new byte[16];
+        Random.Shared.NextBytes(salt);
+        var seq = state.CheatSeq++;
+        await SendPacketAsync(tcp, ScertPacket.CreateSaltedCheatQuery(seq, CheatQueryAddress, CheatQueryLength, salt), state, ct);
+        _log.LogDebug("[{Name}] -> SERVER_CHEAT_QUERY salted seq={Seq} (lobby anti-cheat) to {Id}", ServerName, seq, state.ConnectionId);
+    }
 
     protected abstract Task HandleMediusMessageAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct);
 }
