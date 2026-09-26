@@ -217,6 +217,15 @@ public class MlsServer : BaseMediusTcpServer
                     await HandleGameInfoAsync(packet, state, tcp, ct);
                     break;
 
+                case MediusLobbyMessageId.WorldReport0:
+                    HandleWorldReport0(packet, state);
+                    break;
+
+                case MediusLobbyMessageId.PlayerReport:
+                    // In-game player stats report (282 B, retail sends it too) — one-way, no reply.
+                    _log.LogDebug("[MLS] PlayerReport received (one-way)");
+                    break;
+
                 case MediusLobbyMessageId.ChannelInfo:
                     await HandleChannelInfoAsync(packet, state, tcp, ct);
                     break;
@@ -631,14 +640,27 @@ public class MlsServer : BaseMediusTcpServer
         if (room != null)
         {
             for (int i = 0; i < _config.DefaultGames.Count; i++)
-                entries.Add(DefaultGameEntry(_config.DefaultGames[i], room, index: 2 + i));
+            {
+                int id = (room.ChannelId << 8) | (2 + i);
+                int players = _defaultGameWorlds.TryGetValue(id, out var dw) && DmeWorld.GetById(dw.WorldId) == dw
+                    ? dw.ConnectedCount : 0;
+                entries.Add(DefaultGameEntry(_config.DefaultGames[i], room, index: 2 + i, players));
+            }
         }
 
-        foreach (var g in _store.GetGames(state.AppId))
+        foreach (var g in _store.GetGames(state.AppId).ToList())
         {
+            // A player game whose DME world emptied out (host left) is gone — drop it from the list.
+            var gw = g.DmeWorldId is int wid ? DmeWorld.GetById(wid) : null;
+            if ((gw == null || gw.MediusWorldId != g.GameId) && DateTime.UtcNow - g.CreatedAt > TimeSpan.FromSeconds(60))
+            {
+                _store.RemoveGame(g.GameId);
+                _log.LogInformation("[MLS] Game 0x{Id:X} '{Name}' removed (DME world gone)", g.GameId, g.GameName);
+                continue;
+            }
             if (room != null && g.LobbyChannelId != 0 && g.LobbyChannelId != room.ChannelId)
                 continue;
-            entries.Add(PlayerGameEntry(g, room));
+            entries.Add(PlayerGameEntry(g, room, gw?.ConnectedCount ?? g.PlayerCount));
         }
 
         if (entries.Count == 0)
@@ -674,7 +696,7 @@ public class MlsServer : BaseMediusTcpServer
     /// 0/2/24 players, RulesSet 1, GF1 = briefing-room id, GF2 = 24, WorldStatus 2, and
     /// GameStats = [roomId] 0B 05 00 08 00 [index] 00 [maps…].
     /// </summary>
-    private static GameListEntry DefaultGameEntry(DefaultGameConfig def, MediusChannel room, int index)
+    private static GameListEntry DefaultGameEntry(DefaultGameConfig def, MediusChannel room, int index, int playerCount)
     {
         var stats = new byte[256];
         stats[0] = (byte)room.ChannelId;
@@ -687,7 +709,7 @@ public class MlsServer : BaseMediusTcpServer
 
         return new GameListEntry(
             WorldId: (room.ChannelId << 8) | index,   // unique per room; retail ids were server-assigned
-            PlayerCount: 0, MinPlayers: 2, MaxPlayers: 24,
+            PlayerCount: playerCount, MinPlayers: 2, MaxPlayers: DefaultGameMaxPlayers,
             GameLevel: def.Maps.Count > 0 ? def.Maps[0] : 0,
             PlayerSkillLevel: 0, RulesSet: 1,
             GenericField1: room.ChannelId, GenericField2: 24, GenericField3: 0,
@@ -697,23 +719,20 @@ public class MlsServer : BaseMediusTcpServer
     }
 
     /// <summary>
-    /// A player-created game. Retail player games carried GameStats index 0x7F; the rest of their stats
-    /// block is unknown until create-game is RE'd, so only the room id and index are filled.
+    /// A player-created game, from its CreateGame fields. Retail player games carried GameStats index 0x7F;
+    /// the rest of the stats block is whatever the host last reported (WorldReport, once handled).
     /// </summary>
-    private static GameListEntry PlayerGameEntry(MediusGame g, MediusChannel? room)
+    private static GameListEntry PlayerGameEntry(MediusGame g, MediusChannel? room, int playerCount)
     {
-        var stats = new byte[256];
-        stats[0] = (byte)(room?.ChannelId ?? g.GenericField1);
-        stats[6] = 0x7F;
-
         return new GameListEntry(
-            WorldId: g.GameId, PlayerCount: g.PlayerCount, MinPlayers: g.MinPlayers, MaxPlayers: g.MaxPlayers,
+            WorldId: g.GameId, PlayerCount: playerCount, MinPlayers: g.MinPlayers, MaxPlayers: g.MaxPlayers,
             GameLevel: g.GameLevel, PlayerSkillLevel: g.PlayerSkillLevel, RulesSet: g.RulesSet,
-            GenericField1: room?.ChannelId ?? g.GenericField1, GenericField2: g.GenericField2,
-            GenericField3: g.GenericField3, SecurityLevel: string.IsNullOrEmpty(g.Password) ? 0 : 1,
-            WorldStatus: (int)g.Status, GameHostType: 0,
+            GenericField1: g.GenericField1 != 0 ? g.GenericField1 : room?.ChannelId ?? 0,
+            GenericField2: g.GenericField2, GenericField3: g.GenericField3,
+            SecurityLevel: g.IsLocked ? 1 : 0,
+            WorldStatus: (int)g.Status, GameHostType: g.GameHostType,
             GameName: room != null && !g.GameName.Contains("$~") ? $"{g.GameName}$~{room.ChannelName}" : g.GameName,
-            GameStats: stats);
+            GameStats: g.GameStats);
     }
 
     /// <summary>
@@ -764,73 +783,165 @@ public class MlsServer : BaseMediusTcpServer
         }
     }
 
+    /// <summary>
+    /// CreateGame1 (0xF4) / CreateGame — horizon layout: MessageID[21] | SessionKey[17] | pad2 | AppID |
+    /// MinPlayers | MaxPlayers | GameLevel | GameName[64] | GamePassword[32] | SpectatorPassword[32] |
+    /// PlayerSkillLevel | RulesSet | GenericField1..3 (CreateGame1) or 1..8 (CreateGame) | GameHostType |
+    /// WorldAttributes. Reply = MessageID + pad + StatusCode + MediusWorldID (horizon CreateGameResponse).
+    /// No retail capture of a create exists — the request is logged in full so the layout can be checked.
+    /// </summary>
     private async Task HandleCreateGameAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
     {
-        var r = new MediusReader(packet.Payload);
-        string sessionKey = r.ReadString(64);
-        string gameName   = r.ReadString(64);
-        r.Skip(4);  // reserved / RulesSet
-        int maxPlayers = r.Remaining >= 4 ? r.ReadInt32() : 8;
+        var p = packet.Payload;
+        var r = new MediusReader(p);
+        r.Skip(MediusConstants.MESSAGEID_MAXLEN);
+        string sessionKey = r.ReadString(MediusConstants.SESSIONKEY_MAXLEN);
+        r.Skip(2);
+        int appId       = r.ReadInt32();
+        int minPlayers  = r.ReadInt32();
+        int maxPlayers  = r.ReadInt32();
+        int gameLevel   = r.ReadInt32();
+        string gameName = r.ReadString(64);
+        string password = r.ReadString(32);
+        r.Skip(32);                                   // SpectatorPassword
+        int skillLevel  = r.ReadInt32();
+        int rulesSet    = r.ReadInt32();
+        // CreateGame1 carries 3 generic fields, CreateGame 8; both end with GameHostType + WorldAttributes.
+        int genericCount = Math.Clamp(r.Remaining / 4 - 2, 0, 8);
+        var generic = new int[8];
+        for (int i = 0; i < genericCount; i++) generic[i] = r.ReadInt32();
+        int hostType    = r.Remaining >= 4 ? r.ReadInt32() : 0;
+        int attributes  = r.Remaining >= 4 ? r.ReadInt32() : 0;
 
-        _log.LogInformation("[MLS] CreateGame: '{Name}' host={Host}", gameName, state.AccountName);
+        _log.LogInformation(
+            "[MLS] CreateGame type=0x{Type:X2} ({Len} B): '{Name}' app={App} players={Min}-{Max} level=0x{Level:X} " +
+            "skill={Skill} rules={Rules} GF=[{GF}] host={HostType} attr=0x{Attr:X} pw={HasPw} room=0x{Room:X}",
+            packet.MessageType, p.Length, gameName, appId, minPlayers, maxPlayers, gameLevel, skillLevel, rulesSet,
+            string.Join(",", generic.Take(genericCount).Select(g => $"0x{g:X}")), hostType, attributes,
+            password.Length > 0, state.WorldId ?? 0);
 
-        var game = _store.CreateGame(
-            gameName,
-            state.AppId,
-            state.AccountId ?? 0,
-            state.AccountName,
-            maxPlayers);
+        var game = _store.CreateGame(gameName, state.AppId, state.AccountId ?? 0, state.AccountName, maxPlayers);
+        game.MinPlayers       = minPlayers;
+        game.GameLevel        = gameLevel;
+        game.PlayerSkillLevel = skillLevel;
+        game.RulesSet         = rulesSet;
+        game.Password         = password;
+        game.GenericField1    = generic[0];
+        game.GenericField2    = generic[1];
+        game.GenericField3    = generic[2];
+        game.GenericField4    = generic[3];
+        game.GameHostType     = hostType;
+        game.LobbyChannelId   = state.WorldId ?? 0;
+        game.GameStats[0]     = (byte)game.LobbyChannelId;
+        game.GameStats[6]     = 0x7F;                // retail player-made games carry index 0x7F
 
-        // Create a matching DME world for this game
-        var dmeWorld = DmeServer.CreateWorld(state.AppId, maxPlayers);
-        game.DmeWorldId = dmeWorld.WorldId;
-
-        state.CurrentGameId = game.GameId;
-        state.Status        = PlayerStatus.InGameWorld;
+        var world = DmeServer.CreateWorld(game.GameId, state.AppId, maxPlayers);
+        world.SelfDestructFlag = true;
+        game.DmeWorldId = world.WorldId;
 
         var w = new MediusWriter();
-        w.Write((int)MediusCallbackStatus.MediusSuccess);
-        w.Write(game.GameId);
-        // DME connection info
-        w.WriteString(_config.ServerIp, 16);
-        w.Write((ushort)_config.DmePort);
-        w.WritePadding(2);
+        WriteMlsHeader(w, packet, MediusCallbackStatus.MediusSuccess);
+        w.Write(game.GameId);                        // MediusWorldID
 
-        await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.CreateGameResponse, w.ToArray()), ct);
+        _log.LogInformation("[MLS] CreateGame -> world 0x{Id:X} ({World})", game.GameId, world);
+        await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.CreateGameResponse, w.ToArray()), state, ct);
     }
 
+    /// <summary>
+    /// JoinGame (0xF3) — layout confirmed by the retail Join_Medley capture sizes (198 → 190 bytes on the wire):
+    /// request = MessageID[21] | SessionKey[17] | pad2 | MediusWorldID | JoinType | GamePassword[32] |
+    /// GameHostType | RSA_KEY[64] | NetAddressList[48]; reply = MessageID + pad + StatusCode + GameHostType +
+    /// NetConnectionInfo (this DME server, the DME world id, and the reserved slot's access token).
+    /// </summary>
     private async Task HandleJoinGameAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
     {
         var r = new MediusReader(packet.Payload);
-        string sessionKey = r.ReadString(64);
-        int    gameId     = r.ReadInt32();
+        r.Skip(MediusConstants.MESSAGEID_MAXLEN);
+        string sessionKey = r.ReadString(MediusConstants.SESSIONKEY_MAXLEN);
+        r.Skip(2);
+        int    worldId   = r.ReadInt32();
+        int    joinType  = r.ReadInt32();
+        string password  = r.ReadString(32);
+        int    hostType  = r.ReadInt32();
+        if (string.IsNullOrEmpty(sessionKey)) sessionKey = state.SessionKey;
 
-        var game = _store.GetGameById(gameId);
+        var game  = _store.GetGameById(worldId);
+        var world = game != null ? GetOrCreatePlayerGameWorld(game) : GetOrCreateDefaultGameWorld(worldId, state.AppId);
 
-        if (game == null || game.IsFull || game.Status == GameWorldStatus.WorldClosed)
+        var status =
+            world == null                                                   ? MediusCallbackStatus.MediusGameNotFound
+            : game != null && game.IsLocked && password != game.Password    ? MediusCallbackStatus.MediusInvalidPassword
+            : MediusCallbackStatus.MediusSuccess;
+
+        DmeClientState? slot = null;
+        if (status == MediusCallbackStatus.MediusSuccess)
         {
-            var wFail = new MediusWriter();
-            wFail.Write((int)MediusCallbackStatus.MediusFail);
-            wFail.Write(0);
-            await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.JoinGameResponse, wFail.ToArray()), ct);
-            return;
+            slot = world!.Reserve(sessionKey, state.AccountId ?? 0);
+            if (slot == null) status = MediusCallbackStatus.MediusWorldIsFull;
         }
 
-        if (state.AccountId.HasValue)
-            game.AddPlayer(state.AccountId.Value);
-
-        state.CurrentGameId = game.GameId;
-        state.Status        = PlayerStatus.InGameWorld;
-
         var w = new MediusWriter();
-        w.Write((int)MediusCallbackStatus.MediusSuccess);
-        w.Write(game.GameId);
-        w.WriteString(_config.ServerIp, 16);
-        w.Write((ushort)_config.DmePort);
-        w.WritePadding(2);
+        WriteMlsHeader(w, packet, status);
+        w.Write(game?.GameHostType ?? 0);                                   // GameHostType (retail defaults: 0)
+        if (slot != null)
+        {
+            if (state.AccountId.HasValue) game?.AddPlayer(state.AccountId.Value);
+            state.CurrentGameId = worldId;
+            state.Status        = PlayerStatus.InGameWorld;
 
-        await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.JoinGameResponse, w.ToArray()), ct);
+            w.WriteNetConnectionInfo(
+                NetConnectionType.ClientServerTCP,
+                mls: (NetAddressType.External,   _config.ServerIp, _config.DmePort),
+                nat: (NetAddressType.NATService, _config.ServerIp, _config.NatPort),
+                worldId: world!.WorldId,
+                serverKey: Ps2Rsa.ServerKey.GetPublicKey(),
+                sessionKey: sessionKey,
+                accessKey: slot.AccessKey);
+        }
+        else
+        {
+            w.WriteNetConnectionInfo(NetConnectionType.None, null, null, 0, null, string.Empty, string.Empty);
+        }
+
+        _log.LogInformation("[MLS] JoinGame world=0x{World:X} joinType={JoinType} host={Host} -> {Status} {Dme}",
+            worldId, joinType, hostType, status, world?.ToString() ?? "-");
+        await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.JoinGameResponse, w.ToArray()), state, ct);
     }
+
+    // Default rooms are permanent in the list but only get a DME world while someone is in them
+    // (DME world ids are one byte in v108, so ~300 defaults can't all hold one at once).
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<int, DmeWorld> _defaultGameWorlds = new();
+
+    /// <summary>Resolve a default-room MediusWorldID ((roomId &lt;&lt; 8) | index) to its DME world.</summary>
+    private DmeWorld? GetOrCreateDefaultGameWorld(int mediusWorldId, int appId)
+    {
+        int roomId = mediusWorldId >> 8, index = mediusWorldId & 0xFF;
+        if (_store.GetChannelById(roomId) == null || index < 2 || index - 2 >= _config.DefaultGames.Count)
+            return null;
+
+        lock (_defaultGameWorlds)
+        {
+            if (_defaultGameWorlds.TryGetValue(mediusWorldId, out var existing) && DmeWorld.GetById(existing.WorldId) == existing)
+                return existing;
+            var world = DmeServer.CreateWorld(mediusWorldId, appId, DefaultGameMaxPlayers);
+            world.SelfDestructFlag = true;
+            _defaultGameWorlds[mediusWorldId] = world;
+            return world;
+        }
+    }
+
+    private static DmeWorld? GetOrCreatePlayerGameWorld(MediusGame game)
+    {
+        if (game.DmeWorldId is int id && DmeWorld.GetById(id) is { } world && world.MediusWorldId == game.GameId)
+            return world;
+        var created = DmeServer.CreateWorld(game.GameId, game.AppId, game.MaxPlayers);
+        created.SelfDestructFlag = true;
+        game.DmeWorldId = created.WorldId;
+        return created;
+    }
+
+    /// <summary>Retail default rooms list 2–24 players.</summary>
+    private const int DefaultGameMaxPlayers = 24;
 
     // Old-proto (SOCOM II) Medius responses begin with the request's 21-byte messageID echo
     // + 3 pad bytes + the 4-byte status, exactly like the working MAS handlers. The MLS
@@ -1094,30 +1205,115 @@ public class MlsServer : BaseMediusTcpServer
         return id;
     }
 
+    /// <summary>The host's latest WorldReport0 for a game world (default rooms included).</summary>
+    private sealed record WorldReport(
+        int PlayerCount, string GameName, byte[] GameStats, int MinPlayers, int MaxPlayers, int GameLevel,
+        int PlayerSkillLevel, int RulesSet, int GenericField1, int GenericField2, int GenericField3, int WorldStatus);
+
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<int, WorldReport> _worldReports = new();
+
+    /// <summary>
+    /// WorldReport0 (0x00) — the game HOST reports its world every ~7 s; one-way. Horizon layout, confirmed on
+    /// hardware (386 B): SessionKey[17] | pad3 | MediusWorldID | PlayerCount | GameName[64] | GameStats[256] |
+    /// Min | Max | GameLevel | Skill | RulesSet | GF1 | GF2 | GF3 | WorldStatus. The first player into a default
+    /// room becomes its host and reports it (GF2 = host value, status 1 = staging).
+    /// </summary>
+    private void HandleWorldReport0(MediusPacket packet, MediusClientState state)
+    {
+        var r = new MediusReader(packet.Payload);
+        r.Skip(MediusConstants.SESSIONKEY_MAXLEN + 3);
+        int worldId = r.ReadInt32();
+        var report = new WorldReport(
+            PlayerCount: r.ReadInt32(), GameName: r.ReadString(64), GameStats: r.ReadBytes(256),
+            MinPlayers: r.ReadInt32(), MaxPlayers: r.ReadInt32(), GameLevel: r.ReadInt32(),
+            PlayerSkillLevel: r.ReadInt32(), RulesSet: r.ReadInt32(), GenericField1: r.ReadInt32(),
+            GenericField2: r.ReadInt32(), GenericField3: r.ReadInt32(), WorldStatus: r.ReadInt32());
+
+        bool first = !_worldReports.ContainsKey(worldId);
+        _worldReports[worldId] = report;
+
+        if (_store.GetGameById(worldId) is { } game)
+        {
+            game.GameName         = report.GameName;
+            game.GameStats        = report.GameStats;
+            game.MinPlayers       = report.MinPlayers;
+            game.MaxPlayers       = report.MaxPlayers;
+            game.GameLevel        = report.GameLevel;
+            game.PlayerSkillLevel = report.PlayerSkillLevel;
+            game.RulesSet         = report.RulesSet;
+            game.GenericField1    = report.GenericField1;
+            game.GenericField2    = report.GenericField2;
+            game.GenericField3    = report.GenericField3;
+            game.Status           = (GameWorldStatus)report.WorldStatus;
+        }
+
+        if (first)
+            _log.LogInformation("[MLS] WorldReport0 world=0x{World:X} '{Name}' players={Count} status={Status} GF2=0x{GF2:X} from {Acct}",
+                worldId, report.GameName, report.PlayerCount, report.WorldStatus, report.GenericField2, state.AccountName);
+    }
+
+    /// <summary>Latest host report for a world, only while its DME world is still alive.</summary>
+    private WorldReport? LiveReport(int mediusWorldId)
+    {
+        if (!_worldReports.TryGetValue(mediusWorldId, out var report)) return null;
+        bool alive = DmeWorld.All.Any(w => w.MediusWorldId == mediusWorldId);
+        if (!alive) _worldReports.TryRemove(mediusWorldId, out _);
+        return alive ? report : null;
+    }
+
+    /// <summary>
+    /// GameInfo0 (0x33, 46 B) = MessageID[21] | SessionKey[17] | pad2 | MediusWorldID. Reply GameInfoResponse0
+    /// (0x34, horizon layout, 398 B on the wire): header | AppID | Min | Max | GameLevel | Skill | PlayerCount |
+    /// GameStats[256] | GameName[64] | RulesSet | GF1 | GF2 | GF3 | WorldStatus | GameHostType.
+    /// The old 6-byte reply (no MessageID echo) dropped the host right as the game lobby loaded.
+    /// </summary>
     private async Task HandleGameInfoAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
     {
         var r = new MediusReader(packet.Payload);
-        string sessionKey = r.ReadString(64);
-        int    gameId     = r.ReadInt32();
+        r.Skip(MediusConstants.MESSAGEID_MAXLEN + MediusConstants.SESSIONKEY_MAXLEN + 2);
+        int worldId = r.ReadInt32();
 
-        var game = _store.GetGameById(gameId);
+        // Prefer the host's own report; fall back to the listed entry (default room or player game).
+        var room  = _store.GetChannelById(worldId >> 8);
+        var game  = _store.GetGameById(worldId);
+        int index = worldId & 0xFF;
+        GameListEntry? listed =
+            game != null ? PlayerGameEntry(game, _store.GetChannelById(game.LobbyChannelId), game.PlayerCount)
+            : room != null && index >= 2 && index - 2 < _config.DefaultGames.Count
+                ? DefaultGameEntry(_config.DefaultGames[index - 2], room, index, 0)
+                : null;
+        var report  = LiveReport(worldId);
+        int players = DmeWorld.All.FirstOrDefault(w => w.MediusWorldId == worldId)?.ConnectedCount ?? 0;
 
         var w = new MediusWriter();
-        if (game == null)
+        if (listed == null && report == null)
         {
-            w.Write((int)MediusCallbackStatus.MediusFail);
+            WriteMlsHeader(w, packet, MediusCallbackStatus.MediusGameNotFound);
+            w.WritePadding(4 * 6 + 256 + 64 + 4 * 6);
         }
         else
         {
-            w.Write((int)MediusCallbackStatus.MediusSuccess);
-            w.Write(game.GameId);
-            w.WriteString(game.GameName, 64);
-            w.Write(game.PlayerCount);
-            w.Write(game.MaxPlayers);
-            w.Write((int)game.Status);
+            WriteMlsHeader(w, packet, MediusCallbackStatus.MediusSuccess);
+            w.Write(state.AppId);                                                 // ApplicationID
+            w.Write(report?.MinPlayers ?? listed!.MinPlayers);
+            w.Write(report?.MaxPlayers ?? listed!.MaxPlayers);
+            w.Write(report?.GameLevel ?? listed!.GameLevel);
+            w.Write(report?.PlayerSkillLevel ?? listed!.PlayerSkillLevel);
+            w.Write(Math.Max(players, report?.PlayerCount ?? 0));                 // PlayerCount
+            w.Write(report?.GameStats ?? listed!.GameStats);                      // GameStats[256]
+            w.WriteString(report?.GameName ?? listed!.GameName, 64);              // GameName[64]
+            w.Write(report?.RulesSet ?? listed!.RulesSet);
+            w.Write(report?.GenericField1 ?? listed!.GenericField1);
+            w.Write(report?.GenericField2 ?? listed!.GenericField2);
+            w.Write(report?.GenericField3 ?? listed!.GenericField3);
+            w.Write(report?.WorldStatus ?? listed!.WorldStatus);
+            w.Write(game?.GameHostType ?? 0);                                     // GameHostType
         }
 
-        await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.GameInfoResponse0, w.ToArray()), ct);
+        _log.LogInformation("[MLS] GameInfo0 world=0x{World:X} -> {Result} (players={Players}, from {Src})",
+            worldId, listed == null && report == null ? "not found" : "ok", players,
+            report != null ? "host report" : "list entry");
+        await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.GameInfoResponse0, w.ToArray()), state, ct);
     }
 
     private async Task HandleChannelInfoAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)

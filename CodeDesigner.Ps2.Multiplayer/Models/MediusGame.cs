@@ -30,6 +30,9 @@ public class MediusGame
     public int             GenericField2  { get; set; }
     public int             GenericField3  { get; set; }
     public int             GenericField4  { get; set; }
+    public int             GameHostType   { get; set; }
+    /// <summary>GameStats[256] shown in the game list (retail: [roomId] .. [index 0x7F for player games] ..).</summary>
+    public byte[]          GameStats      { get; set; } = new byte[256];
     public DateTime        CreatedAt      { get; set; } = DateTime.UtcNow;
 
     /// <summary>

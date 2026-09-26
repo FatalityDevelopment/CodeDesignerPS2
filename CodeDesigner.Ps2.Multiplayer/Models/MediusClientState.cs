@@ -61,6 +61,8 @@ public class MediusClientState
     // Medius session
     // -------------------------------------------------------------------------
     public string SessionKey   { get; set; } = string.Empty;
+    /// <summary>Access key the client presented in its v108 CLIENT_CONNECT_TCP (DME: the slot token from JoinGame).</summary>
+    public string AccessKey    { get; set; } = string.Empty;
     public int?   AccountId    { get; set; }
     public string AccountName  { get; set; } = string.Empty;
     public PlayerStatus Status { get; set; } = PlayerStatus.Disconnected;

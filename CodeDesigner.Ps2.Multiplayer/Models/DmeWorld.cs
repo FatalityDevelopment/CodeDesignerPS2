@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Net.Sockets;
 using CodeDesigner.Ps2.Multiplayer.Protocol;
 
 namespace CodeDesigner.Ps2.Multiplayer.Models;
@@ -10,15 +9,20 @@ namespace CodeDesigner.Ps2.Multiplayer.Models;
 /// Adapted from horizon-server Server.Dme/Models/World.cs, reworked to use raw
 /// .NET sockets instead of DotNetty.
 /// </summary>
-public class DmeWorld : IDisposable
+public class DmeWorld
 {
-    public const int MaxClientsPerWorld = 10;
-    public const int MaxWorlds          = 256;
+    public const int MaxClientsPerWorld = 32;
+
+    /// <summary>
+    /// World ids run 1..255: SOCOM II (v108) sends the target world in ONE byte of CLIENT_CONNECT_TCP
+    /// (the high byte of the TargetWorldId u32), so a DME world id must fit in a byte. 0 is left unused.
+    /// </summary>
+    public const int MaxWorldId = 255;
 
     // ── Static world registry ─────────────────────────────────────────────────
 
     private static readonly ConcurrentDictionary<int, DmeWorld> _idToWorld = new();
-    private static int _idCounter;
+    private static int _idCounter = 1;
     private static readonly object _idLock = new();
 
     public static DmeWorld? GetById(int id)
@@ -28,8 +32,11 @@ public class DmeWorld : IDisposable
 
     // ── Instance ──────────────────────────────────────────────────────────────
 
-    /// <summary>World ID assigned on creation (0–255).</summary>
+    /// <summary>DME world id (1–255) — the WorldID put in JoinGameResponse's NetConnectionInfo.</summary>
     public int WorldId { get; private set; } = -1;
+
+    /// <summary>The Medius game (MediusWorldID as listed in the game list) this world hosts.</summary>
+    public int MediusWorldId { get; }
 
     /// <summary>Application / game ID (AppId) this world belongs to.</summary>
     public int AppId { get; }
@@ -37,31 +44,28 @@ public class DmeWorld : IDisposable
     /// <summary>Maximum number of players permitted in this world.</summary>
     public int MaxPlayers { get; }
 
-    /// <summary>UTC timestamp the world was created.</summary>
     public DateTime CreatedAt { get; } = DateTime.UtcNow;
 
-    /// <summary>Whether the world is flagged for destruction once all clients leave.</summary>
+    /// <summary>Destroy the world once its last client leaves (player-created games).</summary>
     public bool SelfDestructFlag { get; set; }
 
-    /// <summary>
-    /// Live clients indexed by their DME client index (0 … MaxClientsPerWorld-1).
-    /// </summary>
+    /// <summary>Slots (reserved or connected) indexed by DME client index.</summary>
     public ConcurrentDictionary<int, DmeClientState> Clients { get; } = new();
 
     private readonly bool[] _slotUsed = new bool[MaxClientsPerWorld];
     private readonly object _slotLock = new();
 
-    public DmeWorld(int appId, int maxPlayers)
+    public DmeWorld(int mediusWorldId, int appId, int maxPlayers)
     {
-        AppId      = appId;
-        MaxPlayers = Math.Clamp(maxPlayers, 1, MaxClientsPerWorld);
+        MediusWorldId = mediusWorldId;
+        AppId         = appId;
+        MaxPlayers    = Math.Clamp(maxPlayers, 1, MaxClientsPerWorld);
         RegisterWorld();
     }
 
     // ── Slot management ───────────────────────────────────────────────────────
 
-    /// <summary>Tries to allocate the next free client slot index.</summary>
-    public bool TryAllocateSlot(out int index)
+    private bool TryAllocateSlot(out int index)
     {
         lock (_slotLock)
         {
@@ -78,28 +82,29 @@ public class DmeWorld : IDisposable
         return false;
     }
 
-    /// <summary>Releases a previously allocated client slot.</summary>
-    public void ReleaseSlot(int index)
+    private void ReleaseSlot(int index)
     {
         if ((uint)index < (uint)MaxClientsPerWorld)
-        {
             lock (_slotLock)
                 _slotUsed[index] = false;
-        }
     }
 
     // ── Client management ─────────────────────────────────────────────────────
 
     /// <summary>
-    /// Add a new DME client to this world, returning its DME slot index.
-    /// Returns -1 if the world is full.
+    /// Reserve a slot for a player joining through MLS. Re-joining with the same session key reuses the
+    /// existing slot (horizon behaviour). Returns null when the world is full.
     /// </summary>
-    public DmeClientState? AddClient(string sessionKey, TcpClient tcp)
+    public DmeClientState? Reserve(string sessionKey, int accountId)
     {
+        var existing = Clients.Values.FirstOrDefault(c => c.SessionKey == sessionKey && !c.Disconnected);
+        if (existing != null) return existing;
+
         if (!TryAllocateSlot(out int index))
             return null;
 
-        var client = new DmeClientState(sessionKey, this, index, tcp);
+        string token = Guid.NewGuid().ToString("N")[..16].ToUpperInvariant();
+        var client = new DmeClientState(sessionKey, token, accountId, this, index);
         if (!Clients.TryAdd(index, client))
         {
             ReleaseSlot(index);
@@ -108,50 +113,46 @@ public class DmeWorld : IDisposable
         return client;
     }
 
-    /// <summary>Remove a client by slot index.</summary>
+    /// <summary>Find a reserved slot by the access token presented in the DME connect.</summary>
+    public DmeClientState? FindByAccessKey(string accessKey)
+        => Clients.Values.FirstOrDefault(c => c.AccessKey == accessKey && !c.Disconnected);
+
+    /// <summary>Remove a client and free its slot.</summary>
     public void RemoveClient(DmeClientState client)
     {
+        client.MarkDisconnected();
         if (Clients.TryRemove(client.DmeId, out _))
             ReleaseSlot(client.DmeId);
     }
 
-    /// <summary>Find an existing client in this world by session key.</summary>
-    public DmeClientState? FindBySessionKey(string sessionKey)
-        => Clients.Values.FirstOrDefault(c => c.SessionKey == sessionKey);
+    /// <summary>Number of clients with a live DME connection.</summary>
+    public int ConnectedCount => Clients.Values.Count(c => c.IsConnected && !c.Disconnected);
 
     // ── Packet relay ──────────────────────────────────────────────────────────
 
-    /// <summary>
-    /// Relay an application broadcast from <paramref name="source"/> to every other
-    /// authenticated client that has <see cref="RT_RECV_FLAG.RECV_BROADCAST"/> set.
-    /// </summary>
+    /// <summary>Relay an application broadcast from <paramref name="source"/> to every other joined client.</summary>
     public void BroadcastApp(DmeClientState source, byte[] payload)
     {
         foreach (var (_, client) in Clients)
         {
-            if (client == source)             continue;
-            if (!client.HasJoined)            continue;
+            if (client == source || !client.HasJoined) continue;
             if (!client.HasRecvFlag(RT_RECV_FLAG.RECV_BROADCAST)) continue;
-            EnqueueToClient(client, source.DmeId, payload);
+            Forward(client, source.DmeId, payload);
         }
     }
 
-    /// <summary>
-    /// Send an application packet from <paramref name="source"/> to a single target by DME id.
-    /// </summary>
+    /// <summary>Send an application packet from <paramref name="source"/> to a single target by DME id.</summary>
     public void SendAppSingle(DmeClientState source, int targetDmeId, byte[] payload)
     {
         if (Clients.TryGetValue(targetDmeId, out var target)
             && target.HasJoined
             && target.HasRecvFlag(RT_RECV_FLAG.RECV_SINGLE))
         {
-            EnqueueToClient(target, source.DmeId, payload);
+            Forward(target, source.DmeId, payload);
         }
     }
 
-    /// <summary>
-    /// Send an application packet from <paramref name="source"/> to a list of target DME ids.
-    /// </summary>
+    /// <summary>Send an application packet from <paramref name="source"/> to a list of target DME ids.</summary>
     public void SendAppList(DmeClientState source, IEnumerable<int> targetIds, byte[] payload)
     {
         foreach (var tid in targetIds)
@@ -160,15 +161,11 @@ public class DmeWorld : IDisposable
                 && target.HasJoined
                 && target.HasRecvFlag(RT_RECV_FLAG.RECV_LIST))
             {
-                EnqueueToClient(target, source.DmeId, payload);
+                Forward(target, source.DmeId, payload);
             }
         }
     }
 
-    /// <summary>
-    /// Notify all clients with <see cref="RT_RECV_FLAG.RECV_NOTIFICATION"/> that
-    /// a player has joined the world.
-    /// </summary>
     public void NotifyPlayerJoined(DmeClientState joined)
     {
         foreach (var (_, client) in Clients)
@@ -179,10 +176,6 @@ public class DmeWorld : IDisposable
         }
     }
 
-    /// <summary>
-    /// Notify all clients with <see cref="RT_RECV_FLAG.RECV_NOTIFICATION"/> that
-    /// a player has left the world.
-    /// </summary>
     public void NotifyPlayerLeft(DmeClientState left)
     {
         foreach (var (_, client) in Clients)
@@ -195,57 +188,41 @@ public class DmeWorld : IDisposable
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
-    /// <summary>Stop all clients and destroy the world.</summary>
-    public async Task StopAsync()
-    {
-        foreach (var (_, client) in Clients)
-            await client.StopAsync();
-        Clients.Clear();
-        Dispose();
-    }
-
-    public void Dispose()
-    {
-        _idToWorld.TryRemove(WorldId, out _);
-    }
+    public void Destroy() => _idToWorld.TryRemove(WorldId, out _);
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private static void EnqueueToClient(DmeClientState client, int sourceDmeId, byte[] payload)
+    /// <summary>
+    /// Server→client relay frame: RT_MSG_CLIENT_APP_SINGLE [sourceDmeId:2 LE][payload] (horizon
+    /// TargetOrSource convention; retail DME traffic to the client is CLIENT_APP_SINGLE frames).
+    /// </summary>
+    private static void Forward(DmeClientState target, int sourceDmeId, byte[] payload)
     {
-        // Build a minimal RT_MSG_CLIENT_APP_SINGLE wire frame:
-        //   [RT_MSG_CLIENT_APP_SINGLE:1][payloadLen+2:2 LE][sourceDmeId:2 LE][payload]
-        var frame = new byte[3 + 2 + payload.Length];
-        frame[0] = (byte)RT_MSG_TYPE.RT_MSG_CLIENT_APP_SINGLE;
-        int totalPayload = 2 + payload.Length;
-        frame[1] = (byte)(totalPayload & 0xFF);
-        frame[2] = (byte)((totalPayload >> 8) & 0xFF);
-        frame[3] = (byte)(sourceDmeId & 0xFF);
-        frame[4] = (byte)((sourceDmeId >> 8) & 0xFF);
-        Buffer.BlockCopy(payload, 0, frame, 5, payload.Length);
-
-        client.EnqueueRaw(frame);
+        var body = new byte[2 + payload.Length];
+        body[0] = (byte)sourceDmeId;
+        body[1] = (byte)(sourceDmeId >> 8);
+        Buffer.BlockCopy(payload, 0, body, 2, payload.Length);
+        target.Send(RT_MSG_TYPE.RT_MSG_CLIENT_APP_SINGLE, body);
     }
 
     private void RegisterWorld()
     {
         lock (_idLock)
         {
-            int tried = 0;
-            while (tried < MaxWorlds && _idToWorld.ContainsKey(_idCounter))
+            for (int tried = 0; tried < MaxWorldId; tried++)
             {
-                _idCounter = (_idCounter + 1) % MaxWorlds;
-                tried++;
+                int id = _idCounter;
+                _idCounter = _idCounter >= MaxWorldId ? 1 : _idCounter + 1;
+                if (_idToWorld.TryAdd(id, this))
+                {
+                    WorldId = id;
+                    return;
+                }
             }
-            if (tried == MaxWorlds)
-                throw new InvalidOperationException("Maximum DME worlds reached.");
-
-            WorldId = _idCounter;
-            _idCounter = (_idCounter + 1) % MaxWorlds;
-            _idToWorld[WorldId] = this;
+            throw new InvalidOperationException("Maximum DME worlds reached.");
         }
     }
 
     public override string ToString()
-        => $"DmeWorld(id={WorldId}, clients={Clients.Count}/{MaxPlayers})";
+        => $"DmeWorld(id={WorldId}, game=0x{MediusWorldId:X}, clients={ConnectedCount}/{MaxPlayers})";
 }

@@ -1,26 +1,26 @@
-using System.Collections.Concurrent;
-using System.Net.Sockets;
 using CodeDesigner.Ps2.Multiplayer.Protocol;
 
 namespace CodeDesigner.Ps2.Multiplayer.Models;
 
 /// <summary>
-/// Per-connection state for a DME game client.
+/// One player slot in a <see cref="DmeWorld"/>.
 ///
-/// A DME client connects to the DME server after the MLS lobby creates or
-/// joins a game world.  The client authenticates using the session key received
-/// from MLS, is assigned a DME slot index in a <see cref="DmeWorld"/>, and
-/// then exchanges RT application packets with other clients in that world.
-///
-/// Adapted from horizon-server Server.Dme/Models/ClientObject.cs, reworked to
-/// use raw .NET sockets instead of DotNetty.
+/// The slot is reserved by MLS JoinGame (keyed by an access token returned in the JoinGameResponse's
+/// NetConnectionInfo), then bound to a TCP connection when the client's CLIENT_CONNECT_TCP to the DME
+/// presents that token — the same reserve-then-connect model as horizon-server's DME.
 /// </summary>
 public class DmeClientState
 {
     // ── Identity ──────────────────────────────────────────────────────────────
 
-    /// <summary>Session key received from MLS, used to match this client to a game.</summary>
+    /// <summary>MLS session key of the player that reserved this slot.</summary>
     public string SessionKey { get; }
+
+    /// <summary>Access token handed out in JoinGameResponse; the DME connect presents it back.</summary>
+    public string AccessKey { get; }
+
+    /// <summary>Account that reserved the slot (for logging / game player counts).</summary>
+    public int AccountId { get; }
 
     /// <summary>Slot index within the <see cref="DmeWorld"/> (0 … MaxClients-1).</summary>
     public int DmeId { get; }
@@ -36,24 +36,21 @@ public class DmeClientState
 
     // ── Transport ─────────────────────────────────────────────────────────────
 
-    /// <summary>Underlying TCP socket for this client.</summary>
-    public TcpClient Tcp { get; }
-
-    /// <summary>Outbound packet queue (raw wire-format frames).</summary>
-    public ConcurrentQueue<byte[]> SendQueue { get; } = new();
+    /// <summary>
+    /// Sends one RT frame (type + plaintext payload) to this client over its encrypted DME connection.
+    /// Null until the client's TCP connection is bound to the slot.
+    /// </summary>
+    public Func<RT_MSG_TYPE, byte[], Task>? Sender { get; set; }
 
     // ── State flags ───────────────────────────────────────────────────────────
 
-    /// <summary>Whether the SCERT handshake is complete.</summary>
+    /// <summary>Whether a TCP connection is bound to this slot.</summary>
     public bool IsConnected { get; set; }
 
-    /// <summary>
-    /// True once the client has sent its first application packet and is
-    /// fully participating in the world.
-    /// </summary>
+    /// <summary>True once the DME connect handshake completed and the client takes part in relaying.</summary>
     public bool HasJoined { get; set; }
 
-    /// <summary>Whether the client has been gracefully disconnected.</summary>
+    /// <summary>Whether the client has been disconnected.</summary>
     public bool Disconnected { get; private set; }
 
     /// <summary>Receive-filter flags controlling which packet types are forwarded.</summary>
@@ -62,20 +59,18 @@ public class DmeClientState
 
     // ── Timing ────────────────────────────────────────────────────────────────
 
-    public DateTime ConnectedAt    { get; } = DateTime.UtcNow;
+    public DateTime ReservedAt     { get; } = DateTime.UtcNow;
     public DateTime LastMessageAt  { get; set; } = DateTime.UtcNow;
-    public TimeSpan Timeout        { get; set; } = TimeSpan.FromSeconds(60);
-
-    public bool IsTimedOut => DateTime.UtcNow - LastMessageAt > Timeout;
 
     // ── Construction ──────────────────────────────────────────────────────────
 
-    public DmeClientState(string sessionKey, DmeWorld world, int dmeId, TcpClient tcp)
+    public DmeClientState(string sessionKey, string accessKey, int accountId, DmeWorld world, int dmeId)
     {
         SessionKey = sessionKey;
+        AccessKey  = accessKey;
+        AccountId  = accountId;
         World      = world;
         DmeId      = dmeId;
-        Tcp        = tcp;
     }
 
     // ── Receive-flag helper ───────────────────────────────────────────────────
@@ -89,53 +84,34 @@ public class DmeClientState
 
     // ── Outbound helpers ──────────────────────────────────────────────────────
 
-    /// <summary>Enqueue a raw pre-serialised frame for sending.</summary>
-    public void EnqueueRaw(byte[] frame)
-        => SendQueue.Enqueue(frame);
+    /// <summary>Send one RT frame to this client (fire-and-forget; send errors surface in the server log).</summary>
+    public void Send(RT_MSG_TYPE type, byte[] payload)
+    {
+        if (Disconnected || Sender == null) return;
+        _ = Sender(type, payload);
+    }
 
     /// <summary>
-    /// Enqueue a SERVER_CONNECT_NOTIFY (player joined) notification.
-    /// Wire format: [RT_MSG_SERVER_CONNECT_NOTIFY:1][len:2 LE][playerIndex:2 LE][scertId:2 LE]
+    /// SERVER_CONNECT_NOTIFY (player joined): [playerIndex:2 LE][scertId:2 LE].
+    /// UNVERIFIED for v108 — only reachable with two or more players in a world.
     /// </summary>
     public void SendConnectNotify(int playerIndex, uint scertId)
-    {
-        var frame = new byte[3 + 4];
-        frame[0] = (byte)RT_MSG_TYPE.RT_MSG_SERVER_CONNECT_NOTIFY;
-        frame[1] = 4; frame[2] = 0; // length = 4
-        frame[3] = (byte)(playerIndex & 0xFF);
-        frame[4] = (byte)((playerIndex >> 8) & 0xFF);
-        frame[5] = (byte)(scertId & 0xFF);
-        frame[6] = (byte)((scertId >> 8) & 0xFF);
-        SendQueue.Enqueue(frame);
-    }
+        => Send(RT_MSG_TYPE.RT_MSG_SERVER_CONNECT_NOTIFY,
+                new[] { (byte)playerIndex, (byte)(playerIndex >> 8), (byte)scertId, (byte)(scertId >> 8) });
 
-    /// <summary>
-    /// Enqueue a SERVER_DISCONNECT_NOTIFY (player left) notification.
-    /// Wire format: [RT_MSG_SERVER_DISCONNECT_NOTIFY:1][len:2 LE][playerIndex:2 LE][scertId:2 LE]
-    /// </summary>
+    /// <summary>SERVER_DISCONNECT_NOTIFY (player left): [playerIndex:2 LE][scertId:2 LE]. UNVERIFIED for v108.</summary>
     public void SendDisconnectNotify(int playerIndex, uint scertId)
-    {
-        var frame = new byte[3 + 4];
-        frame[0] = (byte)RT_MSG_TYPE.RT_MSG_SERVER_DISCONNECT_NOTIFY;
-        frame[1] = 4; frame[2] = 0;
-        frame[3] = (byte)(playerIndex & 0xFF);
-        frame[4] = (byte)((playerIndex >> 8) & 0xFF);
-        frame[5] = (byte)(scertId & 0xFF);
-        frame[6] = (byte)((scertId >> 8) & 0xFF);
-        SendQueue.Enqueue(frame);
-    }
+        => Send(RT_MSG_TYPE.RT_MSG_SERVER_DISCONNECT_NOTIFY,
+                new[] { (byte)playerIndex, (byte)(playerIndex >> 8), (byte)scertId, (byte)(scertId >> 8) });
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
-    /// <summary>Mark the client as disconnected and close the TCP socket.</summary>
-    public Task StopAsync()
+    public void MarkDisconnected()
     {
-        if (Disconnected) return Task.CompletedTask;
         Disconnected = true;
-        try { Tcp.Close(); } catch { /* ignore */ }
-        return Task.CompletedTask;
+        Sender = null;
     }
 
     public override string ToString()
-        => $"DmeClient(world={World.WorldId}, dmeId={DmeId}, key={SessionKey})";
+        => $"DmeClient(world={World.WorldId}, dmeId={DmeId}, acct={AccountId})";
 }

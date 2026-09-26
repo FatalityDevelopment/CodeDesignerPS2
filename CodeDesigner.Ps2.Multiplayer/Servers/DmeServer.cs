@@ -1,6 +1,5 @@
-using System.Collections.Concurrent;
-using System.Net;
 using System.Net.Sockets;
+using System.Text;
 using CodeDesigner.Ps2.Multiplayer.Config;
 using CodeDesigner.Ps2.Multiplayer.Models;
 using CodeDesigner.Ps2.Multiplayer.Protocol;
@@ -9,49 +8,28 @@ using Microsoft.Extensions.Logging;
 namespace CodeDesigner.Ps2.Multiplayer.Servers;
 
 /// <summary>
-/// DME (Demonware Multiplayer Engine) TCP server.
+/// DME (game world) TCP server.
 ///
-/// After the MLS lobby server creates or joins a game world, game clients
-/// connect here to exchange real-time in-game packets with each other.
-///
-/// Protocol:
-///   1. Standard SCERT handshake (same as MAS / MLS).
-///   2. Client sends an authentication request containing its session key.
-///   3. Server looks up the <see cref="DmeWorld"/> for that session key,
-///      assigns a DME client index, and returns connect-accept.
-///   4. From that point on every RT_MSG_CLIENT_APP_* packet is relayed to
-///      the other clients in the same world according to their RECV flags.
-///
-/// Adapted from horizon-server Server.Dme/TcpServer.cs, reworked to use raw
-/// .NET sockets instead of DotNetty.
+/// SOCOM II (v108) flow, from the retail Join_Medley capture:
+///   1. MLS JoinGame reserves a slot in a <see cref="DmeWorld"/> and returns NetConnectionInfo
+///      (this server's address, the DME world id, and the slot's access token).
+///   2. The client connects here with the normal SCERT handshake. Its encrypted CLIENT_CONNECT_TCP carries
+///      the DME world id (one byte, v108 packing) and the access token.
+///   3. Server replies CRYPTKEY_GAME, CRYPTKEY_PEER, CONNECT_ACCEPT_TCP (PlayerId = DME slot,
+///      PlayerCount), CONNECT_COMPLETE, then SERVER_APP DMEServerVersion "1.22.0140".
+///   4. RT_MSG_CLIENT_APP_* frames are relayed to the other players in the world.
 /// </summary>
 public class DmeServer : BaseMediusTcpServer
 {
+    /// <summary>
+    /// Retail DME server version — hash-verified: the 18-byte SERVER_APP after CONNECT_COMPLETE in
+    /// Join_Medley (hash 6f795527) is exactly [00 00]["1.22.0140" zero-padded to 16].
+    /// </summary>
+    private const string RetailDmeServerVersion = "1.22.0140";
+    private const int DmeVersionLength = 16;
+
     private readonly MultiplayerConfig _config;
     private readonly ILogger<DmeServer> _log;
-
-    /// <summary>
-    /// Active DME game worlds, keyed by world ID.
-    /// Worlds are created by <see cref="MlsServer"/> when a game is created and
-    /// removed here when all clients have left.
-    /// </summary>
-    internal static readonly ConcurrentDictionary<int, DmeWorld> Worlds = new();
-
-    /// <summary>
-    /// Create a new DME world and return it.  Called by <see cref="MlsServer"/>.
-    /// </summary>
-    public static DmeWorld CreateWorld(int appId, int maxPlayers)
-    {
-        var world = new DmeWorld(appId, maxPlayers);
-        Worlds[world.WorldId] = world;
-        return world;
-    }
-
-    /// <summary>
-    /// Look up a world by its ID.
-    /// </summary>
-    public static DmeWorld? GetWorld(int worldId)
-        => Worlds.TryGetValue(worldId, out var w) ? w : null;
 
     public DmeServer(MultiplayerConfig config, ILogger<DmeServer> log)
         : base(log, config)
@@ -64,28 +42,72 @@ public class DmeServer : BaseMediusTcpServer
     public Task StartAsync(CancellationToken ct) =>
         StartAsync(_config.BindAddress, _config.DmePort, ct);
 
+    /// <summary>Create a DME world for the Medius game <paramref name="mediusWorldId"/>.</summary>
+    public static DmeWorld CreateWorld(int mediusWorldId, int appId, int maxPlayers)
+        => new(mediusWorldId, appId, maxPlayers);
+
+    // ── Connect (v108 hooks) ──────────────────────────────────────────────────
+
+    protected override bool SendCryptKeyPeerAfterGame => true;
+    protected override bool RejectUnboundOldProtoConnect => true;
+
+    protected override Task<(ushort PlayerId, ushort PlayerCount)?> OnOldProtoConnectAsync(
+        MediusClientState state, TcpClient tcp, CancellationToken ct)
+    {
+        var world = state.WorldId is int id ? DmeWorld.GetById(id) : null;
+        var slot  = world?.FindByAccessKey(state.AccessKey);
+        if (world == null || slot == null)
+        {
+            _log.LogWarning("[DME] Connect for world {World} with unknown access key '{Key}' ({Worlds})",
+                state.WorldId, state.AccessKey, string.Join(", ", DmeWorld.All));
+            return Task.FromResult<(ushort, ushort)?>(null);
+        }
+
+        slot.IsConnected   = true;
+        slot.MediusVersion = state.MediusVersion;
+        slot.ScertId       = state.ScertId;
+        slot.Sender        = (type, payload) =>
+            SendPacketAsync(tcp, new ScertPacket { MessageType = type, Payload = payload }, state, ct);
+
+        state.DmeWorldId         = world.WorldId;
+        state.DmeClientIndex     = slot.DmeId;
+        state.IsDmeAuthenticated = true;
+
+        _log.LogInformation("[DME] Account {Acct} bound to {World} as player {Id}",
+            slot.AccountId, world, slot.DmeId);
+        return Task.FromResult<(ushort, ushort)?>(((ushort)slot.DmeId, (ushort)world.ConnectedCount));
+    }
+
+    protected override async Task OnOldProtoConnectCompleteAsync(MediusClientState state, TcpClient tcp, CancellationToken ct)
+    {
+        var slot = FindSlot(state);
+        if (slot == null) return;
+
+        // DMEServerVersion: [MessageClassDME=0][ServerVersion=0][Version:16]
+        var msg = new byte[2 + DmeVersionLength];
+        Encoding.ASCII.GetBytes(RetailDmeServerVersion).CopyTo(msg, 2);
+        await SendPacketAsync(tcp, ScertPacket.CreateServerApp(msg), state, ct);
+
+        slot.HasJoined = true;
+        slot.World.NotifyPlayerJoined(slot);
+    }
+
     // ── Disconnect cleanup ────────────────────────────────────────────────────
 
     protected override Task OnClientDisconnectedAsync(MediusClientState state)
     {
-        if (state.DmeWorldId.HasValue && state.DmeClientIndex.HasValue)
+        var slot = FindSlot(state);
+        if (slot != null)
         {
-            if (Worlds.TryGetValue(state.DmeWorldId.Value, out var world))
-            {
-                var client = world.Clients.Values
-                    .FirstOrDefault(c => c.DmeId == state.DmeClientIndex.Value);
-                if (client != null)
-                {
-                    world.NotifyPlayerLeft(client);
-                    world.RemoveClient(client);
-                    _log.LogInformation("[DME] Client {Key} left world {World}", state.SessionKey, state.DmeWorldId);
+            var world = slot.World;
+            world.NotifyPlayerLeft(slot);
+            world.RemoveClient(slot);
+            _log.LogInformation("[DME] Player {Id} left {World}", slot.DmeId, world);
 
-                    if (world.Clients.IsEmpty && world.SelfDestructFlag)
-                    {
-                        Worlds.TryRemove(world.WorldId, out _);
-                        _log.LogInformation("[DME] World {World} destroyed (empty + self-destruct)", world.WorldId);
-                    }
-                }
+            if (world.Clients.IsEmpty && world.SelfDestructFlag)
+            {
+                world.Destroy();
+                _log.LogInformation("[DME] {World} destroyed (empty + self-destruct)", world);
             }
         }
         return Task.CompletedTask;
@@ -93,203 +115,89 @@ public class DmeServer : BaseMediusTcpServer
 
     // ── Message dispatch ──────────────────────────────────────────────────────
 
+    private const byte DmeMessageClass = 0x00;
+    private const byte DmePing         = 0x01;
+
     protected override async Task HandleMediusMessageAsync(
         MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
     {
-        // DME uses raw RT messages — there is no Medius application layer in normal
-        // game traffic.  This handler is invoked for RT_MSG_CLIENT_APP_TOSERVER
-        // frames that wrap a Medius payload; in practice these are used during the
-        // initial authentication exchange before game packets begin flowing.
-        _log.LogDebug("[DME] Medius msg class=0x{C:X2} type=0x{T:X2}", (byte)packet.MessageClass, packet.MessageType);
-    }
-
-    /// <summary>
-    /// Handle RT transport-layer packets that are NOT wrapped Medius messages.
-    /// This is where the DME-specific game relay logic lives.
-    /// </summary>
-    protected override async Task HandleRtMessageAsync(
-        RT_MSG_TYPE msgType, byte[] payload, MediusClientState state, TcpClient tcp, CancellationToken ct)
-    {
-        switch (msgType)
+        // DME Ping (class 0, id 1) sent to the server: TimeOfSend:u32 | PingInstance:u8 | RequestEcho:u8 | pad2.
+        // SOCOM sends one about once a minute with RequestEcho=1 (on hardware: 00 00 00 00 01 01 00 00).
+        // Echo it back unchanged except RequestEcho=0, the standard DME ping reply — horizon doesn't handle it.
+        if ((byte)packet.MessageClass == DmeMessageClass && packet.MessageType == DmePing && packet.Payload.Length >= 6)
         {
-            // ── Initial DME authentication ────────────────────────────────────
-            case RT_MSG_TYPE.RT_MSG_CLIENT_APP_TOSERVER when !state.IsDmeAuthenticated:
-                await HandleDmeAuthAsync(payload, state, tcp, ct);
-                break;
-
-            // ── Broadcast to all clients in the world ─────────────────────────
-            case RT_MSG_TYPE.RT_MSG_CLIENT_APP_BROADCAST:
-                if (state.IsDmeAuthenticated && state.DmeWorldId.HasValue)
-                    RelayBroadcast(state, payload);
-                break;
-
-            // ── Unicast to a single target ────────────────────────────────────
-            case RT_MSG_TYPE.RT_MSG_CLIENT_APP_SINGLE:
-                if (state.IsDmeAuthenticated && state.DmeWorldId.HasValue && payload.Length >= 2)
-                    RelaySingle(state, payload);
-                break;
-
-            // ── Multicast to a list of targets ────────────────────────────────
-            case RT_MSG_TYPE.RT_MSG_CLIENT_APP_LIST:
-                if (state.IsDmeAuthenticated && state.DmeWorldId.HasValue && payload.Length >= 3)
-                    RelayList(state, payload);
-                break;
-
-            // ── Recv-flag update ──────────────────────────────────────────────
-            case RT_MSG_TYPE.RT_MSG_CLIENT_SET_RECV_FLAG:
-                if (payload.Length >= 1)
-                    SetRecvFlag(state, payload[0]);
-                break;
-
-            default:
-                _log.LogDebug("[DME] Unhandled RT type 0x{T:X2}", (byte)msgType);
-                break;
-        }
-
-        await Task.CompletedTask;
-    }
-
-    // ── DME authentication ────────────────────────────────────────────────────
-
-    private async Task HandleDmeAuthAsync(
-        byte[] payload, MediusClientState state, TcpClient tcp, CancellationToken ct)
-    {
-        // The payload begins with the session key (null-terminated, up to 64 bytes),
-        // followed by an optional world ID (int32 LE).
-        if (payload.Length < 2) return;
-
-        var r = new MediusReader(payload);
-        string sessionKey = r.ReadString(MediusConstants.SESSIONKEY_MAXLEN);
-
-        // Find a world that has a pending slot for this session key.
-        DmeWorld? world = null;
-        DmeClientState? dmeClient = null;
-
-        foreach (var (_, w) in Worlds)
-        {
-            var existing = w.FindBySessionKey(sessionKey);
-            if (existing != null)
+            if (packet.Payload[5] != 0)
             {
-                world     = w;
-                dmeClient = existing;
-                break;
+                var reply = new byte[2 + packet.Payload.Length];
+                reply[0] = DmeMessageClass;
+                reply[1] = DmePing;
+                packet.Payload.CopyTo(reply, 2);
+                reply[2 + 5] = 0;                                  // RequestEcho = 0
+                await SendPacketAsync(tcp, ScertPacket.CreateServerApp(reply), state, ct);
+                _log.LogDebug("[DME] -> Ping echo (instance {Inst})", packet.Payload[4]);
             }
-        }
-
-        if (world == null)
-        {
-            // No pre-registered slot — try to find a world with a free slot
-            // by matching the AppId from the SCERT connect.
-            foreach (var (_, w) in Worlds)
-            {
-                if (w.AppId == state.AppId)
-                {
-                    dmeClient = w.AddClient(sessionKey, tcp);
-                    if (dmeClient != null) { world = w; break; }
-                }
-            }
-        }
-
-        if (world == null || dmeClient == null)
-        {
-            _log.LogWarning("[DME] No world found for session key {Key}", sessionKey);
-            // Send a forced disconnect.
-            var disc = ScertPacket.CreateServerApp(new byte[] { (byte)RT_MSG_TYPE.RT_MSG_SERVER_FORCED_DISCONNECT, 0, 0 });
-            await SendPacketAsync(tcp, disc, ct);
             return;
         }
 
-        // Link MediusClientState to the DME world.
-        dmeClient.IsConnected  = true;
-        dmeClient.MediusVersion = state.MediusVersion;
-        dmeClient.ScertId       = state.ScertId;
-
-        state.DmeWorldId      = world.WorldId;
-        state.DmeClientIndex  = dmeClient.DmeId;
-        state.IsDmeAuthenticated = true;
-        state.SessionKey      = sessionKey;
-
-        _log.LogInformation("[DME] Client {Key} joined world {World} as player {Id}",
-            sessionKey, world.WorldId, dmeClient.DmeId);
-
-        // Send SERVER_CONNECT_ACCEPT_TCP with the assigned DME id.
-        var accept = ScertPacket.CreateConnectAcceptTcp(state.ScertId, (ushort)dmeClient.DmeId, (ushort)world.Clients.Count, null);
-        await SendPacketAsync(tcp, accept, ct);
-
-        // Notify other world members that this player has joined.
-        dmeClient.HasJoined = true;
-        world.NotifyPlayerJoined(dmeClient);
+        _log.LogInformation("[DME] Medius msg class=0x{C:X2} type=0x{T:X2} ({Len} bytes)",
+            (byte)packet.MessageClass, packet.MessageType, packet.Payload.Length);
     }
 
-    // ── Relay helpers ─────────────────────────────────────────────────────────
-
-    private void RelayBroadcast(MediusClientState state, byte[] payload)
+    protected override Task HandleRtMessageAsync(
+        RT_MSG_TYPE msgType, byte[] payload, MediusClientState state, TcpClient tcp, CancellationToken ct)
     {
-        if (!Worlds.TryGetValue(state.DmeWorldId!.Value, out var world)) return;
-        var src = world.Clients.Values.FirstOrDefault(c => c.DmeId == state.DmeClientIndex);
-        if (src == null) return;
-        world.BroadcastApp(src, payload);
-        FlushWorld(world);
-    }
-
-    private void RelaySingle(MediusClientState state, byte[] payload)
-    {
-        if (!Worlds.TryGetValue(state.DmeWorldId!.Value, out var world)) return;
-        var src = world.Clients.Values.FirstOrDefault(c => c.DmeId == state.DmeClientIndex);
-        if (src == null) return;
-
-        int targetId = payload[0] | (payload[1] << 8);
-        byte[] data  = payload.Length > 2 ? payload[2..] : Array.Empty<byte>();
-        world.SendAppSingle(src, targetId, data);
-        FlushWorld(world);
-    }
-
-    private void RelayList(MediusClientState state, byte[] payload)
-    {
-        if (!Worlds.TryGetValue(state.DmeWorldId!.Value, out var world)) return;
-        var src = world.Clients.Values.FirstOrDefault(c => c.DmeId == state.DmeClientIndex);
-        if (src == null) return;
-
-        // [count:1][targetId:2 LE] * count + [data]
-        int count  = payload[0];
-        int dataOffset = 1 + count * 2;
-        if (payload.Length < dataOffset) return;
-
-        var targets = new List<int>(count);
-        for (int i = 0; i < count; i++)
-            targets.Add(payload[1 + i * 2] | (payload[2 + i * 2] << 8));
-
-        byte[] data = dataOffset < payload.Length ? payload[dataOffset..] : Array.Empty<byte>();
-        world.SendAppList(src, targets, data);
-        FlushWorld(world);
-    }
-
-    private void SetRecvFlag(MediusClientState state, byte flagByte)
-    {
-        if (!state.DmeWorldId.HasValue || !state.DmeClientIndex.HasValue) return;
-        if (!Worlds.TryGetValue(state.DmeWorldId.Value, out var world)) return;
-        if (!world.Clients.TryGetValue(state.DmeClientIndex.Value, out var client)) return;
-        client.RecvFlag = (RT_RECV_FLAG)flagByte;
-    }
-
-    /// <summary>
-    /// Drain queued outbound frames for every client in <paramref name="world"/>.
-    /// </summary>
-    private static void FlushWorld(DmeWorld world)
-    {
-        foreach (var (_, client) in world.Clients)
+        var slot = FindSlot(state);
+        if (slot == null)
         {
-            if (client.Disconnected) continue;
-            try
-            {
-                var stream = client.Tcp.GetStream();
-                while (client.SendQueue.TryDequeue(out var frame))
-                    stream.Write(frame, 0, frame.Length);
-            }
-            catch
-            {
-                // If the write fails the receive loop will handle the disconnect.
-            }
+            _log.LogDebug("[DME] {Type} from unbound connection ignored", msgType);
+            return Task.CompletedTask;
         }
+        slot.LastMessageAt = DateTime.UtcNow;
+        var world = slot.World;
+
+        switch (msgType)
+        {
+            case RT_MSG_TYPE.RT_MSG_CLIENT_APP_BROADCAST:
+                world.BroadcastApp(slot, payload);
+                break;
+
+            case RT_MSG_TYPE.RT_MSG_CLIENT_APP_SINGLE when payload.Length >= 2:
+                world.SendAppSingle(slot, payload[0] | (payload[1] << 8), payload[2..]);
+                break;
+
+            case RT_MSG_TYPE.RT_MSG_CLIENT_APP_LIST when payload.Length >= 1:
+            {
+                // [count:1][targetId:2 LE] * count + [data]
+                int count = payload[0];
+                int dataOffset = 1 + count * 2;
+                if (payload.Length < dataOffset) break;
+                var targets = new List<int>(count);
+                for (int i = 0; i < count; i++)
+                    targets.Add(payload[1 + i * 2] | (payload[2 + i * 2] << 8));
+                world.SendAppList(slot, targets, payload[dataOffset..]);
+                break;
+            }
+
+            case RT_MSG_TYPE.RT_MSG_CLIENT_SET_RECV_FLAG when payload.Length >= 1:
+                slot.RecvFlag = (RT_RECV_FLAG)payload[0];
+                break;
+
+            case RT_MSG_TYPE.RT_MSG_CLIENT_FLUSH_ALL:
+            case RT_MSG_TYPE.RT_MSG_CLIENT_FLUSH_SINGLE:
+            case RT_MSG_TYPE.RT_MSG_CLIENT_SET_AGG_TIME:
+                break;
+
+            default:
+                _log.LogInformation("[DME] Unhandled RT {Type} ({Len} bytes)", msgType, payload.Length);
+                break;
+        }
+        return Task.CompletedTask;
+    }
+
+    private static DmeClientState? FindSlot(MediusClientState state)
+    {
+        if (state.DmeWorldId is not int worldId || state.DmeClientIndex is not int index) return null;
+        var world = DmeWorld.GetById(worldId);
+        return world != null && world.Clients.TryGetValue(index, out var slot) ? slot : null;
     }
 }

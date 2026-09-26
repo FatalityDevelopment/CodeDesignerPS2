@@ -62,6 +62,28 @@ public abstract class BaseMediusTcpServer
     protected virtual bool SendCryptKeyGameOnConnect => true;
 
     /// <summary>
+    /// Old-proto (v108) connect: send a second SERVER_CRYPTKEY_PEER right after CRYPTKEY_GAME. The retail DME
+    /// did (Join_Medley capture: GAME, PEER, ACCEPT_TCP, COMPLETE); the retail MAS/MLS did not.
+    /// </summary>
+    protected virtual bool SendCryptKeyPeerAfterGame => false;
+
+    /// <summary>
+    /// Old-proto (v108) connect hook, called after the encrypted CLIENT_CONNECT_TCP is parsed (WorldId, AppId,
+    /// SessionKey, AccessKey set) and before CONNECT_ACCEPT. Return the (PlayerId, PlayerCount) to put in
+    /// CONNECT_ACCEPT_TCP, or null for the defaults.
+    /// </summary>
+    protected virtual Task<(ushort PlayerId, ushort PlayerCount)?> OnOldProtoConnectAsync(
+        MediusClientState state, TcpClient tcp, CancellationToken ct)
+        => Task.FromResult<(ushort, ushort)?>(null);
+
+    /// <summary>When true, a null result from <see cref="OnOldProtoConnectAsync"/> force-disconnects the client.</summary>
+    protected virtual bool RejectUnboundOldProtoConnect => false;
+
+    /// <summary>Old-proto (v108) hook, called right after SERVER_CONNECT_COMPLETE is sent.</summary>
+    protected virtual Task OnOldProtoConnectCompleteAsync(MediusClientState state, TcpClient tcp, CancellationToken ct)
+        => Task.CompletedTask;
+
+    /// <summary>
     /// If true, OnSessionEstablishedAsync is called immediately after sending SERVER_CONNECT_COMPLETE
     /// in the old-protocol path, without waiting for CLIENT_CONNECT_READY_TCP.
     /// MUIS requires this: the PS2 disconnects from MUIS right after receiving CONNECT_COMPLETE
@@ -291,6 +313,8 @@ public abstract class BaseMediusTcpServer
             case RT_MSG_TYPE.RT_MSG_CLIENT_APP_LIST:
             case RT_MSG_TYPE.RT_MSG_CLIENT_SET_RECV_FLAG:
             case RT_MSG_TYPE.RT_MSG_CLIENT_SET_AGG_TIME:
+            case RT_MSG_TYPE.RT_MSG_CLIENT_FLUSH_ALL:
+            case RT_MSG_TYPE.RT_MSG_CLIENT_FLUSH_SINGLE:
                 await HandleRtMessageAsync(packet.MessageType, packet.Payload, state, tcp, ct);
                 break;
 
@@ -419,6 +443,14 @@ public abstract class BaseMediusTcpServer
                 pos += 1; // skip UNK0 (old protocol only)
             if (packet.Payload.Length >= pos + 4)
                 state.AppId = BitConverter.ToInt32(packet.Payload, pos);
+
+            // v108 tail (107 bytes total): ... [RSA_KEY:64 @9][SessionKey:17 @73][AccessKey:17 @90]
+            const int keysAt = 4 + 1 + 4 + 64;
+            if (state.MediusVersion < 109 && packet.Payload.Length >= keysAt + 2 * MediusConstants.SESSIONKEY_MAXLEN)
+            {
+                var r = new MediusReader(packet.Payload[(keysAt + MediusConstants.SESSIONKEY_MAXLEN)..]);
+                state.AccessKey = r.ReadString(MediusConstants.SESSIONKEY_MAXLEN);
+            }
         }
 
         _log.LogInformation("[{Name}] CLIENT_CONNECT_TCP (encrypted) AppId={AppId} ver={Ver} world=0x{World:X}",
@@ -439,15 +471,27 @@ public abstract class BaseMediusTcpServer
             // CONNECT_ACCEPT and CONNECT_COMPLETE use ctx=1 (RcServerSession) in our implementation
             // because that is what the PS2 accepts in practice (allows proceeding to GetUniverse).
             // Session is established immediately — PS2 does NOT send CLIENT_CONNECT_READY_TCP on MUIS.
+            var ids = await OnOldProtoConnectAsync(state, tcp, ct);
+            if (ids == null && RejectUnboundOldProtoConnect)
+            {
+                _log.LogWarning("[{Name}] CLIENT_CONNECT_TCP rejected (world=0x{World:X})", ServerName, state.WorldId ?? 0);
+                await SendPacketAsync(tcp, ScertPacket.CreateForcedDisconnect(1), state, ct);
+                return;
+            }
+            var (playerId, playerCount) = ids ?? ((ushort)state.ScertId, (ushort)1);
+
             if (SendCryptKeyGameOnConnect)
             {
                 _log.LogDebug("[{Name}] -> RT_MSG_SERVER_CRYPTKEY_GAME", ServerName);
                 await SendPacketAsync(tcp, ScertPacket.CreateCryptKeyGame(state.SessionRc4Key), state, CipherContext.RcClientSession, ct);
             }
-            await SendPacketAsync(tcp, ScertPacket.CreateConnectAcceptTcp(state.ScertId, (ushort)state.ScertId, 1, clientIp, state.MediusVersion), state, ct);
+            if (SendCryptKeyPeerAfterGame)
+                await SendPacketAsync(tcp, ScertPacket.CreateCryptKeyPeer(state.SessionRc4Key), ct);
+            await SendPacketAsync(tcp, ScertPacket.CreateConnectAcceptTcp(state.ScertId, playerId, playerCount, clientIp, state.MediusVersion), state, ct);
             await SendPacketAsync(tcp, ScertPacket.CreateConnectComplete(), state, ct);
             state.IsSessionEstablished = true;
             _log.LogInformation("[{Name}] Old-proto handshake complete for {Ep}", ServerName, state.RemoteEndpoint);
+            await OnOldProtoConnectCompleteAsync(state, tcp, ct);
             if (PushDataAfterConnectComplete)
                 await OnSessionEstablishedAsync(state, tcp, ct);
         }
