@@ -11,6 +11,7 @@ public static class MediusConstants
     public const int SESSIONKEY_MAXLEN   = 17;
     public const int NET_SESSION_KEY_LEN = 17;
     public const int NET_ACCESS_KEY_LEN  = 17;
+    public const int MEDIUS_VERSION_MAXLEN = 56;   // VersionServerResponse string (hash-verified, retail MLS)
 
     // ── Account / player ──────────────────────────────────────────────────────
     public const int ACCOUNTNAME_MAXLEN  = 32;

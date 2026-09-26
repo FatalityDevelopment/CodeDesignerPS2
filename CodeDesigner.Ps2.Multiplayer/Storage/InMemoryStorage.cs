@@ -64,6 +64,25 @@ public class InMemoryStorage : IMultiplayerStorage
         return channel;
     }
 
+    /// <summary>Channel with a fixed id (e.g. a retail briefing room's MediusWorldID), created on first use.</summary>
+    public MediusChannel GetOrCreateChannel(int channelId, string name, int appId, int maxPlayers = 256)
+    {
+        var channel = _channelsById.GetOrAdd(channelId, id => new MediusChannel
+        {
+            ChannelId = id,
+            ChannelName = name,
+            MaxPlayers = maxPlayers,
+            AppId = appId,
+        });
+
+        // Keep auto-assigned ids clear of explicitly seeded ones.
+        int current;
+        while ((current = Volatile.Read(ref _nextChannelId)) < channelId
+               && Interlocked.CompareExchange(ref _nextChannelId, channelId, current) != current) { }
+
+        return channel;
+    }
+
     public MediusChannel CreateChannel(string name, int appId, int maxPlayers = 256)
     {
         var channel = new MediusChannel

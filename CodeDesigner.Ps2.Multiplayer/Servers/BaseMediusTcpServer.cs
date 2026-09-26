@@ -408,14 +408,21 @@ public abstract class BaseMediusTcpServer
         //   New Medius (version >= 109): [TargetWorldId: 4][AppId: 4][RSA_KEY: ...]
         if (packet.Payload.Length >= 4)
         {
-            int pos = 4; // skip TargetWorldId
+            // TargetWorldId: the world this connection is for — e.g. a briefing room's MediusWorldID
+            // when the client reconnects after a successful JoinChannel. SOCOM II (v108) packs the world
+            // into the HIGH byte of this u32; the low 3 bytes are constant (01 08 D2). On hardware:
+            // login batch = 0x01D20801 (world 1, MAS default), US EAST room = 0x44D20801 (world 0x44).
+            uint targetWorld = BitConverter.ToUInt32(packet.Payload, 0);
+            state.WorldId = state.MediusVersion < 109 ? (int)(targetWorld >> 24) : (int)targetWorld;
+            int pos = 4;
             if (state.MediusVersion < 109)
                 pos += 1; // skip UNK0 (old protocol only)
             if (packet.Payload.Length >= pos + 4)
                 state.AppId = BitConverter.ToInt32(packet.Payload, pos);
         }
 
-        _log.LogInformation("[{Name}] CLIENT_CONNECT_TCP (encrypted) AppId={AppId} ver={Ver}", ServerName, state.AppId, state.MediusVersion);
+        _log.LogInformation("[{Name}] CLIENT_CONNECT_TCP (encrypted) AppId={AppId} ver={Ver} world=0x{World:X}",
+            ServerName, state.AppId, state.MediusVersion, state.WorldId ?? 0);
 
         state.ScertId = Interlocked.Increment(ref _scertIdCounter);
         var clientIp = (tcp.Client.RemoteEndPoint as IPEndPoint)?.Address;

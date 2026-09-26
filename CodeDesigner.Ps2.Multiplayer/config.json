@@ -1,7 +1,7 @@
 {
   "Online": {
     "BindAddress": "0.0.0.0",
-    "ServerIp": "192.168.229.108",
+    "ServerIp": "192.168.229.109",
     "MuisPort": 10071,
     "MasPort": 10077,
     "MlsPort": 10075,

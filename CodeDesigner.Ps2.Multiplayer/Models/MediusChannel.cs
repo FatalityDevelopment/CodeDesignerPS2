@@ -8,6 +8,7 @@ public class MediusChannel
     public int    MaxPlayers       { get; set; } = 256;
     public int    AppId            { get; set; }
     public string Password         { get; set; } = string.Empty;
+    public int    SecurityLevel    { get; set; }
     public int    GenericField1    { get; set; }
     public int    GenericField2    { get; set; }
     public int    GenericField3    { get; set; }

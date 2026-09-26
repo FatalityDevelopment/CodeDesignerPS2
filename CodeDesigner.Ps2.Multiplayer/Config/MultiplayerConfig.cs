@@ -150,6 +150,36 @@ public class MultiplayerConfig
     public string UniversePatchVersion { get; set; } = "r0004";
     public string UniversePatchUrl { get; set; } = "https://example.com/patches/r0004/update.zip";
 
+    // ── Briefing rooms (online BRIEFING screen) ───────────────────────────────
+
+    /// <summary>
+    /// Online BRIEFING-screen rooms — the rooms a player must enter before they can create or join a
+    /// game. Each is sent as one ChannelList_ExtraInfoResponse (0xED) entry in reply to the client's
+    /// ChannelList_ExtraInfo0 (0xEC). Defaults are the retail rooms extracted from the servers-online
+    /// memory dump (see <see cref="BriefingRoomConfig.RetailDefaults"/>).
+    /// </summary>
+    public List<BriefingRoomConfig> BriefingRooms { get; set; } = BriefingRoomConfig.RetailDefaults();
+
+    /// <summary>
+    /// Display order for <see cref="BriefingRooms"/>: "Manual" keeps the array order as written;
+    /// "Alphabetical" sorts the room names A→Z before sending them.
+    /// </summary>
+    public string BriefingRoomSortOrder { get; set; } = "Manual";
+
+    /// <summary>
+    /// Wire layout of each 0xED entry. "Retail" = the 0x70-byte struct SOCOM II's RoomList callback
+    /// (EE 0x003009B0) parses; "Legacy" = the 3b4ee8f 105-byte layout (connection-stable but renders no
+    /// rooms — its EndOfList never lands on 0x6C). Keep "Legacy" as the one-line rollback.
+    /// </summary>
+    public string BriefingRoomListFormat { get; set; } = "Retail";
+
+    /// <summary>
+    /// Default rooms (permanent server-hosted games) listed inside every briefing room, as retail did.
+    /// Defaults are the 27 extracted from the retail dump (see <see cref="DefaultGameConfig.RetailDefaults"/>).
+    /// Empty list = briefing rooms show no games until a player creates one.
+    /// </summary>
+    public List<DefaultGameConfig> DefaultGames { get; set; } = DefaultGameConfig.RetailDefaults();
+
     // ── Binary injection ──────────────────────────────────────────────────────
 
     /// <summary>

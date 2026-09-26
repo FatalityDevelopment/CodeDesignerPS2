@@ -14,6 +14,7 @@ namespace CodeDesigner.Ps2.Multiplayer.Storage
         MediusGame? GetGameById(int id);
         IEnumerable<MediusGame> GetGames(int appId);
         MediusChannel GetOrCreateDefaultChannel(int appId);
+        MediusChannel GetOrCreateChannel(int channelId, string name, int appId, int maxPlayers = 256);
         bool RemoveGame(int gameId);
     }
 }
