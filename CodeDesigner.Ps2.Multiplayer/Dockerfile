@@ -1,0 +1,34 @@
+# PS2 Medius server (SOCOM II) — MUIS / MAS / MLS / DME / NAT / DNAS / DNS in one container.
+# Build context: this folder (CodeDesigner.Ps2.Multiplayer).
+#   docker build -t socom2-server .
+#   az acr build -r <registry> -t socom2-server:<tag> .
+
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+WORKDIR /src
+COPY CodeDesigner.Ps2.Multiplayer.csproj ./
+RUN dotnet restore
+COPY . .
+# SkipInstallDeploy: don't run the desktop "copy to %LOCALAPPDATA%" step inside the image build.
+RUN dotnet publish -c Release -o /app --no-restore -p:SkipInstallDeploy=true -p:UseAppHost=false
+
+FROM mcr.microsoft.com/dotnet/runtime:8.0
+WORKDIR /app
+COPY --from=build /app .
+
+# Container defaults — override any setting with Online__<Name> environment variables.
+#   Online__ServerIp=auto + Online__PublicHostname=<fqdn>  → announce the IP the FQDN resolves to
+#   Online__DnsForwardUnknown=false                        → never act as an open DNS resolver
+#   MULTIPLAYER_LOG_FILE=none                              → log to stdout only
+ENV Online__BindAddress=0.0.0.0 \
+    Online__ServerIp=auto \
+    Online__DnsForwardUnknown=false \
+    MULTIPLAYER_LOG_FILE=none \
+    Logging__Console__FormatterName=simple \
+    Logging__Console__FormatterOptions__SingleLine=true \
+    Logging__Console__FormatterOptions__TimestampFormat="HH:mm:ss.fff "
+
+# DNS (PS2 primary DNS), DNAS HTTPS + debug HTTP, NAT, DME, MUIS, MLS, MAS.
+EXPOSE 53/udp 443/tcp 10060/tcp 10069/udp 10070/tcp 10071/tcp 10075/tcp 10077/tcp
+
+# Runs as root: the PS2 needs the fixed privileged ports 53 (DNS) and 443 (DNAS).
+ENTRYPOINT ["dotnet", "CodeDesigner.Ps2.Multiplayer.dll"]

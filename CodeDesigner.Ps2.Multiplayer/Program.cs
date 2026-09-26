@@ -15,16 +15,24 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 var builder = Host.CreateApplicationBuilder(args);
 
-// Config file
+// Config: config.json next to the binary, then an optional extra file (MULTIPLAYER_CONFIG, e.g. a mounted
+// volume), then environment variables LAST so they override both — containers set e.g. Online__ServerIp.
 builder.Configuration
     .SetBasePath(AppContext.BaseDirectory)
     .AddJsonFile("config.json", optional: true, reloadOnChange: false);
+if (Environment.GetEnvironmentVariable("MULTIPLAYER_CONFIG") is { Length: > 0 } extraConfig)
+    builder.Configuration.AddJsonFile(extraConfig, optional: false, reloadOnChange: false);
+builder.Configuration.AddEnvironmentVariables();
 
-// Console logging + file logging
-var logFile = Path.Combine(AppContext.BaseDirectory, "multiplayer.log");
+// Console logging + file logging. MULTIPLAYER_LOG_FILE overrides the file path; "none" disables it
+// (containers log to stdout — an unbounded file would just fill the container disk).
+var logFile = Environment.GetEnvironmentVariable("MULTIPLAYER_LOG_FILE") is { Length: > 0 } logEnv
+    ? logEnv
+    : Path.Combine(AppContext.BaseDirectory, "multiplayer.log");
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
-builder.Logging.AddProvider(new FileLoggerProvider(logFile));
+if (!logFile.Equals("none", StringComparison.OrdinalIgnoreCase))
+    builder.Logging.AddProvider(new FileLoggerProvider(logFile));
 builder.Logging.SetMinimumLevel(LogLevel.Debug);
 
 // Load server config
@@ -52,4 +60,9 @@ builder.Services.AddSingleton<NatServer>();
 builder.Services.AddHostedService<MultiplayerHostedService>();
 
 var host = builder.Build();
+
+// ServerIp "auto" (container deployments): resolve the public IP before any server announces it.
+await ServerIpResolver.ResolveAsync(serverConfig,
+    host.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Config"), CancellationToken.None);
+
 await host.RunAsync();

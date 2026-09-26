@@ -217,8 +217,9 @@ public class DnasServer
                             "Run with admin or: netsh http add urlacl url=http://+:{Port}/ user=Everyone",
                 _config.DnasPort);
         }
-        catch (SocketException ex)
+        catch (Exception ex)
         {
+            // Debug-only listener — never let it take the server down (e.g. HttpListener quirks on Linux).
             _log.LogWarning("[DNAS] Cannot start plain-HTTP listener on {Port}: {Msg}", _config.DnasPort, ex.Message);
             return;
         }

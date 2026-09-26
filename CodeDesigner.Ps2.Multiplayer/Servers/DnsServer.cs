@@ -150,10 +150,16 @@ public class DnsServer
                 reply = BuildAResponse(buf, qname, customIp);
                 _log.LogInformation("[DNS] {Name} → {Ip} (custom mapping)", qname, customIp);
             }
-            else
+            else if (_config.DnsForwardUnknown)
             {
                 reply = await ForwardAsync(buf, ct);
                 _log.LogDebug("[DNS] Forwarded {Name}", qname);
+            }
+            else
+            {
+                // Public deployment: never act as an open resolver.
+                reply = BuildRefused(buf, afterQname + 4);
+                _log.LogDebug("[DNS] Refused {Name} (forwarding disabled)", qname);
             }
 
             if (reply.Length > 0)
@@ -242,6 +248,18 @@ public class DnsServer
         ms.Write(ipBytes, 0, 4);                     // RDATA = IPv4
 
         return ms.ToArray();
+    }
+
+    /// <summary>REFUSED (RCODE 5) reply echoing the query's ID, RD bit and question section.</summary>
+    private static byte[] BuildRefused(byte[] query, int questionEnd)
+    {
+        var reply = new byte[questionEnd];
+        Array.Copy(query, reply, questionEnd);
+        reply[2] = (byte)(0x80 | (query[2] & 0x01));   // QR=1, opcode 0, RD copied
+        reply[3] = 0x05;                                 // RA=0, RCODE=REFUSED
+        reply[4] = 0x00; reply[5] = 0x01;                // QDCOUNT = 1
+        reply[6] = reply[7] = reply[8] = reply[9] = reply[10] = reply[11] = 0;
+        return reply;
     }
 
     private static void WriteQName(Stream ms, string name)

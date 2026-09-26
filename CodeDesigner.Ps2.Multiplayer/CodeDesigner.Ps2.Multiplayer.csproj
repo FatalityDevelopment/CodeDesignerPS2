@@ -37,7 +37,7 @@
       Windows  →  %LOCALAPPDATA%\CodeDesigner\Multiplayer\
       Linux/macOS →  $HOME/.local/share/CodeDesigner/Multiplayer/
   -->
-  <Target Name="DeployToInstallDir" AfterTargets="Build">
+  <Target Name="DeployToInstallDir" AfterTargets="Build" Condition="'$(SkipInstallDeploy)' != 'true'">
     <PropertyGroup>
       <_LocalAppData Condition="'$(LOCALAPPDATA)' != ''">$(LOCALAPPDATA)</_LocalAppData>
       <_LocalAppData Condition="'$(LOCALAPPDATA)' == '' AND '$(HOME)' != ''">$(HOME)/.local/share</_LocalAppData>

@@ -7,8 +7,19 @@ public class MultiplayerConfig
     /// <summary>IP address to bind to. 0.0.0.0 = all interfaces.</summary>
     public string BindAddress { get; set; } = "0.0.0.0";
 
-    /// <summary>Announced server IP returned to clients (your LAN/WAN IP).</summary>
+    /// <summary>
+    /// Announced server IP returned to clients (your LAN/WAN IP). "auto" resolves it at startup: from
+    /// <see cref="PublicHostname"/> when set (e.g. an Azure Container Instances FQDN), otherwise by asking a
+    /// public what's-my-IP service.
+    /// </summary>
     public string ServerIp { get; set; } = "127.0.0.1";
+
+    /// <summary>
+    /// Public DNS name that resolves to this server's inbound IP. Used when <see cref="ServerIp"/> is "auto" —
+    /// on Azure Container Instances the outbound IP can differ from the inbound one, so the IP handed to
+    /// consoles must come from the group's own FQDN (e.g. "mylabel.eastus.azurecontainer.io").
+    /// </summary>
+    public string PublicHostname { get; set; } = "";
 
     // ── Medius ports ─────────────────────────────────────────────────────────
 
@@ -47,6 +58,14 @@ public class MultiplayerConfig
     /// Set to 0 to disable the built-in DNS responder.
     /// </summary>
     public int DnsDnasPort { get; set; } = 53;
+
+    /// <summary>
+    /// Forward DNS queries this server doesn't answer itself (anything but the DNAS/Medius intercepts and
+    /// <see cref="DnsMappings"/>) to a public resolver. Fine on a LAN; on a public IP it makes the server an
+    /// open resolver that gets abused for DNS amplification, so internet deployments set this false and
+    /// unknown names are REFUSED.
+    /// </summary>
+    public bool DnsForwardUnknown { get; set; } = true;
 
     /// <summary>
     /// DNAS region sub-folder inside Data/. The server looks for response files
