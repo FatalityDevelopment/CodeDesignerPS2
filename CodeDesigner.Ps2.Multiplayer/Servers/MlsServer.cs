@@ -1116,7 +1116,7 @@ public class MlsServer : BaseMediusTcpServer
         {
             var w = new MediusWriter();
             WriteMlsHeader(w, packet, MediusCallbackStatus.MediusSuccess);
-            _log.LogDebug("[MLS] -> SetGameListFilterResponse0 (room 0x{World:X})", state.WorldId);
+            _log.LogDebug("[MLS] -> SetGameListFilterResponse0 (world 0x{World:X})", state.WorldId);
             await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.SetGameListFilterResponse0, w.ToArray()), ct);
             return;
         }
@@ -1164,12 +1164,35 @@ public class MlsServer : BaseMediusTcpServer
         await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.UpdateLadderStatsResponse, w.ToArray()), ct);
     }
 
-    private Task HandleFileListFilesAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
+    /// <summary>
+    /// FileListFiles (0xB2) — the game asks for its saved weapon profile ("WeapProfile_N.dat") in the login
+    /// batch. Request (176 B): Filename[128] | 6×u32 filters | MessageID[21] @152 | pad3.
+    /// Reply FileListFilesResponse (0xB3) = MediusFile[172] | StatusCode @0xAC | MessageID[21] @0xB0 |
+    /// EndOfList @0xC5 | pad2 = 200 B (202 on the wire, the size retail sent on the community connection).
+    /// Layout RE'd from the client's handler at EE 0x003225D0 (status @0xAC checked by 0x00311560, MessageID
+    /// @0xB0 looked up in the pending-request map 0x00453440, EOL @0xC5). A non-zero status opens the
+    /// MP_MEDIUS_FILE_DOES_NOT_EXIST modal via 0x0027F920, and left UNANSWERED the request times out ~15-18 s
+    /// later — if the player is already on the community screen by then, that is the intermittent "news"
+    /// disconnect. So: Success + an empty entry + EndOfList = "no server-side profile".
+    /// </summary>
+    private async Task HandleFileListFilesAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
     {
-        // UNANSWERED — exactly as in the L654 state that reached the EULA + community screen. The game
-        // sends FileListFiles for its weapon profile but does NOT block the lobby on the reply.
-        _log.LogDebug("[MLS] FileListFiles received (no reply — minimal lobby)");
-        return Task.CompletedTask;
+        const int msgIdAt = 152;
+        var p = packet.Payload;
+        byte[] msgId = p.Length >= msgIdAt + MediusConstants.MESSAGEID_MAXLEN
+            ? p[msgIdAt..(msgIdAt + MediusConstants.MESSAGEID_MAXLEN)]
+            : ExtractTrailingMessageId(p);
+
+        var w = new MediusWriter();
+        WriteEmptyMediusFile(w);                                   // 0x00 MediusFile[172] (no file)
+        w.Write((int)MediusCallbackStatus.MediusSuccess);          // 0xAC StatusCode
+        w.Write(msgId);                                            // 0xB0 MessageID[21]
+        w.Write((byte)1);                                          // 0xC5 EndOfList
+        w.WritePadding(2);                                         // → 0xC8 = 200
+
+        _log.LogInformation("[MLS] FileListFiles '{File}' -> empty list (msgId={MsgId})",
+            ReadLeadingString(p), System.Text.Encoding.ASCII.GetString(msgId).TrimEnd('\0'));
+        await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.FileListFilesResponse, w.ToArray()), state, ct);
     }
 
     /// <summary>
@@ -1479,7 +1502,7 @@ public class MlsServer : BaseMediusTcpServer
             var w = new MediusWriter();
             w.Write(MlsMsgId(packet));                                          // MessageID[21]
             w.WriteString(RetailLobbyServerVersion, MediusConstants.MEDIUS_VERSION_MAXLEN);
-            _log.LogDebug("[MLS] -> VersionServerResponse (room 0x{World:X})", state.WorldId);
+            _log.LogDebug("[MLS] -> VersionServerResponse (world 0x{World:X})", state.WorldId);
             await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.VersionServerResponse, w.ToArray()), ct);
             return;
         }
