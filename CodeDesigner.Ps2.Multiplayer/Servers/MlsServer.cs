@@ -226,6 +226,16 @@ public class MlsServer : BaseMediusTcpServer
                     _log.LogDebug("[MLS] PlayerReport received (one-way)");
                     break;
 
+                case MediusLobbyMessageId.EndGameReport:
+                    // Host's end-of-game report (126 B: SessionKey | pad3 | WorldID | WinningTeam | WinningPlayer |
+                    // FinalScore) — one-way in horizon, no reply.
+                    _log.LogInformation("[MLS] EndGameReport received (one-way) from {Acct}", state.AccountName);
+                    break;
+
+                case MediusLobbyMessageId.TextFilter:
+                    await HandleTextFilterAsync(packet, state, tcp, ct);
+                    break;
+
                 case MediusLobbyMessageId.ChannelInfo:
                     await HandleChannelInfoAsync(packet, state, tcp, ct);
                     break;
@@ -1043,10 +1053,13 @@ public class MlsServer : BaseMediusTcpServer
         // so CommunityReached stays false. Leaving that PlayerInfo silent fired cbIsGameAlive's
         // "_1067 disconnected" screen on entering the room (socket still up, game-list refresh still polling).
         bool roomConnection = IsRoomConnection(state);
+        // Retail answered this on the community connection as well (create_Masquarr: 330 B). The old "stops
+        // advancing" failure was with the legacy layout, which made the client read its status as Disconnected.
+        bool retailLayout = roomConnection || _config.CommunityRetailReplies;
 
-        // LOGIN-batch connection (no ChannelList seen yet): stay SILENT — answering here stops the game
-        // from advancing to the community reconnect.
-        if (!state.CommunityReached && !roomConnection)
+        // LOGIN-batch connection (no ChannelList seen yet): stay SILENT — answering here (legacy layout)
+        // stopped the game from advancing to the community reconnect.
+        if (!state.CommunityReached && !retailLayout)
         {
             _log.LogDebug("[MLS] PlayerInfo received (login batch — no reply)");
             return;
@@ -1064,7 +1077,7 @@ public class MlsServer : BaseMediusTcpServer
 
         var w = new MediusWriter();
         WriteMlsHeader(w, packet, MediusCallbackStatus.MediusSuccess);          // msgId echo + pad + StatusCode=0 @0x18
-        if (roomConnection)
+        if (retailLayout)
         {
             // Retail layout (horizon MediusPlayerInfoResponse): 328-byte payload = the 330-byte reply in both
             // retail room-join captures (Join_US_East, create_Masquarr). The legacy layout below put an
@@ -1097,8 +1110,9 @@ public class MlsServer : BaseMediusTcpServer
         // Briefing-room connection: retail DOES answer. Hash-verified against the Join_US_East and
         // create_Masquarr captures: the constant 30-byte reply (hash fb182a2e) is exactly
         // 01 4F + MessageID(21 zero) + pad(90 FF BF, uninitialised server stack) + StatusCode 0 — the v108
-        // header-only SetGameListFilterResponse0 (FilterID only exists for v>108).
-        if (IsRoomConnection(state))
+        // header-only SetGameListFilterResponse0 (FilterID only exists for v>108). create_Masquarr shows retail
+        // sent the same reply on the community connection (CommunityRetailReplies).
+        if (IsRoomConnection(state) || _config.CommunityRetailReplies)
         {
             var w = new MediusWriter();
             WriteMlsHeader(w, packet, MediusCallbackStatus.MediusSuccess);
@@ -1137,15 +1151,15 @@ public class MlsServer : BaseMediusTcpServer
     }
 
     /// <summary>
-    /// UpdateLadderStatsResponse (0xCF). Horizon only implements the newer *Wide variant; like every Medius
-    /// "update" reply it carries just MessageID + pad + StatusCode. Zero filler guards against the parser
-    /// reading a field past our payload (unverified against the client).
+    /// UpdateLadderStatsResponse (0xCF) = MessageID + pad + StatusCode only: retail's reply is 30 bytes on the
+    /// wire in both room-join captures (our old reply added 32 filler bytes → 62). Its exact bytes aren't
+    /// hash-recoverable (status isn't 0/±1 and the pad is server garbage), so we answer Success.
+    /// Request (90 B): MessageID[21] | pad3 | LadderType | Stats.
     /// </summary>
     private async Task HandleUpdateLadderStatsAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
     {
         var w = new MediusWriter();
         WriteMlsHeader(w, packet, MediusCallbackStatus.MediusSuccess);
-        w.WritePadding(32);
         _log.LogDebug("[MLS] -> UpdateLadderStatsResponse (ack)");
         await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.UpdateLadderStatsResponse, w.ToArray()), ct);
     }
@@ -1203,6 +1217,29 @@ public class MlsServer : BaseMediusTcpServer
         int len = Math.Min(end - start, MediusConstants.MESSAGEID_MAXLEN);
         Buffer.BlockCopy(payload, start, id, 0, len);
         return id;
+    }
+
+    /// <summary>
+    /// TextFilter (0x98) — the client vets typed text (e.g. a new game's name) before using it. Request (110 B,
+    /// hardware) = MessageID[21] | SessionKey[17] | pad2 | TextFilterType | Text[64]. Reply TextFilterResponse
+    /// (0x99, horizon) = MessageID[21] | Text[64] | pad3 | StatusCode = 94 B on the wire — the same size as the
+    /// retail create_Masquarr "110 → 94" exchange. No word filter: every text passes and is echoed back.
+    /// </summary>
+    private async Task HandleTextFilterAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
+    {
+        var r = new MediusReader(packet.Payload);
+        r.Skip(MediusConstants.MESSAGEID_MAXLEN + MediusConstants.SESSIONKEY_MAXLEN + 2);
+        int    filterType = r.ReadInt32();
+        string text       = r.ReadString(64);
+
+        var w = new MediusWriter();
+        w.Write(MlsMsgId(packet));                                   // MessageID[21]
+        w.WriteString(text, 64);                                     // Text[64]
+        w.WritePadding(3);
+        w.Write((int)MediusCallbackStatus.MediusSuccess);
+
+        _log.LogInformation("[MLS] TextFilter type={Type} '{Text}' -> pass", filterType, text);
+        await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.TextFilterResponse, w.ToArray()), state, ct);
     }
 
     /// <summary>The host's latest WorldReport0 for a game world (default rooms included).</summary>
@@ -1435,8 +1472,9 @@ public class MlsServer : BaseMediusTcpServer
     {
         // Briefing-room connection: retail DOES answer. Hash-verified (Join_US_East + create_Masquarr, constant
         // hash f1037739): the 79-byte reply is exactly 01 87 + MessageID[21] + VersionServer[56] — no pad, no
-        // StatusCode. Left unanswered, the pending request raised the transition-screen disconnect.
-        if (IsRoomConnection(state))
+        // StatusCode. Left unanswered, the pending request raised the transition-screen disconnect. The same
+        // reply also went out on the retail community connection (create_Masquarr) — CommunityRetailReplies.
+        if (IsRoomConnection(state) || _config.CommunityRetailReplies)
         {
             var w = new MediusWriter();
             w.Write(MlsMsgId(packet));                                          // MessageID[21]

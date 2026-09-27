@@ -199,6 +199,15 @@ public class MultiplayerConfig
     /// </summary>
     public List<DefaultGameConfig> DefaultGames { get; set; } = DefaultGameConfig.RetailDefaults();
 
+    /// <summary>
+    /// Answer the community (login) connection's batch like retail did: VersionServer (79 B), SetGameListFilter0
+    /// (30 B) and PlayerInfo (330-byte retail layout) — all hash/size-verified against create_Masquarr, where
+    /// the retail server answered them on the community connection too. Off = the older hardware-stable
+    /// behaviour (those three stay silent there). Targets the intermittent news-screen disconnect; flip back
+    /// to false if login regresses.
+    /// </summary>
+    public bool CommunityRetailReplies { get; set; } = false;
+
     // ── Binary injection ──────────────────────────────────────────────────────
 
     /// <summary>
