@@ -3,6 +3,7 @@ using System.Text;
 using CodeDesigner.Ps2.Multiplayer.Config;
 using CodeDesigner.Ps2.Multiplayer.Models;
 using CodeDesigner.Ps2.Multiplayer.Protocol;
+using CodeDesigner.Ps2.Multiplayer.Storage;
 using Microsoft.Extensions.Logging;
 
 namespace CodeDesigner.Ps2.Multiplayer.Servers;
@@ -29,12 +30,14 @@ public class DmeServer : BaseMediusTcpServer
     private const int DmeVersionLength = 16;
 
     private readonly MultiplayerConfig _config;
+    private readonly PresenceRegistry _presence;
     private readonly ILogger<DmeServer> _log;
 
-    public DmeServer(MultiplayerConfig config, ILogger<DmeServer> log)
+    public DmeServer(MultiplayerConfig config, PresenceRegistry presence, ILogger<DmeServer> log)
         : base(log, config)
     {
         _config    = config;
+        _presence  = presence;
         _log       = log;
         ServerName = "DME";
     }
@@ -102,6 +105,7 @@ public class DmeServer : BaseMediusTcpServer
             var world = slot.World;
             world.NotifyPlayerLeft(slot);
             world.RemoveClient(slot);
+            if (slot.AccountId != 0) _presence.LeftGame(slot.AccountId);
             _log.LogInformation("[DME] Player {Id} left {World}", slot.DmeId, world);
 
             if (world.Clients.IsEmpty && world.SelfDestructFlag)

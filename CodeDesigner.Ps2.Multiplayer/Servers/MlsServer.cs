@@ -16,22 +16,48 @@ namespace CodeDesigner.Ps2.Multiplayer.Servers;
 ///
 /// Default port: 10073 (TCP)
 /// </summary>
-public class MlsServer : BaseMediusTcpServer
+public partial class MlsServer : BaseMediusTcpServer
 {
     private readonly MultiplayerConfig       _config;
     private readonly InMemoryStorage    _store;
-
-    // Last Stats[256] each account uploaded via AccountUpdateStats — echoed in room PlayerInfo replies.
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<int, byte[]> _accountStats = new();
+    private readonly PresenceRegistry   _presence;
     private readonly ILogger<MlsServer> _log;
 
-    public MlsServer(MultiplayerConfig config, InMemoryStorage store, ILogger<MlsServer> log)
+    // MLS connections that registered presence for an account (ConnectionId → AccountId).
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> _presenceByConnection = new();
+
+    public MlsServer(MultiplayerConfig config, InMemoryStorage store, PresenceRegistry presence, ILogger<MlsServer> log)
         : base(log, config)
     {
         _config    = config;
         _store     = store;
+        _presence  = presence;
         _log       = log;
         ServerName = "MLS";
+    }
+
+    /// <summary>
+    /// Bind this MLS connection to its account. MLS never sees the login itself: the client presents the MAS
+    /// session key as the access key of its CLIENT_CONNECT_TCP (MAS AccountLoginResponse / JoinChannel set it),
+    /// and MAS registered that key at login. Also registers the account as online in the connection's lobby.
+    /// </summary>
+    private MediusAccount? ResolveAccount(MediusClientState state)
+    {
+        if (state.AccountId is int known) return _store.GetAccountById(known);
+
+        var account = _store.GetAccountBySession(state.AccessKey);
+        if (account == null) return null;
+
+        state.AccountId   = account.AccountId;
+        state.AccountName = account.AccountName;
+        if (_presenceByConnection.TryAdd(state.ConnectionId, account.AccountId))
+        {
+            var room = state.WorldId is int w ? _store.GetChannelById(w) : null;
+            _presence.Connected(account.AccountId, room?.ChannelId ?? state.WorldId ?? 0, room?.ChannelName ?? "Community");
+        }
+        _log.LogInformation("[MLS] Connection {Conn} is account {Id} '{Name}' (world 0x{World:X})",
+            state.ConnectionId, account.AccountId, account.AccountName, state.WorldId ?? 0);
+        return account;
     }
 
     private FileSystemWatcher? _injectWatcher;
@@ -153,6 +179,8 @@ public class MlsServer : BaseMediusTcpServer
             var game = _store.GetGameById(state.CurrentGameId.Value);
             if (state.AccountId.HasValue) game?.RemovePlayer(state.AccountId.Value);
         }
+        if (_presenceByConnection.TryRemove(state.ConnectionId, out int accountId))
+            _presence.Disconnected(accountId);
         return Task.CompletedTask;
     }
 
@@ -162,10 +190,16 @@ public class MlsServer : BaseMediusTcpServer
 
     protected override async Task HandleMediusMessageAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
     {
+        ResolveAccount(state);
+
         if (packet.MessageClass == NetMessageClass.MessageClassLobby)
         {
             var typeId = (MediusLobbyMessageId)packet.MessageType;
             _log.LogDebug("[MLS] Lobby msg: {Type}", typeId);
+
+            // Friends, ignore list, ladder rankings and clans (MlsServer.Social.cs).
+            if (await TryHandleSocialAsync(typeId, packet, state, tcp, ct))
+                return;
 
             switch (typeId)
             {
@@ -240,10 +274,6 @@ public class MlsServer : BaseMediusTcpServer
                     await HandleChannelInfoAsync(packet, state, tcp, ct);
                     break;
 
-                case MediusLobbyMessageId.FindPlayer:
-                    await HandleFindPlayerAsync(packet, state, tcp, ct);
-                    break;
-
                 case MediusLobbyMessageId.ChatMessage:
                     await HandleChatMessageAsync(packet, state, tcp, ct);
                     break;
@@ -291,57 +321,14 @@ public class MlsServer : BaseMediusTcpServer
                     await HandlePolicyAsync(packet, state, tcp, ct);
                     break;
 
-                case MediusLobbyMessageId.GetMyClans:
-                    await SendEmptyLobbyListAsync(packet, tcp, MediusLobbyMessageId.GetMyClansResponse, ct);
-                    break;
-
-                case MediusLobbyMessageId.CheckMyClanInvitations:
-                    await SendEmptyLobbyListAsync(packet, tcp, MediusLobbyMessageId.CheckMyClanInvitationsResponse, ct);
-                    break;
-
-                case MediusLobbyMessageId.ClanLadderList:
-                    await SendEmptyLobbyListAsync(packet, tcp, MediusLobbyMessageId.ClanLadderListResponse, ct);
-                    break;
-
-                case MediusLobbyMessageId.LadderList_ExtraInfo0:
-                    await SendEmptyLobbyListAsync(packet, tcp, MediusLobbyMessageId.LadderList_ExtraInfoResponse, ct);
-                    break;
-
-                case MediusLobbyMessageId.LadderPosition_ExtraInfo:
-                    await SendEmptyLobbyListAsync(packet, tcp, MediusLobbyMessageId.LadderPosition_ExtraInfoResponse, ct);
-                    break;
-
-                case MediusLobbyMessageId.GetBuddyList_ExtraInfo:
-                    await SendEmptyLobbyListAsync(packet, tcp, MediusLobbyMessageId.GetBuddyList_ExtraInfoResponse, ct);
-                    break;
-
-                case MediusLobbyMessageId.GetIgnoreList:
-                    await SendEmptyLobbyListAsync(packet, tcp, MediusLobbyMessageId.GetIgnoreListResponse, ct);
-                    break;
-
-                // ── Clan info sweep (follows the init batch on the community screen) ──
-                case MediusLobbyMessageId.GetClanMemberList_ExtraInfo:
-                    await SendEmptyLobbyListAsync(packet, tcp, MediusLobbyMessageId.GetClanMemberList_ExtraInfoResponse, ct);
-                    break;
-
+                // Friends, ignore list, ladders and clans are answered in MlsServer.Social.cs (TryHandleSocialAsync).
                 case MediusLobbyMessageId.GetClanMemberList:
                     await SendEmptyLobbyListAsync(packet, tcp, MediusLobbyMessageId.GetClanMemberListResponse, ct);
                     break;
 
-                case MediusLobbyMessageId.GetMyClanMessages:
-                    await SendEmptyLobbyListAsync(packet, tcp, MediusLobbyMessageId.GetMyClanMessagesResponse, ct);
-                    break;
-
-                case MediusLobbyMessageId.GetAllClanMessages:
-                    await SendEmptyLobbyListAsync(packet, tcp, MediusLobbyMessageId.GetAllClanMessagesResponse, ct);
-                    break;
-
-                case MediusLobbyMessageId.GetClanInvitationsSent:
-                    await SendEmptyLobbyListAsync(packet, tcp, MediusLobbyMessageId.GetClanInvitationsSentResponse, ct);
-                    break;
 
                 default:
-                    _log.LogDebug("[MLS] Unhandled lobby msg 0x{Type:X2}", packet.MessageType);
+                    _log.LogInformation("[MLS] Unhandled lobby msg 0x{Type:X2} ({Name}, {Len} B)", packet.MessageType, (MediusLobbyMessageId)packet.MessageType, packet.Payload.Length);
                     break;
             }
         }
@@ -898,6 +885,13 @@ public class MlsServer : BaseMediusTcpServer
             if (state.AccountId.HasValue) game?.AddPlayer(state.AccountId.Value);
             state.CurrentGameId = worldId;
             state.Status        = PlayerStatus.InGameWorld;
+            if (state.AccountId is int joiner)
+            {
+                int defaultIndex = (worldId & 0xFF) - 2;
+                string gameName = game?.GameName
+                    ?? (defaultIndex >= 0 && defaultIndex < _config.DefaultGames.Count ? _config.DefaultGames[defaultIndex].Name : "");
+                _presence.JoinedGame(joiner, worldId, gameName);
+            }
 
             w.WriteNetConnectionInfo(
                 NetConnectionType.ClientServerTCP,
@@ -1086,8 +1080,7 @@ public class MlsServer : BaseMediusTcpServer
             w.Write(state.AppId);                                               // 0x3C ApplicationID
             w.Write((int)MediusPlayerStatus.MediusPlayerInChatWorld);          // 0x40 PlayerStatus
             w.Write((int)MediusConnectionType.Ethernet);                       // 0x44 ConnectionClass
-            w.Write(_accountStats.TryGetValue(accountId, out var stats)         // 0x48 Stats[256]
-                ? stats : new byte[MediusConstants.ACCOUNTSTATS_MAXLEN]);
+            w.Write(Fixed(account?.AccountStats, MediusConstants.ACCOUNTSTATS_MAXLEN)); // 0x48 Stats[256]
         }
         else
         {
@@ -1131,7 +1124,7 @@ public class MlsServer : BaseMediusTcpServer
 
     // Both stats updates are request/response. The client sends them on the briefing-room connection right
     // after PlayerInfo is answered; each unanswered one raised its own "Disconnected" screen (two on entering
-    // a room). Stats aren't persisted to disk yet — cached per account for PlayerInfo, then acked with Success.
+    // a room). Both are persisted on the account (AccountStats → PlayerInfo/ladder rows, LadderStats → ranking).
 
     /// <summary>
     /// AccountUpdateStatsResponse (0x12) = MessageID + pad + StatusCode. Hash-verified against the retail
@@ -1141,8 +1134,12 @@ public class MlsServer : BaseMediusTcpServer
     private async Task HandleAccountUpdateStatsAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
     {
         const int statsOffset = MediusConstants.MESSAGEID_MAXLEN + MediusConstants.SESSIONKEY_MAXLEN;
-        if (state.AccountId is int acct && packet.Payload.Length >= statsOffset + MediusConstants.ACCOUNTSTATS_MAXLEN)
-            _accountStats[acct] = packet.Payload.AsSpan(statsOffset, MediusConstants.ACCOUNTSTATS_MAXLEN).ToArray();
+        var account = state.AccountId is int acct ? _store.GetAccountById(acct) : null;
+        if (account != null && packet.Payload.Length >= statsOffset + MediusConstants.ACCOUNTSTATS_MAXLEN)
+        {
+            account.AccountStats = packet.Payload.AsSpan(statsOffset, MediusConstants.ACCOUNTSTATS_MAXLEN).ToArray();
+            _store.MarkDirty();
+        }
 
         var w = new MediusWriter();
         WriteMlsHeader(w, packet, MediusCallbackStatus.MediusSuccess);
@@ -1154,10 +1151,31 @@ public class MlsServer : BaseMediusTcpServer
     /// UpdateLadderStatsResponse (0xCF) = MessageID + pad + StatusCode only: retail's reply is 30 bytes on the
     /// wire in both room-join captures (our old reply added 32 filler bytes → 62). Its exact bytes aren't
     /// hash-recoverable (status isn't 0/±1 and the pad is server garbage), so we answer Success.
-    /// Request (90 B): MessageID[21] | pad3 | LadderType | Stats.
+    /// Request body (88 B): MessageID[21] | pad3 | LadderType (0 player, 1 clan) | Stats: 15 × int32
+    /// (SOCOM II: index 0 = rating, 1000 for a new player). Persisted — the ladder ranks on these.
     /// </summary>
     private async Task HandleUpdateLadderStatsAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
     {
+        const int typeAt = MediusConstants.MESSAGEID_MAXLEN + 3, statsAt = typeAt + 4;
+        var p = packet.Payload;
+        var account = state.AccountId is int acct ? _store.GetAccountById(acct) : null;
+        if (account != null && p.Length >= statsAt + 4)
+        {
+            int ladderType = BitConverter.ToInt32(p, typeAt);
+            var stats = new int[(p.Length - statsAt) / 4];
+            for (int i = 0; i < stats.Length; i++) stats[i] = BitConverter.ToInt32(p, statsAt + i * 4);
+
+            if (ladderType == (int)MediusLadderType.MediusLadderTypeClan)
+            {
+                if (_store.GetClanById(account.ClanId) is { } clan) clan.LadderStats = stats;
+            }
+            else
+            {
+                account.LadderStats = stats;
+            }
+            _store.MarkDirty();
+        }
+
         var w = new MediusWriter();
         WriteMlsHeader(w, packet, MediusCallbackStatus.MediusSuccess);
         _log.LogDebug("[MLS] -> UpdateLadderStatsResponse (ack)");
@@ -1399,31 +1417,6 @@ public class MlsServer : BaseMediusTcpServer
         }
 
         await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.ChannelInfoResponse, w.ToArray()), ct);
-    }
-
-    private async Task HandleFindPlayerAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
-    {
-        var r    = new MediusReader(packet.Payload);
-        string sessionKey = r.ReadString(64);
-        string targetName = r.ReadString(64);
-
-        var account = _store.GetAccountByName(targetName);
-
-        var w = new MediusWriter();
-        if (account == null)
-        {
-            w.Write((int)MediusCallbackStatus.MediusAccountNotFound);
-            w.Write((byte)1);  // EndOfList
-        }
-        else
-        {
-            w.Write((int)MediusCallbackStatus.MediusSuccess);
-            w.Write((byte)1);
-            w.Write(account.AccountId);
-            w.WriteString(account.AccountName, 64);
-        }
-
-        await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.FindPlayerResponse, w.ToArray()), ct);
     }
 
     private async Task HandleChatMessageAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)

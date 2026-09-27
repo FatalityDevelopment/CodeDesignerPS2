@@ -46,6 +46,7 @@ builder.Services.AddSingleton(serverConfig);
 
 // Shared in-memory storage
 builder.Services.AddSingleton<InMemoryStorage>();
+builder.Services.AddSingleton<PresenceRegistry>();
 
 // Servers
 builder.Services.AddSingleton<MuisServer>();

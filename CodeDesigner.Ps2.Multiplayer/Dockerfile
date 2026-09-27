@@ -19,13 +19,17 @@ COPY --from=build /app .
 #   Online__ServerIp=auto + Online__PublicHostname=<fqdn>  → announce the IP the FQDN resolves to
 #   Online__DnsForwardUnknown=false                        → never act as an open DNS resolver
 #   MULTIPLAYER_LOG_FILE=none                              → log to stdout only
+#   Online__DataDirectory=/data                            → accounts, stats, friends, clans (mount a volume)
 ENV Online__BindAddress=0.0.0.0 \
+    Online__DataDirectory=/data \
     Online__ServerIp=auto \
     Online__DnsForwardUnknown=false \
     MULTIPLAYER_LOG_FILE=none \
     Logging__Console__FormatterName=simple \
     Logging__Console__FormatterOptions__SingleLine=true \
     Logging__Console__FormatterOptions__TimestampFormat="HH:mm:ss.fff "
+
+VOLUME /data
 
 # DNS (PS2 primary DNS), DNAS HTTPS + debug HTTP, NAT, DME, MUIS, MLS, MAS.
 EXPOSE 53/udp 443/tcp 10060/tcp 10069/udp 10070/tcp 10071/tcp 10075/tcp 10077/tcp

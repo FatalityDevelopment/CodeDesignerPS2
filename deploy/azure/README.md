@@ -45,7 +45,9 @@ Settings come from `config.json` in the image, overridden by `Online__<Setting>`
 
 ## Test-deployment caveats
 
-- **State is in memory.** Accounts, games and stats reset whenever the container restarts.
+- **Persistent data** (accounts, stats, friends/ignore lists, clans) lives in `server-data.json` on an Azure Files
+  share mounted at `/data`, so it survives restarts and redeploys. `az group delete` removes it too.
+  Games, briefing-room occupancy and online presence are runtime-only.
 - **The container runs as root** because the console needs the fixed privileged ports 53 and 443.
 - **Accounts are auto-created** on first login (`AutoCreateAccounts`). Anyone who points a PS2 at the IP can play.
 - **The IP can change** if the container group is deleted and recreated. `az container stop`/`start` normally keeps

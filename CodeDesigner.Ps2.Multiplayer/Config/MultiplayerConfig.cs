@@ -112,6 +112,12 @@ public class MultiplayerConfig
     /// </summary>
     public Dictionary<string, string> DnsMappings { get; set; } = new();
 
+    /// <summary>
+    /// Folder for persistent server data (accounts, stats, friends/ignore lists, clans) — a JSON snapshot.
+    /// Empty = "data" next to the server binary. Containers mount a volume here (e.g. /data).
+    /// </summary>
+    public string DataDirectory { get; set; } = "";
+
     /// <summary>When true, accounts are auto-created on first login (no separate registration).</summary>
     public bool AutoCreateAccounts { get; set; } = true;
 

@@ -241,6 +241,11 @@ public class MasServer : BaseMediusTcpServer
         state.Status      = PlayerStatus.InAuthWorld;
         status            = MediusCallbackStatus.MediusSuccess;
 
+        // The lobby (MLS) connections present this session key back — map it to the account there.
+        _store.RegisterSession(state.SessionKey, account.AccountId);
+        account.LastLoginAt = DateTime.UtcNow;
+        _store.MarkDirty();
+
         // AccountLoginResponse — wire format ported from horizon-server
         // RT.Models.Lobby.MediusAccountLoginResponse + RT.Models.Misc.NetConnectionInfo:
         //
@@ -424,6 +429,7 @@ public class MasServer : BaseMediusTcpServer
         state.AccountId   = account.AccountId;
         state.AccountName = account.AccountName;
         state.Status      = PlayerStatus.InAuthWorld;
+        _store.RegisterSession(state.SessionKey, account.AccountId);
 
         // TicketLoginResponse — wire format ported from horizon-server
         // RT.Models.Lobby.MediusTicketLoginResponse. Same NetConnectionInfo

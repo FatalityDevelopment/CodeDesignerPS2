@@ -10,6 +10,8 @@ services:
       # On a LAN the console may need other names resolved too; forwarding is safe there.
       Online__DnsForwardUnknown: "true"
       Logging__LogLevel__Default: "Debug"
+    volumes:
+      - socom2-data:/data          # accounts, stats, friends, clans
     ports:
       - "53:53/udp"
       - "443:443/tcp"
@@ -19,3 +21,6 @@ services:
       - "10071:10071/tcp"
       - "10075:10075/tcp"
       - "10077:10077/tcp"
+
+volumes:
+  socom2-data:

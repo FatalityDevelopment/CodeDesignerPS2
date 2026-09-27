@@ -32,6 +32,24 @@ resource acr 'Microsoft.ContainerRegistry/registries@2023-07-01' existing = {
   name: acrName
 }
 
+// Persistent server data (accounts, stats, friends, clans) — an Azure Files share mounted at /data, so it
+// survives container restarts and redeploys.
+resource storage 'Microsoft.Storage/storageAccounts@2023-01-01' = {
+  name: 'socom2${uniqueString(resourceGroup().id)}'
+  location: location
+  sku: { name: 'Standard_LRS' }
+  kind: 'StorageV2'
+  properties: {
+    minimumTlsVersion: 'TLS1_2'
+    allowBlobPublicAccess: false
+  }
+}
+
+resource dataShare 'Microsoft.Storage/storageAccounts/fileServices/shares@2023-01-01' = {
+  name: '${storage.name}/default/socom2-data'
+  properties: { shareQuota: 1 }
+}
+
 var fqdn = '${dnsNameLabel}.${location}.azurecontainer.io'
 
 var ports = [
@@ -82,11 +100,26 @@ resource containerGroup 'Microsoft.ContainerInstance/containerGroups@2023-05-01'
             { name: 'Online__DnsForwardUnknown', value: 'false' }
             { name: 'MULTIPLAYER_LOG_FILE', value: 'none' }
             { name: 'Logging__LogLevel__Default', value: logLevel }
+            { name: 'Online__DataDirectory', value: '/data' }
+          ]
+          volumeMounts: [
+            { name: 'data', mountPath: '/data' }
           ]
         }
       }
     ]
+    volumes: [
+      {
+        name: 'data'
+        azureFile: {
+          shareName: 'socom2-data'
+          storageAccountName: storage.name
+          storageAccountKey: storage.listKeys().keys[0].value
+        }
+      }
+    ]
   }
+  dependsOn: [ dataShare ]
 }
 
 output fqdn string = containerGroup.properties.ipAddress.fqdn
