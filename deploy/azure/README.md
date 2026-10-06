@@ -47,6 +47,8 @@ Settings come from `config.json` in the image, overridden by `Online__<Setting>`
 
 - **Persistent data** (accounts, stats, friends/ignore lists, clans) lives in `server-data.json` on an Azure Files
   share mounted at `/data`, so it survives restarts and redeploys. `az group delete` removes it too.
+- **Patch download**: put the APACHE00.ZDB to serve at `patch/APACHE00.ZDB` on that share. Unpatched (disc r0001)
+  consoles download it from `http://<fqdn>:80/_socom2-prod/currentpatch/APACHE00.ZDB` and save it to the memory card.
   Games, briefing-room occupancy and online presence are runtime-only.
 - **The container runs as root** because the console needs the fixed privileged ports 53 and 443.
 - **Accounts are auto-created** on first login (`AutoCreateAccounts`). Anyone who points a PS2 at the IP can play.

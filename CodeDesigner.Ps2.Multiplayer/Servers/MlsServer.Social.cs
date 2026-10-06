@@ -75,7 +75,7 @@ public partial class MlsServer
             case MediusLobbyMessageId.DeleteClanMessage:           await HandleModifyClanMessageAsync(packet, state, tcp, delete: true, ct); return true;
             case MediusLobbyMessageId.UpdateClanStats:             await HandleUpdateClanStatsAsync(packet, state, tcp, ct); return true;
 
-            default: return false;
+            default: return await TryHandleChatAndListsAsync(type, packet, state, tcp, ct);
         }
     }
 

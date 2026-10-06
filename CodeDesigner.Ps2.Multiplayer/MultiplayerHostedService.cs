@@ -13,13 +13,14 @@ public class MultiplayerHostedService : IHostedService
     private readonly DnsServer           _dns;
     private readonly DmeServer           _dme;
     private readonly NatServer           _nat;
+    private readonly PatchHttpServer     _patch;
     private readonly MultiplayerConfig   _config;
     private readonly ILogger<MultiplayerHostedService> _log;
     private CancellationTokenSource _cts = new();
 
     public MultiplayerHostedService(
         MuisServer muis, MasServer mas, MlsServer mls, DnasServer dnas,
-        DnsServer dns, DmeServer dme, NatServer nat,
+        DnsServer dns, DmeServer dme, NatServer nat, PatchHttpServer patch,
         MultiplayerConfig config, ILogger<MultiplayerHostedService> log)
     {
         _muis   = muis;
@@ -29,6 +30,7 @@ public class MultiplayerHostedService : IHostedService
         _dns    = dns;
         _dme    = dme;
         _nat    = nat;
+        _patch  = patch;
         _config = config;
         _log    = log;
     }
@@ -49,6 +51,7 @@ public class MultiplayerHostedService : IHostedService
         _log.LogInformation("  DNAS HTTPS  : {Port} (region={Region})", _config.DnasHttpsPort, _config.DnasRegion);
         _log.LogInformation("  DNAS HTTP   : {Port} (debug plain-HTTP)", _config.DnasPort);
         _log.LogInformation("  DNS Port    : {Port} (UDP, intercepts *.dnas.playstation.org)", _config.DnsDnasPort);
+        _log.LogInformation("  Patch HTTP  : {Port} ({Ver})", _config.PatchHttpPort, _config.UniversePatchVersion);
         _log.LogInformation("  AppIds      : {Ids}",  string.Join(", ", _config.AllowedAppIds));
         _log.LogInformation("═══════════════════════════════════════════════════");
 
@@ -59,6 +62,7 @@ public class MultiplayerHostedService : IHostedService
         await _dnas.StartAsync(ct);
         await _dme.StartAsync(ct);
         await _nat.StartAsync(ct);
+        await _patch.StartAsync(ct);
     }
 
     public Task StopAsync(CancellationToken cancellationToken)
@@ -72,6 +76,7 @@ public class MultiplayerHostedService : IHostedService
         _dnas.Stop();
         _dme.Stop();
         _nat.Stop();
+        _patch.Stop();
         return Task.CompletedTask;
     }
 }

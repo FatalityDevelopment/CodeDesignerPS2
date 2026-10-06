@@ -47,6 +47,7 @@ builder.Services.AddSingleton(serverConfig);
 // Shared in-memory storage
 builder.Services.AddSingleton<InMemoryStorage>();
 builder.Services.AddSingleton<PresenceRegistry>();
+builder.Services.AddSingleton<AdminSettings>();
 
 // Servers
 builder.Services.AddSingleton<MuisServer>();
@@ -56,6 +57,7 @@ builder.Services.AddSingleton<DnasServer>();
 builder.Services.AddSingleton<DnsServer>();
 builder.Services.AddSingleton<DmeServer>();
 builder.Services.AddSingleton<NatServer>();
+builder.Services.AddSingleton<PatchHttpServer>();
 
 // Hosted service that starts everything
 builder.Services.AddHostedService<MultiplayerHostedService>();

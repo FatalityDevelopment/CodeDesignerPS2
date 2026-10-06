@@ -32,7 +32,7 @@ ENV Online__BindAddress=0.0.0.0 \
 VOLUME /data
 
 # DNS (PS2 primary DNS), DNAS HTTPS + debug HTTP, NAT, DME, MUIS, MLS, MAS.
-EXPOSE 53/udp 443/tcp 10060/tcp 10069/udp 10070/tcp 10071/tcp 10075/tcp 10077/tcp
+EXPOSE 53/udp 80/tcp 443/tcp 10060/tcp 10069/udp 10070/tcp 10071/tcp 10075/tcp 10077/tcp
 
 # Runs as root: the PS2 needs the fixed privileged ports 53 (DNS) and 443 (DNAS).
 ENTRYPOINT ["dotnet", "CodeDesigner.Ps2.Multiplayer.dll"]

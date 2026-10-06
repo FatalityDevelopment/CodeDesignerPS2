@@ -33,14 +33,19 @@ public class DmeServer : BaseMediusTcpServer
     private readonly PresenceRegistry _presence;
     private readonly ILogger<DmeServer> _log;
 
-    public DmeServer(MultiplayerConfig config, PresenceRegistry presence, ILogger<DmeServer> log)
+    public DmeServer(MultiplayerConfig config, PresenceRegistry presence, InMemoryStorage store, AdminSettings admin,
+        ILogger<DmeServer> log)
         : base(log, config)
     {
         _config    = config;
         _presence  = presence;
         _log       = log;
         ServerName = "DME";
+        admin.BansChanged += bans => KickBanned(bans, store);
     }
+
+    protected override int? AccountIdOf(MediusClientState state) =>
+        FindSlot(state)?.AccountId is int id && id != 0 ? id : null;
 
     public Task StartAsync(CancellationToken ct) =>
         StartAsync(_config.BindAddress, _config.DmePort, ct);

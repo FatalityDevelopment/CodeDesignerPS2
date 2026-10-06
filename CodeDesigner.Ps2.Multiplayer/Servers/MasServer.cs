@@ -22,11 +22,14 @@ public class MasServer : BaseMediusTcpServer
 {
     private readonly MultiplayerConfig  _config;
     private readonly InMemoryStorage _store;
+    private readonly AdminSettings _admin;
     private readonly ILogger<MasServer> _log;
 
-    public MasServer(MultiplayerConfig config, InMemoryStorage store, ILogger<MasServer> log)
+    public MasServer(MultiplayerConfig config, InMemoryStorage store, AdminSettings admin, ILogger<MasServer> log)
         : base(log, config)
     {
+        _admin = admin;
+        admin.BansChanged += bans => KickBanned(bans, _store);
         _config    = config;
         _store     = store;
         _log       = log;
@@ -230,9 +233,12 @@ public class MasServer : BaseMediusTcpServer
             return;
         }
 
-        if (account.IsBanned)
+        var ban = _admin.Bans.FindAccount(account.AccountName)
+                  ?? _admin.Bans.FindIp((tcp.Client.RemoteEndPoint as System.Net.IPEndPoint)?.Address);
+        if (account.IsBanned || ban != null)
         {
-            await SendLoginFailure(tcp, MediusCallbackStatus.MediusFail, msgId, ct);
+            _log.LogWarning("[MAS] Login refused — '{User}' is banned ({Reason})", username, ban?.Reason ?? "account flag");
+            await SendLoginFailure(tcp, MediusCallbackStatus.MediusAccountBanned, msgId, ct);
             return;
         }
 

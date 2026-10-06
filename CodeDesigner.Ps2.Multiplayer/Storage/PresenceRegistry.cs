@@ -58,4 +58,11 @@ public class PresenceRegistry
         _online.TryGetValue(accountId, out var e) ? e.State : null;
 
     public bool IsOnline(int accountId) => _online.ContainsKey(accountId);
+
+    /// <summary>Number of accounts currently online (universe list player count).</summary>
+    public int OnlineCount => _online.Count;
+
+    /// <summary>Online accounts whose lobby is <paramref name="lobbyWorldId"/> (a briefing room, or 1 = community).</summary>
+    public List<int> AccountsInLobby(int lobbyWorldId) =>
+        _online.Where(kv => kv.Value.State.LobbyWorldId == lobbyWorldId).Select(kv => kv.Key).ToList();
 }

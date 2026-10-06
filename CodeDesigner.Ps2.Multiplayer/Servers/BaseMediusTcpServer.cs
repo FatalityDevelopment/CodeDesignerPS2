@@ -5,6 +5,7 @@ using CodeDesigner.Ps2.Multiplayer.Config;
 using CodeDesigner.Ps2.Multiplayer.Crypto;
 using CodeDesigner.Ps2.Multiplayer.Models;
 using CodeDesigner.Ps2.Multiplayer.Protocol;
+using CodeDesigner.Ps2.Multiplayer.Storage;
 using Microsoft.Extensions.Logging;
 
 namespace CodeDesigner.Ps2.Multiplayer.Servers;
@@ -144,6 +145,28 @@ public abstract class BaseMediusTcpServer
             {
                 _log.LogError(ex, "[{Name}] Accept error", ServerName);
             }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Bans
+    // -------------------------------------------------------------------------
+
+    /// <summary>The account a connection belongs to (DME overrides — its connections are tied via the DME slot).</summary>
+    protected virtual int? AccountIdOf(MediusClientState state) => state.AccountId;
+
+    /// <summary>Close every connection whose account or IP is banned. Wired to <see cref="AdminSettings.BansChanged"/>.</summary>
+    protected void KickBanned(BanList bans, InMemoryStorage store)
+    {
+        foreach (var (_, (state, tcp)) in Clients)
+        {
+            var name = AccountIdOf(state) is int id ? store.GetAccountById(id)?.AccountName : null;
+            var ip = IPEndPoint.TryParse(state.RemoteEndpoint, out var ep) ? ep.Address : null;
+            var ban = (name != null ? bans.FindAccount(name) : null) ?? bans.FindIp(ip);
+            if (ban == null) continue;
+
+            _log.LogWarning("[{Name}] Kicking {Who} ({Ep}) — banned: {Reason}", ServerName, name ?? "?", state.RemoteEndpoint, ban.Reason);
+            try { tcp.Close(); } catch { /* already gone */ }
         }
     }
 

@@ -210,6 +210,22 @@ public class ScertPacket
     }
 
     /// <summary>
+    /// RT_MSG_SERVER_CHEAT_QUERY (0x1D) RAW_MEMORY read: [QueryType 0][SequenceId:4][Address:4][Length:4] (13 B).
+    /// The client answers with the same header followed by <paramref name="length"/> bytes of EE memory
+    /// (horizon RT_MSG_SERVER_CHEAT_QUERY: Data = rest of the message). The MUIS login round already uses this
+    /// query type (with length 0).
+    /// </summary>
+    public static ScertPacket CreateRawMemoryQuery(int sequenceId, uint address, int length)
+    {
+        var payload = new byte[13];
+        payload[0] = (byte)CheatQueryType.DME_SERVER_CHEAT_QUERY_RAW_MEMORY;
+        BitConverter.GetBytes(sequenceId).CopyTo(payload, 1);
+        BitConverter.GetBytes(address).CopyTo(payload, 5);
+        BitConverter.GetBytes(length).CopyTo(payload, 9);
+        return new() { MessageType = RT_MSG_TYPE.RT_MSG_SERVER_CHEAT_QUERY, Payload = payload };
+    }
+
+    /// <summary>
     /// RT_MSG_SERVER_MEMORY_POKE (0x1E) — 14-byte payload.
     /// Sent once during the MUIS anti-cheat exchange (round 2), followed immediately
     /// by another CHEAT_QUERY in the same TCP write.

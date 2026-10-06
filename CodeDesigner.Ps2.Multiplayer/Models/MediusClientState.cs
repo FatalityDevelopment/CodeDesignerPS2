@@ -85,6 +85,11 @@ public class MediusClientState
     /// <summary>Incrementing SequenceId for the lobby anti-cheat SERVER_CHEAT_QUERY heartbeat.</summary>
     public int CheatSeq { get; set; }
 
+    // Lobby memory scanner (cheat-scan.json) — where this client's scan is up to.
+    public int  ScanVersion    { get; set; } = -1;
+    public int  ScanRangeIndex { get; set; }
+    public uint ScanCursor     { get; set; }
+
     /// <summary>
     /// True once this connection has received a community-screen init message (ChannelList). The game
     /// uses a SEPARATE MLS connection for the post-login community screen vs. the initial login batch;

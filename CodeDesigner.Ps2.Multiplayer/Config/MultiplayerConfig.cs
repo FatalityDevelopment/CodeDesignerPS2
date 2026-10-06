@@ -172,8 +172,39 @@ public class MultiplayerConfig
         "- Be respectful and have fun.\r\n" +
         "- Check back here for the latest news and events.";
 
+    /// <summary>
+    /// Patch level announced in the universe entry (field 0x2B5 = "&lt;version&gt; &lt;url&gt;", split by the client
+    /// with strtok(" \t")). A client whose built-in level differs (the r0001 disc) downloads
+    /// <c>&lt;url&gt;APACHE00.ZDB</c> over HTTP and saves it to the memory card; a matching client logs straight in.
+    /// </summary>
     public string UniversePatchVersion { get; set; } = "r0004";
-    public string UniversePatchUrl { get; set; } = "https://example.com/patches/r0004/update.zip";
+
+    /// <summary>
+    /// Folder URL the client appends "APACHE00.ZDB" to (must end in '/'; plain http — the client uses sceHTTP).
+    /// Empty = this server's own patch HTTP server: http://&lt;ServerIp&gt;:&lt;PatchHttpPort&gt;/_socom2-prod/currentpatch/
+    /// (retail was http://updates.pdonline.scea.com:80/_socom2-prod/currentpatch/).
+    /// </summary>
+    public string UniversePatchUrl { get; set; } = "";
+
+    /// <summary>TCP port of the built-in patch HTTP server. 0 = disabled.</summary>
+    public int PatchHttpPort { get; set; } = 80;
+
+    /// <summary>
+    /// The APACHE00.ZDB served to clients that need the update. Empty = &lt;DataDirectory&gt;/patch/APACHE00.ZDB.
+    /// </summary>
+    public string PatchFile { get; set; } = "";
+
+    /// <summary>The URL actually announced to clients (see <see cref="UniversePatchUrl"/>).</summary>
+    public string EffectivePatchUrl
+    {
+        get
+        {
+            var url = string.IsNullOrWhiteSpace(UniversePatchUrl)
+                ? $"http://{ServerIp}:{PatchHttpPort}/_socom2-prod/currentpatch/"
+                : UniversePatchUrl.Trim();
+            return url.EndsWith('/') ? url : url + "/";
+        }
+    }
 
     // ── Briefing rooms (online BRIEFING screen) ───────────────────────────────
 

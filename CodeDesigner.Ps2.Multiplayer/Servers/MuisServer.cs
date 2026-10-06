@@ -3,6 +3,7 @@ using System.Net.Sockets;
 using CodeDesigner.Ps2.Multiplayer.Config;
 using CodeDesigner.Ps2.Multiplayer.Models;
 using CodeDesigner.Ps2.Multiplayer.Protocol;
+using CodeDesigner.Ps2.Multiplayer.Storage;
 using Microsoft.Extensions.Logging;
 
 namespace CodeDesigner.Ps2.Multiplayer.Servers;
@@ -28,11 +29,13 @@ namespace CodeDesigner.Ps2.Multiplayer.Servers;
 public class MuisServer : BaseMediusTcpServer
 {
     private readonly MultiplayerConfig   _config;
+    private readonly PresenceRegistry    _presence;
     private readonly ILogger<MuisServer> _log;
 
-    public MuisServer(MultiplayerConfig config, ILogger<MuisServer> log)
+    public MuisServer(MultiplayerConfig config, PresenceRegistry presence, ILogger<MuisServer> log)
         : base(log, config)
     {
+        _presence = presence;
         _config    = config;
         _log       = log;
         ServerName = "MUIS";
@@ -266,8 +269,8 @@ public class MuisServer : BaseMediusTcpServer
 
         Array.Copy(msgId, 0, payload, 0, Math.Min(msgId.Length, MediusConstants.MESSAGEID_MAXLEN));
         // StatusCode at 0x18 = 0 (zero-initialized array)
-        WriteFixedAscii(payload, 0x1C,  64, "[FaTaLiTy] Dev Server");
-        WriteFixedAscii(payload, 0x5C, 128, "Get Down Or Lay Down....");
+        WriteFixedAscii(payload, 0x1C,  64, _config.UniverseName);
+        WriteFixedAscii(payload, 0x5C, 128, _config.UniverseDescription);
         WriteFixedAscii(payload, 0xDC,  64, _config.ServerIp);
         payload[0x11C] = 0x01;  // MAS available flag — handler 0x0031B270 checks this byte
 
@@ -292,9 +295,10 @@ public class MuisServer : BaseMediusTcpServer
         //   0x22C ( 4): active flag        → entry+0x22C
         //   0x234 (64): unknown field      → entry+0x234
         //   0x2B4 ( 1): MAS enable flag (non-zero = initiate MAS TCP connection)
-        //   0x2B5 (128): version/patch string (e.g. "r0004") → entry+0x2B5
-        //                looked up via 0x0019AA00 to populate entry+0x338 ("r0004")
-        //                entry+0x338 being empty also passes the version check (beqz)
+        //   0x2B5 (128): "<version> <patchUrl>" — split by strtok(" \t") (0x0019AA00) into
+        //                entry+0x338 (version, 32) and entry+0x358 (URL, 128). VerifyPatchLevel
+        //                (0x0031AA80) passes when entry+0x338 is empty or equals the client's built-in
+        //                level; otherwise the client GETs <URL>APACHE00.ZDB (CSMDownloadPatch).
         //   0x335 ( 1): EndOfList — MUST be 1 on final entry; PS2 parser loops until
         //                this is non-zero before committing the universe and connecting to MAS.
         //   0x336..0x337: struct padding (2 bytes, zeros)
@@ -335,18 +339,20 @@ public class MuisServer : BaseMediusTcpServer
         WriteFixedAscii(payload, 0x120, 256, _config.UniverseDescription);
         // 0x220: status dot — 1 = green (confirmed from PSRewired dump: entry+0x220 = 1)
         WriteInt32Le(payload, 0x220, 1);
-        // 0x224: user count (confirmed from dump: entry+0x224 = 0x20)
-        WriteInt32Le(payload, 0x224, 0x20);
+        // 0x224: user count shown in the universe list (the dump held 0x20) — players online right now.
+        WriteInt32Le(payload, 0x224, _presence.OnlineCount);
         // 0x228: max users (confirmed from dump: entry+0x228 = 0x2710)
-        WriteInt32Le(payload, 0x228, 0x2710);
+        WriteInt32Le(payload, 0x228, Math.Max(1, _config.MaxClients));
         // 0x22C: 8 bytes copied by parser — zeros (confirmed from dump: entry+0x22C = 0)
         // 0x234: 128 bytes copied by parser — zeros
         // 0x2B4: MAS enable flag — non-zero triggers immediate MAS TCP connection
         payload[0x2B4] = 0x01;
-        // 0x2B5: version/patch string (parser copies 128 bytes: 0x40 iterations × 2)
-        //        entry+0x338 ("r0004") comes from 0x0019AA00 registry lookup which
-        //        will fail for our hostname — empty entry+0x338 still passes version check (beqz)
-        WriteFixedAscii(payload, 0x2B5, 128, _config.UniversePatchVersion);
+        // 0x2B5: "<version> <patchUrl>" (parser copies 128 bytes) — retail sent
+        //        "r0004 http://updates.pdonline.scea.com:80/_socom2-prod/currentpatch/" (retail dump).
+        //        A version with no URL leaves unpatched (r0001) clients failing with "Bad URI".
+        WriteFixedAscii(payload, 0x2B5, 128, string.IsNullOrWhiteSpace(_config.UniversePatchVersion)
+            ? ""
+            : $"{_config.UniversePatchVersion.Trim()} {_config.EffectivePatchUrl}");
         // 0x335: EndOfList — PS2 universe parser loops until this byte is non-zero.
         //        Without it the PS2 waits for more entries indefinitely and never
         //        proceeds to connect to MAS.  Must be 1 on the final (or only) entry.

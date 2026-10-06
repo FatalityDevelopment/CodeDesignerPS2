@@ -54,6 +54,7 @@ var fqdn = '${dnsNameLabel}.${location}.azurecontainer.io'
 
 var ports = [
   { port: 53, protocol: 'UDP' }      // DNS — the PS2's primary DNS server
+  { port: 80, protocol: 'TCP' }      // patch download (APACHE00.ZDB)
   { port: 443, protocol: 'TCP' }     // DNAS HTTPS
   { port: 10060, protocol: 'TCP' }   // DNAS plain-HTTP debug
   { port: 10069, protocol: 'UDP' }   // NAT service
