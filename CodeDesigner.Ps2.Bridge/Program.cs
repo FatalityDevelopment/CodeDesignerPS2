@@ -3,6 +3,7 @@ using CodeDesigner.Ps2.Bridge.Services;
 using CodeDesigner.Ps2.Common;
 using CodeDesigner.Ps2.Compression;
 using CodeDesigner.Ps2.Database;
+using CodeDesigner.Ps2.DiscordBot;
 using CodeDesigner.Ps2.DiscordPresence;
 using CodeDesigner.Ps2.Recompiler;
 using Microsoft.EntityFrameworkCore;
@@ -630,6 +631,7 @@ namespace CodeDesigner.Ps2.Bridge
             };
 
             StartDiscordPresence(server, cts.Token);
+            StartDiscordBot(cts.Token);
 
             Console.WriteLine("Server is running. Press Ctrl+C to stop.");
             Console.WriteLine("Runtime commands:");
@@ -727,6 +729,37 @@ namespace CodeDesigner.Ps2.Bridge
                 catch (Exception ex)
                 {
                     Console.WriteLine($"[Discord] Rich presence stopped: {ex.Message}");
+                }
+            }, cancellationToken);
+        }
+
+        /// <summary>
+        /// Starts the Discord bot loop: <see cref="DiscordBotWorker"/> polls the
+        /// AiActivityLogs table (written by <see cref="Services.AiActivityRecorder"/>)
+        /// and posts each new AI activity entry to a Discord channel. It idles until
+        /// a bot token + channel ID or a webhook URL is configured — see
+        /// <see cref="DatabaseAiActivityProvider"/> for the settings keys.
+        /// </summary>
+        private static void StartDiscordBot(CancellationToken cancellationToken)
+        {
+            var dbContextFactory = new BridgeDbContextFactory(
+                DatabaseInitialiser.BuildDbOptions(DatabasePaths.GetDefaultConnectionString()));
+
+            _ = Task.Run(async () =>
+            {
+                using var discord = new DiscordRestClient();
+                var worker = new DiscordBotWorker(new DatabaseAiActivityProvider(dbContextFactory), discord);
+                try
+                {
+                    await worker.RunAsync(TimeSpan.FromSeconds(3), cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    // Bridge is shutting down.
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[DiscordBot] Stopped: {ex.Message}");
                 }
             }, cancellationToken);
         }

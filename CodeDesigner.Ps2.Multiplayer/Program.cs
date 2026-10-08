@@ -58,6 +58,7 @@ builder.Services.AddSingleton<DnsServer>();
 builder.Services.AddSingleton<DmeServer>();
 builder.Services.AddSingleton<NatServer>();
 builder.Services.AddSingleton<PatchHttpServer>();
+builder.Services.AddSingleton<DebugApiServer>();
 
 // Hosted service that starts everything
 builder.Services.AddHostedService<MultiplayerHostedService>();

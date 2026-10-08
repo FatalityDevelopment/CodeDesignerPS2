@@ -91,18 +91,56 @@ public class DmeClientState
         _ = Sender(type, payload);
     }
 
-    /// <summary>
-    /// SERVER_CONNECT_NOTIFY (player joined): [playerIndex:2 LE][scertId:2 LE].
-    /// UNVERIFIED for v108 — only reachable with two or more players in a world.
-    /// </summary>
-    public void SendConnectNotify(int playerIndex, uint scertId)
-        => Send(RT_MSG_TYPE.RT_MSG_SERVER_CONNECT_NOTIFY,
-                new[] { (byte)playerIndex, (byte)(playerIndex >> 8), (byte)scertId, (byte)(scertId >> 8) });
+    /// <summary>The client's 64-byte RSA public modulus (N_ps2, LE) from CLIENT_CRYPTKEY_PUBLIC; peers need it.</summary>
+    public byte[] PublicKey { get; set; } = new byte[64];
 
-    /// <summary>SERVER_DISCONNECT_NOTIFY (player left): [playerIndex:2 LE][scertId:2 LE]. UNVERIFIED for v108.</summary>
-    public void SendDisconnectNotify(int playerIndex, uint scertId)
-        => Send(RT_MSG_TYPE.RT_MSG_SERVER_DISCONNECT_NOTIFY,
-                new[] { (byte)playerIndex, (byte)(playerIndex >> 8), (byte)scertId, (byte)(scertId >> 8) });
+    /// <summary>The client's IP address as peers should see it.</summary>
+    public string IpAddress { get; set; } = "0.0.0.0";
+
+    /// <summary>
+    /// SERVER_CONNECT_NOTIFY (player joined), v108 layout from the SOCOM II DME client (handler 0x0063E848,
+    /// which requires exactly 82 bytes): [playerIndex:2 LE][IP address: 16-byte NUL-padded string][public key:64].
+    /// Any other length is a protocol error and the receiving console drops out of the game.
+    /// </summary>
+    public void SendConnectNotify(DmeClientState joined)
+        => SendNotify(RT_MSG_TYPE.RT_MSG_SERVER_CONNECT_NOTIFY,
+                BuildConnectNotify(joined.DmeId, joined.IpAddress, joined.PublicKey));
+
+    /// <summary>SERVER_DISCONNECT_NOTIFY (player left), v108: [playerIndex:2 LE][IP address:16] — exactly 18 bytes.</summary>
+    public void SendDisconnectNotify(DmeClientState left)
+        => SendNotify(RT_MSG_TYPE.RT_MSG_SERVER_DISCONNECT_NOTIFY,
+                BuildDisconnectNotify(left.DmeId, left.IpAddress));
+
+    public static byte[] BuildConnectNotify(int playerIndex, string ip, byte[] publicKey)
+    {
+        var payload = new byte[2 + 16 + 64];
+        WriteIndexAndIp(payload, playerIndex, ip);
+        Buffer.BlockCopy(publicKey, 0, payload, 18, Math.Min(64, publicKey.Length));
+        return payload;
+    }
+
+    public static byte[] BuildDisconnectNotify(int playerIndex, string ip)
+    {
+        var payload = new byte[2 + 16];
+        WriteIndexAndIp(payload, playerIndex, ip);
+        return payload;
+    }
+
+    private static void WriteIndexAndIp(byte[] payload, int playerIndex, string ip)
+    {
+        payload[0] = (byte)playerIndex;
+        payload[1] = (byte)(playerIndex >> 8);
+        var ipBytes = System.Text.Encoding.ASCII.GetBytes(ip);
+        Buffer.BlockCopy(ipBytes, 0, payload, 2, Math.Min(15, ipBytes.Length));
+    }
+
+    /// <summary>Set from <c>MultiplayerConfig.DmePlayerNotifications</c> when the DME server starts.</summary>
+    public static bool PlayerNotificationsEnabled { get; set; }
+
+    private void SendNotify(RT_MSG_TYPE type, byte[] payload)
+    {
+        if (PlayerNotificationsEnabled) Send(type, payload);
+    }
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 

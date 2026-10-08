@@ -14,13 +14,14 @@ public class MultiplayerHostedService : IHostedService
     private readonly DmeServer           _dme;
     private readonly NatServer           _nat;
     private readonly PatchHttpServer     _patch;
+    private readonly DebugApiServer      _debug;
     private readonly MultiplayerConfig   _config;
     private readonly ILogger<MultiplayerHostedService> _log;
     private CancellationTokenSource _cts = new();
 
     public MultiplayerHostedService(
         MuisServer muis, MasServer mas, MlsServer mls, DnasServer dnas,
-        DnsServer dns, DmeServer dme, NatServer nat, PatchHttpServer patch,
+        DnsServer dns, DmeServer dme, NatServer nat, PatchHttpServer patch, DebugApiServer debug,
         MultiplayerConfig config, ILogger<MultiplayerHostedService> log)
     {
         _muis   = muis;
@@ -31,6 +32,7 @@ public class MultiplayerHostedService : IHostedService
         _dme    = dme;
         _nat    = nat;
         _patch  = patch;
+        _debug  = debug;
         _config = config;
         _log    = log;
     }
@@ -63,6 +65,7 @@ public class MultiplayerHostedService : IHostedService
         await _dme.StartAsync(ct);
         await _nat.StartAsync(ct);
         await _patch.StartAsync(ct);
+        await _debug.StartAsync(ct);
     }
 
     public Task StopAsync(CancellationToken cancellationToken)
@@ -77,6 +80,7 @@ public class MultiplayerHostedService : IHostedService
         _dme.Stop();
         _nat.Stop();
         _patch.Stop();
+        _debug.Stop();
         return Task.CompletedTask;
     }
 }

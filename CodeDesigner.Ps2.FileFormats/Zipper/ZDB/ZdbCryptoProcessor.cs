@@ -1,4 +1,20 @@
-﻿using CodeDesigner.Ps2.FileFormats.Zipper.Apache;
+﻿// =============================================================================
+//  DEPRECATED MODEL — read before relying on anything in this file.
+//
+//  This file implements an AES-128-CBC + vtable-transform pipeline and an
+//  RSA-2048 "Sony DNAS key in DNAS.BIN" verify. Live PCSX2 tracing (2026-10)
+//  disproved that model for retail APACHE00.ZDB:
+//    * The block cipher is RC6-32/20/16-CBC, not AES  (see Apache/Rc6.cs).
+//    * Integrity is RSA-1024 PKCS#1 signatures from a 30-key table in the EE
+//      executable at 0x00560A20, not a single RSA-2048 key in DNAS.BIN.
+//    * The 16 "vtable word transforms" decrypt the loader's own JIT stub code,
+//      not the ZDB file contents.
+//  For read-only decrypt/extract/verify of real ZDB files use
+//  Apache/ApacheZdbReader (with Apache/ApacheKeyTable + Apache/Rc6).
+//  Retained only for the older research/history it documents.
+//  See memory note reference_apache-zdb-format.
+// =============================================================================
+using CodeDesigner.Ps2.FileFormats.Zipper.Apache;
 using System.IO.Compression;
 using System.Security.Cryptography;
 

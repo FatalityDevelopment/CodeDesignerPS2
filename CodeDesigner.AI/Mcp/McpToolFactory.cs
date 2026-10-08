@@ -25,10 +25,12 @@ internal static class McpToolFactory
             });
 
         // High-risk tools (WritesDisk and up) get a soft "reason" nudge + session logging.
+        bool riskWrapped = false;
         if (RiskFrictionTool.AppliesTo(descriptor.Meta.Risk) &&
             services.GetService<SessionState>() is { } state)
         {
             tool = new RiskFrictionTool(tool, state, descriptor.Meta.Name, descriptor.Meta.Risk);
+            riskWrapped = true;
         }
 
         // Outermost wrapper: log every invocation (name + args + result preview)
@@ -37,7 +39,8 @@ internal static class McpToolFactory
         // missing bridge just means no logging.
         if (services.GetService<IEmulatorBridge>() is { } bridge)
         {
-            tool = new ActivityLoggingTool(tool, bridge, descriptor.Meta.Name);
+            // RiskFrictionTool reads + strips `reason` itself, so leave it in place for it.
+            tool = new ActivityLoggingTool(tool, bridge, descriptor.Meta.Name, stripReason: !riskWrapped);
         }
 
         return tool;

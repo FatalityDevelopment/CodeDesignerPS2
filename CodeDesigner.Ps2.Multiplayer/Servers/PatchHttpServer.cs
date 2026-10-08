@@ -47,6 +47,10 @@ public class PatchHttpServer
         _listener = new TcpListener(IPAddress.Parse(_config.BindAddress), _config.PatchHttpPort);
         _listener.Start();
         var file = new FileInfo(PatchPath);
+        if (!string.IsNullOrWhiteSpace(_config.UniversePatchUrl) &&
+            !_config.UniversePatchUrl.Trim().StartsWith("http://", StringComparison.OrdinalIgnoreCase))
+            _log.LogWarning("[PATCH] UniversePatchUrl \"{Url}\" is not an http:// URL — ignored. Put the file to serve in PatchFile.",
+                _config.UniversePatchUrl);
         _log.LogInformation("[PATCH] Listening on {Addr}:{Port} — announcing \"{Ver} {Url}\"",
             _config.BindAddress, _config.PatchHttpPort, _config.UniversePatchVersion, _config.EffectivePatchUrl);
         if (file.Exists)
@@ -101,8 +105,8 @@ public class PatchHttpServer
                 return;
             }
             string method = parts[0].ToUpperInvariant(), target = parts[1];
-            var agent = lines.FirstOrDefault(l => l.StartsWith("User-Agent:", StringComparison.OrdinalIgnoreCase)) ?? "";
-            _log.LogInformation("[PATCH] {Remote} {Method} {Target} {Agent}", remote, method, target, agent);
+            var version = parts.Length > 2 && parts[2] == "HTTP/1.0" ? "HTTP/1.0" : "HTTP/1.1";
+            _log.LogInformation("[PATCH] {Remote} {Request} | {Headers}", remote, lines[0], string.Join(" | ", lines.Skip(1)));
 
             var path = target.Split('?')[0];
             if ((method != "GET" && method != "HEAD") || !path.EndsWith("/" + PatchName, StringComparison.OrdinalIgnoreCase))
@@ -119,18 +123,50 @@ public class PatchHttpServer
                 return;
             }
 
-            var header = "HTTP/1.1 200 OK\r\n" +
-                         "Content-Type: application/octet-stream\r\n" +
-                         $"Content-Length: {file.Length}\r\n" +
+            // Apache-style headers, answering in the request's HTTP version (retail was Apache).
+            var header = $"{version} 200 OK\r\n" +
+                         $"Date: {DateTime.UtcNow:R}\r\n" +
+                         "Server: Apache\r\n" +
                          $"Last-Modified: {file.LastWriteTimeUtc:R}\r\n" +
-                         "Connection: close\r\n\r\n";
+                         "Accept-Ranges: bytes\r\n" +
+                         $"Content-Length: {file.Length}\r\n" +
+                         "Connection: close\r\n" +
+                         "Content-Type: application/octet-stream\r\n\r\n";
             await stream.WriteAsync(Encoding.ASCII.GetBytes(header), timeout.Token);
             if (method == "HEAD") return;
 
+            var sw = System.Diagnostics.Stopwatch.StartNew();
             await using (var fs = file.OpenRead())
-                await fs.CopyToAsync(stream, 64 * 1024, timeout.Token);
+                await fs.CopyToAsync(stream, 16 * 1024, timeout.Token);
             await stream.FlushAsync(timeout.Token);
-            _log.LogInformation("[PATCH] {Remote} sent {File} ({Len} bytes)", remote, PatchName, file.Length);
+            var sent = sw.Elapsed;
+
+            // Graceful close: FIN after the last byte, then wait for the console to close its side. Closing
+            // straight away can turn into an RST that discards the unacknowledged tail, so sceHTTP never
+            // reaches Content-Length and the game reports "Timeout during download" after 30 s of no progress.
+            client.Client.Shutdown(SocketShutdown.Send);
+            var drained = 0;
+            var buf = new byte[1024];
+            using var linger = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            linger.CancelAfter(TimeSpan.FromSeconds(60));
+            try
+            {
+                int n;
+                while ((n = await stream.ReadAsync(buf, linger.Token)) > 0) drained += n;
+                _log.LogInformation("[PATCH] {Remote} sent {File} ({Len} bytes) in {Sent:F1}s; console closed after {Total:F1}s{Extra}",
+                    remote, PatchName, file.Length, sent.TotalSeconds, sw.Elapsed.TotalSeconds,
+                    drained > 0 ? $" (it sent {drained} more bytes)" : "");
+            }
+            catch (OperationCanceledException)
+            {
+                _log.LogWarning("[PATCH] {Remote} sent {File} ({Len} bytes) in {Sent:F1}s but the console kept the connection open 60s — it did not finish the transfer",
+                    remote, PatchName, file.Length, sent.TotalSeconds);
+            }
+            catch (IOException ex)
+            {
+                _log.LogWarning("[PATCH] {Remote} sent {File} ({Len} bytes) in {Sent:F1}s; connection then failed after {Total:F1}s: {Error}",
+                    remote, PatchName, file.Length, sent.TotalSeconds, sw.Elapsed.TotalSeconds, ex.Message);
+            }
         }
         catch (OperationCanceledException)
         {

@@ -35,6 +35,20 @@ public class MultiplayerConfig
     /// <summary>DME (Demonware Multiplayer Engine) in-game relay TCP port.</summary>
     public int DmePort { get; set; } = 10070;
 
+    /// <summary>
+    /// Send SERVER_CONNECT_NOTIFY / SERVER_DISCONNECT_NOTIFY to the other players in a DME world. Off by default.
+    /// The old 4-byte layout made the player already in the room quit (the DME client requires exactly 82 / 18
+    /// bytes, handler 0x0063E848). The layout is now the v108 one ([index][ip:16][key:64]); proven on PCSX2 via the
+    /// debug API, still to be confirmed on hardware before turning this on.
+    /// </summary>
+    public bool DmePlayerNotifications { get; set; }
+
+    /// <summary>
+    /// Localhost-only debug API (fake DME clients, raw RT frames) for testing lobby/player-count mods.
+    /// 0 = disabled. Always binds 127.0.0.1, never <see cref="BindAddress"/>.
+    /// </summary>
+    public int DebugApiPort { get; set; }
+
     // ── DNAS ─────────────────────────────────────────────────────────────────
 
     /// <summary>
@@ -199,9 +213,11 @@ public class MultiplayerConfig
     {
         get
         {
-            var url = string.IsNullOrWhiteSpace(UniversePatchUrl)
-                ? $"http://{ServerIp}:{PatchHttpPort}/_socom2-prod/currentpatch/"
-                : UniversePatchUrl.Trim();
+            // Only an http:// URL is usable by the client; anything else (e.g. a file path meant for PatchFile)
+            // falls back to this server's own patch URL.
+            var url = UniversePatchUrl.Trim().StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+                ? UniversePatchUrl.Trim()
+                : $"http://{ServerIp}:{PatchHttpPort}/_socom2-prod/currentpatch/";
             return url.EndsWith('/') ? url : url + "/";
         }
     }

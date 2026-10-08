@@ -28,6 +28,10 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.Apache
     ///   ftscore  : version-increment ftscorePlaintext → encrypt with revival AES key → sign with our key
     ///   zsealetc : keep disc-encrypted body unchanged → replace Sony RSA sig with ours
     /// </summary>
+    [Obsolete("DEPRECATED — built on the wrong (AES / single RSA-2048-in-DNAS.BIN) model and cannot " +
+              "produce a ZDB the retail loader accepts. The real format is RC6-CBC + a 30-key RSA-1024 " +
+              "table; the RSA header blocks ARE the per-block signatures. Decrypt/inspect with ApacheZdbReader. " +
+              "See memory note reference_apache-zdb-format.")]
     public static class ApachePatchBuilder
     {
         // DNAS prefix size: 0x300-byte blob + 16-byte key + 16-byte IV = 0x320 bytes.

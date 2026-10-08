@@ -67,12 +67,23 @@ public sealed class Ps2MemoryCard : IDisposable
     // ── Public API ───────────────────────────────────────────────────────────
 
     /// <summary>Opens an existing PS2 memory card image.</summary>
-    public static Ps2MemoryCard Open(string path)
+    public static Ps2MemoryCard Open(string path, bool readOnly = false)
     {
         var mc = new Ps2MemoryCard();
-        mc._stream = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
-        mc.ReadSuperblock();
-        mc.LoadFat();
+        // Read-only opens share with other processes (PCSX2 / sync clients may hold the card).
+        mc._stream = readOnly
+            ? new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete)
+            : new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        try
+        {
+            mc.ReadSuperblock();
+            mc.LoadFat();
+        }
+        catch
+        {
+            mc.Dispose();
+            throw;
+        }
         return mc;
     }
 
@@ -374,7 +385,13 @@ public sealed class Ps2MemoryCard : IDisposable
 
         var magic = Encoding.ASCII.GetString(page, 0, 28);
         if (magic != Magic)
+        {
+            // PCSX2 creates new cards as 0xFF-filled files until the game/BIOS formats them.
+            if (page.All(b => b == 0xFF))
+                throw new InvalidDataException(
+                    "Memory card is unformatted (blank). Format it from the PS2 BIOS/game or use MC_FORMAT.");
             throw new InvalidDataException("Not a valid PS2 memory card image (bad magic).");
+        }
 
         _pageSize        = ReadU16(page, 40);
         _pagesPerCluster = ReadU16(page, 42);

@@ -39,6 +39,7 @@
     <ProjectReference Include="..\CodeDesigner.Ps2.Recompiler\CodeDesigner.Ps2.Recompiler.csproj" />
     <ProjectReference Include="..\CodeDesigner.Ps2.FileFormats\CodeDesigner.Ps2.FileFormats.csproj" />
     <ProjectReference Include="..\CodeDesigner.Ps2.DiscordPresence\CodeDesigner.Ps2.DiscordPresence.csproj" />
+    <ProjectReference Include="..\CodeDesigner.Ps2.DiscordBot\CodeDesigner.Ps2.DiscordBot.csproj" />
   </ItemGroup>
 
   <ItemGroup>

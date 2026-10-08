@@ -144,7 +144,8 @@ public class DmeWorld
     /// <summary>Send an application packet from <paramref name="source"/> to a single target by DME id.</summary>
     public void SendAppSingle(DmeClientState source, int targetDmeId, byte[] payload)
     {
-        if (Clients.TryGetValue(targetDmeId, out var target)
+        if (IsFake(targetDmeId)) RecordToFake(source.DmeId, targetDmeId, payload);
+        else if (Clients.TryGetValue(targetDmeId, out var target)
             && target.HasJoined
             && target.HasRecvFlag(RT_RECV_FLAG.RECV_SINGLE))
         {
@@ -157,7 +158,8 @@ public class DmeWorld
     {
         foreach (var tid in targetIds)
         {
-            if (Clients.TryGetValue(tid, out var target)
+            if (IsFake(tid)) RecordToFake(source.DmeId, tid, payload);
+            else if (Clients.TryGetValue(tid, out var target)
                 && target.HasJoined
                 && target.HasRecvFlag(RT_RECV_FLAG.RECV_LIST))
             {
@@ -166,13 +168,90 @@ public class DmeWorld
         }
     }
 
+    // ── Fake clients (debug API) ──────────────────────────────────────────────
+
+    private readonly HashSet<int> _fakeIds = new();
+
+    /// <summary>Slot indexes held by debug-API fake clients (no connection behind them).</summary>
+    public IReadOnlyCollection<int> FakeIds { get { lock (_slotLock) return _fakeIds.ToArray(); } }
+
+    /// <summary>Reserve <paramref name="index"/> for a fake client, or the first free slot when null.</summary>
+    public int? ReserveFake(int? index)
+    {
+        lock (_slotLock)
+        {
+            if (index is int i)
+            {
+                if ((uint)i >= (uint)MaxClientsPerWorld || _slotUsed[i]) return null;
+                _slotUsed[i] = true;
+                _fakeIds.Add(i);
+                return i;
+            }
+            for (int n = 0; n < MaxPlayers; n++)
+            {
+                if (_slotUsed[n]) continue;
+                _slotUsed[n] = true;
+                _fakeIds.Add(n);
+                return n;
+            }
+            return null;
+        }
+    }
+
+    public bool IsFake(int index) { lock (_slotLock) return _fakeIds.Contains(index); }
+
+    /// <summary>App payloads real clients addressed to fake clients (newest last, capped).</summary>
+    public ConcurrentQueue<(DateTime At, int From, int To, byte[] Payload)> FakeInbox { get; } = new();
+
+    private void RecordToFake(int from, int to, byte[] payload)
+    {
+        FakeInbox.Enqueue((DateTime.UtcNow, from, to, payload));
+        while (FakeInbox.Count > 500) FakeInbox.TryDequeue(out _);
+    }
+
+    public bool ReleaseFake(int index)
+    {
+        lock (_slotLock)
+        {
+            if (!_fakeIds.Remove(index)) return false;
+            _slotUsed[index] = false;
+            return true;
+        }
+    }
+
+    /// <summary>Send one RT frame to every joined real client, bypassing the notification gate.</summary>
+    public int SendToJoined(RT_MSG_TYPE type, byte[] payload)
+    {
+        int sent = 0;
+        foreach (var (_, client) in Clients)
+        {
+            if (!client.HasJoined || client.Disconnected) continue;
+            client.Send(type, payload);
+            sent++;
+        }
+        return sent;
+    }
+
+    /// <summary>Relay an application payload to every joined real client as if <paramref name="sourceDmeId"/> sent it.</summary>
+    public int ForwardAppFrom(int sourceDmeId, byte[] payload)
+    {
+        int sent = 0;
+        foreach (var (_, client) in Clients)
+        {
+            if (!client.HasJoined || client.Disconnected || client.DmeId == sourceDmeId) continue;
+            Forward(client, sourceDmeId, payload);
+            sent++;
+        }
+        return sent;
+    }
+
     public void NotifyPlayerJoined(DmeClientState joined)
     {
         foreach (var (_, client) in Clients)
         {
             if (client == joined || !client.HasJoined) continue;
             if (!client.HasRecvFlag(RT_RECV_FLAG.RECV_NOTIFICATION)) continue;
-            client.SendConnectNotify(joined.DmeId, joined.ScertId);
+            client.SendConnectNotify(joined);
         }
     }
 
@@ -182,7 +261,7 @@ public class DmeWorld
         {
             if (client == left || !client.HasJoined) continue;
             if (!client.HasRecvFlag(RT_RECV_FLAG.RECV_NOTIFICATION)) continue;
-            client.SendDisconnectNotify(left.DmeId, left.ScertId);
+            client.SendDisconnectNotify(left);
         }
     }
 

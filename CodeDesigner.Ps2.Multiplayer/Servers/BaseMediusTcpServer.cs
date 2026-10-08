@@ -229,7 +229,10 @@ public abstract class BaseMediusTcpServer
                     // Only applies AFTER the key exchange completes (CLIENT_CRYPTKEY_PUBLIC
                     // itself is RSA-encrypted, not RC4 — don't decrypt it).
                     if (packet.IsEncrypted && packet.Hash != null && state.CryptKeyReceived)
-                        PS2_RC4.Decrypt(state.SessionRc4Key, packet.Hash, packet.Payload);
+                    {
+                        int clear = ClearPrefixLength(packet.MessageType, packet.Payload.Length);
+                        PS2_RC4.Decrypt(state.SessionRc4Key, packet.Hash, packet.Payload.AsSpan(clear));
+                    }
 
                     // Isolate handler faults: a single malformed message must not tear down
                     // the connection (and drop every message queued behind it). Log and move on.
@@ -685,13 +688,23 @@ public abstract class BaseMediusTcpServer
     {
         if (state.SessionRc4Key != null && packet.Hash == null)
         {
+            int clear = ClearPrefixLength(packet.MessageType, packet.Payload.Length);
             PS2_RC4.Encrypt(state.SessionRc4Key, context,
-                packet.Payload, out var cipher, out var hash);
+                packet.Payload[clear..], out var cipher, out var hash);
             packet.Hash    = hash;
-            packet.Payload = cipher;
+            packet.Payload = [.. packet.Payload.AsSpan(0, clear), .. cipher];
         }
         return SendPacketAsync(tcp, packet, ct);
     }
+
+    /// <summary>
+    /// Bytes at the start of an encrypted RT payload that travel in the clear. CLIENT_APP_SINGLE carries its
+    /// [target/source DME index:2] unencrypted and the hash + RC4 cover only the data after it — seen on PCSX2:
+    /// the host's identical handshake to fake peers 1, 2 and 3 had the same hash and ciphertext, only the
+    /// leading index differed.
+    /// </summary>
+    private static int ClearPrefixLength(RT_MSG_TYPE type, int payloadLength)
+        => type == RT_MSG_TYPE.RT_MSG_CLIENT_APP_SINGLE && payloadLength >= 2 ? 2 : 0;
 
     /// <summary>
     /// Send a SCERT packet encrypted with <see cref="CipherContext.RcServerSession"/>.

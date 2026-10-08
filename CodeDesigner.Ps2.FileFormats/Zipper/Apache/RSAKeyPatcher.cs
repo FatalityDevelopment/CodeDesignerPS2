@@ -3,6 +3,17 @@ using System;
 namespace CodeDesigner.Ps2.FileFormats.Zipper.Apache
 {
     /// <summary>
+    /// DEPRECATED / INCORRECT — kept only for reference. This was written against an assumed
+    /// "IOP secrman" + AES model that live tracing disproved:
+    ///   * The ZDB cipher is RC6-CBC, not AES.
+    ///   * The patch-verification keys are a 30-entry RSA-1024 table in the MAIN (EE) executable
+    ///     at EE 0x00560A20 — not an IOP secrman module. The "0x00188938" below is a MWo3
+    ///     TextSize field, not an IOP load address; the three byte-patch sites actually fall in
+    ///     the EE image, and patching them does not affect retail ZDB verification.
+    /// To make a custom ZDB loadable, replace the EE key table (gApacheKeyTable) — see the
+    /// memory note reference_apache-zdb-format. For read-only decrypt use ApacheZdbReader.
+    ///
+    /// Original (incorrect) notes follow:
     /// Patches the captured ZSealEtc IOP secrman binary (code.bin, loaded at IOP 0x00188938)
     /// to bypass the DNAS session-blob validation.
     ///
@@ -29,6 +40,9 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.Apache
     ///   If the EE ISO patches supply the revival_aes.bin key independently this is
     ///   not required.  Revival AES key: D5 F6 C6 D5 7C 66 49 76 68 25 23 D7 57 A8 F6 4B
     /// </summary>
+    [Obsolete("DEPRECATED / INCORRECT — targets EE addresses under the false assumption they are an " +
+              "IOP secrman module, and does not affect retail ZDB verification (RC6 + RSA-1024 key table " +
+              "at EE 0x00560A20). See memory note reference_apache-zdb-format.")]
     public static class RSAKeyPatcher
     {
         // ── Patch 1: fn@0x001892A0 – DNAS key-byte loop guard ───────────────

@@ -41,6 +41,7 @@ public class DmeServer : BaseMediusTcpServer
         _presence  = presence;
         _log       = log;
         ServerName = "DME";
+        DmeClientState.PlayerNotificationsEnabled = config.DmePlayerNotifications;
         admin.BansChanged += bans => KickBanned(bans, store);
     }
 
@@ -74,6 +75,8 @@ public class DmeServer : BaseMediusTcpServer
         slot.IsConnected   = true;
         slot.MediusVersion = state.MediusVersion;
         slot.ScertId       = state.ScertId;
+        if (state.ClientCryptKey.Length > 0) slot.PublicKey = state.ClientCryptKey;
+        if (tcp.Client.RemoteEndPoint is System.Net.IPEndPoint ep) slot.IpAddress = ep.Address.MapToIPv4().ToString();
         slot.Sender        = (type, payload) =>
             SendPacketAsync(tcp, new ScertPacket { MessageType = type, Payload = payload }, state, ct);
 

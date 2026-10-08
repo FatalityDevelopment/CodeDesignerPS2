@@ -80,6 +80,9 @@ public class CodeDesignerDbContext : DbContext
     /// <summary>Persisted caller → callee relationships used by the call-graph visualizer.</summary>
     public DbSet<CallEdge> CallEdges { get; set; } = null!;
 
+    /// <summary>Persisted AI activity log (the events shown in the AI Activity panel).</summary>
+    public DbSet<AiActivityLog> AiActivityLogs { get; set; } = null!;
+
     // ── Construction ──────────────────────────────────────────────────────────
 
     public CodeDesignerDbContext(DbContextOptions<CodeDesignerDbContext> options)
@@ -283,6 +286,19 @@ public class CodeDesignerDbContext : DbContext
             // The renderer always pages through messages by session in
             // chronological order — index covers that path.
             entity.HasIndex(m => new { m.McpChatSessionId, m.CreatedAt });
+        });
+
+        // ── AiActivityLog ──────────────────────────────────────────────────────
+        modelBuilder.Entity<AiActivityLog>(entity =>
+        {
+            entity.HasKey(a => a.Id);
+            entity.Property(a => a.Kind).HasMaxLength(16).IsRequired();
+            entity.Property(a => a.Name).HasMaxLength(128);
+            entity.Property(a => a.Region).HasMaxLength(16);
+            entity.Property(a => a.Detail).HasMaxLength(512);
+
+            // Retention pruning deletes by age.
+            entity.HasIndex(a => a.CreatedAt);
         });
 
         // ── GameRegion ─────────────────────────────────────────────────────────

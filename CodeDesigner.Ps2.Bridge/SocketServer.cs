@@ -57,6 +57,9 @@ namespace CodeDesigner.Ps2.Bridge
         /// <summary>True when <see cref="Db"/> was created by this instance and must be disposed with it.</summary>
         private readonly bool _ownsDb;
 
+        /// <summary>Persists relayed AI activity to the AiActivityLogs table (null when the DB has no connection string).</summary>
+        private readonly Services.AiActivityRecorder? _activityRecorder;
+
         /// <summary>
         /// Dedicated binary fan-out for GS framebuffer streaming. Owns its own
         /// inbound socket to PCSX2's GSStreamServer and a separate outbound
@@ -284,6 +287,16 @@ namespace CodeDesigner.Ps2.Bridge
             McpOrchestrationRepo = new DbMcpOrchestrationRepository(db);
             ChatRepo      = new DbMcpChatRepository(db);
             DataFormatRepo = new DbDataFormatRepository(db, LabelRepo);
+
+            // The recorder writes from a background task, so it gets its own
+            // contexts built from the same connection rather than sharing `db`.
+            string? activityConnectionString = null;
+            try { activityConnectionString = db.Database.GetConnectionString(); } catch { /* non-relational provider */ }
+            if (!string.IsNullOrEmpty(activityConnectionString))
+            {
+                _activityRecorder = new Services.AiActivityRecorder(
+                    new BridgeDbContextFactory(DatabaseInitialiser.BuildDbOptions(activityConnectionString)));
+            }
 
             // Constructed before the service list because GsStreamService takes
             // a reference to it. The listener doesn't actually bind until Start().
@@ -682,20 +695,19 @@ namespace CodeDesigner.Ps2.Bridge
         /// command is one of the interesting address-based operations, pushes a JSON
         /// <c>{"type":"ai_activity",...}</c> notification to every subscribed stream
         /// except <paramref name="requesterStream"/> (so VSCode's own reads never echo back).
+        /// Every event is also persisted to the AiActivityLogs table (whether or not a
+        /// panel is subscribed) so the Discord bot and other consumers can poll it.
         /// </summary>
         private async Task TryPushActivityNotification(string requestMessage, string responseMessage, NetworkStream requesterStream)
         {
             try
             {
-                List<NetworkStream> subscribers;
-                lock (_subscribersLock) { subscribers = new List<NetworkStream>(_activitySubscribers); }
-                if (subscribers.Count == 0) { return; }
-
                 var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
                 var command = JsonSerializer.Deserialize<CommandMessage>(requestMessage, options);
                 if (command == null) { return; }
 
                 string? notificationJson = null;
+                Database.Entities.AiActivityLog? logEntry = null;
                 var cmdUpper = command.Command?.ToUpperInvariant();
 
                 if (cmdUpper != null && command.Address.HasValue && _activityAddressCommands.Contains(cmdUpper))
@@ -707,6 +719,7 @@ namespace CodeDesigner.Ps2.Bridge
                         address = command.Address.Value,
                         region  = command.Region ?? "ee",
                     });
+                    logEntry = new() { Kind = "activity", Name = command.Command, Address = command.Address.Value, Region = command.Region ?? "ee" };
                 }
                 else if (cmdUpper == "GETPC")
                 {
@@ -721,6 +734,7 @@ namespace CodeDesigner.Ps2.Bridge
                             address = resp.PC.Value,
                             region  = "ee",
                         });
+                        logEntry = new() { Kind = "activity", Name = "GETPC", Address = resp.PC.Value, Region = "ee" };
                     }
                 }
                 else if (cmdUpper == "SESSION_START")
@@ -731,6 +745,7 @@ namespace CodeDesigner.Ps2.Bridge
                     {
                         type = "ai_session_start",
                     });
+                    logEntry = new() { Kind = "session", Name = command.Command };
                 }
                 else if (cmdUpper is "ADDLABELENTRY" or "ADDLABELENTRIES" or "CREATELABELSET" or "DELETELABELENTRY" or "DELETELABELSET")
                 {
@@ -743,6 +758,7 @@ namespace CodeDesigner.Ps2.Bridge
                         setName = command.SetName,
                         gameId  = command.GameId,
                     });
+                    logEntry = new() { Kind = "label", Name = command.Command, Detail = command.SetName };
                 }
                 else if (cmdUpper is "NETCAPTURE" or "NETRECVCAPTURE")
                 {
@@ -755,6 +771,13 @@ namespace CodeDesigner.Ps2.Bridge
                         direction = command.NetCaptureDirection,
                         enable    = command.NetCaptureEnable,
                     });
+                    logEntry = new()
+                    {
+                        Kind   = "packet",
+                        Name   = command.Command,
+                        Detail = command.NetCaptureEnable is bool on ? (on ? "capture on" : "capture off")
+                               : command.NetCaptureDirection is byte dir ? $"dir {dir}" : null,
+                    };
                 }
                 else if (cmdUpper == "AI_TOOL_CALL")
                 {
@@ -767,9 +790,22 @@ namespace CodeDesigner.Ps2.Bridge
                         "{\"type\":\"ai_tool_call\",\"payload\":" +
                         (string.IsNullOrEmpty(command.Data) ? "null" : command.Data) +
                         "}";
+                    logEntry = ParseToolCallLogEntry(command.Data);
+                }
+                else if (cmdUpper == "AI_MESSAGE" && !string.IsNullOrWhiteSpace(command.Data))
+                {
+                    // The AI's reply text for a turn, sent by the Claude Code Stop hook
+                    // (tools/hooks/send-ai-message.js). Persisted only — the panel
+                    // has no renderer for it yet.
+                    logEntry = new() { Kind = "message", Name = "assistant", Result = command.Data };
                 }
 
+                if (logEntry != null) { _activityRecorder?.Record(logEntry); }
+
                 if (notificationJson == null) { return; }
+
+                List<NetworkStream> subscribers;
+                lock (_subscribersLock) { subscribers = new List<NetworkStream>(_activitySubscribers); }
 
                 var bytes = Encoding.UTF8.GetBytes(notificationJson + "\n");
                 foreach (var sub in subscribers)
@@ -780,6 +816,35 @@ namespace CodeDesigner.Ps2.Bridge
                 }
             }
             catch { /* ignore any notification errors */ }
+        }
+
+        /// <summary>
+        /// Builds an AiActivityLog row from an AI_TOOL_CALL payload
+        /// (<c>{ tool, args, result, ok, elapsedMs }</c>); null when it is malformed.
+        /// </summary>
+        private static Database.Entities.AiActivityLog? ParseToolCallLogEntry(string? data)
+        {
+            if (string.IsNullOrEmpty(data)) { return null; }
+            try
+            {
+                using var doc = JsonDocument.Parse(data);
+                var root = doc.RootElement;
+                string? Str(string name) =>
+                    root.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+
+                string? tool = Str("tool");
+                return new Database.Entities.AiActivityLog
+                {
+                    Kind      = "tool",
+                    Name      = tool is { Length: > 128 } ? tool[..128] : tool,
+                    ArgsJson  = Str("args"),
+                    Detail    = Str("reason") is { } reason ? (reason.Length > 512 ? reason[..512] : reason) : null,
+                    Result    = Str("result"),
+                    Ok        = root.TryGetProperty("ok", out var ok) && ok.ValueKind is JsonValueKind.True or JsonValueKind.False ? ok.GetBoolean() : null,
+                    ElapsedMs = root.TryGetProperty("elapsedMs", out var ms) && ms.TryGetInt32(out var elapsed) ? elapsed : null,
+                };
+            }
+            catch (JsonException) { return null; }
         }
 
         /// <summary>
@@ -998,6 +1063,10 @@ namespace CodeDesigner.Ps2.Bridge
                     // ── AI session lifecycle ───────────────────────────────────────────
                     case "SESSION_START":
                         return CreateSuccessResponse("AI session started");
+
+                    case "AI_MESSAGE":
+                        // Persisted by TryPushActivityNotification; just ack.
+                        return CreateSuccessResponse("logged");
 
                     case "AI_TOOL_CALL":
                         // Pure notification relay — TryPushActivityNotification

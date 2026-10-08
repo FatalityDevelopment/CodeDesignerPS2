@@ -25,12 +25,18 @@ namespace CodeDesigner.Ps2.Bridge.Services
         {
             if (string.IsNullOrWhiteSpace(mcPath))
                 return Responses.Error("McPath is required for MC_LIST");
-            if (!File.Exists(mcPath))
+            if (!File.Exists(mcPath) && !FolderMemoryCard.IsFolderCard(mcPath))
                 return Responses.Error($"Memory card file not found: {mcPath}");
             try
             {
-                using var mc = Ps2MemoryCard.Open(mcPath);
-                var saves = mc.ListSaves();
+                MemoryCardEntry[] saves;
+                if (FolderMemoryCard.IsFolderCard(mcPath))
+                    saves = FolderMemoryCard.ListSaves(mcPath);
+                else
+                {
+                    using var mc = Ps2MemoryCard.Open(mcPath, readOnly: true);
+                    saves = mc.ListSaves();
+                }
                 var infos = saves.Select(s => new McSaveInfo
                 {
                     Name       = s.Name,
@@ -51,12 +57,17 @@ namespace CodeDesigner.Ps2.Bridge.Services
             if (string.IsNullOrWhiteSpace(mcPath))   return Responses.Error("McPath is required");
             if (string.IsNullOrWhiteSpace(saveName))  return Responses.Error("SaveName is required");
             if (string.IsNullOrWhiteSpace(exportDir)) return Responses.Error("ExportDir is required");
-            if (!File.Exists(mcPath)) return Responses.Error($"Memory card file not found: {mcPath}");
+            if (!File.Exists(mcPath) && !FolderMemoryCard.IsFolderCard(mcPath)) return Responses.Error($"Memory card file not found: {mcPath}");
             try
             {
                 string outPath = Path.Combine(exportDir, saveName);
-                using var mc = Ps2MemoryCard.Open(mcPath);
-                mc.ExportSave(saveName, outPath);
+                if (FolderMemoryCard.IsFolderCard(mcPath))
+                    FolderMemoryCard.ExportSave(mcPath, saveName, outPath);
+                else
+                {
+                    using var mc = Ps2MemoryCard.Open(mcPath, readOnly: true);
+                    mc.ExportSave(saveName, outPath);
+                }
                 return JsonSerializer.Serialize(new CommandResponse
                 {
                     Success = true, Command = "MC_EXPORT",
@@ -71,6 +82,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
         {
             if (string.IsNullOrWhiteSpace(mcPath))   return Responses.Error("McPath is required");
             if (string.IsNullOrWhiteSpace(importDir)) return Responses.Error("ImportDir is required");
+            if (FolderMemoryCard.IsFolderCard(mcPath)) return Responses.Error("Importing into PCSX2 folder memory cards is not supported; use a file-based card.");
             if (!File.Exists(mcPath)) return Responses.Error($"Memory card file not found: {mcPath}");
             if (!Directory.Exists(importDir)) return Responses.Error($"Import directory not found: {importDir}");
             try
@@ -91,6 +103,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
         {
             if (string.IsNullOrWhiteSpace(mcPath))  return Responses.Error("McPath is required");
             if (string.IsNullOrWhiteSpace(saveName)) return Responses.Error("SaveName is required");
+            if (FolderMemoryCard.IsFolderCard(mcPath)) return Responses.Error("Deleting from PCSX2 folder memory cards is not supported; use a file-based card.");
             if (!File.Exists(mcPath)) return Responses.Error($"Memory card file not found: {mcPath}");
             try
             {
@@ -110,11 +123,17 @@ namespace CodeDesigner.Ps2.Bridge.Services
             if (string.IsNullOrWhiteSpace(mcPath))   return Responses.Error("McPath is required");
             if (string.IsNullOrWhiteSpace(saveName))  return Responses.Error("SaveName is required");
             if (string.IsNullOrWhiteSpace(fileName))  return Responses.Error("McFileName is required");
-            if (!File.Exists(mcPath)) return Responses.Error($"Memory card file not found: {mcPath}");
+            if (!File.Exists(mcPath) && !FolderMemoryCard.IsFolderCard(mcPath)) return Responses.Error($"Memory card file not found: {mcPath}");
             try
             {
-                using var mc = Ps2MemoryCard.Open(mcPath);
-                byte[] data = mc.ReadFile(saveName, fileName);
+                byte[] data;
+                if (FolderMemoryCard.IsFolderCard(mcPath))
+                    data = FolderMemoryCard.ReadFile(mcPath, saveName, fileName);
+                else
+                {
+                    using var mc = Ps2MemoryCard.Open(mcPath, readOnly: true);
+                    data = mc.ReadFile(saveName, fileName);
+                }
                 return JsonSerializer.Serialize(new CommandResponse
                 {
                     Success = true, Command = "MC_READ_FILE",

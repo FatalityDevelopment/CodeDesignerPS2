@@ -38,6 +38,10 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.Apache
     ///   apache.Archive.Save("APACHE00_revival.ZDB");
     /// </code>
     /// </summary>
+    [Obsolete("DEPRECATED — wrong cipher model. Retail APACHE00.ZDB is protected with RC6-CBC + " +
+              "RSA-1024 signatures (not AES), as confirmed by live trace. This AES/vtable codec cannot " +
+              "decrypt a retail ZDB. For read-only decrypt/extract/verify use ApacheZdbReader. " +
+              "See memory note reference_apache-zdb-format.")]
     public sealed class ApacheZdb : IDisposable
     {
         // Section name constants (lowercase, as stored in ZDB directory)
