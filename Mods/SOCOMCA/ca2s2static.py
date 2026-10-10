@@ -74,8 +74,64 @@ def nparams(local, lo, hi, kind, flags):
     return struct.pack("<22f2I", *f, kind, flags)
 
 
+def node_meshes(clib, n):
+    """(textures {hash}, triangles, bbox (lo, hi) in the node's own space) of a node's mesh objects, or None."""
+    import staticmesh
+    texs, tris, pts = set(), 0, []
+    for obj in clib.vector(n + 0x98):
+        for tex, mat, pairs in castatic.sections(clib, obj):
+            if tex:
+                texs.add(clib.u32(tex + 0x4C))
+            for _, _, g in pairs:
+                for _, v, t in staticmesh.chunks(g):
+                    pts += v
+                    tris += len(t)
+    if not pts:
+        return None
+    return texs, tris, ([min(p[i] for p in pts) for i in range(3)], [max(p[i] for p in pts) for i in range(3)])
+
+
+def auto_skip(clib, model):
+    """CA models keep lower-detail copies and an enclosing low-poly hull next to the full mesh and draw one by
+    distance; SOCOM II would draw them all (an olive box over the Humvee). No flag marks them, so:
+      copy: >= 10 triangles, shares >= 60% of its textures with a node that has more triangles, and its bbox is
+            within 25% of that node's on every axis
+      hull: one texture of <= 16x16, bbox >= 80% of the most detailed node's on every axis
+    (bboxes are in each node's own space - fine for the Humvee's body / LOD / hull nodes, which share one)
+    -> {node hash}"""
+    nodes = []
+    def walk(n):
+        m = node_meshes(clib, n)
+        if m:
+            nodes.append((clib.u32(n + 4), *m))
+        for k in clib.vector(n + 0x50):
+            walk(k)
+    walk(model)
+    if not nodes:
+        return set()
+    size = lambda b: [b[1][i] - b[0][i] for i in range(3)]
+    whole = size(max(nodes, key=lambda x: x[2])[3])
+    tex_size = {clib.u32(r + 0x4C): clib.texture(r)["width"] * clib.texture(r)["height"] for r in clib.textures}
+    skip = set()
+    for h, texs, tris, box in nodes:
+        sz = size(box)
+        if len(texs) == 1 and tex_size.get(next(iter(texs)), 1 << 20) <= 256 and                 all(sz[i] >= 0.8 * whole[i] for i in range(3)):
+            skip.add(h)
+            continue
+        for h2, texs2, tris2, box2 in nodes:
+            sz2 = size(box2)
+            if h2 != h and tris >= 10 and tris2 > tris and texs and len(texs & texs2) >= 0.6 * len(texs) and                     all(abs(sz[i] - sz2[i]) <= 0.25 * max(sz2[i], 1) for i in range(3)):
+                skip.add(h)
+                break
+    return skip
+
+
 def convert(clib, model_index, name, out_name, out_root, tpl, lib_name="WEAP", verbose=True, max_size=64, bright=0x80, skip=()):
     model = clib.models[model_index]
+    if skip == "auto":
+        skip = auto_skip(clib, model)
+        if verbose and skip:
+            print("  leaving out (LOD copies / hull):", ", ".join(f"{h:08x}" for h in sorted(skip)))
     order = []
 
     def walk(n, depth):
@@ -249,7 +305,7 @@ def main():
     ap.add_argument("--out", default="mcv0001")
     ap.add_argument("--bright", type=lambda x: int(x, 0), default=0x80, help="vertex colour put on unlit CA meshes "
                     "(0x80 = texture as is, up to 0xFF = twice as bright)")
-    ap.add_argument("--skip", default="", help="comma-separated CA node hashes to leave out (their meshes): CA keeps "
+    ap.add_argument("--skip", default="auto", help="comma-separated CA node hashes to leave out (their meshes): CA keeps "
                     "lower-detail copies + an enclosing hull in the same model and picks one by distance")
     ap.add_argument("--max-size", type=int, default=64, help="halve textures larger than this (VRAM: a fresh map's "
                     "prop pool has ~0xBA 256-byte blocks free)")
@@ -260,7 +316,7 @@ def main():
     name = a.name or f"ca_{clib.u32(clib.models[a.model] + 4):08x}"
     tpl = template(a.kind)
     convert(clib, a.model, name, a.out, a.root, tpl, tpl["lib"], max_size=a.max_size, bright=a.bright,
-            skip={int(h, 16) for h in a.skip.split(",") if h})
+            skip="auto" if a.skip == "auto" else {int(h, 16) for h in a.skip.split(",") if h})
 
 
 if __name__ == "__main__":
