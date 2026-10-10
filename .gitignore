@@ -408,3 +408,13 @@ website/obj\\Debug/
 /CodeDesigner.Ps2.CdsLanguage/StdLib/snapshots/SCUS-97275/labels/SOCOM2_r0004.json
 *.json
 /CodeDesigner.Ps2.CdsLanguage/StdLib/emu-settings.json
+
+# SOCOM II auto-login credentials (Mods/SOCOM2/bots/socom_bots.py login) - never commit
+Mods/SOCOM2/auto_login.local.json
+
+# retail game data extracted from the disc for tests / runtime packs (never commit)
+Mods/SOCOM2/packs/
+
+# per-session scratch state of socom_bots.py (grenade sequence, testprop VRAM mark)
+Mods/SOCOM2/bots/.grenade_seq
+Mods/SOCOM2/bots/.vram_mark
