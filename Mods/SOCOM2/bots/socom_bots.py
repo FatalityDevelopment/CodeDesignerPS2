@@ -571,7 +571,10 @@ def spawn_prop(model, pos=None):
     m = game_call([(MODEL_FIND, MODEL_NAME_BUF)])[0]
     if not m:
         sys.exit(f"model '{model}' is not loaded on this map - loadpack its pack first")
-    pos = pos or my_pos((8.0, 0.0, 8.0))
+    pos = list(pos or my_pos((8.0, 0.0, 8.0)))
+    low = struct.unpack("<f", rd(m + 0x44, 4))[0]          # model bounds min y (+0x40 min, +0x4C max: the root
+    if -100.0 < low < 0.0:                                   # nparams); CA origins can sit at rotor height -> lift
+        pos[1] -= low                                        # the lowest point onto the ground
     for i, f in enumerate(pos):
         wr32(CALL_BUF + 4 * i, struct.unpack("<I", struct.pack("<f", f))[0])
     node = game_call([(INSTANTIATE, m, CALL_BUF, 0)])[0]

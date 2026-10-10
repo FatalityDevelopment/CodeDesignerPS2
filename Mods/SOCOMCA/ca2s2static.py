@@ -96,7 +96,7 @@ def auto_skip(clib, model):
     distance; SOCOM II would draw them all (an olive box over the Humvee). No flag marks them, so:
       copy: >= 10 triangles, shares >= 60% of its textures with a node that has more triangles, and its bbox is
             within 25% of that node's on every axis
-      hull: one texture of <= 16x16, bbox >= 80% of the most detailed node's on every axis
+      hull: one texture of <= 16x16, bbox >= 50% of the most detailed node's on every axis
     (bboxes are in each node's own space - fine for the Humvee's body / LOD / hull nodes, which share one)
     -> {node hash}"""
     nodes = []
@@ -115,7 +115,7 @@ def auto_skip(clib, model):
     skip = set()
     for h, texs, tris, box in nodes:
         sz = size(box)
-        if len(texs) == 1 and tex_size.get(next(iter(texs)), 1 << 20) <= 256 and                 all(sz[i] >= 0.8 * whole[i] for i in range(3)):
+        if len(texs) == 1 and tex_size.get(next(iter(texs)), 1 << 20) <= 256 and                 all(sz[i] >= 0.5 * whole[i] for i in range(3)):
             skip.add(h)
             continue
         for h2, texs2, tris2, box2 in nodes:
@@ -156,6 +156,9 @@ def convert(clib, model_index, name, out_name, out_root, tpl, lib_name="WEAP", v
                 if tex is None or geometry in drawn:          # alternative chains over the same geometry (wheels:
                     continue                                  # hub / tread / 2 untextured - states CA picks between);
                 drawn.add(geometry)                           # SOCOM II would draw them all, the untextured as garbage
+                if clib.texture(tex)["psm"] == 0x00 and sum(chunk_stats(g)[1] for _, _, g in pairs) <= 4:
+                    continue                                  # a card with a 32-bit (alpha) texture: rotor blur discs -
+                                                              # the prop material is opaque, so they'd draw solid
                 th = clib.u32(tex + 0x4C)
                 if tex and th not in [t for t, _ in used_tex]:
                     used_tex.append((th, tex))
@@ -180,6 +183,26 @@ def convert(clib, model_index, name, out_name, out_root, tpl, lib_name="WEAP", v
         vis_index += 1
     data, offsets = s2static.encode(visuals)
 
+    # model bounds (game units: positions are 1/16 units, node translations whole units): written to every node so
+    # culling is right and spawn_prop can put the lowest point on the ground (CA origins can sit at rotor height)
+    import staticmesh
+    pts, world = [], []
+    for n, local, depth in order:
+        del world[depth:]
+        parent = world[-1] if world else None
+        m = local if parent is None else [[sum(local[r][k] * parent[k][c] for k in range(4)) for c in range(4)]
+                                          for r in range(4)]
+        world.append(m)
+        if n in node_vis:
+            for obj in clib.vector(n + 0x98):
+                for tex, mat, pairs in castatic.sections(clib, obj):
+                    for _, _, g in pairs:
+                        for _, v, _ in staticmesh.chunks(g):
+                            pts += [[p[0] / 16 * m[0][c] + p[1] / 16 * m[1][c] + p[2] / 16 * m[2][c] + m[3][c]
+                                     for c in range(3)] for p in v]
+    lo = tuple(min(p[c] for p in pts) for c in range(3)) if pts else (-BOUND,) * 3
+    hi = tuple(max(p[c] for p in pts) for c in range(3)) if pts else (BOUND,) * 3
+
     # GEO tree
     def geo_node(i):
         n, local, depth = order[i]
@@ -192,7 +215,7 @@ def convert(clib, model_index, name, out_name, out_root, tpl, lib_name="WEAP", v
             flags |= 0x40000
             if i and not children:
                 flags &= ~0x800000
-        kids = [bp.Node("nparams", nparams(local, (-BOUND,) * 3, (BOUND,) * 3, 7 if i == 0 else 1, flags))]
+        kids = [bp.Node("nparams", nparams(local, lo, hi, 7 if i == 0 else 1, flags))]
         if n in node_vis:
             vis = []
             for key, verts, tris, centre in node_vis[n]:
@@ -243,9 +266,10 @@ def convert(clib, model_index, name, out_name, out_root, tpl, lib_name="WEAP", v
     info = {"visuals": len(visuals), "textures": len(tex_nodes), "palettes": len(pal_nodes), "kb": len(cdb) // 1024,
             "tris": sum(t for v in node_vis.values() for _, _, t, _ in v)}
     info["vram"], problems = check(files)
+    info["bounds"] = (lo, hi)
     if verbose:
         print(f"{name}: {info['visuals']} visuals, {info['tris']} tris, {info['textures']} textures, {info['kb']} KB, "
-              f"VRAM {info['vram']:#x} blocks -> {out_dir}")
+              f"VRAM {info['vram']:#x} blocks, bounds y {lo[1]:.1f}..{hi[1]:.1f} -> {out_dir}")
         for p in problems:
             print("  PROBLEM:", p)
     return path, info
