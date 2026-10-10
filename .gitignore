@@ -418,3 +418,4 @@ Mods/SOCOM2/packs/
 # per-session scratch state of socom_bots.py (grenade sequence, testprop VRAM mark)
 Mods/SOCOM2/bots/.grenade_seq
 Mods/SOCOM2/bots/.vram_mark
+Mods/SOCOM2/bots/.props

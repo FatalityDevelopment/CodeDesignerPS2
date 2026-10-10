@@ -586,6 +586,61 @@ def spawn_prop(model, pos=None):
     print(f"  {model}: node {node:#x} at {pos[0]:.1f} {pos[1]:.1f} {pos[2]:.1f}")
     return node
 
+PROPS_FILE = os.path.join(HERE, ".props")                     # props spawned this map: "<map> <node> <model>" lines
+
+def _pack_model(pack):
+    """The model a pack holds: its <LIB>_MDL.ZED top node (one model per prop pack)."""
+    import build_charpack as bp
+    folder = os.path.dirname(find_pack(pack))
+    mdl = next((f for f in os.listdir(folder) if f.upper().endswith("_MDL.ZED")), None)
+    if not mdl:
+        sys.exit(f"{pack} has no _MDL.ZED")
+    return bp.zed_read(open(os.path.join(folder, mdl), "rb").read())[1][0].name
+
+def _props():
+    current = rd(0x004417C0, 8).split(b"\0")[0].decode()
+    if not os.path.exists(PROPS_FILE):
+        return current, []
+    rows = [l.split() for l in open(PROPS_FILE) if l.strip()]
+    return current, [(int(n, 16), m) for mp, n, m in rows if mp == current]
+
+def prop(pack, model=None, offset=(0.0, 0.0, -12.0)):
+    """Load a prop pack if needed (from this PC over the bridge) and place its model in front of you, standing on
+    the ground. pack: a pack folder name (mcv104, mi0004 ... see F:/SOCOM Packs/*/catalog.json, vehicles.json)."""
+    require_round()
+    model = model or _pack_model(pack)
+    _put_str(MODEL_NAME_BUF, model)
+    if not game_call([(MODEL_FIND, MODEL_NAME_BUF)])[0]:
+        load_pack(pack, "mem")
+    node = spawn_prop(model, my_pos(offset))
+    current, _ = _props()
+    with open(PROPS_FILE, "a") as f:
+        f.write(f"{current} {node:x} {model}\n")
+    return node
+
+def despawn(which="last"):
+    """Remove props placed with `prop` on this map: last (default) or all. The world root's RemoveChild (vtable
+    +0x1C, 0x0033C730 -> zdb::CNode 0x00333410: unlink, drop the reference, clear the parent at +0x64)."""
+    require_round()
+    current, rows = _props()
+    if not rows:
+        print("  no props placed on this map")
+        return
+    targets = rows if which == "all" else rows[-1:]
+    root = struct.unpack("<I", rd(WORLD_ROOT, 4))[0]
+    remove = struct.unpack("<I", rd(struct.unpack("<I", rd(root + 0x60, 4))[0] + 0x1C, 4))[0]
+    for node, model in targets:
+        if struct.unpack("<I", rd(node + 0x64, 4))[0] != root:   # already gone (or the map changed under us)
+            print(f"  {model}: node {node:x} is no longer in the world")
+            continue
+        game_call([(remove, root, node)])
+        print(f"  removed {model} (node {node:x})")
+    keep = set(rows) - set(targets)
+    others = [l for l in (open(PROPS_FILE).read().splitlines() if os.path.exists(PROPS_FILE) else [])
+              if l.strip() and l.split()[0] != current]
+    with open(PROPS_FILE, "w") as f:
+        f.write("".join(l + "\n" for l in others) + "".join(f"{current} {n:x} {m}\n" for n, m in rows if (n, m) in keep))
+
 MODEL_DONOR = "mp_pow1"                                      # chartype lent to models that have none (ai ca_<hash>)
 MODEL_NAME_BUF = 0x000D1F80                                  # its borrowed model name string
 
@@ -1177,6 +1232,10 @@ if __name__ == "__main__":
         load_lib(rest[0])
     elif cmd == "loadpack":                           # loadpack mhost [mc|mem]
         load_pack(rest[0], rest[1] if len(rest) > 1 else "mc")
+    elif cmd == "prop":                               # prop mcv104 [model]  (loads the pack if needed)
+        prop(rest[0], rest[1] if len(rest) > 1 else None)
+    elif cmd == "despawn":                            # despawn [all]  (props placed with `prop`, newest first)
+        despawn("all" if "all" in rest else "last")
     elif cmd == "testprop":                           # testprop mcv0016 ca_hmv_lod  (no map reload between builds)
         test_prop(rest[0], rest[1])
     elif cmd == "inject":                             # inject //mp/mp53/clib  (takes effect on the next map load)
