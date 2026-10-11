@@ -92,6 +92,21 @@ Alpha: GS alpha runs 0..0x80, mapped to 0..255. In 16-bit palettes and textures 
 when no entry sets it the image is opaque, otherwise coloured entries stay visible and black entries without the
 bit are transparent (how the game's cutouts look through TEXA/AEM).
 
+## Where textures come from
+
+A model's `.tif` names are looked up in every texture archive the viewer has loaded:
+
+1. The package: opening a `.ZDB` loads every root `*_TXR.ZED` / `*_PAL.ZED` (and GEO) at once. `WORL_MDL` has no
+   TXR of its own; its textures are in the map's pair (`M51.ZDB` → `M51_TXR` / `M51_PAL`).
+2. When a nested `*_MDL.ZED` is entered before the package has loaded, the per-layer loader fetches that prefix's
+   TXR/PAL, plus the map pair for `WORL_MDL` (found from the root entries).
+3. If textures are still missing after a render, every root TXR/PAL archive that is not loaded yet is fetched on
+   demand and the model re-renders. Palettes are merged, never replaced.
+
+The status line under the toolbar shows what the package delivered, or why it failed (with Retry). The **Missing
+textures** list in the Mesh section says which texture archives were searched. If package payloads arrive
+undecodable, the viewer asks the extension once for a base64 copy.
+
 ## Rendering
 
 - Models with chain colours render pre-lit: `MeshBasicMaterial` with `vertexColors`, colour = byte / 128 (the GS

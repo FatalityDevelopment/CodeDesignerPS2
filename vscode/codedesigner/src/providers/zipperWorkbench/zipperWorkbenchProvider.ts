@@ -147,7 +147,14 @@ export class ZipperWorkbenchProvider {
                 break;
             case 'reloadZdbPackage':
                 // Force-bypass the cache (toolbar "Reload Package" button).
-                await this._loadZdbPackage(webview, msg['path'] as string | undefined, true);
+                // encoding 'base64' is the webview's fallback when binary
+                // payloads arrived undecodable.
+                await this._loadZdbPackage(
+                    webview,
+                    msg['path'] as string | undefined,
+                    true,
+                    msg['encoding'] === 'base64' ? 'base64' : 'binary',
+                );
                 break;
             case 'zipperLog': {
                 // Stream the webview's log line into the dedicated output channel
@@ -275,8 +282,10 @@ export class ZipperWorkbenchProvider {
         webview: vscode.Webview,
         filePath: string | undefined,
         force = false,
+        encoding: 'binary' | 'base64' = 'binary',
     ): Promise<void> {
         if (!filePath) { return; }
+        const wire = (nodes: BinaryNode[]) => encoding === 'base64' ? toBase64Nodes(nodes) : nodes;
 
         // Reuse the cached package when available — survives the panel being
         // closed and reopened, since the cache lives in the extension process
@@ -284,7 +293,7 @@ export class ZipperWorkbenchProvider {
         if (!force) {
             const cached = this._packageCache.get(filePath);
             if (cached) {
-                webview.postMessage({ type: 'zdbPackage', path: filePath, nodes: cached.nodes, fromCache: true, preloadToken: cached.preloadToken });
+                webview.postMessage({ type: 'zdbPackage', path: filePath, nodes: wire(cached.nodes), fromCache: true, preloadToken: cached.preloadToken });
                 return;
             }
         }
@@ -297,7 +306,7 @@ export class ZipperWorkbenchProvider {
                 webview.postMessage({
                     type: 'zdbPackage',
                     path: filePath,
-                    nodes,
+                    nodes: wire(nodes),
                     fromCache: false,
                     preloadStats: {
                         preloadToken: '',
@@ -327,7 +336,7 @@ export class ZipperWorkbenchProvider {
                     this._packageCache.delete(oldest[0]);
                 }
             }
-            webview.postMessage({ type: 'zdbPackage', path: filePath, nodes, fromCache: false, preloadToken: preload.preloadToken, preloadStats: preload });
+            webview.postMessage({ type: 'zdbPackage', path: filePath, nodes: wire(nodes), fromCache: false, preloadToken: preload.preloadToken, preloadStats: preload });
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
             webview.postMessage({ type: 'zdbPackageError', path: filePath, message });
@@ -828,6 +837,10 @@ function bufferToArrayBuffer(buf: Buffer): ArrayBuffer {
 
 function base64ToArrayBuffer(base64: string): ArrayBuffer {
     return bufferToArrayBuffer(Buffer.from(base64 ?? '', 'base64'));
+}
+
+function toBase64Nodes(nodes: BinaryNode[]): Array<{ index: number; name: string; type: number; data: string }> {
+    return nodes.map(n => ({ index: n.index, name: n.name, type: n.type, data: Buffer.from(n.data).toString('base64') }));
 }
 
 function toBinaryNodes(nodes: Array<{ index: number; name: string; type: number; data: string }>): BinaryNode[] {
