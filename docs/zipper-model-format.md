@@ -76,6 +76,20 @@ unit and transforms it by the node's matrix accumulated from the model root. Whe
 node's matrix is applied on top, and implicit child nodes already drawn through their model's chains are not placed
 a second time. The log shows `[placement]` lines with how many visuals were placed.
 
+## Composing the map scene
+
+**Compose GEO scene** uses the map's scene graph: the GEO archive with a `worldmodel` node, preferring the map's own
+prefix (`MP53_GEO`). A package lists several GEO archives and `RUN\COMMON` ones come first, so "the first GEO" is
+`EFFE_GEO`. Instances are collected from the scene root (or the selected node):
+
+- a node that is itself a model (`worldmodel`, a selected weapon root) is placed once, and its descendants are drawn
+  by that model's own chains;
+- a `model_name` reference is always placed (MP53: three `LMG_turret_ledge` on the bunkers, `pavehawk`), and its
+  visuals are placed by the model's definition in its own library scene (`TLLM_GEO`, `PAVE_GEO`);
+- any other node with visuals is tried by name.
+
+The same lookup finds a model's GEO node when it is viewed on its own (`worldmodel` → `MP53_GEO`).
+
 ## Texture record (`<name>.tif` → `texdat`)
 
 ```

@@ -54,7 +54,6 @@ import {
   findSceneNode,
   instanceNameVariants,
   buildVisualPlacementMap,
-  isInSubtree,
   parseGeoScene,
   positionUnitForNode,
   readGeoTransform,
@@ -62,6 +61,7 @@ import {
   readVisualFlags,
   transformPoint,
 } from './zed-geo-parser';
+import { chooseMapScene, collectSceneInstances, definitionNodeFor } from './zed-scene-compose';
 import './zipper-workbench-page.css';
 
 interface ZipperEntryInfo {
@@ -3043,13 +3043,37 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
   // The GEO node that defines a model (same lookup as the unit choice).
   private findGeoNodeForModel(entryName: string | null | undefined, sourceArchiveName: string | null | undefined): GeoNode | null {
     if (!entryName) { return null; }
-    const scene = this.companionSceneForArchive(sourceArchiveName);
-    if (!scene) { return null; }
-    for (const name of this.characterGeoNameCandidates(entryName)) {
-      const node = findSceneNode(scene, name);
-      if (node) { return node; }
+    // The archive's own scene first, then the map scene (WORL_MDL has no
+    // WORL_GEO: worldmodel lives in MP53_GEO), then every loaded scene.
+    const scenes: GeoScene[] = [];
+    const add = (scene: GeoScene | null) => { if (scene && !scenes.includes(scene)) { scenes.push(scene); } };
+    const namespace = namespaceFromArchiveName(sourceArchiveName);
+    if (namespace) { add(this.companionScenesByNamespace.get(namespace) ?? null); }
+    add(this.mapScene());
+    for (const scene of this.allGeoScenes()) { add(scene); }
+    for (const scene of scenes) {
+      for (const name of this.characterGeoNameCandidates(entryName)) {
+        const node = findSceneNode(scene, name);
+        if (node && node.children.some(c => c.name === 'visuals' || c.name === 'children')) { return node; }
+      }
     }
     return null;
+  }
+
+  private allGeoScenes(): GeoScene[] {
+    const scenes = [...this.companionScenesByNamespace.values()];
+    const legacy = this.companionScene();
+    if (legacy && !scenes.includes(legacy)) { scenes.push(legacy); }
+    return scenes;
+  }
+
+  // The map's scene graph: the GEO archive that places the world
+  // (worldmodel), preferring the map's own prefix (MP53_GEO). Package order
+  // puts RUN\COMMON first, so "the first GEO" was EFFE_GEO.
+  mapScene(): GeoScene | null {
+    const candidates = [...this.companionScenesByNamespace.entries()].map(([namespace, scene]) => ({ namespace, scene }));
+    const chosen = chooseMapScene(candidates, this.primaryMapTextureNamespace());
+    return chosen?.scene ?? this.companionScene();
   }
 
   // Put every chain-decoded chunk where its GEO node says: each visual's
@@ -4440,7 +4464,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     }
   }
   dumpGeoReport(): void {
-    const scene = this.companionScene();
+    const scene = this.mapScene();
     if (!scene) { this.log('[DUMP geo] no GEO scene loaded', true); return; }
     this.log('--- GEO report ---', true);
     const entry = this.selectedEntry();
@@ -4462,7 +4486,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
   // model preview pipeline.
   // ------------------------------------------------------------------
   composeGeoScene(): void {
-    const scene = this.companionScene();
+    const scene = this.mapScene();
     if (!scene) {
       this.log('[GEO] no GEO scene loaded for this package', true);
       return;
@@ -4519,38 +4543,10 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       return null;
     };
 
-    let instances = collectGeoInstances(scene, root, { accumulateTransforms: true });
-    const rootHit = root !== scene.root ? resolve(root.name) : null;
-    const rootIsWorldModel =
-      root.name.toLowerCase() === 'worldmodel' ||
-      namespaceFromArchiveName(rootHit?.sourceFile) === 'worl';
-    if (rootHit && rootIsWorldModel) {
-      const hasRootInstance = instances.some(inst =>
-        inst.node === root || inst.modelName.toLowerCase() === root.name.toLowerCase());
-      if (!hasRootInstance) {
-        instances.unshift({
-          modelName: root.name,
-          instanceName: root.name,
-          path: root.name,
-          matrix: identityMatrix(),
-          node: root,
-          positionUnit: positionUnitForNode(root),
-        });
-      }
-    } else if (rootHit) {
-      // Weapon GEO roots such as m4Acarbine_203 own visual part children
-      // (m4_high/m4_low), while the actual renderable MDL entry is the root.
-      // Treat the selected root as the instance so part names don't resolve
-      // as standalone models.
-      instances = [{
-        modelName: root.name,
-        instanceName: root.name,
-        path: root.name,
-        matrix: identityMatrix(),
-        node: root,
-        positionUnit: positionUnitForNode(root),
-      }];
-    }
+    // Nodes that are models themselves (worldmodel, a selected weapon root)
+    // are placed once with their whole subtree; model_name references are
+    // always placed; other nodes with visuals are tried by name.
+    const instances = collectSceneInstances(scene, root, name => !!resolve(name));
     if (instances.length === 0) {
       this.log(`[GEO] no placeable instances found under ${root.name}`, true);
       return;
@@ -4664,17 +4660,10 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
 
     const unitCounts = new Map<string, number>();
     const rawCache = new Map<string, ZedModel | null>();
-    // Nodes whose visuals were drawn through their model's chains. Their
-    // implicit descendants are part of that model, not separate placements.
-    const covered: GeoNode[] = [];
-    let skippedCovered = 0;
     const placedCache = new Map<string, ZedModel>();
+    const allScenes = this.allGeoScenes();
+    const kindCounts = instances.reduce<Record<string, number>>((acc, i) => { acc[i.kind] = (acc[i.kind] ?? 0) + 1; return acc; }, {});
     for (const inst of instances) {
-      const explicit = inst.node.children.some(c => c.name === 'model_name');
-      if (!explicit && covered.some(a => a !== inst.node && isInSubtree(a, inst.node))) {
-        skippedCovered++;
-        continue;
-      }
       const hit = resolve(inst.modelName);
       if (!hit) { missing.push(inst.modelName); continue; }
       const bindKey = /(^|[\\/])weap_mdl(?:\([^)]+\))?\.zed$/i.test(hit.sourceFile)
@@ -4690,10 +4679,15 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       }
       if (!raw) { continue; }
       // The GEO node that defines this model's visuals: the placed node
-      // itself when it owns visuals, else the model's own definition.
-      const defNode = inst.node.children.some(c => c.name === 'visuals' || c.name === 'children')
-        ? inst.node
-        : (findSceneNode(scene, hit.node.name) ?? inst.node);
+      // itself when its subtree owns visuals, else the model's node in its
+      // own library scene (TLLM_GEO for a turret MP53_GEO places).
+      const ownNamespace = namespaceFromArchiveName(hit.sourceFile);
+      const defNode = definitionNodeFor(
+        inst.node,
+        hit.node.name,
+        ownNamespace ? this.companionScenesByNamespace.get(ownNamespace) ?? null : null,
+        allScenes,
+      );
       let mdl: ZedModel | undefined;
       const placedKey = `${rawKey}|${inst.path}|${this.mapPositionUnit()}`;
       mdl = placedCache.get(placedKey);
@@ -4707,9 +4701,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       } else {
         unitCounts.set('GEO placement', (unitCounts.get('GEO placement') ?? 0) + 1);
       }
-      if (mdl) {
-        covered.push(inst.node);
-      } else {
+      if (!mdl) {
         const choice = this.choosePositionUnit(raw, hit.node.name, hit.sourceFile, inst.node);
         const unitLabel = `${choice.unit} (${choice.reason})`;
         unitCounts.set(unitLabel, (unitCounts.get(unitLabel) ?? 0) + 1);
@@ -4773,7 +4765,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
 
     const uniqueMissing = [...new Set(missing.map(m => m.toLowerCase()))];
     this.log('--- GEO scene composed ---', true);
-    this.log(`Root: ${root.name}, instances=${instances.length}, rendered=${rendered}, coveredByParentModel=${skippedCovered}, missingModels=${uniqueMissing.length}, fallbackDecodes=${fallbackUsed}`);
+    this.log(`Root: ${root.name}, instances=${instances.length} (${Object.entries(kindCounts).map(([k, n]) => `${k}=${n}`).join(', ')}), rendered=${rendered}, missingModels=${uniqueMissing.length}, fallbackDecodes=${fallbackUsed}`);
     this.log(`Composed model: ${composedVertices.length} verts, ${composedIndices.length / 3 | 0} tris, ${composedChunks.length} chunks across ${meshCache.size} unique source model(s)`);
     const chainBound = composedChunks.filter(c => c.textureBinding === 'chain').length;
     const coloured = composedChunks.filter(c => c.hasVertexColors).length;
@@ -4939,7 +4931,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
   // the fastest way to figure out why so many GEO instances aren't matching
   // any of the package's MDL nodes.
   dumpGeoInstances(): void {
-    const scene = this.companionScene();
+    const scene = this.mapScene();
     if (!scene) {
       this.log('[GEO instances] no GEO scene loaded for this package', true);
       return;
@@ -4981,34 +4973,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       return null;
     };
 
-    let instances = collectGeoInstances(scene, root, { accumulateTransforms: true });
-    const rootHit = root !== scene.root ? resolve(root.name) : null;
-    const rootIsWorldModel =
-      root.name.toLowerCase() === 'worldmodel' ||
-      namespaceFromArchiveName(rootHit?.sourceFile) === 'worl';
-    if (rootHit && rootIsWorldModel) {
-      const hasRootInstance = instances.some(inst =>
-        inst.node === root || inst.modelName.toLowerCase() === root.name.toLowerCase());
-      if (!hasRootInstance) {
-        instances.unshift({
-          modelName: root.name,
-          instanceName: root.name,
-          path: root.name,
-          matrix: identityMatrix(),
-          node: root,
-          positionUnit: positionUnitForNode(root),
-        });
-      }
-    } else if (rootHit) {
-      instances = [{
-        modelName: root.name,
-        instanceName: root.name,
-        path: root.name,
-        matrix: identityMatrix(),
-        node: root,
-        positionUnit: positionUnitForNode(root),
-      }];
-    }
+    const instances = collectSceneInstances(scene, root, name => !!resolve(name));
 
     let resolved = 0, missing = 0;
     const missingNames = new Set<string>();
