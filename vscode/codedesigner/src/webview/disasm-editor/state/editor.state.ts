@@ -20,6 +20,7 @@ import {
   ThreadEntry,
   CallStackEntry,
 } from './types';
+import { cursorToByteOffset, findRowIndexForByteOffset, toPhysAddr } from './row-locator';
 
 @Injectable({ providedIn: 'root' })
 export class EditorState {
@@ -30,6 +31,18 @@ export class EditorState {
 
   /** Current cursor position (global instruction index, 0-based). */
   readonly cursor = signal(0);
+
+  /**
+   * Byte offset of the cursor inside its instruction word (0–3).  Only
+   * non-zero when the user selects a sub-word (`.byte` / `.half`) row; every
+   * index-based move (goto, search, PC snap) resets it to 0.
+   */
+  readonly cursorByteOffset = signal(0);
+
+  /** Cursor position as a byte offset from the region base address. */
+  readonly cursorOffsetBytes = computed(() =>
+    cursorToByteOffset(this.cursor(), this.cursorByteOffset())
+  );
 
   /** Total number of instructions in the loaded region. */
   readonly totalInstructions = signal(0);
@@ -68,15 +81,20 @@ export class EditorState {
     this.loadedPages().get(this.currentPageStart()) ?? []
   );
 
-  /** Local index of cursor within the current page. */
+  /**
+   * Index of the cursor row within the current page's rows, resolved by
+   * address (rows are variable length, so this is not `cursor - pageStart`).
+   * -1 when the page is not loaded or no row covers the cursor.
+   */
   readonly localCursorIndex = computed(() =>
-    this.cursor() - this.currentPageStart()
+    findRowIndexForByteOffset(this.currentPageRows(), this.baseAddress(), this.cursorOffsetBytes())
   );
 
   /** The DisasmRow at the current cursor position. */
-  readonly currentRow = computed(() =>
-    this.currentPageRows()[this.localCursorIndex()]
-  );
+  readonly currentRow = computed((): DisasmRow | undefined => {
+    const index = this.localCursorIndex();
+    return index >= 0 ? this.currentPageRows()[index] : undefined;
+  });
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Live/Debug State
@@ -119,8 +137,8 @@ export class EditorState {
     const pc = this.pcAddress();
     if (pc === undefined) return -1;
 
-    const physPc = toPhysAddrInternal(pc);
-    const physBase = toPhysAddrInternal(this.baseAddress());
+    const physPc = toPhysAddr(pc);
+    const physBase = toPhysAddr(this.baseAddress());
     const pcInstrIdx = Math.floor((physPc - physBase) / 4);
 
     if (pcInstrIdx < 0 || pcInstrIdx >= this.totalInstructions()) return -1;
@@ -232,23 +250,4 @@ export class EditorState {
     floats: signal(0),
     integers: signal(0),
   };
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Internal Helpers (copied here to avoid circular imports)
-// ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * Translate any virtual/logical EE address to its physical equivalent.
- * KSEG0/KSEG1 (0x80000000–0xBFFFFFFF): strip the top 3 bits.
- * EE RAM uncached mirror (0x20000000–0x21FFFFFF): subtract 0x20000000.
- * EE RAM uncached+accelerated (0x30000000–0x31FFFFFF): subtract 0x30000000.
- * All other addresses pass through.
- */
-function toPhysAddrInternal(addr: number): number {
-  const v = addr >>> 0;
-  if (v >= 0x80000000 && v <= 0xBFFFFFFF) return (v & 0x1FFFFFFF) >>> 0;
-  if (v >= 0x20000000 && v <= 0x21FFFFFF) return (v - 0x20000000) >>> 0;
-  if (v >= 0x30000000 && v <= 0x31FFFFFF) return (v - 0x30000000) >>> 0;
-  return v;
 }

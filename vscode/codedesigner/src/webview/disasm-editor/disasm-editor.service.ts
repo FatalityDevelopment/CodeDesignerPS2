@@ -27,7 +27,10 @@ export type {
 // ── Editor state ──────────────────────────────────────────────────────────────
 
 export interface DisasmEditorState {
+  /** Global instruction index of the cursor (one unit per 4 bytes). */
   cursor: number;
+  /** Byte offset of the cursor inside its instruction word (0–3); see EditorState. */
+  cursorByteOffset: number;
   disasmRows: DisasmRow[];
   totalInstructions: number;
   pageSize: number;
@@ -98,6 +101,7 @@ export class DisasmEditorService implements OnDestroy {
   // ── Mutable editor state ─────────────────────────────────────────────────
   readonly state: DisasmEditorState = {
     cursor: 0,
+    cursorByteOffset: 0,
     disasmRows: [],
     totalInstructions: 0,
     pageSize: 1000,
@@ -262,6 +266,7 @@ export class DisasmEditorService implements OnDestroy {
     this.state.loadedPages.clear();
     this.state.disasmRows        = [];
     this.state.cursor            = 0;
+    this.state.cursorByteOffset  = 0;
     this.state.isLive            = isLive;
 
     // Update signals (new architecture)
@@ -272,6 +277,7 @@ export class DisasmEditorService implements OnDestroy {
     this.signals.regionLabel.set(regionLabel);
     this.signals.loadedPages.set(new Map());
     this.signals.cursor.set(0);
+    this.signals.cursorByteOffset.set(0);
     this.signals.isLive.set(isLive);
     this.signals.navHistory.set([]);
 
