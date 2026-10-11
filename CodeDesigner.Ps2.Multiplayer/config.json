@@ -26,6 +26,9 @@
     "UniversePatchUrl": "",
     "PatchFile": "C:\\Users\\tholu\\Downloads\\BASCUS-97275SOCOMII\\APACHE00.ZDB",
     "LobbyPokeStreamFile": "",
+    "MuisEarlyInject": false,
+    "MuisEarlyPeekAddress": "",
+    "MuisEarlyPeekLength": 64,
     "CommunityRetailReplies": true
   }
 }

@@ -288,6 +288,26 @@ public class MultiplayerConfig
     /// handshake then times out ("Disconnected from Network"). Empty = disabled.
     /// </summary>
     public string LobbyPokeStreamFile { get; set; } = "";
+
+    // ── Early (MUIS) peek/poke experiment ─────────────────────────────────────
+
+    /// <summary>
+    /// Send the configured <see cref="Injections"/> on the MUIS connection — the first SCERT server the PS2
+    /// talks to — instead of waiting for the MLS lobby. They go out inside the MUIS anti-cheat exchange
+    /// (after the round-1 CHEAT_QUERY reply, before the retail round-2 MEMORY_POKE), the earliest point
+    /// hardware is known to accept 0x1D/0x1E traffic. Poked bytes stay in EE RAM across the MAS/MLS
+    /// reconnects. Experimental: false = stock (lobby-only) behaviour.
+    /// </summary>
+    public bool MuisEarlyInject { get; set; } = false;
+
+    /// <summary>
+    /// Optional test peek on MUIS: EE address (hex, e.g. "0x00100000") to read with a RAW_MEMORY
+    /// CHEAT_QUERY at the same early point. The reply is logged as hex. Empty = no peek.
+    /// </summary>
+    public string MuisEarlyPeekAddress { get; set; } = "";
+
+    /// <summary>Bytes to read for <see cref="MuisEarlyPeekAddress"/> (clamped 4..1024).</summary>
+    public int MuisEarlyPeekLength { get; set; } = 64;
 }
 
 /// <summary>
