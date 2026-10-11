@@ -13,6 +13,10 @@
 //
 // Internal scratch use is restricted to $t0-$t9 and $at.
 
+// lib_str_itoa lives in str_ext.cds; includes are only ever inlined once, so this is
+// safe even when the caller already included str_ext.cds itself.
+include "str_ext.cds"
+
     // Temporary 16-byte buffer for numeric conversions.
 _fmt_tmpbuf:
     string "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0"

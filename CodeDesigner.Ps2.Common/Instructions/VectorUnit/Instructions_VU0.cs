@@ -1,4 +1,4 @@
-using CodeDesigner.Ps2.Common.Cpu.InstrArgs;
+﻿using CodeDesigner.Ps2.Common.Cpu.InstrArgs;
 using CodeDesigner.Ps2.Common.Cpu.Instructions;
 using CodeDesigner.Ps2.Common.CPU;
 using CodeDesigner.Ps2.Common.VectorUnits.VU0;
@@ -1130,7 +1130,7 @@ namespace CodeDesigner.Ps2.Common.Instructions.VectorUnitInstructions
         public override string Disasm(Args_I args, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            return $"{Name} {VU0State.GetVFRegisterName(args.Rt)}, {offset}({CpuHelpers.RegName(args.Rs)})";
+            return $"{Name} {VU0State.GetVFRegisterName(args.Rt)}, {CpuHelpers.FormatOffset(offset)}({CpuHelpers.RegName(args.Rs)})";
         }
 
         public override uint Asm(int[] args)
@@ -1182,7 +1182,7 @@ namespace CodeDesigner.Ps2.Common.Instructions.VectorUnitInstructions
         public override string Disasm(Args_I args, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            return $"{Name} {VU0State.GetVFRegisterName(args.Rt)}, {offset}({CpuHelpers.RegName(args.Rs)})";
+            return $"{Name} {VU0State.GetVFRegisterName(args.Rt)}, {CpuHelpers.FormatOffset(offset)}({CpuHelpers.RegName(args.Rs)})";
         }
 
         public override uint Asm(int[] args)

@@ -3,7 +3,23 @@
 // ============================================================================
 // This file contains practical code examples for every function in the library.
 // Each example is self-contained and demonstrates best practices.
+//
+// The library implementations are included here so the file compiles as a unit
+// (includes are only inlined once per compile, so this is safe alongside your own
+// includes). The example data lives in the DATA SECTION at the end of the file.
 // ============================================================================
+
+include "string.cds"
+include "strutils.cds"
+include "str_ext.cds"
+include "mem.cds"
+include "hash.cds"
+include "crc32.cds"
+include "allocator.cds"
+include "split.cds"
+include "printf.cds"
+
+address $80102000
 
 // ============================================================================
 // 1. STRING OPERATIONS - string.cds
@@ -445,3 +461,22 @@ text:
 
 input_string_split:
     string "one:two:three:four"
+
+mytext:
+    string "Mixed Case Text"
+
+dest_buffer:
+    string "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0"
+
+// ----------------------------------------------------------------------------
+// Branch targets used by the snippets above. In a real patch these would be
+// your own handlers; here they simply fall through.
+// ----------------------------------------------------------------------------
+heap_init_failed:
+malloc_failed:
+mem_equal:
+mem_first_less:
+no_prefix:
+no_suffix:
+not_found:
+    nop

@@ -156,7 +156,7 @@ sb    $v0, 0($a0)           // Store byte: mem[a0 + 0] = v0 (8-bit)
 // Delay slot note: MIPS has a branch delay slot!
 // The instruction AFTER a branch/jump ALWAYS executes before the branch is taken.
 // Best practice: use 'nop' in delay slots to avoid confusion.
-beq   $v0, $a0, :target
+beq   $v0, $a0, :my_label
 nop                         // This executes regardless of branch
 // End delay slot
 
@@ -223,18 +223,19 @@ pointer $80200000 + $10 + $8 = $DEADBEEF
 // Format: const <NAME> <value>
 // Constants can be used in any operand, address, or condition.
 
-const HEALTH_ADDR $20123456   // Symbolic address
+const HEALTH_ADDR $20123450   // Symbolic address (word-aligned: code must start on a 4-byte boundary)
 const MAX_HP 9999              // Symbolic value
 const CRITICAL_HP 100
 const BUFFER_SIZE 256
 
 // Use constants:
-address HEALTH_ADDR            // Expands to: address $20123456
+address HEALTH_ADDR            // Expands to: address $20123450
 setreg $v0, MAX_HP             // Expands to: setreg $v0, 9999
 addi   $t0, $zero, CRITICAL_HP // Expands to: addi $t0, $zero, 100
 
-// Constants can reference other constants:
-const HALF_HP (MAX_HP / 2)     // HALF_HP = 4999 (if math is supported)
+// Constants are substituted as text, so arithmetic is NOT evaluated:
+// write the computed value instead of (MAX_HP / 2).
+const HALF_HP 4999
 
 // ------ PREPROCESSOR: alias ------
 // Define a symbolic alias for a register (convenience).
@@ -298,9 +299,11 @@ add3 $v0, $a0, $a1, $a2       // Expands to:
 // ============================================================================
 
 // ------ PREPROCESSOR: if / else / endif ------
-// Compile-time conditional. Body expands only if condition is true.
 // Format: if <condition> ... [else ...] endif
-// Conditions can be: constants, symbols, expressions (if supported)
+// When both sides are constants (or a single constant) the condition is evaluated
+// at compile time and only the selected body is emitted.
+// When the left-hand side is a register ($t0 == 0, $t0 < $t1, $t0 >=u 0x100, ...)
+// the condition is evaluated at run time: a compare + branch is emitted.
 
 const DEBUG 1
 const PROFILE 0
@@ -333,22 +336,23 @@ else
 endif
 
 // ------ PREPROCESSOR: while / endwhile ------
-// Compile-time loop. Body expands N times until condition is false.
-// Format: while <condition> ... endwhile
-// Common pattern: while N > 0; expands N times.
+// Run-time loop. The left-hand side must be a register; the condition is
+// re-tested on the EE before every iteration (top-tested loop).
+// Format: while <$reg> <op> <$reg|value> ... endwhile
+// Use `repeat N` for a fixed number of iterations.
 
-const ITERATIONS 3
-
-// Expand code 3 times:
-while ITERATIONS > 0
-  nop
-  const ITERATIONS (ITERATIONS - 1)  // Decrement (pseudo-decrement)
+addiu $t0, $zero, 3
+while $t0 > 0
+  addiu $t0, $t0, -1
 endwhile
 
 // This expands to:
-// nop
-// nop
-// nop
+// loop:  blez $t0, :end   (branch when the condition is FALSE)
+//        nop
+//        addiu $t0, $t0, -1
+//        j :loop
+//        nop
+// end:
 
 // ------ PREPROCESSOR: repeat / endrepeat ------
 // Compile-time loop. Body expands N times (simpler than while).
@@ -395,7 +399,7 @@ freeze $2012345C = 50         // Every frame: write 50 here
 // Wrap a freeze block in a condition (memory value check).
 // Format: cond <address> <operator> <value> ... endcond
 // The freeze(s) only run when the condition is true.
-// Operators: ==, !=, <, >, <=, >=
+// Operators: == and != (the value is compared as a 32-bit word)
 
 address $80100600
 cond $80001234 == 1           // Only if mem[$80001234] == 1
@@ -404,7 +408,7 @@ endcond
 
 // Real-world example: Freeze health only when player is in-game
 cond $80002000 == 1           // If in_game == 1
-  cond $80002004 != 0         // AND player_alive != 0
+  cond $80002004 == 1         // AND player_alive == 1 (only == is supported)
     freeze $80002100 = 9999   // Keep health at 9999
   endcond
 endcond
@@ -439,7 +443,7 @@ endtimer
 // Verify a memory value before applying the patch.
 // Format: assert <address> <operator> <value>
 // If the assertion fails, the patch is NOT applied and an error is shown.
-// Operators: ==, !=, <, >, <=, >=
+// Operators: == and != (the value is compared as a 32-bit word)
 
 address $80100800
 assert $20123456 == $DEADBEEF   // Verify original value is DEADBEEF
@@ -449,7 +453,7 @@ assert $20123458 != 0            // Verify value is not zero
 
 // Multiple assertions (all must pass):
 assert $80001000 == $12345678
-assert $80001004 > 0
+assert $80001004 != 0
 // If both pass, the following code runs:
 sw $v0, 0($a0)
 
@@ -673,7 +677,7 @@ sw $v0, PLAYER_LEVEL_OFF($a0)
 // ─────────────────────────────────────────────────
 address $80101800
 assert $80200000 == $12345678      // Verify we're at the right location
-addiu $v0, $zero, $DEADBEEF        // Load new value
+li $v0, $DEADBEEF                  // Load new value (li expands to lui+ori for 32-bit values)
 sw $v0, 0($a0)                     // Write new value
 log "Value replaced safely"
 
