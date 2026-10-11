@@ -110,6 +110,7 @@ export class ZedModelRenderer {
   private readonly resizeObserver: ResizeObserver;
 
   private frameId = 0;
+  private readonly maxAnisotropy: number;
   private mesh: THREE.Mesh | null = null;
   private wireOverlay: THREE.LineSegments | null = null;
   private boundsGuide: THREE.Group | null = null;
@@ -141,6 +142,7 @@ export class ZedModelRenderer {
     // was making the world model look washed out compared to the HTML
     // reference renderer).
     this.renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
+    this.maxAnisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
 
     this.scene.add(this.root);
 
@@ -296,9 +298,13 @@ export class ZedModelRenderer {
       dt.colorSpace = THREE.LinearSRGBColorSpace;
       // Closer to PS2 bilinear: linear mag, no mipmap (PS2 rarely uses
       // them in fixed-camera shots), repeat wrap for atlas tiling.
+      // Mipmapped, trilinear + anisotropic. The game mipmaps its world
+      // textures (TEX1 MMIN in the section materials); without mipmaps a
+      // texture tiled across a map aliases into speckled noise at distance.
       dt.magFilter = THREE.LinearFilter;
-      dt.minFilter = THREE.LinearFilter;
-      dt.generateMipmaps = false;
+      dt.minFilter = THREE.LinearMipmapLinearFilter;
+      dt.generateMipmaps = true;
+      dt.anisotropy = this.maxAnisotropy;
       // Wrap modes come from the texture's GS CLAMP register when known.
       dt.wrapS = tex.wrapS === 'clamp' ? THREE.ClampToEdgeWrapping : THREE.RepeatWrapping;
       dt.wrapT = tex.wrapT === 'clamp' ? THREE.ClampToEdgeWrapping : THREE.RepeatWrapping;
@@ -405,14 +411,18 @@ export class ZedModelRenderer {
     geometry.computeVertexNormals();
 
     // Re-center the geometry so it sits in front of the camera regardless of
-    // where the model authored its world position.
+    // where the model authored its world position. Maps carry far-away
+    // billboards (sun glow, sky cards) that would dwarf the playable area,
+    // so frame on the bulk of the vertices (2nd..98th percentile per axis)
+    // when that box is much smaller than the full one.
     geometry.computeBoundingBox();
     const box = geometry.boundingBox;
+    const fitBox = trimmedBox(allPositions) ?? box;
     const originalCenter = new THREE.Vector3();
-    if (box) {
-      const cx = (box.min.x + box.max.x) / 2;
-      const cy = (box.min.y + box.max.y) / 2;
-      const cz = (box.min.z + box.max.z) / 2;
+    if (fitBox) {
+      const cx = (fitBox.min.x + fitBox.max.x) / 2;
+      const cy = (fitBox.min.y + fitBox.max.y) / 2;
+      const cz = (fitBox.min.z + fitBox.max.z) / 2;
       originalCenter.set(cx, cy, cz);
       geometry.translate(-cx, -cy, -cz);
     }
@@ -423,7 +433,8 @@ export class ZedModelRenderer {
       geometry.addGroup(g.start, g.count, g.material);
     }
 
-    this.boundingRadius = geometry.boundingSphere?.radius || 1;
+    const fitRadiusFromBox = fitBox ? radiusFromBox(fitBox) : 0;
+    this.boundingRadius = fitRadiusFromBox || geometry.boundingSphere?.radius || 1;
     const referenceBox = options.referenceBounds
       ? boundsToBox3(options.referenceBounds.bounds).translate(originalCenter.clone().multiplyScalar(-1))
       : null;
@@ -647,6 +658,31 @@ function boundsToBox3(bounds: ModelBounds3): THREE.Box3 {
     new THREE.Vector3(bounds.minX, bounds.minY, bounds.minZ),
     new THREE.Vector3(bounds.maxX, bounds.maxY, bounds.maxZ),
   );
+}
+
+// Box over the 2nd..98th percentile of the vertex positions on each axis,
+// or null when it is not much smaller than the full box (nothing to trim).
+function trimmedBox(positions: number[]): THREE.Box3 | null {
+  const count = positions.length / 3;
+  if (count < 64) { return null; }
+  const step = Math.max(1, Math.floor(count / 20000));
+  const axes: number[][] = [[], [], []];
+  for (let i = 0; i < count; i += step) {
+    axes[0].push(positions[i * 3]);
+    axes[1].push(positions[i * 3 + 1]);
+    axes[2].push(positions[i * 3 + 2]);
+  }
+  const lo: number[] = [], hi: number[] = [], fullLo: number[] = [], fullHi: number[] = [];
+  for (const a of axes) {
+    a.sort((x, y) => x - y);
+    lo.push(a[Math.floor(a.length * 0.02)]);
+    hi.push(a[Math.min(a.length - 1, Math.ceil(a.length * 0.98))]);
+    fullLo.push(a[0]);
+    fullHi.push(a[a.length - 1]);
+  }
+  const trimmed = new THREE.Box3(new THREE.Vector3(lo[0], lo[1], lo[2]), new THREE.Vector3(hi[0], hi[1], hi[2]));
+  const full = new THREE.Box3(new THREE.Vector3(fullLo[0], fullLo[1], fullLo[2]), new THREE.Vector3(fullHi[0], fullHi[1], fullHi[2]));
+  return radiusFromBox(trimmed) < radiusFromBox(full) * 0.6 ? trimmed : null;
 }
 
 function radiusFromBox(box: THREE.Box3 | null): number {

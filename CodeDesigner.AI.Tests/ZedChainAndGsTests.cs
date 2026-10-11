@@ -78,6 +78,34 @@ public class ZedChainAndGsTests
     }
 
     [TestMethod]
+    public void Model_ChunkOrigin_And_FlaggedMaterialTag()
+    {
+        var (payload, offsets) = BuildChainModel();
+        // Retail world chunks store an origin at +0x38..+0x40 (MP53: 2000 / 0 / 2000).
+        var legacy = ZedModelFile.Parse(payload);
+        int chunkA = legacy.Chunks[0].Offset;
+        BitConverter.GetBytes(2000f).CopyTo(payload, chunkA + 0x38);
+        BitConverter.GetBytes(0f).CopyTo(payload, chunkA + 0x3C);
+        BitConverter.GetBytes(2000f).CopyTo(payload, chunkA + 0x40);
+        // Retail material tags can carry bit 24 (0x31030003): still kind 3.
+        int chain = offsets[0].Offset;
+        int matTag = chain + 16 + 16;
+        uint lo = BitConverter.ToUInt32(payload, matTag);
+        Assert.AreEqual(3u, (lo >> 16) & 0xff);
+        BitConverter.GetBytes(lo | 0x01000000u).CopyTo(payload, matTag);
+
+        var model = ZedModelFile.Parse(payload, offsets);
+        Assert.IsTrue(model.FromChains, "a flagged material tag must not invalidate the chain");
+        var c = model.Chunks[0];
+        Assert.AreEqual((2000f, 0f, 2000f), c.Origin);
+        var p = ZedModelFile.VertexPosition(c, c.Vertices[2], ZedModelFile.PositionUnit.Scale);
+        Assert.AreEqual(2001f, p.X, 1e-2f);
+        Assert.AreEqual(2001f, p.Z, 1e-2f);
+        var p16 = ZedModelFile.VertexPosition(c, c.Vertices[2], ZedModelFile.PositionUnit.Sixteenth);
+        Assert.AreEqual(2000f + 2048f, p16.X, 1f, "1/16 units scale around the origin");
+    }
+
+    [TestMethod]
     public void Model_ParseWithChains_RejectsGarbageOffsets()
     {
         var (payload, _) = BuildChainModel();
