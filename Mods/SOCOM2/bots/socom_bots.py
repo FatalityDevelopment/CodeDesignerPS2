@@ -713,6 +713,33 @@ def squad_hud(names=()):
         wr32(panel + SQUAD_PANEL_SLOTS + 4 + 4 * i, picks[i] if i < len(picks) else 0)
     print("  squad panel:", ", ".join(all_b.get(b, hex(b)) for b in picks) or "(empty)")
 
+SEAL_PART_HEALTH, SEAL_PART_MAX = 0xFFC, 0x1014              # per-body-part health / its maximum (6 floats each;
+                                                             #   zeroed at death, refilled on respawn)
+SEAL_KILLER = 0xFB8                                          # +0xFB8..+0xFC4 killer / cause: 0xFFFFFFFF, 0xFF while alive
+SEAL_DEATH_STATE, SEAL_DEATH_TIMER = 0xFD0, 0xFD8            # 0x1F0001 / 0xFFFF dead -> 0 / 1.0 alive
+SEAL_DEATH_RECORD = (0x109C, 0x10AC, 0x10B0, 0x10B4, 0x10B8, 0x10BC, 0x10C0, 0x10C4)   # where you died: cleared
+ACTION_IDLE = 0x1                                            # +0x534 standing idle
+
+def revive():
+    """Bring your soldier back where it died (same body, as a round reset does): per-part and overall health,
+    killer / death state cleared, animation reset to standing idle (some death animations lock the body otherwise).
+    EXPERIMENTAL: the game may keep a 'dead' flag elsewhere (other players may still see a corpse)."""
+    me = my_body()
+    if not 0x100000 < me < 0x2000000:
+        sys.exit("no player body")
+    for i in range(6):
+        wr32(me + SEAL_PART_HEALTH + 4 * i, struct.unpack("<I", rd(me + SEAL_PART_MAX + 4 * i, 4))[0])
+    wr32(me + SEAL_HEALTH, 0x3F800000)
+    for o, v in ((0x0, 0xFFFFFFFF), (0x4, 0xFF), (0x8, 0xFFFFFFFF), (0xC, 0xFF)):
+        wr32(me + SEAL_KILLER + o, v)
+    wr32(me + SEAL_DEATH_STATE, 0)
+    wr32(me + SEAL_DEATH_TIMER, 0x3F800000)
+    for o in SEAL_DEATH_RECORD:
+        wr32(me + o, 0)
+    wr32(me + SEAL_STANCE, 0)
+    wr32(me + SEAL_ACTION, ACTION_IDLE)
+    print(f"  revived {me:#x}: health 1.0, animation reset")
+
 def cheats(flags, seconds=1800):
     """Hold cheats on your soldier until Ctrl+C (or `seconds`): god (health 1.0), ammo (magazines refilled),
     autoaim, rapid (rapid / auto fire). Works across respawns (re-reads the Seal Pointer)."""
@@ -1380,6 +1407,8 @@ if __name__ == "__main__":
         prop(rest[0], rest[1] if len(rest) > 1 else None)
     elif cmd == "cheats":                             # cheats god ammo autoaim rapid  (held until Ctrl+C)
         cheats(set(rest) or {"god", "ammo"})
+    elif cmd == "revive":                             # revive  (back to life where you died; experimental)
+        revive()
     elif cmd == "squadhud":                           # squadhud [JESTER WARDOG VANDAL]  (default: 3 nearest team)
         squad_hud(rest)
     elif cmd == "bodies":                             # list every soldier on the map

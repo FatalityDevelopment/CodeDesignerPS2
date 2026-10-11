@@ -21,6 +21,18 @@ Holds the chosen cheats until you stop it (Ctrl+C in its terminal, or close the 
 
 With no names it runs `god ammo`. It follows you through respawns.
 
+## Revive
+
+```
+python SOCOM2/bots/socom_bots.py revive
+```
+
+Brings you back to life where you died, the way a round reset does: refills each body part's health (+0xFFC from
+the maximums at +0x1014) and overall health (+0x1044), clears the killer / death state (+0xFB8-+0xFC4, +0xFD0,
++0xFD8, the death record +0x109C-+0x10C4) and resets the animation to standing idle (+0x534 = 1, stance +0x174 = 0)
+so a death animation can't lock you. The network state is built from your soldier object, so other players see it.
+Experimental until tested on a death.
+
 ## Soldiers on the map
 
 ```
@@ -79,5 +91,7 @@ Offsets from the Seal Pointer (`*0x0044D648`, the player's CZSealBody):
 | +0x7B4 | rounds in magazine per slot |
 | +0x7DC | second per-slot counter |
 | +0xDFC-+0xE54 | recoil, spread and stance accuracy |
-| +0xFFC | damage ratio per body part (18 floats) |
+| +0xFB8-+0xFC4 | killer / cause of death (0xFFFFFFFF / 0xFF while alive) |
+| +0xFD0 / +0xFD8 | death state / timer (0x1F0001 / 0xFFFF dead, 0 / 1.0 alive) |
+| +0xFFC | health per body part (6 floats, zeroed at death); +0x1014 their maximums (online: 8, 30, 30, 50, 30, 30) |
 | +0x1044 | health |
