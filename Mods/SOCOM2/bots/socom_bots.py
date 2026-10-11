@@ -641,6 +641,147 @@ def despawn(which="last"):
     with open(PROPS_FILE, "w") as f:
         f.write("".join(l + "\n" for l in others) + "".join(f"{current} {n:x} {m}\n" for n, m in rows if (n, m) in keep))
 
+# Player body (CZSealBody, *[SEAL_PTR]) fields, offsets from the Seal Pointer start
+SEAL_PTR = 0x0044D648
+SEAL_CONTROL = 0x0C0                                         # controller pointer (CSealCtrl / CSealCtrlAi)
+SEAL_TEAM = 0x0C8                                            # team mask 0x40000001 SEAL / 0x80000100 TERR
+SEAL_WEAPONS = 0x6C4                                         # weapon record pointers per slot (0x290-byte defs:
+                                                             #   +0x14 name x3, +0x24 icon, +0x2C model name, stats)
+SEAL_AMMO = 0x73C                                            # ammo/state object pointers per slot
+SEAL_PRIMARY_CLIPS = 0x7B4                                   # rounds per magazine, per slot (30 for the 552)
+SEAL_SECONDARY_CLIPS = 0x7DC
+SEAL_DAMAGE_RATIOS = 0xFFC                                   # per body part
+SEAL_HEALTH = 0x1044
+
+SEAL_CALLSIGN = 0x014                                        # -> name string (SPECTER, JESTER ...)
+SEAL_STANCE = 0x174                                          # 0 stand, 1 crouch, 2 prone
+SEAL_ACTION = 0x534                                          # current action / animation state id
+SEAL_SHOTS = 0x594                                           # shots fired counter
+SEAL_WEAPON_BITS = 0x5E0                                     # weapon state: 0x4 firing, 0x10 rapid / auto fire,
+WB_FIRING, WB_RAPID, WB_AUTOAIM = 0x4, 0x10, 0x10000         #   0x10000 auto-aim (the menu option)
+BODY_VTABLE = 0x00668B20                                     # CZSealBody
+SQUAD_PANEL_PTR = 0x006E154C                                 # -> HUD squad panel (HUD +0x165A0, HUD at *0x6E0ED4)
+SQUAD_PANEL_SLOTS = 0x18                                     # +0x18 leader, +0x1C/+0x20/+0x24 squadmates (bodies):
+                                                             #   each drawn with name, health bar, order (FOLLOWING)
+
+def my_body():
+    return struct.unpack("<I", rd(SEAL_PTR, 4))[0]
+
+def bodies():
+    """{body: callsign} for every soldier on the map (CZSealBody objects)."""
+    out = {}
+    for base in range(0x100000, 0x2000000, 0x10000):
+        try:
+            d = rd(base, 0x10000)
+        except Exception:                                    # noqa: BLE001 - unmapped block
+            continue
+        o = d.find(struct.pack("<I", BODY_VTABLE))
+        while o >= 0:
+            if o % 4 == 0:
+                b = base + o
+                try:
+                    cs = struct.unpack("<I", rd(b + SEAL_CALLSIGN, 4))[0]
+                    nm = rd(cs, 24).split(b"\0")[0].decode("latin1") if 0x100000 < cs < 0x2000000 else ""
+                    if nm.isprintable() and nm:
+                        out[b] = nm
+                except Exception:                            # noqa: BLE001
+                    pass
+            o = d.find(struct.pack("<I", BODY_VTABLE), o + 1)
+    return out
+
+def squad_hud(names=()):
+    """Fill the bottom-of-screen squad panel (name, health bar, order per row). Single player fills it with JESTER /
+    WARDOG / VANDAL; online the rows are empty, so nothing draws. names: callsigns to show (default: the 3 nearest
+    soldiers on your team)."""
+    require_round()
+    panel = struct.unpack("<I", rd(SQUAD_PANEL_PTR, 4))[0]
+    me = my_body()
+    team = struct.unpack("<I", rd(me + SEAL_TEAM, 4))[0]
+    all_b = bodies()
+    if names:
+        picks = [b for n in names for b, nm in all_b.items() if nm.lower() == n.lower() and b != me][:3]
+    else:
+        mx, my, mz = struct.unpack("<3f", rd(me + 0x1C, 12))
+        mates = [b for b in all_b if b != me and struct.unpack("<I", rd(b + SEAL_TEAM, 4))[0] == team]
+        picks = sorted(mates, key=lambda b: sum((p - q) ** 2 for p, q in
+                                                 zip(struct.unpack("<3f", rd(b + 0x1C, 12)), (mx, my, mz))))[:3]
+    wr32(panel + SQUAD_PANEL_SLOTS, me)
+    for i in range(3):
+        wr32(panel + SQUAD_PANEL_SLOTS + 4 + 4 * i, picks[i] if i < len(picks) else 0)
+    print("  squad panel:", ", ".join(all_b.get(b, hex(b)) for b in picks) or "(empty)")
+
+def cheats(flags, seconds=1800):
+    """Hold cheats on your soldier until Ctrl+C (or `seconds`): god (health 1.0), ammo (magazines refilled),
+    autoaim, rapid (rapid / auto fire). Works across respawns (re-reads the Seal Pointer)."""
+    require_round()
+    full = {}
+    end = time.time() + seconds
+    print(f"  holding {', '.join(flags)} - Ctrl+C to stop")
+    try:
+        while time.time() < end:
+            me = my_body()
+            if 0x100000 < me < 0x2000000:
+                if "god" in flags:
+                    wr32(me + SEAL_HEALTH, 0x3F800000)
+                if "ammo" in flags:
+                    clips = struct.unpack("<6I", rd(me + SEAL_PRIMARY_CLIPS, 24))
+                    for i, c in enumerate(clips):
+                        full[(me, i)] = max(full.get((me, i), 0), c)
+                        if c < full[(me, i)]:
+                            wr32(me + SEAL_PRIMARY_CLIPS + 4 * i, full[(me, i)])
+                bits = (WB_AUTOAIM if "autoaim" in flags else 0) | (WB_RAPID if "rapid" in flags else 0)
+                if bits:
+                    w = struct.unpack("<I", rd(me + SEAL_WEAPON_BITS, 4))[0]
+                    if w | bits != w:
+                        wr32(me + SEAL_WEAPON_BITS, w | bits)
+            time.sleep(0.03)
+    except KeyboardInterrupt:
+        pass
+    me = my_body()
+    if "rapid" in flags and 0x100000 < me < 0x2000000:        # the game keeps the bit set: clear it on the way out
+        w = struct.unpack("<I", rd(me + SEAL_WEAPON_BITS, 4))[0]
+        wr32(me + SEAL_WEAPON_BITS, w & ~WB_RAPID)
+
+CNODE_VTABLE = 0x00433040                                    # zdb::CNode vtable (node +0x60)
+
+def find_instances(model_ptr, lo=0x100000, hi=0x2000000):
+    """Scene nodes drawing a model: zdb::CNode with +0xB4 = model (only an instance's root holds the model; its
+    children - firepoint, Gun_box ... - are transforms with model 0). Scans EE RAM in 64 KB reads."""
+    out, step = [], 0x10000
+    for base in range(lo, hi, step):
+        try:
+            d = rd(base, step)
+        except Exception:                                    # noqa: BLE001 - unmapped / busy: skip the block
+            continue
+        o = d.find(struct.pack("<I", model_ptr))
+        while o >= 0:
+            node = base + o - 0xB4
+            if o % 4 == 0 and o >= 0xB4 and struct.unpack_from("<I", d, o - 0xB4 + 0x60)[0] == CNODE_VTABLE:
+                out.append(node)
+            o = d.find(struct.pack("<I", model_ptr), o + 1)
+    return out
+
+def swap_weapon(old, pack, model=None):
+    """Draw every held copy of SOCOM II weapon model `old` (e.g. m4Acarbine) as a converted weapon from `pack`
+    (e.g. mcw02 = SOCOM CA AK-47): loads the pack if needed, then points each attached instance node's model (+0xB4)
+    at the new one. Looks only - ammo, sound, HUD stay the old weapon's. Respawns make new nodes: run it again."""
+    require_round()
+    model = model or _pack_model(pack)
+    _put_str(MODEL_NAME_BUF, model)
+    new = game_call([(MODEL_FIND, MODEL_NAME_BUF)])[0]
+    if not new:
+        load_pack(pack, "mem")
+        new = game_call([(MODEL_FIND, MODEL_NAME_BUF)])[0]
+    _put_str(MODEL_NAME_BUF, old)
+    cur = game_call([(MODEL_FIND, MODEL_NAME_BUF)])[0]
+    if not cur:
+        sys.exit(f"model '{old}' is not loaded on this map")
+    nodes = [n for n in find_instances(cur) if struct.unpack("<I", rd(n + 0x64, 4))[0]]   # attached to someone
+    for n in nodes:
+        wr32(n + 0xB4, new)
+    print(f"  {old} -> {model}: {len(nodes)} held cop{'y' if len(nodes) == 1 else 'ies'}")
+    return nodes
+
 MODEL_DONOR = "mp_pow1"                                      # chartype lent to models that have none (ai ca_<hash>)
 MODEL_NAME_BUF = 0x000D1F80                                  # its borrowed model name string
 
@@ -720,7 +861,7 @@ PACK_STREAM_CODES = os.path.join(HERE, "..", "pack_stream.codes.txt")
 MEM_MOUNT, MEM_UNMOUNT = 0x000D6000, 0x000D6040                 # pack_stream.cds
 PACK_MAILBOX, PACK_STREAM, PACK_TABLE = 0x000D7000, 0x000D7040, 0x000D7800   # data page, apart from the code
 PACK_ROOTS = [os.path.join(HERE, "..", "packs"), "F:/SOCOM Packs/SOCOM2", "F:/SOCOM Packs/SOCOMCA/packs",
-              "F:/SOCOM Packs/SOCOMCA/static"] +              [f"F:/SOCOM Packs/SOCOM2/{c}" for c in ("weapons", "gear", "vehicles", "props", "effects", "objects")] +              [p for p in os.environ.get("SOCOM_PACKS", "").split(os.pathsep) if p]
+              "F:/SOCOM Packs/SOCOMCA/static", "F:/SOCOM Packs/SOCOMCA/weapons"] +              [f"F:/SOCOM Packs/SOCOM2/{c}" for c in ("weapons", "gear", "vehicles", "props", "effects", "objects")] +              [p for p in os.environ.get("SOCOM_PACKS", "").split(os.pathsep) if p]
 
 def find_pack(name):
     """<root>/<name>/<NAME>.CDB in the pack library folders (build_charpack, rip_socom2, Mods/SOCOMCA/ca2s2)."""
@@ -1234,6 +1375,15 @@ if __name__ == "__main__":
         load_pack(rest[0], rest[1] if len(rest) > 1 else "mc")
     elif cmd == "prop":                               # prop mcv104 [model]  (loads the pack if needed)
         prop(rest[0], rest[1] if len(rest) > 1 else None)
+    elif cmd == "cheats":                             # cheats god ammo autoaim rapid  (held until Ctrl+C)
+        cheats(set(rest) or {"god", "ammo"})
+    elif cmd == "squadhud":                           # squadhud [JESTER WARDOG VANDAL]  (default: 3 nearest team)
+        squad_hud(rest)
+    elif cmd == "bodies":                             # list every soldier on the map
+        for b, nm in bodies().items():
+            print(f"  {b:#x} {nm}")
+    elif cmd == "swapweapon":                         # swapweapon m4Acarbine mcw02  (held M4s drawn as the CA AK-47)
+        swap_weapon(rest[0], rest[1], rest[2] if len(rest) > 2 else None)
     elif cmd == "despawn":                            # despawn [all]  (props placed with `prop`, newest first)
         despawn("all" if "all" in rest else "last")
     elif cmd == "testprop":                           # testprop mcv0016 ca_hmv_lod  (no map reload between builds)

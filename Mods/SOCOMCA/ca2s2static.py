@@ -52,7 +52,7 @@ def template(kind="weapon"):
     return {"parts": parts, "material": sec["material"], "mat_upper": sec["mat_upper"], "lib": out_lib,
             "renderphase": (bp.Node("renderphase", struct.pack("<I", TEMPLATES[kind][4])) if len(TEMPLATES[kind]) > 4
                             else next(n for n in parts["TXR"][1] if n.name == "renderphase")),
-            "char": ca2s2.template()}                        # 8/16-bit texdat samples
+            "char": ca2s2.template(), "weapon": kind == "weapon"}                        # 8/16-bit texdat samples
 
 
 def chunk_stats(g):
@@ -186,7 +186,10 @@ def convert(clib, model_index, name, out_name, out_root, tpl, lib_name="WEAP", v
     # model bounds (game units: positions are 1/16 units, node translations whole units): written to every node so
     # culling is right and spawn_prop can put the lowest point on the ground (CA origins can sit at rotor height)
     import staticmesh
-    pts, world = [], []
+    # weapons (SOCOM II and CA alike): position = int16 * chunk scale / 32768 (visual flags 0x000BC0FA, node flags
+    # ...55); vehicles / props / CA static: 1/16 units (0x0009C0FA, ...51)
+    unit = 32768 if tpl.get("weapon") else 16
+    pts, world, preview_tris = [], [], []
     for n, local, depth in order:
         del world[depth:]
         parent = world[-1] if world else None
@@ -197,9 +200,11 @@ def convert(clib, model_index, name, out_name, out_root, tpl, lib_name="WEAP", v
             for obj in clib.vector(n + 0x98):
                 for tex, mat, pairs in castatic.sections(clib, obj):
                     for _, _, g in pairs:
-                        for _, v, _ in staticmesh.chunks(g):
-                            pts += [[p[0] / 16 * m[0][c] + p[1] / 16 * m[1][c] + p[2] / 16 * m[2][c] + m[3][c]
-                                     for c in range(3)] for p in v]
+                        for _, v, t in staticmesh.chunks(g):
+                            w = [[p[0] / unit * m[0][c] + p[1] / unit * m[1][c] + p[2] / unit * m[2][c] + m[3][c]
+                                  for c in range(3)] for p in v]
+                            pts += w
+                            preview_tris.extend((w[a], w[b], w[c]) for a, b, c in t)
     lo = tuple(min(p[c] for p in pts) for c in range(3)) if pts else (-BOUND,) * 3
     hi = tuple(max(p[c] for p in pts) for c in range(3)) if pts else (BOUND,) * 3
 
@@ -210,7 +215,7 @@ def convert(clib, model_index, name, out_name, out_root, tpl, lib_name="WEAP", v
         nm = name if i == 0 else NAMES.get(h, f"n_{h:08x}")
         children = [j for j in range(i + 1, len(order)) if order[j][2] == depth + 1 and
                     all(order[k][2] > depth for k in range(i + 1, j))]
-        flags = 0x80800051
+        flags = 0x80800055 if tpl.get("weapon") else 0x80800051
         if n in node_vis:
             flags |= 0x40000
             if i and not children:
@@ -221,7 +226,8 @@ def convert(clib, model_index, name, out_name, out_root, tpl, lib_name="WEAP", v
             for key, verts, tris, centre in node_vis[n]:
                 # flags 0x0009C0FA: positions in 1/16 units (SOCOM II vehicles and CA static meshes); 0x000BC0FA
                 # (bit 0x20000, weapons) means positions normalised by the chunk scale instead
-                vp = struct.pack("<IIHHfff", 0x0009C0FA, 0, min(tris, 0xFFFF), min(verts, 0xFFFF), *centre)
+                vp = struct.pack("<IIHHfff", 0x000BC0FA if tpl.get("weapon") else 0x0009C0FA, 0, min(tris, 0xFFFF),
+                                 min(verts, 0xFFFF), *centre)
                 vis.append(bp.Node("vis", children=[bp.Node("vparams", vp)]))
             kids.append(bp.Node("visuals", children=vis))
         if children:
@@ -267,6 +273,9 @@ def convert(clib, model_index, name, out_name, out_root, tpl, lib_name="WEAP", v
             "tris": sum(t for v in node_vis.values() for _, _, t, _ in v)}
     info["vram"], problems = check(files)
     info["bounds"] = (lo, hi)
+    if preview_tris:
+        import render
+        render.wire(os.path.join(out_dir, "preview.png"), preview_tris)
     if verbose:
         print(f"{name}: {info['visuals']} visuals, {info['tris']} tris, {info['textures']} textures, {info['kb']} KB, "
               f"VRAM {info['vram']:#x} blocks, bounds y {lo[1]:.1f}..{hi[1]:.1f} -> {out_dir}")

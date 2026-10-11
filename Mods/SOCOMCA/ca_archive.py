@@ -128,9 +128,11 @@ def palette_size(kind):
 
 
 class Clib:
-    """A character library as stored on disc (offsets, not pointers)."""
-    def __init__(self, data):
+    """A character library as stored on disc (offsets, not pointers). base: where the four header vectors (models,
+    objects, textures, palettes) start - by default from the header version; nested() gives a second library."""
+    def __init__(self, data, base=None):
         self.d = data
+        self._base = base
 
     def u32(self, o):
         return struct.unpack_from("<I", self.d, o)[0]
@@ -140,8 +142,20 @@ class Clib:
 
     @property
     def base(self):
-        """Header vectors start at +0x28 in version 2 (character libraries), +0x2C in version 3 (global_assets ...)."""
-        return 0x28 + 4 * (self.u32(0) - 2)
+        """Header vectors start at +0x28 in version 2 (character libraries), +0x2C in version 3 (global_assets ...),
+        +0x24 in version 1 (ISLE level data)."""
+        return self._base if self._base is not None else 0x28 + 4 * (self.u32(0) - 2)
+
+    def nested(self):
+        """The second library a version-3 header points at (word 3): global_assets.rdr keeps every weapon there
+        (~90 models: ak47, m4a1, mp5, spas12 ... with firepoint / aimpoint / Gun_box nodes). Its vectors start at
+        +0x18. None when there is none."""
+        if self.u32(0) != 3:
+            return None
+        o = self.u32(0x0C)
+        if not 0 < o < len(self.d) - 0x58:
+            return None
+        return Clib(self.d, o + 0x18)
 
     models = property(lambda self: self.vector(self.base))
     objects = property(lambda self: self.vector(self.base + 0x10))
