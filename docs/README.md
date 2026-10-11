@@ -17,6 +17,7 @@ Welcome to the CodeDesigner documentation catalog. Each link below opens a focus
 | [Building](building.md) | Building all projects from source, running tests, and packaging the VS Code extension |
 | [Labels](labels.md) | Label system: address annotations, types, label sets, pointer fields, and live resolution |
 | [HDD Manager](hdd-manager.md) | PS2 HDD image management: APA partitions, PFS filesystem, export, and image creation |
+| [Zipper model and texture format](zipper-model-format.md) | SOCOM II map editor: DMA chain binding, geometry chunks, texdat GS registers, palettes, rendering |
 
 ---
 

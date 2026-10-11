@@ -68,7 +68,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
                     var node = zed.Nodes[i];
                     if (!ZedModelFile.LooksLikeModel(node.Data)) continue;
 
-                    var model = ZedModelFile.Parse(node.Data);
+                    var model = ParseForInspection(zed, i);
                     int totalVerts = model.Chunks.Sum(ch => ch.VertexCount);
                     int totalTris = model.Chunks.Sum(ch => ch.TriangleCount);
 
@@ -87,6 +87,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
                         triangles = totalTris,
                         textureEntries = textureNames,
                         sizeBytes = node.Data.Length,
+                        chainBound = model.FromChains,
                         shapeHint = $"{model.Chunks.Count} chunks, {totalVerts} verts, " +
                                     $"{totalTris} tris" +
                                     (textureNames.Count > 0
@@ -128,7 +129,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 if (!ZedModelFile.LooksLikeModel(node.Data))
                     return Responses.Error($"Entry '{weaponName}' does not look like a model.");
 
-                var model = ZedModelFile.Parse(node.Data);
+                var model = ParseForInspection(zed, zed.Nodes.ToList().IndexOf(node));
 
                 // Try to resolve the first texture binding.
                 object? textureMeta = null;
@@ -149,7 +150,16 @@ namespace CodeDesigner.Ps2.Bridge.Services
                             height = header.Height,
                             bpp = header.Bpp,
                             isIndexed = header.IsIndexed,
-                            paletteId = header.PaletteId,
+                            // The palette the game binds (TEX0.CBP -> texpal_<id>),
+                            // falling back to the header slot for old records.
+                            paletteId = header.ResolvePaletteId(),
+                            textureIndex = header.TextureIndex,
+                            psm = $"0x{header.Psm:X2}",
+                            cbp = header.Cbp,
+                            wrapS = header.Gs == null ? null : (header.Gs.ClampS ? "clamp" : "repeat"),
+                            wrapT = header.Gs == null ? null : (header.Gs.ClampT ? "clamp" : "repeat"),
+                            alphaTest = header.Gs?.AlphaTest,
+                            alphaBlend = header.Gs?.AlphaBlend,
                             formatA = $"0x{header.FormatA:X4}",
                             sizeBytes = tifNode.Data.Length,
                         };
@@ -170,6 +180,9 @@ namespace CodeDesigner.Ps2.Bridge.Services
                             triangleCount = c.TriangleCount,
                             scale = c.Scale,
                             textureName = c.TextureName,
+                            textureBinding = c.TextureBinding,
+                            visual = c.VisualKey,
+                            hasVertexColors = c.HasVertexColors,
                             vertexBoundsXyz = ComputeBounds(c.Vertices),
                         }).ToList(),
                         allTextureRefs = model.TextureRefs,
@@ -213,7 +226,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 ZedNode? tifNode = null;
                 if (ZedModelFile.LooksLikeModel(node.Data))
                 {
-                    var model = ZedModelFile.Parse(node.Data);
+                    var model = ParseForInspection(zed, zed.Nodes.ToList().IndexOf(node));
                     string? firstTifName = model.Chunks
                         .Select(c => c.TextureName)
                         .FirstOrDefault(n => !string.IsNullOrEmpty(n))
@@ -233,7 +246,9 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 // an entry named "texpal_N" matching paletteId, or the next
                 // "buf" entry after the .tif (PAL.ZED triplet layout).
                 var header = ZedTextureFile.ParseHeader(tifNode.Data);
-                ZedTextureFile.Palette? palette = TryResolvePalette(zed, header.PaletteId);
+                ZedTextureFile.Palette? palette = header.IsIndexed
+                    ? TryResolvePalette(zed, header.ResolvePaletteId())
+                    : null;
 
                 var decoded = ZedTextureFile.Parse(tifNode.Data, palette);
                 byte[] png = PngEncoder.EncodeRgba(decoded.Rgba, header.Width, header.Height);
@@ -257,6 +272,18 @@ namespace CodeDesigner.Ps2.Bridge.Services
             {
                 return Responses.Error($"ZIPPER_WEAPON_TEXTURE_PNG error: {ex.Message}");
             }
+        }
+
+        // Decode a model for inspection: through its N* child chains when the
+        // node has them (exact texture per section, vertex colours), else the
+        // legacy chunk scan. Editing/encoding paths keep the legacy parse.
+        private static ZedModelFile.Model ParseForInspection(ZedContainer zed, int nodeIndex)
+        {
+            var node = zed.Nodes[nodeIndex];
+            var chainOffsets = ZedModelFile.CollectChainOffsets(zed.Nodes, nodeIndex);
+            return chainOffsets.Count > 0
+                ? ZedModelFile.Parse(node.Data, chainOffsets)
+                : ZedModelFile.Parse(node.Data);
         }
 
         private static ZedTextureFile.Palette? TryResolvePalette(ZedContainer zed, int paletteId)

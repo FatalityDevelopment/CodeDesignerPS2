@@ -12,6 +12,7 @@ import { AgentCtrlPanelProvider } from '../agentCtrlPanel/agentCtrlPanelProvider
 import { McpProgressReportEditorProvider } from '../mcpProgressReportEditor/mcpProgressReportEditorProvider';
 import { PacketViewerProvider, loadMediusPorts } from '../packetViewer/packetViewerProvider';
 import { SnapshotManagerProvider, SnapshotDataDelegate } from '../snapshotManager/snapshotManagerProvider';
+import { DebugCommandsProvider } from '../debugCommands/debugCommandsProvider';
 import { DiffViewerProvider } from '../diffViewer/diffViewerProvider';
 import { MemoryRegion } from '../../shared/memoryRegions';
 import { JokerMakerProvider } from '../jokerMaker/jokerMakerProvider';
@@ -292,6 +293,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         );
         this._compatBrowserProvider   = new CompatBrowserProvider(_extensionUri, socketClient);
         this._packetViewerProvider    = new PacketViewerProvider(_extensionUri, socketClient);
+        this._debugCommandsProvider   = new DebugCommandsProvider(_extensionUri);
 
         const delegate: SnapshotDataDelegate = {
             getSnapshots:    () => this.getPcsx2Savestates(),
@@ -307,6 +309,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private readonly _agentCtrlPanelProvider: AgentCtrlPanelProvider;
     private readonly _compatBrowserProvider: CompatBrowserProvider;
     private readonly _packetViewerProvider: PacketViewerProvider;
+    private readonly _debugCommandsProvider: DebugCommandsProvider;
     private readonly _snapshotManagerProvider: SnapshotManagerProvider;
     private readonly _diffViewerProvider: DiffViewerProvider;
 
@@ -640,6 +643,10 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 // ── Multiplayer config editor ─────────────────────────────
                 case 'openNetConfig':
                     await this.handleOpenNetConfig();
+                    break;
+                // ── Debug commands page (Mods/debug-commands.json) ────────
+                case 'openDebugCommands':
+                    this._debugCommandsProvider.open();
                     break;
                 // ── Multiplayer server reachability + capture state ───────
                 case 'requestNetworkStatus':

@@ -1,18 +1,32 @@
 // Decoder for Zipper PS2 model payloads stored inside ZED containers
 // (WEAP_MDL.ZED, WORL_MDL.ZED, and friends).
 //
-// Chunk format verified against the working C# decoder shipped with the format
-// notes:
-//   chunk + 0x00 = 0x01000101
-//   chunk + 0x04 = 0x6C048000
-//   chunk + 0x08 = 0x00008000
+// Geometry chunk (one VU1 batch; verified against the SOCOM II pack builders
+// in Mods/SOCOMCA, whose output renders in game):
+//   chunk + 0x00 = 0x01000101   STCYCL 0x101
+//   chunk + 0x04 = 0x6C048000   UNPACK V4-32 @0, 4 qwords
+//   chunk + 0x08 = GIF tag, GIF tag, (index addr, 0, verts, tris), (0, 0, 0, scale)
 //   chunk + 0x30 = vertexCount   (int32)
 //   chunk + 0x34 = triangleCount (int32)
 //   chunk + 0x44 = scale         (float32)
-//   chunk + 0x48 = 03 02 00 01   (geometry command marker)
-//   chunk + 0x50 = vertex records, 0x10 bytes each (int16 X, Y, Z, W + 8 bytes)
-//   vertexEnd + 0x08 = triangle table, 4 bytes each (byte a, b, c, flags)
-//   Triangle indices are packed VU slot offsets; real index = packed / 3.
+//   chunk + 0x48 = 03 02 00 01   STCYCL 0x203 (write 2 qwords of every 3: the
+//                                third slot is the colour, see below)
+//   chunk + 0x4C = UNPACK V4-16 @4, 2 elements per vertex
+//   chunk + 0x50 = vertex records, 0x10 bytes each:
+//                  int16 x, y, z, nx | int16 u, v, ny, nz
+//                  u/v are 12-bit fixed point (4096 = 1.0); normals are Q15.
+//   vertexEnd + 0x08 = triangle table, 4 bytes each (a*3, b*3, c*3, 3)
+//   then a V3-16 face-normal table and MSCNT.
+//
+// Positions: int16 * scale / 32768 for weapons (GEO vparams flag 0x20000 set)
+// and int16 * scale / 16 for props, vehicles and map objects (flag clear).
+//
+// A model's child stubs (N<node>_<visual>, 4-byte payload) point at DMA
+// chains that bind the chunks: per material section a kind-6 tag (the .tif
+// name), a kind-3 tag (GS material registers), then per chunk a kind-4 tag
+// (per-vertex RGBA, 0x80 = 1.0, the baked lighting) and a kind-2 tag (the
+// geometry chunk). parseVisualChains walks those; parseModel uses them when
+// they validate and only falls back to scanning for .tif strings otherwise.
 
 export interface ZedModelVertex {
   x: number;
@@ -20,7 +34,17 @@ export interface ZedModelVertex {
   z: number;
   u: number;
   v: number;
+  // Baked vertex colour from the chain's colour block, 0..255 per channel
+  // with 0x80 = 1.0 (the GS modulates texture * colour * 2). Absent when
+  // the chunk was decoded without its chain.
+  r?: number;
+  g?: number;
+  b?: number;
+  a?: number;
 }
+
+// How int16 vertex positions map to world units. See the header comment.
+export type PositionUnit = 'scale' | 'sixteenth';
 
 export interface ZedModelChunk {
   offset: number;
@@ -30,12 +54,18 @@ export interface ZedModelChunk {
   scale: number;
   vertices: ZedModelVertex[];
   indices: number[];
-  // Name of the .tif this chunk references (lowercased). Found in the tail
-  // area after the triangle table, before the next chunk header.
+  // Name of the .tif this chunk references (lowercased). From the DMA chain
+  // when available, else found in the tail area after the triangle table.
   textureName: string | null;
-  // Where textureName came from. Weapon MDL descriptor tables are explicit
+  // Where textureName came from. 'chain' and 'descriptor' are explicit
   // material bindings and should not be second-guessed by render heuristics.
-  textureBinding?: 'tail' | 'descriptor' | 'smartWorld' | 'sliceNearest' | 'globalNearest';
+  textureBinding?: 'chain' | 'tail' | 'descriptor' | 'smartWorld' | 'sliceNearest' | 'globalNearest';
+  // The visual (N<node>_<visual> stub) whose chain drew this chunk.
+  visualKey?: string;
+  // True when every vertex carries r/g/b/a from the chain's colour block.
+  hasVertexColors?: boolean;
+  // Which position unit was applied when decoding the vertices.
+  positionUnit?: PositionUnit;
   // Original MDL/GEO source for composed scenes. Palette selection can depend
   // on the model that referenced a shared .tif page.
   sourceModelName?: string;
@@ -156,7 +186,12 @@ function findTifInRange(bytes: Uint8Array, start: number, end: number): string |
   return null;
 }
 
-function parseChunk(bytes: Uint8Array, offset: number, nextChunkOffset: number): ZedModelChunk | null {
+function parseChunk(
+  bytes: Uint8Array,
+  offset: number,
+  nextChunkOffset: number,
+  positionUnit: PositionUnit = 'scale',
+): ZedModelChunk | null {
   const view = new DataView(bytes.buffer, bytes.byteOffset + offset, Math.min(0x50, bytes.length - offset));
   const vertexCount = view.getInt32(0x30, true);
   const triangleCount = view.getInt32(0x34, true);
@@ -167,6 +202,9 @@ function parseChunk(bytes: Uint8Array, offset: number, nextChunkOffset: number):
   const vertexBlockSize = vertexCount * 0x10;
   if (vertexStart + vertexBlockSize > bytes.length) { return null; }
 
+  // int16 -> units. Weapons normalise by the chunk scale (int16 / 32768 *
+  // scale); props, vehicles and map objects store 1/16 units.
+  const divisor = positionUnit === 'sixteenth' ? 16 : 32768;
   const vertices: ZedModelVertex[] = [];
   for (let i = 0; i < vertexCount; i++) {
     const o = vertexStart + i * 0x10;
@@ -174,14 +212,14 @@ function parseChunk(bytes: Uint8Array, offset: number, nextChunkOffset: number):
     const xi = v.getInt16(0, true);
     const yi = v.getInt16(2, true);
     const zi = v.getInt16(4, true);
-    // Remaining 8 bytes (offsets 0x08..0x0f) carry packed UV / normal / color.
-    // Treat the next two int16s as UV in [0, 1] fixed-point for preview render.
+    // Second element of the vertex: (u, v, ny, nz). u/v are 12-bit fixed
+    // point, 4096 = 1.0.
     const ui = v.getInt16(0x08, true);
     const vi = v.getInt16(0x0a, true);
     vertices.push({
-      x: (xi / 32767) * scale,
-      y: (yi / 32767) * scale,
-      z: (zi / 32767) * scale,
+      x: (xi * scale) / divisor,
+      y: (yi * scale) / divisor,
+      z: (zi * scale) / divisor,
       u: ui / 4096,
       v: vi / 4096,
     });
@@ -221,19 +259,191 @@ function parseChunk(bytes: Uint8Array, offset: number, nextChunkOffset: number):
     indices,
     textureName,
     textureBinding: textureName ? 'tail' : undefined,
+    positionUnit,
   };
 }
 
-export function parseModel(bytes: Uint8Array): ZedModel {
-  const offsets = findChunkOffsets(bytes);
-  const chunks: ZedModelChunk[] = [];
-  for (let i = 0; i < offsets.length; i++) {
-    const off = offsets[i];
-    const nextOff = i + 1 < offsets.length ? offsets[i + 1] : bytes.length;
-    const chunk = parseChunk(bytes, off, nextOff);
-    if (chunk) { chunks.push(chunk); }
-  }
+// ---------------------------------------------------------------------------
+// DMA chain binding. A model node's N<node>_<visual> children hold a 4-byte
+// offset into the node payload. At that offset:
+//   u32 count (low 16 bits), then `count` 16-byte DMA tags (lo, addr, v0, v1)
+//   kind = (lo >> 16) & 0x3FF, qwc = lo & 0xFFFF
+//     6  name field      addr -> NUL-terminated .tif name (16 or 32 bytes)
+//     3  material block  qwc qwords of GS register data for the section
+//     4  colour block    qwc qwords of RGBA per vertex; v0/v1 are the VIF
+//                        codes (STCYCL 0x103, UNPACK V4-8 @6) that write it
+//                        into the third slot of each vertex
+//     2  geometry chunk  qwc qwords starting at a chunk header
+// Sections start at a kind-6 tag; colour + geometry pairs follow.
+// ---------------------------------------------------------------------------
 
+export interface ChainChunkRef {
+  geometryOffset: number;
+  geometryLength: number;
+  colorOffset: number | null;
+  colorLength: number;
+}
+
+export interface ChainSection {
+  textureName: string | null;
+  materialOffset: number | null;
+  materialLength: number;
+  chunks: ChainChunkRef[];
+}
+
+export interface VisualChain {
+  offset: number;
+  key: string | null;
+  sections: ChainSection[];
+}
+
+export interface ChainOffset {
+  offset: number;
+  key?: string | null;
+}
+
+const CHUNK_MAGIC_0 = 0x01000101;
+const CHUNK_MAGIC_1 = 0x6c048000;
+
+function readChainName(bytes: Uint8Array, offset: number): string | null {
+  if (offset < 0 || offset >= bytes.length) { return null; }
+  let text = '';
+  for (let i = offset; i < Math.min(bytes.length, offset + 64); i++) {
+    const b = bytes[i];
+    if (b === 0) { break; }
+    if (b < 0x20 || b > 0x7e) { return null; }
+    text += String.fromCharCode(b);
+  }
+  const trimmed = text.trim();
+  if (!trimmed) { return null; }
+  const leaf = trimmed.split(/[\\/]/).pop() ?? trimmed;
+  return leaf.toLowerCase();
+}
+
+// Parse one chain. Returns null when anything about it is implausible so the
+// caller can fall back to the string-scan heuristics instead of trusting a
+// 4-byte child that happened not to be a chain offset.
+function parseVisualChain(bytes: Uint8Array, offset: number, key: string | null): VisualChain | null {
+  if (offset < 0 || offset + 16 > bytes.length) { return null; }
+  const count = readU32LE(bytes, offset) & 0xffff;
+  if (count === 0 || count > 8192) { return null; }
+  if (offset + 16 + count * 16 > bytes.length) { return null; }
+
+  const sections: ChainSection[] = [];
+  let pendingColor: { offset: number; length: number } | null = null;
+  for (let i = 0; i < count; i++) {
+    const tag = offset + 16 + i * 16;
+    const lo = readU32LE(bytes, tag);
+    const addr = readU32LE(bytes, tag + 4);
+    const kind = (lo >>> 16) & 0x3ff;
+    const qwc = lo & 0xffff;
+    const length = qwc * 16;
+    if (addr > bytes.length) { return null; }
+    switch (kind) {
+      case 6: {
+        sections.push({ textureName: readChainName(bytes, addr), materialOffset: null, materialLength: 0, chunks: [] });
+        pendingColor = null;
+        break;
+      }
+      case 3: {
+        if (sections.length === 0 || addr + length > bytes.length) { return null; }
+        const section = sections[sections.length - 1];
+        section.materialOffset = addr;
+        section.materialLength = length;
+        break;
+      }
+      case 4: {
+        if (addr + length > bytes.length) { return null; }
+        pendingColor = { offset: addr, length };
+        break;
+      }
+      case 2: {
+        if (addr + 0x50 > bytes.length || addr + length > bytes.length) { return null; }
+        if (readU32LE(bytes, addr) !== CHUNK_MAGIC_0 || readU32LE(bytes, addr + 4) !== CHUNK_MAGIC_1) { return null; }
+        if (sections.length === 0) {
+          sections.push({ textureName: null, materialOffset: null, materialLength: 0, chunks: [] });
+        }
+        sections[sections.length - 1].chunks.push({
+          geometryOffset: addr,
+          geometryLength: length,
+          colorOffset: pendingColor ? pendingColor.offset : null,
+          colorLength: pendingColor ? pendingColor.length : 0,
+        });
+        pendingColor = null;
+        break;
+      }
+      default:
+        return null;
+    }
+  }
+  if (!sections.some(s => s.chunks.length > 0)) { return null; }
+  return { offset, key, sections };
+}
+
+// Parse every chain the stubs point at. Chains that fail validation are
+// dropped; returns null when none validate.
+export function parseVisualChains(bytes: Uint8Array, offsets: ChainOffset[]): VisualChain[] | null {
+  const seen = new Set<number>();
+  const chains: VisualChain[] = [];
+  for (const entry of offsets) {
+    if (seen.has(entry.offset)) { continue; }
+    seen.add(entry.offset);
+    const chain = parseVisualChain(bytes, entry.offset, entry.key ?? null);
+    if (chain) { chains.push(chain); }
+  }
+  if (chains.length === 0) { return null; }
+  chains.sort((a, b) => (a.key ?? '').localeCompare(b.key ?? '') || a.offset - b.offset);
+  return chains;
+}
+
+function attachVertexColors(chunk: ZedModelChunk, bytes: Uint8Array, ref: ChainChunkRef): void {
+  if (ref.colorOffset === null) { return; }
+  const needed = chunk.vertexCount * 4;
+  if (ref.colorLength < needed || ref.colorOffset + needed > bytes.length) { return; }
+  for (let i = 0; i < chunk.vertexCount; i++) {
+    const o = ref.colorOffset + i * 4;
+    const v = chunk.vertices[i];
+    v.r = bytes[o];
+    v.g = bytes[o + 1];
+    v.b = bytes[o + 2];
+    v.a = bytes[o + 3];
+  }
+  chunk.hasVertexColors = true;
+}
+
+export interface ParseModelOptions {
+  // N<node>_<visual> stub offsets (and their names) for exact chain binding.
+  chainOffsets?: ChainOffset[];
+  // Position unit for int16 vertices; default 'scale' (weapon convention).
+  positionUnit?: PositionUnit;
+}
+
+// Decode the chunks a set of chains reference, with their exact texture and
+// vertex colours. Returns null when no chain validates.
+export function parseModelFromChains(bytes: Uint8Array, chainOffsets: ChainOffset[], positionUnit: PositionUnit = 'scale'): ZedModel | null {
+  const chains = parseVisualChains(bytes, chainOffsets);
+  if (!chains) { return null; }
+  const chunks: ZedModelChunk[] = [];
+  for (const chain of chains) {
+    for (const section of chain.sections) {
+      for (const ref of section.chunks) {
+        const chunk = parseChunk(bytes, ref.geometryOffset, ref.geometryOffset + ref.geometryLength, positionUnit);
+        if (!chunk) { continue; }
+        if (section.textureName) {
+          chunk.textureName = section.textureName;
+          chunk.textureBinding = 'chain';
+        }
+        chunk.visualKey = chain.key ?? `chain@0x${chain.offset.toString(16)}`;
+        attachVertexColors(chunk, bytes, ref);
+        chunks.push(chunk);
+      }
+    }
+  }
+  if (chunks.length === 0) { return null; }
+  return assembleModel(bytes, chunks);
+}
+
+function assembleModel(bytes: Uint8Array, chunks: ZedModelChunk[]): ZedModel {
   const vertices: ZedModelVertex[] = [];
   const indices: number[] = [];
   let radius = 0;
@@ -252,6 +462,11 @@ export function parseModel(bytes: Uint8Array): ZedModel {
   // Scan the full payload for embedded .tif texture references. These usually
   // live in a string block after the geometry chunks.
   const textureRefs = extractTextureRefs(bytes, 0, bytes.length);
+  for (const chunk of chunks) {
+    if (chunk.textureName && !textureRefs.some(r => r.toLowerCase() === chunk.textureName)) {
+      textureRefs.push(chunk.textureName);
+    }
+  }
 
   return {
     chunks,
@@ -260,6 +475,24 @@ export function parseModel(bytes: Uint8Array): ZedModel {
     textureRefs,
     boundingRadius: radius || 1,
   };
+}
+
+export function parseModel(bytes: Uint8Array, options: ParseModelOptions = {}): ZedModel {
+  const positionUnit = options.positionUnit ?? 'scale';
+  if (options.chainOffsets && options.chainOffsets.length > 0) {
+    const fromChains = parseModelFromChains(bytes, options.chainOffsets, positionUnit);
+    if (fromChains) { return fromChains; }
+  }
+
+  const offsets = findChunkOffsets(bytes);
+  const chunks: ZedModelChunk[] = [];
+  for (let i = 0; i < offsets.length; i++) {
+    const off = offsets[i];
+    const nextOff = i + 1 < offsets.length ? offsets[i + 1] : bytes.length;
+    const chunk = parseChunk(bytes, off, nextOff, positionUnit);
+    if (chunk) { chunks.push(chunk); }
+  }
+  return assembleModel(bytes, chunks);
 }
 
 // ---------------------------------------------------------------------------

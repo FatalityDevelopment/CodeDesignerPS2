@@ -10,6 +10,7 @@ import {
 } from '@angular/core';
 import { EditorState } from '../state/editor.state';
 import { DisasmRow } from '../state/types';
+import { rowContainsByteOffset } from '../state/row-locator';
 
 /**
  * DisasmRowComponent - Renders a single disassembly instruction row.
@@ -97,7 +98,8 @@ export class DisasmRowComponent {
   protected readonly commentTooltipBottom = signal<number | null>(null);
 
   /** Output events */
-  readonly select = output<number>();
+  /** Emits the clicked row; the parent resolves the cursor from its address. */
+  readonly select = output<DisasmRow>();
   readonly edit = output<{ row: DisasmRow; address: number; addressHex: string }>();
   readonly contextMenu = output<{ event: MouseEvent; row: DisasmRow; globalIndex: number }>();
 
@@ -105,9 +107,18 @@ export class DisasmRowComponent {
   // Computed State Classes
   // ═══════════════════════════════════════════════════════════════════════════
 
-  /** Whether this row is the current cursor position */
+  /**
+   * Whether this row is the current cursor position.
+   *
+   * Resolved by address span rather than by index: rows are variable length
+   * (data-format overrides, auto-strings), so the cursor's byte offset is
+   * matched against `[rowStart, rowStart + rowLength)`.  This keeps the
+   * highlight on the same address when a page is re-rendered with a different
+   * row layout, and lets sub-word (`.byte` / `.half`) rows be selected
+   * individually.
+   */
   protected readonly isActive = computed(() =>
-    this.globalIndex() === this.state.cursor()
+    rowContainsByteOffset(this.data(), this.state.baseAddress(), this.state.cursorOffsetBytes())
   );
 
   /** Whether this row contains the PC */
@@ -240,7 +251,7 @@ export class DisasmRowComponent {
   // ═══════════════════════════════════════════════════════════════════════════
 
   protected onClick(): void {
-    this.select.emit(this.globalIndex());
+    this.select.emit(this.data());
   }
 
   protected onDblClick(): void {

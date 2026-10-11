@@ -28,9 +28,22 @@ interface DragState {
   lastY: number;
 }
 
+export interface ModelTexturePixels {
+  width: number;
+  height: number;
+  rgba: Uint8Array;
+  // From the texture's GS CLAMP register: per-axis wrap mode.
+  wrapS?: 'repeat' | 'clamp';
+  wrapT?: 'repeat' | 'clamp';
+  // From the GS TEST register: discard texels below this alpha (0..1).
+  alphaTest?: number | null;
+  // True when the decoded pixels contain any non-opaque texel.
+  hasTransparency?: boolean;
+}
+
 export interface ModelTextureMap {
   // Map from lowercased .tif name -> decoded texture pixels.
-  [tifName: string]: { width: number; height: number; rgba: Uint8Array };
+  [tifName: string]: ModelTexturePixels;
 }
 
 export type UvMode = 'direct' | 'flipV' | 'swap' | 'swapFlipV';
@@ -54,7 +67,11 @@ export interface ModelRendererOptions {
   // own .tif. PS2 weapon atlases share one sheet across all chunks.
   defaultTexture?: string | null;
   // Fallback single texture (used if chunk has no specific texture).
-  textureRgba?: { width: number; height: number; rgba: Uint8Array } | null;
+  textureRgba?: ModelTexturePixels | null;
+  // Multiply the baked per-vertex colours from the model's DMA chains into
+  // the material (the game's lighting for maps, props and vehicles). On by
+  // default; chunks without colours get a neutral 1.0.
+  vertexColors?: boolean;
   // Map-viewer style controls (HTML reference). Defaults preserve current
   // weapon-preview behaviour, so untouched options leave the renderer alone.
   triStride?: number;        // 1 = full, N = every Nth triangle.
@@ -157,21 +174,48 @@ export class ZedModelRenderer {
     // Subsamples the triangle list: 1 = full, 2 = every other, etc. Mirrors
     // the HTML map viewer's triStep dropdown.
     const triStride = Math.max(1, options.triStride ?? 1);
+    // Baked vertex colours are the game's lighting: when the model carries
+    // them, render it pre-lit (no scene light) and multiply them in.
+    const useVertexColors = (options.vertexColors ?? true) && !solidColorMode &&
+      visibleChunks.some(c => c.hasVertexColors);
+    const prelit = unlit || useVertexColors;
 
     // Build the per-material texture cache. Each unique .tif becomes one
     // DataTexture + Mesh material. Chunks with no matching .tif fall
     // back to a plain grey material.
-    const makeMaterial = (color: number, map?: THREE.DataTexture): THREE.Material => {
+    const makeMaterial = (color: number, map?: THREE.DataTexture, pixels?: ModelTexturePixels): THREE.Material => {
+      // Per-texture alpha. Effects keep the soft-blend setup they had
+      // (transparentTextures). Otherwise the GS alpha test from the
+      // texture's TEST register wins, and textures with transparent texels
+      // but no test get a cutout threshold so fences, foliage and decals
+      // read correctly.
+      const gsAlphaTest = pixels?.alphaTest ?? null;
+      let alphaTest: number;
+      let translucent: boolean;
+      if (transparentTextures) {
+        alphaTest = gsAlphaTest ?? 0.02;
+        translucent = true;
+      } else if (gsAlphaTest !== null) {
+        alphaTest = gsAlphaTest;
+        translucent = !!pixels?.hasTransparency && gsAlphaTest < 0.5;
+      } else if (pixels?.hasTransparency) {
+        alphaTest = 0.5;
+        translucent = false;
+      } else {
+        alphaTest = 0;
+        translucent = false;
+      }
       const base = {
         color,
         side: THREE.DoubleSide,
         wireframe: this.wireframe,
-        transparent: transparentTextures,
-        depthWrite: !transparentTextures,
-        alphaTest: transparentTextures ? 0.02 : 0,
+        transparent: translucent,
+        depthWrite: !translucent,
+        alphaTest,
+        vertexColors: useVertexColors,
       };
       const params = map ? { ...base, map } : base;
-      if (unlit) {
+      if (prelit) {
         return new THREE.MeshBasicMaterial(params);
       }
       return new THREE.MeshStandardMaterial({
@@ -227,11 +271,12 @@ export class ZedModelRenderer {
       dt.magFilter = THREE.LinearFilter;
       dt.minFilter = THREE.LinearFilter;
       dt.generateMipmaps = false;
-      dt.wrapS = THREE.RepeatWrapping;
-      dt.wrapT = THREE.RepeatWrapping;
+      // Wrap modes come from the texture's GS CLAMP register when known.
+      dt.wrapS = tex.wrapS === 'clamp' ? THREE.ClampToEdgeWrapping : THREE.RepeatWrapping;
+      dt.wrapT = tex.wrapT === 'clamp' ? THREE.ClampToEdgeWrapping : THREE.RepeatWrapping;
       dt.needsUpdate = true;
       this.textures.push(dt);
-      const mat = makeMaterial(0xffffff, dt);
+      const mat = makeMaterial(0xffffff, dt, tex);
       this.materials.push(mat);
       const idx = this.materials.length - 1;
       materialIndexByTif.set(key, idx);
@@ -242,6 +287,7 @@ export class ZedModelRenderer {
     // adding a draw group per chunk so its material is applied.
     const allPositions: number[] = [];
     const allUvs: number[] = [];
+    const allColors: number[] = [];
     const allIndices: number[] = [];
     const groups: Array<{ start: number; count: number; material: number }> = [];
     let vBase = 0;
@@ -267,10 +313,21 @@ export class ZedModelRenderer {
       // a UI / scripting blob that happened to satisfy the chunk magic).
       if (vBase + chunk.vertices.length > MAX_VERTICES_TOTAL) { bailedOnSize = true; break; }
       if (iBase + chunk.indices.length > MAX_INDICES_TOTAL) { bailedOnSize = true; break; }
+      const chunkHasColors = !!chunk.hasVertexColors;
       for (const v of chunk.vertices) {
         allPositions.push(v.x, v.y, v.z);
         const [tu, tv] = transformUv(v.u, v.v);
         allUvs.push(tu, tv);
+        if (useVertexColors) {
+          // GS modulation: texel * colour / 128, so 0x80 is neutral and
+          // 0xFF doubles the brightness. Chunks without a colour block
+          // draw at 1.0.
+          if (chunkHasColors) {
+            allColors.push((v.r ?? 128) / 128, (v.g ?? 128) / 128, (v.b ?? 128) / 128);
+          } else {
+            allColors.push(1, 1, 1);
+          }
+        }
       }
       // Apply the triangle stride here so the stride applies per-chunk.
       // Each chunk.indices is laid out as flat triples (a, b, c, a, b, c…).
@@ -301,6 +358,9 @@ export class ZedModelRenderer {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(allPositions), 3));
     geometry.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(allUvs), 2));
+    if (useVertexColors) {
+      geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(allColors), 3));
+    }
     geometry.setIndex(allIndices);
     geometry.computeVertexNormals();
 

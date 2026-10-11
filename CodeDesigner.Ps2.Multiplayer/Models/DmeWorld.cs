@@ -133,6 +133,7 @@ public class DmeWorld
     /// <summary>Relay an application broadcast from <paramref name="source"/> to every other joined client.</summary>
     public void BroadcastApp(DmeClientState source, byte[] payload)
     {
+        if (FakeIds.Count > 0) RecordToFake(source.DmeId, -1, payload);   // -1 = broadcast
         foreach (var (_, client) in Clients)
         {
             if (client == source || !client.HasJoined) continue;

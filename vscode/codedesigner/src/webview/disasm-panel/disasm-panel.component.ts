@@ -607,6 +607,10 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
     this.bridge.postMessage({ command: 'openNetConfig' });
   }
 
+  onOpenDebugCommands(): void {
+    this.bridge.postMessage({ command: 'openDebugCommands' });
+  }
+
   // ── History / Recent Labels / Network status handlers ────────────────────
 
   onRequestHistory(): void {

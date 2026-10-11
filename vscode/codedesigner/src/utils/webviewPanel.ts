@@ -8,6 +8,7 @@ import * as vscode from 'vscode';
  */
 export type CodeDesignerPanelIcon =
     | 'bot'
+    | 'bug'
     | 'camera'
     | 'database'
     | 'disc3'

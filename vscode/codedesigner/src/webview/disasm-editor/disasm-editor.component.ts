@@ -10,6 +10,13 @@ import {
 } from './disasm-editor.service';
 import { EditorState } from './state/editor.state';
 import { SearchMode, DisasmRow as DisasmRowType, HistoryEntry, CallStackEntry, ModuleEntry, PineWatchInfo } from './state/types';
+import {
+  INSTRUCTION_BYTES,
+  cursorToByteOffset,
+  findRowIndexForByteOffset,
+  rowByteLength,
+  rowByteOffset,
+} from './state/row-locator';
 import { HexViewComponent } from './components/hex-view.component';
 import { SearchPanelComponent } from './components/search-panel.component';
 import { AddressInputPanelComponent } from './components/address-input-panel.component';
@@ -70,7 +77,7 @@ export class DisasmEditorComponent implements AfterViewInit {
 
   // Virtual grid actions (set by initEditorLogic)
   private readonly gridRuntime = {
-    selectRow: null as ((globalIndex: number) => void) | null,
+    selectRow: null as ((row: DisasmRowType) => void) | null,
     editRow: null as ((row: DisasmRowType, address: number, addressHex: string) => void) | null,
     navigateTarget: null as (() => void) | null,
     navigateBack: null as (() => void) | null,
@@ -161,7 +168,15 @@ export class DisasmEditorComponent implements AfterViewInit {
   };
 
   private pendingPageScrollBlock: ScrollLogicalPosition | null = null;
-  private lastGridState: { pageStart: number; p1: DisasmRow[] | undefined; p2: DisasmRow[] | undefined } | null = null;
+  /** Pages currently shown by the grid (adjacent pages, in address order). */
+  private lastGridState: { pageStart: number; parts: DisasmRow[][] } | null = null;
+  /**
+   * Page requests posted to the extension host that have not been answered
+   * yet (startIndex → timestamp).  Prevents duplicate fetches while a page is
+   * in flight; entries expire so a dropped response can be retried.
+   */
+  private readonly pendingPageRequests = new Map<number, number>();
+  private static readonly PAGE_REQUEST_RETRY_MS = 1500;
   /** Last synced breakpoints size — avoids creating a new Set on every live-refresh tick. */
   private _lastBreakpointsSize = -1;
   /** Last synced search-matches array identity — avoids creating a new Array on every tick. */
@@ -335,8 +350,8 @@ export class DisasmEditorComponent implements AfterViewInit {
   // Virtual Grid Event Handlers (Phase 5)
   // ═══════════════════════════════════════════════════════════════════════════
 
-  protected onGridSelectRow(globalIndex: number): void {
-    this.gridRuntime.selectRow?.(globalIndex);
+  protected onGridSelectRow(row: DisasmRowType): void {
+    this.gridRuntime.selectRow?.(row);
   }
 
   protected onGridEditRow(event: { row: DisasmRowType; address: number; addressHex: string }): void {
@@ -369,7 +384,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     this._ctxGlobalIndex = event.globalIndex;
 
     // Move cursor to the right-clicked row
-    this.gridRuntime.selectRow?.(event.globalIndex);
+    this.gridRuntime.selectRow?.(event.row);
 
     // Determine menu state
     const addr = parseInt(event.row.addr, 16);
@@ -993,6 +1008,55 @@ export class DisasmEditorComponent implements AfterViewInit {
     params.vscode.postMessage({ type: 'requestPage', startIndex });
   }
 
+  // ── Cursor helpers ──────────────────────────────────────────────────────
+  // The cursor is a global instruction index plus a sub-word byte offset.
+  // Rows are resolved from it by address (see state/row-locator.ts) because
+  // formatted rows make "row N of the page" ≠ "instruction pageStart + N".
+
+  /** Move the cursor to an instruction index (resets the sub-word offset). */
+  private setCursorIndex(state: DisasmEditorService['state'], index: number, byteOffset = 0): void {
+    state.cursor = index;
+    state.cursorByteOffset = byteOffset;
+  }
+
+  /** Move the cursor onto the given row (keeps sub-word rows addressable). */
+  private setCursorToRow(state: DisasmEditorService['state'], row: DisasmRow): void {
+    const offset = rowByteOffset(row, state.baseAddress);
+    if (!Number.isFinite(offset) || offset < 0) { return; }
+    this.setCursorIndex(state, Math.floor(offset / INSTRUCTION_BYTES), offset % INSTRUCTION_BYTES);
+  }
+
+  /** Cursor position as a byte offset from the region base. */
+  private cursorOffsetBytes(state: DisasmEditorService['state']): number {
+    return cursorToByteOffset(state.cursor, state.cursorByteOffset);
+  }
+
+  private cursorPageStart(state: DisasmEditorService['state']): number {
+    return Math.floor(state.cursor / state.pageSize) * state.pageSize;
+  }
+
+  /** The row under the cursor in the cursor's page, resolved by address. */
+  private getCursorRow(state: DisasmEditorService['state']): DisasmRow | undefined {
+    const rows = state.loadedPages.get(this.cursorPageStart(state)) ?? state.disasmRows;
+    const index = findRowIndexForByteOffset(rows, state.baseAddress, this.cursorOffsetBytes(state));
+    return index >= 0 ? rows[index] : undefined;
+  }
+
+  /**
+   * Ask the extension host for a page unless an identical request is already
+   * in flight.  Returns true when a request was posted.
+   */
+  private requestPageOnce(vscode: ReturnType<typeof getVsCodeApi>, startIndex: number): boolean {
+    const now = Date.now();
+    const pendingSince = this.pendingPageRequests.get(startIndex);
+    if (pendingSince !== undefined && now - pendingSince < DisasmEditorComponent.PAGE_REQUEST_RETRY_MS) {
+      return false;
+    }
+    this.pendingPageRequests.set(startIndex, now);
+    vscode.postMessage({ type: 'requestPage', startIndex });
+    return true;
+  }
+
   private handleLiveStatusUpdate(params: {
     paused: boolean;
     pc: number;
@@ -1054,7 +1118,7 @@ export class DisasmEditorComponent implements AfterViewInit {
       const physBase = this.toPhysicalAddress(params.state.baseAddress);
       const instrIndex = Math.floor((physPc - physBase) / 4);
       if (instrIndex >= 0 && instrIndex < params.state.totalInstructions) {
-        params.state.cursor = instrIndex;
+        this.setCursorIndex(params.state, instrIndex);
         this.pendingPageScrollBlock = 'center';
         const pageReady = params.checkAndLoadPage();
         if (pageReady) {
@@ -1160,14 +1224,12 @@ export class DisasmEditorComponent implements AfterViewInit {
       params.vscode.postMessage({ type: 'gotoRegion', address: alignedAddr });
       return;
     }
-    // Re-fetch the destination page with DataFormatOverrides bypassed so
-    // the cursor lands on the typed-address row even if user overrides or
-    // auto-string detection would normally shift the row layout around it.
-    const gotoPageStart = Math.floor(instrIndex / params.state.pageSize) * params.state.pageSize;
-    params.vscode.postMessage({ type: 'requestPage', startIndex: gotoPageStart, bypassOverrides: true });
+    // The cursor row is resolved by address, so the destination page can be
+    // rendered with its normal (override-aware) layout: if the address sits
+    // inside a formatted multi-byte row, that row is highlighted.
     params.recordNavigation(alignedAddr);
     params.pushNavHistory();
-    params.state.cursor = instrIndex;
+    this.setCursorIndex(params.state, instrIndex);
     this.pendingPageScrollBlock = 'center';
     if (params.checkAndLoadPage()) {
       this.pendingPageScrollBlock = null;
@@ -1177,11 +1239,9 @@ export class DisasmEditorComponent implements AfterViewInit {
 
   private navigateToCurrentRowTarget(params: {
     state: DisasmEditorService['state'];
-    getLocalIndex: (index: number) => number;
     navigateToAddress: (address: number) => void;
   }): void {
-    const localIndex = params.getLocalIndex(params.state.cursor);
-    const row = params.state.disasmRows[localIndex];
+    const row = this.getCursorRow(params.state);
     if (!row) { return; }
 
     // Priority 1: jump / branch instruction target in the args field
@@ -1263,12 +1323,10 @@ export class DisasmEditorComponent implements AfterViewInit {
 
   private toggleBreakpointAtCursor(params: {
     state: DisasmEditorService['state'];
-    getLocalIndex: (index: number) => number;
     vscode: ReturnType<typeof getVsCodeApi>;
     renderDisassembly: (scrollBlock?: ScrollLogicalPosition | null) => void;
   }): void {
-    const localIndex = params.getLocalIndex(params.state.cursor);
-    const row = params.state.disasmRows[localIndex];
+    const row = this.getCursorRow(params.state);
     if (!row) { return; }
 
     const addr = parseInt(row.addr, 16);
@@ -1284,6 +1342,7 @@ export class DisasmEditorComponent implements AfterViewInit {
 
   private syncEditorSignals(state: DisasmEditorService['state'], signals: EditorState): void {
     signals.cursor.set(state.cursor);
+    signals.cursorByteOffset.set(state.cursorByteOffset);
     signals.totalInstructions.set(state.totalInstructions);
     signals.baseAddress.set(state.baseAddress);
     signals.pageSize.set(state.pageSize);
@@ -1313,79 +1372,87 @@ export class DisasmEditorComponent implements AfterViewInit {
     signals.currentMatchIndex.set(state.currentMatch);
   }
 
+  /**
+   * Decide which pages the grid shows and push them in.
+   *
+   * The cursor page is always shown.  When the cursor row is within
+   * BOUNDARY_THRESHOLD rows of the page's first/last row, the adjacent page
+   * is concatenated (and fetched first if it is not cached yet) so the grid
+   * has continuous rows across the boundary: crossing it is then an ordinary
+   * one-row move instead of a page swap.
+   *
+   * Whenever the row array changes, the grid is re-anchored on the row that
+   * was at the top of the viewport (by address), so merging, dropping, or
+   * re-laying-out rows above the viewport never moves what the user sees.
+   */
   private syncVirtualGridState(params: {
     state: DisasmEditorService['state'];
     getPageStart: (index: number) => number;
     pointerLabelMap: Map<string, string>;
     cheatLabelMap: Map<string, string>;
+    vscode: ReturnType<typeof getVsCodeApi>;
   }): void {
     if (!this.useVirtualGrid()) { return; }
     const state = params.state;
-    const currentPageStart = params.getPageStart(state.cursor);
-    const pageRows = state.loadedPages.get(currentPageStart) as DisasmRowType[] | undefined;
-
-    // ── Multi-page merge for smooth boundary scrolling ──────────────────
-    // When the cursor is near the start or end of the current page, merge
-    // with the adjacent cached page so the virtual grid has continuous data
-    // across the boundary.  This prevents the cursor from jumping to the
-    // top of a freshly loaded page.
-    const localIndex = state.cursor - currentPageStart;
-    const pageSize = state.pageSize;
-    const BOUNDARY_THRESHOLD = 60; // rows from edge to trigger merge
-
-    let effectivePageStart = currentPageStart;
-    let p1: DisasmRowType[] | undefined = pageRows;
-    let p2: DisasmRowType[] | undefined;
-
-    if (localIndex < BOUNDARY_THRESHOLD && currentPageStart > 0) {
-      // Near the start of the current page — prepend the previous page
-      const prevStart = currentPageStart - pageSize;
-      const prevRows = state.loadedPages.get(prevStart) as DisasmRowType[] | undefined;
-      if (prevRows) {
-        effectivePageStart = prevStart;
-        p1 = prevRows;
-        p2 = pageRows;
-      }
-    } else if (pageRows && localIndex >= pageSize - BOUNDARY_THRESHOLD) {
-      // Near the end of the current page — append the next page
-      const nextStart = currentPageStart + pageSize;
-      const nextRows = state.loadedPages.get(nextStart) as DisasmRowType[] | undefined;
-      if (nextRows) {
-        p1 = pageRows;
-        p2 = nextRows;
-      }
-    }
-
-    const last = this.lastGridState;
-    if (!last || last.pageStart !== effectivePageStart || last.p1 !== p1 || last.p2 !== p2) {
-      let gridRows: DisasmRowType[];
-      if (p1 && p2) {
-        gridRows = [...p1, ...p2];
-      } else if (p1 && p1.length > 0) {
-        gridRows = p1;
-      } else {
-        gridRows = (state.disasmRows as DisasmRowType[]);
-      }
-
-      // When the effective page start changes (merge ↔ de-merge),
-      // adjust the virtual grid's scroll position so the same physical
-      // rows stay visible and the user sees no jump.
-      const oldPageStart = last?.pageStart ?? effectivePageStart;
-      if (oldPageStart !== effectivePageStart && last) {
-        const grid = this.virtualGridRef();
-        if (grid) {
-          grid.adjustScroll((oldPageStart - effectivePageStart) * grid.rowHeight);
-        }
-      }
-
-      this.gridRows.set(gridRows);
-      this.gridPageStart.set(effectivePageStart);
-      this.lastGridState = { pageStart: effectivePageStart, p1, p2 };
-    }
 
     // Pass the same map reference so the signal only changes when rebuildPointerLabelMap() fires
     this.gridPointerLabelMap.set(params.pointerLabelMap);
     this.gridCheatLabelMap.set(params.cheatLabelMap);
+
+    const pageSize = state.pageSize;
+    const currentPageStart = params.getPageStart(state.cursor);
+    const pageRows = state.loadedPages.get(currentPageStart) as DisasmRowType[] | undefined;
+    if (!pageRows) {
+      // The cursor page is still loading: keep the grid parked on what it
+      // shows now.  pageLoaded$ re-runs this once the rows arrive.
+      return;
+    }
+
+    const BOUNDARY_THRESHOLD = 60; // rows from a page edge that trigger the merge
+    const cursorRowIndex = findRowIndexForByteOffset(pageRows, state.baseAddress, this.cursorOffsetBytes(state));
+    const nearStart = cursorRowIndex < 0 || cursorRowIndex < BOUNDARY_THRESHOLD;
+    const nearEnd = cursorRowIndex < 0 || cursorRowIndex >= pageRows.length - BOUNDARY_THRESHOLD;
+
+    const parts: DisasmRowType[][] = [pageRows];
+    let effectivePageStart = currentPageStart;
+
+    if (nearStart && currentPageStart > 0) {
+      const prevStart = currentPageStart - pageSize;
+      const prevRows = state.loadedPages.get(prevStart) as DisasmRowType[] | undefined;
+      if (prevRows) {
+        parts.unshift(prevRows);
+        effectivePageStart = prevStart;
+      } else {
+        this.requestPageOnce(params.vscode, prevStart);
+      }
+    }
+    if (nearEnd && currentPageStart + pageSize < state.totalInstructions) {
+      const nextStart = currentPageStart + pageSize;
+      const nextRows = state.loadedPages.get(nextStart) as DisasmRowType[] | undefined;
+      if (nextRows) {
+        parts.push(nextRows);
+      } else {
+        this.requestPageOnce(params.vscode, nextStart);
+      }
+    }
+
+    const last = this.lastGridState;
+    const unchanged = !!last
+      && last.pageStart === effectivePageStart
+      && last.parts.length === parts.length
+      && last.parts.every((part, i) => part === parts[i]);
+    if (unchanged) { return; }
+
+    const gridRows: DisasmRowType[] = parts.length === 1 ? parts[0] : ([] as DisasmRowType[]).concat(...parts);
+    const previousRows = this.gridRows();
+    this.gridRows.set(gridRows);
+    this.gridPageStart.set(effectivePageStart);
+    this.lastGridState = { pageStart: effectivePageStart, parts };
+
+    // Keep the viewport on the same physical rows across the change.  When
+    // the anchor row is gone (jump to another page) the caller positions the
+    // grid explicitly via updateCursor's scrollBlock.
+    this.virtualGridRef()?.rebaseScroll(previousRows, gridRows);
   }
 
   private updateHexForRow(params: {
@@ -1406,21 +1473,35 @@ export class DisasmEditorComponent implements AfterViewInit {
     params.vscode.postMessage({ type: 'updateHex', address: addr, length });
   }
 
+  /**
+   * Re-sync the grid, highlight the cursor row and (optionally) scroll it
+   * into view.  `scrollBlock === null` leaves the viewport where it is.
+   */
   private updateCursor(params: {
     state: DisasmEditorService['state'];
     signals: EditorState;
-    getLocalIndex: (index: number) => number;
+    getPageStart: (index: number) => number;
+    getPointerLabelMap: () => Map<string, string>;
+    getCheatLabelMap: () => Map<string, string>;
     scrollBlock?: ScrollLogicalPosition | null;
     updateHexView: (data: number[], offset: number, highlightAddr?: number, highlightLength?: number) => void;
     vscode: ReturnType<typeof getVsCodeApi>;
   }): void {
-    const currentPageLocalIndex = params.getLocalIndex(params.state.cursor);
-    const gridLocalIndex = params.state.cursor - this.gridPageStart();
+    this.syncVirtualGridState({
+      state: params.state,
+      getPageStart: params.getPageStart,
+      pointerLabelMap: params.getPointerLabelMap(),
+      cheatLabelMap: params.getCheatLabelMap(),
+      vscode: params.vscode,
+    });
     this.syncEditorSignals(params.state, params.signals);
-    if (params.scrollBlock !== null) {
-      this.virtualGridRef()?.scrollToIndex(gridLocalIndex, params.scrollBlock ?? 'nearest');
+
+    const gridRows = this.gridRows();
+    const gridRowIndex = findRowIndexForByteOffset(gridRows, params.state.baseAddress, this.cursorOffsetBytes(params.state));
+    if (params.scrollBlock !== null && gridRowIndex >= 0) {
+      this.virtualGridRef()?.scrollToIndex(gridRowIndex, params.scrollBlock ?? 'nearest');
     }
-    const row = params.state.disasmRows[currentPageLocalIndex];
+    const row = gridRowIndex >= 0 ? gridRows[gridRowIndex] : undefined;
     if (!row) { return; }
     this.updateHexForRow({
       row,
@@ -1430,59 +1511,24 @@ export class DisasmEditorComponent implements AfterViewInit {
     });
   }
 
-  private renderDisassembly(params: {
-    state: DisasmEditorService['state'];
-    getPageStart: (index: number) => number;
-    pointerLabelMap: Map<string, string>;
-    cheatLabelMap: Map<string, string>;
-    signals: EditorState;
-    getLocalIndex: (index: number) => number;
-    scrollBlock?: ScrollLogicalPosition | null;
-    updateHexView: (data: number[], offset: number, highlightAddr?: number, highlightLength?: number) => void;
-    vscode: ReturnType<typeof getVsCodeApi>;
-  }): void {
-    this.syncVirtualGridState({
-      state: params.state,
-      getPageStart: params.getPageStart,
-      pointerLabelMap: params.pointerLabelMap,
-      cheatLabelMap: params.cheatLabelMap,
-    });
-    this.updateCursor({
-      state: params.state,
-      signals: params.signals,
-      getLocalIndex: params.getLocalIndex,
-      scrollBlock: params.scrollBlock,
-      updateHexView: params.updateHexView,
-      vscode: params.vscode,
-    });
-  }
-
+  /**
+   * Make sure the cursor's page is in `state.disasmRows`, requesting it from
+   * the extension host when it is not cached.  Returns true when the page is
+   * available; the caller then calls updateCursor with the scroll intent.
+   */
   private checkAndLoadPage(params: {
     state: DisasmEditorService['state'];
     getPageStart: (index: number) => number;
     vscode: ReturnType<typeof getVsCodeApi>;
-    renderDisassembly: (scrollBlock?: ScrollLogicalPosition | null) => void;
-    bypassOverrides?: boolean;
   }): boolean {
     const startIndex = params.getPageStart(params.state.cursor);
-    if (!params.state.loadedPages.has(startIndex)) {
-      const msg: { type: string; startIndex: number; bypassOverrides?: boolean } =
-        { type: 'requestPage', startIndex };
-      if (params.bypassOverrides) { msg.bypassOverrides = true; }
-      params.vscode.postMessage(msg);
+    const cachedRows = params.state.loadedPages.get(startIndex);
+    if (!cachedRows) {
+      this.requestPageOnce(params.vscode, startIndex);
       return false;
     }
-
-    const cachedRows = params.state.loadedPages.get(startIndex)!;
     if (params.state.disasmRows !== cachedRows) {
       params.state.disasmRows = cachedRows;
-      // Only sync grid data without scrolling — the caller is responsible for
-      // calling updateCursor with the correct scroll position. Using
-      // renderDisassembly('nearest') here caused a double-render: the first
-      // scroll to 'nearest' visually jumped the cursor to the wrong position
-      // before the caller's scroll corrected it, producing a flicker at page
-      // boundaries.
-      params.renderDisassembly(null);
     }
     return true;
   }
@@ -1530,9 +1576,11 @@ export class DisasmEditorComponent implements AfterViewInit {
   }): void {
     const prev = params.navHistory.pop();
     if (prev === undefined) { return; }
-    params.state.cursor = prev;
+    this.setCursorIndex(params.state, prev);
     params.navBackBtn.disabled = params.navHistory.length === 0;
+    this.pendingPageScrollBlock = 'center';
     if (params.checkAndLoadPage()) {
+      this.pendingPageScrollBlock = null;
       params.updateCursor('center');
     }
     params.focusGrid();
@@ -1574,7 +1622,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     if (params.matchIndex < 0 || params.matchIndex >= params.state.searchMatches.length) { return; }
     params.state.currentMatch = params.matchIndex;
     const match = params.state.searchMatches[params.matchIndex];
-    params.state.cursor = match.instructionIndex;
+    this.setCursorIndex(params.state, match.instructionIndex);
 
     // Search navigation is expected to reveal the selected hit immediately.
     // When the target page is not cached yet, preserve that scroll intent for
@@ -1931,7 +1979,6 @@ export class DisasmEditorComponent implements AfterViewInit {
       labels: Array<{ address: string; label: string }>,
     ) => CallStackEntry[];
     getPageStart: (index: number) => number;
-    getLocalIndex: (index: number) => number;
     navHistory: number[];
     createPlaceholderRegs: () => RegisterData;
     generateZeroPageRows: (
@@ -1971,22 +2018,34 @@ export class DisasmEditorComponent implements AfterViewInit {
 
     params.svc.pageLoaded$.subscribe(({ startIndex, changed }) => {
       this.liveRuntime.refreshPending = false;
-      if (startIndex === params.getPageStart(params.state.cursor)) {
+      this.pendingPageRequests.delete(startIndex);
+      const cursorPageStart = params.getPageStart(params.state.cursor);
+      if (startIndex === cursorPageStart) {
+        if (!params.state.loadedPages.has(startIndex)) {
+          // A skipped live refresh for a page we do not have yet: nothing to
+          // render, and the scroll intent must survive until the rows arrive.
+          return;
+        }
         if (!changed && this.pendingPageScrollBlock === null) {
           return;
         }
-        // Page loads should preserve the caller's scroll intent. Paused mode
-        // already sets `center` explicitly for PC jumps; keyboard page moves
-        // use start/end so crossing a page boundary does not snap to center.
+        // Page loads preserve the caller's scroll intent (center for goto /
+        // PC jumps, nearest for keyboard moves); refreshes of an already
+        // shown page keep the viewport where it is.
         const scrollBlock = this.pendingPageScrollBlock;
         this.pendingPageScrollBlock = null;
         params.renderDisassembly(scrollBlock);
+        return;
+      }
+      if (changed && Math.abs(startIndex - cursorPageStart) === params.state.pageSize) {
+        // A neighbouring page (pre-fetched for boundary scrolling) arrived or
+        // changed: merge it into the grid without moving the viewport.
+        params.renderDisassembly(null);
       }
     });
 
     params.svc.hexUpdated$.subscribe(event => {
-      const localIndex = params.getLocalIndex(params.state.cursor);
-      const curRow = params.state.disasmRows[localIndex];
+      const curRow = this.getCursorRow(params.state);
       let hiAddr = event.highlightAddr ?? event.offset;
       let hiLength = event.highlightLength ?? 4;
       if (curRow) {
@@ -2092,7 +2151,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     nextSearchMatch: () => void;
     pushNavHistory: () => void;
     getPageStart: (index: number) => number;
-    checkAndLoadPage: (bypassOverrides?: boolean) => boolean;
+    checkAndLoadPage: () => boolean;
     updateCursor: (scrollBlock?: ScrollLogicalPosition | null) => void;
     renderDisassembly: (scrollBlock?: ScrollLogicalPosition | null) => void;
     navigateBack: () => void;
@@ -2149,15 +2208,13 @@ export class DisasmEditorComponent implements AfterViewInit {
       }
       addr = alignedAddr;
 
-      // Re-fetch this page with DataFormatOverrides bypassed so the row the
-      // user typed lands on a clean 4-byte boundary even if user overrides
-      // would normally produce variable-stride rows around it. The next
-      // ordinary page refresh restores override-aware rendering.
-      const gotoPageStart = Math.floor(instrIndex / params.state.pageSize) * params.state.pageSize;
-      params.vscode.postMessage({ type: 'requestPage', startIndex: gotoPageStart, bypassOverrides: true });
+      // The cursor row is resolved by address, so the page keeps its normal
+      // (override-aware) layout: a goto into a formatted multi-byte row
+      // highlights that row instead of forcing a 4-byte re-render that the
+      // next live refresh would undo again.
       recordNavigation(addr);
       params.pushNavHistory();
-      params.state.cursor = instrIndex;
+      this.setCursorIndex(params.state, instrIndex);
       params.state.searchActive = false;
       params.signals.panels.search.set(false);
       // Invalidate the cached hex window so updateHexForRow always fetches
@@ -2173,8 +2230,8 @@ export class DisasmEditorComponent implements AfterViewInit {
       params.gotoStatus.set(`Moved to 0x${addr.toString(16).toUpperCase()}`);
     };
 
-    this.gridRuntime.selectRow = (globalIndex: number) => {
-      params.state.cursor = globalIndex;
+    this.gridRuntime.selectRow = (row: DisasmRow) => {
+      this.setCursorToRow(params.state, row);
       if (params.checkAndLoadPage()) {
         params.updateCursor();
       }
@@ -2193,34 +2250,46 @@ export class DisasmEditorComponent implements AfterViewInit {
       params.bottomPanelBreakpoints.set(new Set(params.state.breakpoints));
     };
     this.gridRuntime.cursorMove = (delta: number) => {
-      const previousCursor = params.state.cursor;
-      const nextCursor = params.clamp(previousCursor + delta, 0, params.state.totalInstructions - 1);
-      if (nextCursor === previousCursor) { return; }
+      const state = params.state;
+      const rows = this.gridRows();
+      const rowIndex = findRowIndexForByteOffset(rows, state.baseAddress, this.cursorOffsetBytes(state));
 
-      const previousPageStart = params.getPageStart(previousCursor);
-      const nextPageStart = params.getPageStart(nextCursor);
-      const crossedPageBoundary = previousPageStart !== nextPageStart;
-      const boundaryScrollBlock: ScrollLogicalPosition = crossedPageBoundary
-        ? (delta > 0 ? 'end' : 'start')
-        : 'nearest';
-
-      params.state.cursor = nextCursor;
-      if (crossedPageBoundary) {
-        this.pendingPageScrollBlock = boundaryScrollBlock;
-      }
-      // The cursor coordinate uses a fixed 4-byte stride, but data-format
-      // overrides and per-page auto-string detection make rows variable
-      // length. When we cross into a new page whose row layout differs from
-      // the cursor model, the cursor "skips" to whatever row the
-      // variable-stride layout produced at that local index. Forcing the
-      // destination page to render with fixed 4-byte rows on the boundary
-      // crossing keeps the cursor on the address the user scrolled toward;
-      // overrides remain visible on pages the user opens explicitly via goto.
-      if (params.checkAndLoadPage(crossedPageBoundary)) {
-        if (crossedPageBoundary) {
-          this.pendingPageScrollBlock = null;
+      // Move by *rows* through what the grid is showing.  The grid holds the
+      // cursor page plus its neighbours near a boundary, so an arrow key
+      // simply steps to the adjacent row — across a page boundary, across
+      // sub-word rows, and across multi-byte formatted rows alike.
+      if (rowIndex >= 0 && rows.length > 0) {
+        const wanted = rowIndex + delta;
+        const target = params.clamp(wanted, 0, rows.length - 1);
+        const firstRow = rows[0];
+        const lastRow = rows[rows.length - 1];
+        const firstByte = rowByteOffset(firstRow, state.baseAddress);
+        const lastByteEnd = rowByteOffset(lastRow, state.baseAddress) + rowByteLength(lastRow);
+        const atRegionEdge = delta < 0
+          ? firstByte <= 0
+          : lastByteEnd >= state.totalInstructions * INSTRUCTION_BYTES;
+        if (target === wanted || atRegionEdge) {
+          if (target === rowIndex) { return; }
+          this.setCursorToRow(state, rows[target]);
+          if (params.checkAndLoadPage()) {
+            params.updateCursor('nearest');
+          }
+          return;
         }
-        params.updateCursor(boundaryScrollBlock);
+        // The move runs past the rows we have and more pages exist: fall
+        // through to an index-based move so the missing page gets loaded.
+      }
+
+      const previousCursor = state.cursor;
+      const nextCursor = params.clamp(previousCursor + delta, 0, state.totalInstructions - 1);
+      if (nextCursor === previousCursor && state.cursorByteOffset === 0) { return; }
+      this.setCursorIndex(state, nextCursor);
+      // When the destination page is still loading, keep the "nearest"
+      // intent for pageLoaded$ so the row is revealed without re-centering.
+      this.pendingPageScrollBlock = 'nearest';
+      if (params.checkAndLoadPage()) {
+        this.pendingPageScrollBlock = null;
+        params.updateCursor('nearest');
       }
     };
 
@@ -2268,8 +2337,8 @@ export class DisasmEditorComponent implements AfterViewInit {
     };
 
     this.contextMenuRuntime.gotoTarget = () => {
-      if (this._ctxGlobalIndex < 0) { return; }
-      params.state.cursor = this._ctxGlobalIndex;
+      if (!this._ctxRow) { return; }
+      this.setCursorToRow(params.state, this._ctxRow);
       params.navigateToCurrentRowTarget();
     };
 
@@ -2347,9 +2416,11 @@ export class DisasmEditorComponent implements AfterViewInit {
       }
       recordNavigation(addr);
       params.pushNavHistory();
-      params.state.cursor = instrIndex;
+      this.setCursorIndex(params.state, instrIndex);
+      this.pendingPageScrollBlock = 'center';
       if (params.checkAndLoadPage()) {
-        params.updateCursor();
+        this.pendingPageScrollBlock = null;
+        params.updateCursor('center');
       }
     };
 
@@ -2463,7 +2534,6 @@ export class DisasmEditorComponent implements AfterViewInit {
 
     const clamp = (val: number, min: number, max: number) => Math.max(min, Math.min(val, max));
     const getPageStart = (index: number) => Math.floor(index / state.pageSize) * state.pageSize;
-    const getLocalIndex = (index: number) => index - getPageStart(index);
 
     // ── Pointer-label map ─────────────────────────────────────────────────────
     // Kept in sync with state.pointerLabels; keyed by 8-digit upper-case hex
@@ -2485,30 +2555,23 @@ export class DisasmEditorComponent implements AfterViewInit {
     const updateCursor = (scrollBlock: ScrollLogicalPosition | null = 'nearest') => this.updateCursor({
       state,
       signals,
-      getLocalIndex,
+      getPageStart,
+      getPointerLabelMap: () => pointerLabelMap,
+      getCheatLabelMap: () => cheatLabelMap,
       scrollBlock,
       updateHexView,
       vscode,
     });
 
-    const renderDisassembly = (scrollBlock: ScrollLogicalPosition | null = 'nearest') => this.renderDisassembly({
-      state,
-      getPageStart,
-      pointerLabelMap,
-      cheatLabelMap,
-      signals,
-      getLocalIndex,
-      scrollBlock,
-      updateHexView,
-      vscode,
-    });
+    // Re-render after data changes (page loads, label/analysis updates).
+    // Identical to updateCursor: the grid is re-synced from the page cache
+    // and the viewport is re-anchored, so rows can change without a jump.
+    const renderDisassembly = (scrollBlock: ScrollLogicalPosition | null = 'nearest') => updateCursor(scrollBlock);
 
-    const checkAndLoadPage = (bypassOverrides?: boolean) => this.checkAndLoadPage({
+    const checkAndLoadPage = () => this.checkAndLoadPage({
       state,
       getPageStart,
       vscode,
-      renderDisassembly,
-      bypassOverrides,
     });
     // Returns the 0-based index of the current PC within the page that starts at
     // `pageStart`, or -1 if the PC is not on that page (or not set).
@@ -2615,7 +2678,6 @@ export class DisasmEditorComponent implements AfterViewInit {
       bottomPanelBreakpoints,
       buildCallStackFrames,
       getPageStart,
-      getLocalIndex,
       navHistory,
       createPlaceholderRegs,
       generateZeroPageRows,
@@ -2745,13 +2807,11 @@ export class DisasmEditorComponent implements AfterViewInit {
 
     const navigateToCurrentRowTarget = () => this.navigateToCurrentRowTarget({
       state,
-      getLocalIndex,
       navigateToAddress,
     });
 
     const toggleBreakpointAtCursor = () => this.toggleBreakpointAtCursor({
       state,
-      getLocalIndex,
       vscode,
       renderDisassembly,
     });
@@ -2815,19 +2875,13 @@ export class DisasmEditorComponent implements AfterViewInit {
       const instrIndex = Math.floor((physAligned - physBase) / 4);
       if (instrIndex < 0 || instrIndex >= state.totalInstructions) { return; }
 
-      // Force-reload the destination page with DataFormatOverrides bypassed so
-      // the goto target lands on a clean 4-byte boundary regardless of any
-      // variable-stride overrides the user has applied near it.
-      const gotoPageStart = Math.floor(instrIndex / state.pageSize) * state.pageSize;
-      vscode.postMessage({ type: 'requestPage', startIndex: gotoPageStart, bypassOverrides: true });
-
       pushNavHistory();
       const addrHex = `0x${address.toString(16).toUpperCase()}`;
       this.gotoValue.set(addrHex);
       if (!state.gotoActive) { toggleGoto(); }
       this.gotoStatus.set(`Moved to ${addrHex}`);
 
-      state.cursor = instrIndex;
+      this.setCursorIndex(state, instrIndex);
       state.searchActive = false;
       signals.panels.search.set(false);
       searchToggleBtn.classList.remove('active');
@@ -2860,10 +2914,7 @@ export class DisasmEditorComponent implements AfterViewInit {
      */
     const setCursorRowFormat = (kind: DataFormatKind) => {
       const pageStart = getPageStart(state.cursor);
-      const rows = state.loadedPages.get(pageStart);
-      if (!rows) { return; }
-      const local = state.cursor - pageStart;
-      const row = rows[local];
+      const row = this.getCursorRow(state);
       if (!row) { return; }
       const address = parseInt(row.addr, 16);
       if (!Number.isFinite(address)) { return; }
@@ -2894,10 +2945,7 @@ export class DisasmEditorComponent implements AfterViewInit {
      */
     const clearCursorRowFormat = () => {
       const pageStart = getPageStart(state.cursor);
-      const rows = state.loadedPages.get(pageStart);
-      if (!rows) { return; }
-      const local = state.cursor - pageStart;
-      const row = rows[local];
+      const row = this.getCursorRow(state);
       if (!row) { return; }
       const address = parseInt(row.addr, 16);
       if (!Number.isFinite(address)) { return; }
