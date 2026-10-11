@@ -37,6 +37,24 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.COP0
 
         public static string Get(int reg) =>
             (uint)reg < (uint)Names.Length ? Names[reg] : $"${reg}";
+
+        /// <summary>
+        /// Resolve a COP0 register name (case-insensitive, e.g. <c>Status</c>, <c>EPC</c>)
+        /// to its register index.
+        /// </summary>
+        public static bool TryParse(string name, out int index)
+        {
+            for (int i = 0; i < Names.Length; i++)
+            {
+                if (string.Equals(Names[i], name, StringComparison.OrdinalIgnoreCase))
+                {
+                    index = i;
+                    return true;
+                }
+            }
+            index = -1;
+            return false;
+        }
     }
     // MFC0 - Move from COP0 register to GPR (32-bit)
     public sealed class MFC0 : Instruction<Args_R>
@@ -638,7 +656,7 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.COP0
         public override string Disasm(Args_I args, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            return $"{Name} 0x{args.Rt:X}, {offset}({CpuHelpers.RegName(args.Rs)})";
+            return $"{Name} 0x{args.Rt:X}, {CpuHelpers.FormatOffset(offset)}({CpuHelpers.RegName(args.Rs)})";
         }
 
         public override uint Asm(int[] args)

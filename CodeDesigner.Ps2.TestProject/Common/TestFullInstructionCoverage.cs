@@ -2699,10 +2699,10 @@ namespace CodeDesigner.Ps2.TestProject
 
             string analysis = MipsAnalyzer.AnalyzeSingleInstruction(enc, 0x80000000u, cpu, null);
 
-            Assert.IsTrue(analysis.Contains("$a0"), $"Analysis should show $a0, got: {analysis}");
-            Assert.IsTrue(analysis.Contains("$a1"), $"Analysis should show $a1, got: {analysis}");
-            Assert.IsTrue(analysis.Contains("$a2"), $"Analysis should show $a2, got: {analysis}");
-            Assert.IsTrue(analysis.Contains("$a3"), $"Analysis should show $a3, got: {analysis}");
+            Assert.IsTrue(analysis.Contains("a0 = 0xAAAA1111"), $"Analysis should show $a0, got: {analysis}");
+            Assert.IsTrue(analysis.Contains("a1 = 0xBBBB2222"), $"Analysis should show $a1, got: {analysis}");
+            Assert.IsTrue(analysis.Contains("a2 = 0xCCCC3333"), $"Analysis should show $a2, got: {analysis}");
+            Assert.IsTrue(analysis.Contains("a3 = 0xDDDD4444"), $"Analysis should show $a3, got: {analysis}");
         }
 
         [TestMethod]
@@ -2717,8 +2717,8 @@ namespace CodeDesigner.Ps2.TestProject
 
             string analysis = MipsAnalyzer.AnalyzeSingleInstruction(enc, 0x80000000u, cpu, null);
 
-            Assert.IsTrue(analysis.Contains("$a0"), $"JALR analysis should show $a0, got: {analysis}");
-            Assert.IsTrue(analysis.Contains("call"), $"JALR analysis should contain 'call', got: {analysis}");
+            Assert.IsTrue(analysis.Contains("a0 = 0x11223344"), $"JALR analysis should show $a0, got: {analysis}");
+            Assert.IsTrue(analysis.Contains("0x80400000"), $"JALR analysis should show the call target, got: {analysis}");
         }
 
         [TestMethod]
@@ -2734,9 +2734,9 @@ namespace CodeDesigner.Ps2.TestProject
 
             string analysis = MipsAnalyzer.AnalyzeSingleInstruction(enc, 0x80000000u, cpu, null);
 
-            Assert.IsTrue(analysis.Contains("$t0"), $"Analysis should show $t0, got: {analysis}");
-            Assert.IsTrue(analysis.Contains("$t1"), $"Analysis should show $t1, got: {analysis}");
-            Assert.IsFalse(analysis.Contains("$t2"), $"Analysis should not show zero $t2, got: {analysis}");
+            Assert.IsTrue(analysis.Contains("t0 = 0xDEADBEEF"), $"Analysis should show $t0, got: {analysis}");
+            Assert.IsTrue(analysis.Contains("t1 = 0x0000CAFE"), $"Analysis should show $t1, got: {analysis}");
+            Assert.IsFalse(analysis.Contains("t2 ="), $"Analysis should not show zero $t2, got: {analysis}");
         }
 
         // -----------------------------------------------------------------------

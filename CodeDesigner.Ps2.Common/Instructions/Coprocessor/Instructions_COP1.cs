@@ -360,7 +360,7 @@ namespace CodeDesigner.Ps2.Common.Instructions.CoprocessorInstructions
         public override string Disasm(Args_I args, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            return $"{Name} $f{args.Rt}, {offset}({CpuHelpers.RegName(args.Rs)})";
+            return $"{Name} $f{args.Rt}, {CpuHelpers.FormatOffset(offset)}({CpuHelpers.RegName(args.Rs)})";
         }
 
         public override uint Asm(int[] args)
@@ -420,7 +420,7 @@ namespace CodeDesigner.Ps2.Common.Instructions.CoprocessorInstructions
         public override string Disasm(Args_I args, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            return $"{Name} $f{args.Rt}, {offset}({CpuHelpers.RegName(args.Rs)})";
+            return $"{Name} $f{args.Rt}, {CpuHelpers.FormatOffset(offset)}({CpuHelpers.RegName(args.Rs)})";
         }
 
         public override uint Asm(int[] args)
@@ -1614,7 +1614,7 @@ namespace CodeDesigner.Ps2.Common.Instructions.CoprocessorInstructions
         public override string Disasm(Args_I args, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            return $"{Name} $f{args.Rt}, {offset}({CpuHelpers.RegName(args.Rs)})";
+            return $"{Name} $f{args.Rt}, {CpuHelpers.FormatOffset(offset)}({CpuHelpers.RegName(args.Rs)})";
         }
 
         public override uint Asm(int[] args) => (uint)(Opcode << 26 | args[2] << 21 | args[0] << 16 | args[1] & 0xFFFF);
@@ -1671,7 +1671,7 @@ namespace CodeDesigner.Ps2.Common.Instructions.CoprocessorInstructions
         public override string Disasm(Args_I args, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            return $"{Name} $f{args.Rt}, {offset}({CpuHelpers.RegName(args.Rs)})";
+            return $"{Name} $f{args.Rt}, {CpuHelpers.FormatOffset(offset)}({CpuHelpers.RegName(args.Rs)})";
         }
 
         public override uint Asm(int[] args) => (uint)(Opcode << 26 | args[2] << 21 | args[0] << 16 | args[1] & 0xFFFF);

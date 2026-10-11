@@ -96,7 +96,7 @@ lib_str_trim_right:
     // find end
 tr_find_end:
     lb   $t1, 0($t0)
-    beq  $t1, $zero, :tr_step_back
+    beq  $t1, $zero, :tr_check_empty
     addiu $t0, $t0, 1
     j    :tr_find_end
     nop

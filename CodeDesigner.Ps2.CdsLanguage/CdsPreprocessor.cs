@@ -43,21 +43,30 @@ namespace CodeDesigner.Ps2.CdsLanguage
         // Regex patterns
         // -----------------------------------------------------------------------
 
+        // const NAME = VALUE   |   const NAME VALUE
         private static readonly Regex ConstRegex =
-            new(@"^const\s+([A-Za-z_]\w*)\s*=\s*(.+)$",
+            new(@"^const\s+([A-Za-z_]\w*)(?:\s*=\s*|\s+)(.+)$",
                 RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+        // alias NAME = $REG   |   alias NAME $REG
         private static readonly Regex AliasRegex =
-            new(@"^alias\s+([A-Za-z_]\w*)\s*=\s*(\$?\w+)$",
+            new(@"^alias\s+([A-Za-z_]\w*)(?:\s*=\s*|\s+)(\$?\w+)$",
                 RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+        // macro NAME(p1, p2)   |   macro NAME p1, p2   |   macro NAME
         private static readonly Regex MacroDefRegex =
-            new(@"^macro\s+([A-Za-z_]\w*)\s*\(([^)]*)\)$",
+            new(@"^macro\s+([A-Za-z_]\w*)\s*(?:\(([^)]*)\)|\s+([^()]*))?$",
                 RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         private static readonly Regex MacroCallRegex =
             new(@"^([A-Za-z_]\w*)\s*\(([^)]*)\)$",
                 RegexOptions.Compiled);
+
+        // Compile-time condition: `if 1`, `if 0`, `if 9999 > 500` (operands are plain numbers,
+        // typically produced by const substitution).
+        private static readonly Regex ConstIfRegex =
+            new(@"^if\s+(-?\d+|0x[0-9a-fA-F]+|\$[0-9a-fA-F]+)\s*(?:(==|!=|<=|>=|<|>)\s*(-?\d+|0x[0-9a-fA-F]+|\$[0-9a-fA-F]+))?$",
+                RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         // extern function NAME(p1, p2, ...) at :label_name
         private static readonly Regex ExternFunctionRegex =
@@ -133,6 +142,17 @@ namespace CodeDesigner.Ps2.CdsLanguage
         // that function-call dispatch sees declarations made in the enclosing file.
         private readonly Stack<Dictionary<string, ExternFunction>> _externScopeStack = new();
 
+        // Files already inlined by `include` during the current top-level Process call.
+        // A file is only ever included once so shared dependencies (e.g. printf.cds and
+        // tests.cds both including str_ext.cds) do not define their labels twice.
+        private readonly HashSet<string> _includedFiles = new(StringComparer.OrdinalIgnoreCase);
+
+        // const / alias tables. They are shared by the whole compile (including nested
+        // if/while/repeat bodies, macro expansions, function bodies and included files) so a
+        // constant defined at the top of a script is visible everywhere below it.
+        private readonly Dictionary<string, string> _consts = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, string> _aliases = new(StringComparer.OrdinalIgnoreCase);
+
         /// <summary>
         /// Preprocess <paramref name="source"/> and return the transformed source that
         /// can be passed to <see cref="CdsParser.Parse"/>.
@@ -150,6 +170,9 @@ namespace CodeDesigner.Ps2.CdsLanguage
                 _diagnostics.Clear();
                 _counter = 0;
                 _externScopeStack.Clear();
+                _includedFiles.Clear();
+                _consts.Clear();
+                _aliases.Clear();
             }
 
             if (depth > 32)
@@ -193,8 +216,8 @@ namespace CodeDesigner.Ps2.CdsLanguage
 
             _externScopeStack.Push(externFunctions);
 
-            var consts  = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            var aliases = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var consts  = _consts;
+            var aliases = _aliases;
             var output  = new List<string>();
 
             int i = 0;
@@ -320,8 +343,15 @@ namespace CodeDesigner.Ps2.CdsLanguage
                     }
                     else
                     {
-                        string includedSource = File.ReadAllText(full);
-                        string includedBasePath = Path.GetDirectoryName(Path.GetFullPath(full)) ?? string.Empty;
+                        string normalised = Path.GetFullPath(full);
+                        if (!_includedFiles.Add(normalised))
+                        {
+                            // Already inlined earlier in this compile — keep a note for readers.
+                            output.Add($"// include \"{rel}\" skipped: already included");
+                            continue;
+                        }
+                        string includedSource = File.ReadAllText(normalised);
+                        string includedBasePath = Path.GetDirectoryName(normalised) ?? string.Empty;
                         string expanded = Process(includedSource, includedBasePath, depth + 1);
                         output.Add(expanded);
                     }
@@ -331,6 +361,27 @@ namespace CodeDesigner.Ps2.CdsLanguage
                 // Apply const/alias substitutions to the current (clean) line before
                 // checking for other keywords and before emitting.
                 clean = ApplySubstitutions(clean, consts, aliases);
+
+                // ---- if CONST — evaluated at compile time ----
+                var constIfMatch = ConstIfRegex.Match(clean);
+                if (constIfMatch.Success)
+                {
+                    var (thenLines, elseLines, consumed, terminated) = CollectBlock(lines, i);
+                    i += consumed;
+
+                    if (!terminated)
+                    {
+                        AddDiagnostic(CdsDiagnosticSeverity.Error, lineNumber,
+                            "unterminated if block — missing 'endif'", raw, "if", "CDS1001");
+                        continue;
+                    }
+
+                    bool conditionTrue = EvaluateConstantCondition(constIfMatch, lineNumber, clean);
+                    var selected = conditionTrue ? thenLines : elseLines;
+                    if (selected != null && selected.Count > 0)
+                        output.Add(Process(string.Join("\n", selected), basePath, depth + 1));
+                    continue;
+                }
 
                 // ---- if COND ----
                 var ifMatch = IfRegex.Match(clean);
@@ -382,6 +433,15 @@ namespace CodeDesigner.Ps2.CdsLanguage
 
                 // ---- while COND ----
                 var whileMatch = WhileRegex.Match(clean);
+                if (whileMatch.Success && !IsRegisterToken(whileMatch.Groups[1].Value))
+                {
+                    AddDiagnostic(CdsDiagnosticSeverity.Error, lineNumber,
+                        $"'while' needs a register on the left-hand side (got '{whileMatch.Groups[1].Value}'); use 'repeat N' for a fixed count",
+                        raw, "while", "CDS1009");
+                    var (_, _, consumedWhile, _) = CollectBlock(lines, i);
+                    i += consumedWhile;
+                    continue;
+                }
                 if (whileMatch.Success)
                 {
                     string lhs = whileMatch.Groups[1].Value;
@@ -518,6 +578,29 @@ namespace CodeDesigner.Ps2.CdsLanguage
                     // Not a known macro or extern function — fall through and emit as-is
                 }
 
+                // ---- macro call without parentheses: MacroName arg1, arg2 ----
+                string firstWord = FirstWord(clean);
+                if (firstWord.Length > 0 && macros.TryGetValue(firstWord, out var bareMacro))
+                {
+                    string argsRaw = clean[firstWord.Length..].Trim();
+                    string[] args = SplitArgs(argsRaw);
+                    if (args.Length != bareMacro.Parameters.Length)
+                    {
+                        _diagnostics.Add(new CdsDiagnostic
+                        {
+                            Severity   = CdsDiagnosticSeverity.Error,
+                            LineNumber = lineNumber,
+                            Message    = $"macro '{bareMacro.Name}' expects {bareMacro.Parameters.Length} argument(s) but got {args.Length}"
+                        });
+                    }
+                    else
+                    {
+                        string expanded = ExpandMacro(bareMacro, args);
+                        output.Add(Process(expanded, basePath, depth + 1));
+                    }
+                    continue;
+                }
+
                 // ---- Normal line: emit with substitutions applied ----
                 // Reconstruct with original indentation but substituted content
                 string indent = raw.Length > raw.TrimStart().Length
@@ -545,7 +628,7 @@ namespace CodeDesigner.Ps2.CdsLanguage
                 if (m.Success)
                 {
                     string name = m.Groups[1].Value;
-                    string[] parms = SplitArgs(m.Groups[2].Value);
+                    string[] parms = SplitArgs(m.Groups[2].Success ? m.Groups[2].Value : m.Groups[3].Value);
                     i++;
                     var body = new List<string>();
                     while (i < lines.Count &&
@@ -809,16 +892,48 @@ namespace CodeDesigner.Ps2.CdsLanguage
         // Utility
         // -----------------------------------------------------------------------
 
-        private static string StripInlineComment(string line)
+        private static string StripInlineComment(string line) => CdsParser.StripInlineComments(line);
+
+        private static string FirstWord(string line)
         {
-            if (string.IsNullOrWhiteSpace(line)) return line;
-            int cutAt = int.MaxValue;
-            foreach (var marker in new[] { "//", ";", "#" })
+            int end = 0;
+            while (end < line.Length && (char.IsLetterOrDigit(line[end]) || line[end] == '_')) end++;
+            return line[..end];
+        }
+
+        private static bool IsRegisterToken(string token) => CdsRegisters.NormalizeGpr(token) is not null;
+
+        /// <summary>
+        /// Evaluate a constant <c>if</c> condition (<c>if 1</c>, <c>if 0</c>, <c>if 9999 > 500</c>).
+        /// </summary>
+        private bool EvaluateConstantCondition(Match m, int lineNumber, string lineText)
+        {
+            long lhs = ParseConstant(m.Groups[1].Value);
+            if (!m.Groups[2].Success)
+                return lhs != 0;
+
+            long rhs = ParseConstant(m.Groups[3].Value);
+            return m.Groups[2].Value switch
             {
-                int ci = line.IndexOf(marker, StringComparison.Ordinal);
-                if (ci > 0 && ci < cutAt) cutAt = ci;
-            }
-            return cutAt != int.MaxValue ? line[..cutAt].TrimEnd() : line;
+                "==" => lhs == rhs,
+                "!=" => lhs != rhs,
+                "<=" => lhs <= rhs,
+                ">=" => lhs >= rhs,
+                "<"  => lhs < rhs,
+                _    => lhs > rhs
+            };
+        }
+
+        private static long ParseConstant(string text)
+        {
+            string s = text.Trim();
+            bool negative = s.StartsWith("-");
+            if (negative) s = s[1..];
+            long value;
+            if (s.StartsWith("$")) value = Convert.ToInt64(s[1..], 16);
+            else if (s.StartsWith("0x", StringComparison.OrdinalIgnoreCase)) value = Convert.ToInt64(s[2..], 16);
+            else value = long.Parse(s, System.Globalization.CultureInfo.InvariantCulture);
+            return negative ? -value : value;
         }
 
         private static string[] SplitArgs(string args)
@@ -830,26 +945,25 @@ namespace CodeDesigner.Ps2.CdsLanguage
 
         private static string ReplaceWholeWord(string source, string word, string replacement)
         {
-            // Use word-boundary regex so "t0" doesn't replace inside "t01"
+            // Use word-boundary regex so "t0" doesn't replace inside "t01". The replacement is
+            // supplied through an evaluator so values such as "$0C" are inserted literally
+            // instead of being read as regex group references ("$0" + "C").
             return Regex.Replace(
                 source,
                 $@"\b{Regex.Escape(word)}\b",
-                replacement);
+                _ => replacement);
         }
 
         private static bool TryParseImmediate(string s, out uint value)
         {
-            // Strip leading '$' (CDS hex prefix)
-            string src = s.StartsWith("$") ? s[1..] : s;
-            if (src.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
-            {
-                try { value = Convert.ToUInt32(src, 16); return true; }
-                catch { value = 0; return false; }
-            }
-            if (uint.TryParse(src, out value)) return true;
+            string src = s.Trim();
+            if (src.StartsWith("$") || src.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+                return CdsParser.TryParseHex32(src, out value, out _);
+            if (uint.TryParse(src, System.Globalization.NumberStyles.None,
+                    System.Globalization.CultureInfo.InvariantCulture, out value))
+                return true;
             // Pure hex string (no 0x prefix, but all hex digits)
-            try { value = Convert.ToUInt32(src, 16); return true; }
-            catch { value = 0; return false; }
+            return CdsParser.TryParseHex32(src, out value, out _);
         }
 
         private void AddDiagnostic(

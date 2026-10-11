@@ -153,7 +153,7 @@ nop
             Assert.AreEqual(MipsAssembler.Assemble("addu $a0, $t0, $zero"), pairs[0].Word);
             Assert.AreEqual(MipsAssembler.Assemble("addu $a1, $t1, $zero"), pairs[1].Word);
             // pairs[2] = jal — the encoded immediate is the target address >> 2; we just check the opcode here.
-            Assert.AreEqual(0xCu, pairs[2].Word >> 26, "third word should be a jal (opcode 0x03 << 26 = 0x0C000000)");
+            Assert.AreEqual(0x3u, pairs[2].Word >> 26, "third word should be a jal (opcode 0x03)");
             Assert.AreEqual(MipsAssembler.Assemble("nop"), pairs[3].Word);
         }
 
@@ -185,7 +185,7 @@ nop
             var pairs = Compile(src);
             // Both args already in their targets → no addu needed; just jal + nop + nop.
             Assert.AreEqual(3, pairs.Count);
-            Assert.AreEqual(0xCu, pairs[0].Word >> 26, "first word should be jal");
+            Assert.AreEqual(0x3u, pairs[0].Word >> 26, "first word should be jal");
         }
 
         [TestMethod]
@@ -209,9 +209,12 @@ nop
             //   addu $at, $a1, $zero
             //   addu $a1, $a0, $zero    (target a1, source a0 unchanged)
             //   addu $a0, $at, $zero    (target a0, source rewritten to $at)
-            // Then jal + nop + nop.
-            Assert.AreEqual(5, pairs.Count);
+            // Then jal + nop + nop: 3 moves + 3 = 6 words.
+            Assert.AreEqual(6, pairs.Count);
             Assert.AreEqual(MipsAssembler.Assemble("addu $at, $a1, $zero"), pairs[0].Word);
+            Assert.AreEqual(MipsAssembler.Assemble("addu $a1, $a0, $zero"), pairs[1].Word);
+            Assert.AreEqual(MipsAssembler.Assemble("addu $a0, $at, $zero"), pairs[2].Word);
+            Assert.AreEqual(0x3u, pairs[3].Word >> 26, "fourth word should be jal");
         }
 
         [TestMethod]
