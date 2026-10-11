@@ -95,16 +95,20 @@ public class DmeWorld
     /// Reserve a slot for a player joining through MLS. Re-joining with the same session key reuses the
     /// existing slot (horizon behaviour). Returns null when the world is full.
     /// </summary>
-    public DmeClientState? Reserve(string sessionKey, int accountId)
+    public DmeClientState? Reserve(string sessionKey, int accountId, bool spectator = false)
     {
         var existing = Clients.Values.FirstOrDefault(c => c.SessionKey == sessionKey && !c.Disconnected);
-        if (existing != null) return existing;
+        if (existing != null)
+        {
+            existing.IsSpectator = spectator;
+            return existing;
+        }
 
         if (!TryAllocateSlot(out int index))
             return null;
 
         string token = Guid.NewGuid().ToString("N")[..16].ToUpperInvariant();
-        var client = new DmeClientState(sessionKey, token, accountId, this, index);
+        var client = new DmeClientState(sessionKey, token, accountId, this, index) { IsSpectator = spectator };
         if (!Clients.TryAdd(index, client))
         {
             ReleaseSlot(index);
@@ -125,8 +129,11 @@ public class DmeWorld
             ReleaseSlot(client.DmeId);
     }
 
-    /// <summary>Number of clients with a live DME connection.</summary>
+    /// <summary>Number of clients with a live DME connection (players and spectators).</summary>
     public int ConnectedCount => Clients.Values.Count(c => c.IsConnected && !c.Disconnected);
+
+    /// <summary>Connected clients that joined as spectators.</summary>
+    public int SpectatorCount => Clients.Values.Count(c => c.IsConnected && !c.Disconnected && c.IsSpectator);
 
     // ── Packet relay ──────────────────────────────────────────────────────────
 
@@ -304,5 +311,6 @@ public class DmeWorld
     }
 
     public override string ToString()
-        => $"DmeWorld(id={WorldId}, game=0x{MediusWorldId:X}, clients={ConnectedCount}/{MaxPlayers})";
+        => $"DmeWorld(id={WorldId}, game=0x{MediusWorldId:X}, clients={ConnectedCount}/{MaxPlayers}" +
+           (SpectatorCount > 0 ? $", spectators={SpectatorCount})" : ")");
 }

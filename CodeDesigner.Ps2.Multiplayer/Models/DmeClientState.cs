@@ -25,6 +25,13 @@ public class DmeClientState
     /// <summary>Slot index within the <see cref="DmeWorld"/> (0 … MaxClients-1).</summary>
     public int DmeId { get; }
 
+    /// <summary>
+    /// Reserved through JoinGame with JoinType spectator / mass spectator. SOCOM II's CreateGame MaxPlayers already
+    /// counts the spectator seats (players + spectators, GameStats[4] = max spectators), so spectators share the
+    /// world's slots; the flag only drives the server's own counts and logs.
+    /// </summary>
+    public bool IsSpectator { get; set; }
+
     /// <summary>SCERT client ID assigned during the SCERT handshake.</summary>
     public uint ScertId { get; set; }
 

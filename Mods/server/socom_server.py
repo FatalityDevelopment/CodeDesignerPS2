@@ -4,8 +4,16 @@ Needs the multiplayer server running with the debug API ($env:Online__DebugApiPo
 Memory commands go over the player's lobby connection (RAW_MEMORY cheat queries / SERVER_MEMORY_POKE);
 packet commands go into the DME game world as app messages from a fake client (add one with socom_bots.py).
 
-  Memory
+  Lobby
     python socom_server.py clients                          list lobby players (connection id, account)
+    python socom_server.py rooms                            briefing rooms: who is in each, games listed
+    python socom_server.py lobbyjoin NAME [ROOM]            put a virtual player in a briefing room (ROOM = 0x44 or
+                                                            "US EAST"; default = first room) - shows up in the room's
+                                                            player list on your console
+    python socom_server.py lobbyleave NAME                  remove a virtual player
+    python socom_server.py chat TEXT [--name BOT]           lobby chat line from a fake name to everyone in your room
+
+  Memory
     python socom_server.py peek ADDR [LEN] [--client C]     hex dump of a player's EE memory
     python socom_server.py dump ADDR LEN FILE [--client C]  save memory to a file
     python socom_server.py poke ADDR HEX [--client C]       write bytes (hex string)
@@ -209,6 +217,7 @@ def opt(args, name, default=None):
 if __name__ == "__main__":
     args = sys.argv[1:]
     client = opt(args, "--client")
+    chat_name = opt(args, "--name", "BOT")
     sender = opt(args, "--from", "1")
     clear = "--clear" in args
     follow = "--follow" in args
@@ -217,6 +226,14 @@ if __name__ == "__main__":
 
     if cmd == "clients":
         print(api("/clients"))
+    elif cmd == "rooms":
+        print(api("/rooms"))
+    elif cmd == "lobbyjoin":
+        print(api("/lobby/join", name=rest[0], room=" ".join(rest[1:]) or None))
+    elif cmd == "lobbyleave":
+        print(api("/lobby/leave", name=rest[0]))
+    elif cmd == "chat":
+        print(api("/chat", client=client, name=chat_name, text=" ".join(rest)))
     elif cmd == "peek":
         addr = num(rest[0])
         hexdump(addr, peek(addr, num(rest[1]) if len(rest) > 1 else 64, client))

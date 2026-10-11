@@ -61,6 +61,7 @@ public partial class MlsServer
             case MediusLobbyMessageId.GetClanByName:               await HandleGetClanByNameAsync(packet, state, tcp, ct); return true;
             case MediusLobbyMessageId.TransferClanLeadership:      await HandleTransferClanLeadershipAsync(packet, state, tcp, ct); return true;
             case MediusLobbyMessageId.RemovePlayerFromClan:        await HandleRemovePlayerFromClanAsync(packet, state, tcp, ct); return true;
+            case MediusLobbyMessageId.AddPlayerToClan:             await HandleAddPlayerToClanAsync(packet, state, tcp, ct); return true;
             case MediusLobbyMessageId.InvitePlayerToClan:          await HandleInvitePlayerToClanAsync(packet, state, tcp, byName: false, ct); return true;
             case MediusLobbyMessageId.InvitePlayerToClan_ByName:   await HandleInvitePlayerToClanAsync(packet, state, tcp, byName: true, ct); return true;
             case MediusLobbyMessageId.CheckMyClanInvitations:      await HandleCheckMyClanInvitationsAsync(packet, state, tcp, ct); return true;

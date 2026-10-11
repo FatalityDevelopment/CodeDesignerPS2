@@ -8,7 +8,18 @@ namespace CodeDesigner.Ps2.Multiplayer.Servers;
 /// <summary>
 /// Chat and "who's here" queries: lobby chat / whispers / clan + buddy chat, briefing-room and game player
 /// lists, channel info and total rankings. Horizon layouts; the ChatMessage request size is confirmed on
-/// hardware (112 B — SOCOM also uses whispers for clan-invite notifications). Every request is logged.
+/// hardware (112 B — SOCOM also uses whispers for clan-invite notifications).
+///
+/// The briefing-room player list is GetLobbyPlayerNames_ExtraInfo (0xDC → 0xDD), verified against the r0004
+/// client: its RefreshRoomPlayerList native (EE 0x0027EA80 → 0x0030E380) sends 0x1C bytes (MessageID | pad3 |
+/// MediusWorldID = the room, global 0x00669EB8) at most once per 10 s and only while no request is in flight
+/// (flag 0x00452DB8). Its callback (0x0030E530) parses each 0xDD row as AccountID @0x1C | Name[32] @0x20 |
+/// OnlineState @0x40 (ConnectStatus, LobbyWorldID, GameWorldID, LobbyName[64] @0x4C, GameName[64] @0x8C) |
+/// EndOfList @0xCC — exactly the 208-byte row written here. Before sending it zeroes every known player's
+/// ConnectStatus, merges the rows by AccountID, and on EndOfList erases the players still at 0, so the reply
+/// must list EVERY player in the room with a non-zero status (2 In Lobby / 3 In Game) and end with EndOfList.
+/// The GameWorldPlayerList (0x2F → 0x30) callback (0x00314040) reads Stats @0x40 and EndOfList @0x144 — the
+/// 328-byte row below. Rows are polled every few seconds, so they log at Debug.
 /// </summary>
 public partial class MlsServer
 {
@@ -138,7 +149,7 @@ public partial class MlsServer
     {
         int world = LobbyWorld(state, Int(packet.Payload, SessionBody));
         var players = AccountsInLobby(world);
-        _log.LogInformation("[MLS] LobbyWorldPlayerList world=0x{World:X} -> {Count}", world, players.Count);
+        _log.LogDebug("[MLS] LobbyWorldPlayerList world=0x{World:X} -> {Count}", world, players.Count);
 
         return SendListAsync(packet, state, tcp, MediusLobbyMessageId.LobbyWorldPlayerListResponse, players,
             4 + 4 + NameLen + StatsLen + 4, (w, a) =>
@@ -159,7 +170,7 @@ public partial class MlsServer
     {
         int world = LobbyWorld(state, Int(packet.Payload, extraInfo ? Pad3Body : SessionBody));
         var players = AccountsInLobby(world);
-        _log.LogInformation("[MLS] GetLobbyPlayerNames{Extra} world=0x{World:X} -> {Count}", extraInfo ? "_ExtraInfo" : "", world, players.Count);
+        _log.LogDebug("[MLS] GetLobbyPlayerNames{Extra} world=0x{World:X} -> {Count}", extraInfo ? "_ExtraInfo" : "", world, players.Count);
 
         if (!extraInfo)
             return SendListAsync(packet, state, tcp, MediusLobbyMessageId.GetLobbyPlayerNamesResponse, players,
@@ -189,7 +200,7 @@ public partial class MlsServer
         var players = world == null ? new List<MediusAccount>()
             : world.Clients.Values.Where(c => c.IsConnected && !c.Disconnected)
                 .Select(c => _store.GetAccountById(c.AccountId)).OfType<MediusAccount>().ToList();
-        _log.LogInformation("[MLS] GameWorldPlayerList game=0x{Game:X} -> {Count}", gameId, players.Count);
+        _log.LogDebug("[MLS] GameWorldPlayerList game=0x{Game:X} -> {Count}", gameId, players.Count);
 
         return SendListAsync(packet, state, tcp, MediusLobbyMessageId.GameWorldPlayerListResponse, players,
             4 + NameLen + StatsLen + 4, (w, a) =>
@@ -212,7 +223,7 @@ public partial class MlsServer
         w.WriteString(channel?.ChannelName ?? "", WorldNameLen);
         w.Write(channel != null ? RoomPlayerCount(channel.ChannelId) : 0);
         w.Write(channel?.MaxPlayers ?? 0);
-        _log.LogInformation("[MLS] ChannelInfo world=0x{World:X} -> {Name}", world, channel?.ChannelName ?? "(none)");
+        _log.LogDebug("[MLS] ChannelInfo world=0x{World:X} -> {Name}", world, channel?.ChannelName ?? "(none)");
         return SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.ChannelInfoResponse, w.ToArray()), state, ct);
     }
 

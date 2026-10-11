@@ -326,6 +326,32 @@ public partial class MlsServer : BaseMediusTcpServer
                     await SendEmptyLobbyListAsync(packet, tcp, MediusLobbyMessageId.GetClanMemberListResponse, ct);
                     break;
 
+                // ── Requests the SOCOM II client sends that used to go unanswered (MlsServer.Lobby.cs) ──
+                // Each one was found in the r0004 client's Medius sender table (CodeDesigner.Ps2.Bridge/Resources/
+                // Dumps/r0004.bin) with live callers; an unanswered request times out ~15 s later and can raise
+                // the "Disconnected" screen, and ClearGameListFilter0 is the first link of the game-list refresh.
+                case MediusLobbyMessageId.ClearGameListFilter0:
+                    await HandleClearGameListFilterAsync(packet, state, tcp, ct);
+                    break;
+
+                case MediusLobbyMessageId.FindWorldByName:
+                    await HandleFindWorldByNameAsync(packet, state, tcp, ct);
+                    break;
+
+                case MediusLobbyMessageId.GetTotalUsers:
+                case MediusLobbyMessageId.GetTotalGames:
+                case MediusLobbyMessageId.GetTotalChannels:
+                    await HandleGetTotalsAsync(typeId, packet, state, tcp, ct);
+                    break;
+
+                case MediusLobbyMessageId.SessionEnd:
+                    await HandleSessionEndAsync(packet, state, tcp, ct);
+                    break;
+
+                case MediusLobbyMessageId.SetLocalizationParams:
+                    // Same header-only ack MAS sends (retail: 30 B on the wire).
+                    await SendStatusAsync(packet, state, tcp, MediusLobbyMessageId.SetLocalizationParamsResponse, MediusCallbackStatus.MediusSuccess, ct);
+                    break;
 
                 default:
                     _log.LogInformation("[MLS] Unhandled lobby msg 0x{Type:X2} ({Name}, {Len} B)", packet.MessageType, (MediusLobbyMessageId)packet.MessageType, packet.Payload.Length);
@@ -374,6 +400,10 @@ public partial class MlsServer : BaseMediusTcpServer
                     // Layout unknown (not in horizon) — logged in full so a vote-out on hardware shows it.
                     _log.LogInformation("[MLS] VoteToBanPlayerRequest from {Me} ({Len} B): {Hex}",
                         state.AccountName, packet.Payload.Length, Convert.ToHexString(packet.Payload));
+                    break;
+
+                case MediusLobbyExtMessageId.AddToBuddyListConfirmation:
+                    await HandleAddToBuddyListConfirmationAsync(packet, state, tcp, ct);
                     break;
 
                 case MediusLobbyExtMessageId.GetBuddyInvitations:
@@ -689,7 +719,7 @@ public partial class MlsServer : BaseMediusTcpServer
             return;
         }
 
-        _log.LogInformation("[MLS] GameList room=0x{Room:X} ({Name}) -> {Count} games",
+        _log.LogDebug("[MLS] GameList room=0x{Room:X} ({Name}) -> {Count} games",
             room?.ChannelId ?? 0, room?.ChannelName ?? "-", entries.Count);
 
         for (int i = 0; i < entries.Count; i++)
@@ -820,7 +850,7 @@ public partial class MlsServer : BaseMediusTcpServer
         int gameLevel   = r.ReadInt32();
         string gameName = r.ReadString(64);
         string password = r.ReadString(32);
-        r.Skip(32);                                   // SpectatorPassword
+        string spectatorPassword = r.ReadString(32);  // SpectatorPassword
         int skillLevel  = r.ReadInt32();
         int rulesSet    = r.ReadInt32();
         // CreateGame1 carries 3 generic fields, CreateGame 8; both end with GameHostType + WorldAttributes.
@@ -835,7 +865,8 @@ public partial class MlsServer : BaseMediusTcpServer
             "skill={Skill} rules={Rules} GF=[{GF}] host={HostType} attr=0x{Attr:X} pw={HasPw} room=0x{Room:X}",
             packet.MessageType, p.Length, gameName, appId, minPlayers, maxPlayers, gameLevel, skillLevel, rulesSet,
             string.Join(",", generic.Take(genericCount).Select(g => $"0x{g:X}")), hostType, attributes,
-            password.Length > 0, state.WorldId ?? 0);
+            password.Length > 0 ? (spectatorPassword.Length > 0 ? "game+spectator" : "game") : spectatorPassword.Length > 0 ? "spectator" : "none",
+            state.WorldId ?? 0);
 
         var game = _store.CreateGame(gameName, state.AppId, state.AccountId ?? 0, state.AccountName, maxPlayers);
         game.MinPlayers       = minPlayers;
@@ -843,6 +874,7 @@ public partial class MlsServer : BaseMediusTcpServer
         game.PlayerSkillLevel = skillLevel;
         game.RulesSet         = rulesSet;
         game.Password         = password;
+        game.SpectatorPassword = spectatorPassword;
         game.GenericField1    = generic[0];
         game.GenericField2    = generic[1];
         game.GenericField3    = generic[2];
@@ -869,6 +901,12 @@ public partial class MlsServer : BaseMediusTcpServer
     /// request = MessageID[21] | SessionKey[17] | pad2 | MediusWorldID | JoinType | GamePassword[32] |
     /// GameHostType | RSA_KEY[64] | NetAddressList[48]; reply = MessageID + pad + StatusCode + GameHostType +
     /// NetConnectionInfo (this DME server, the DME world id, and the reserved slot's access token).
+    ///
+    /// Spectators: the client sends the same request with JoinType = MediusJoinAsSpectator (SOCOM's join-as-spectator
+    /// flag, 0x00453170, selects it) and the game's SPECTATOR password in the password field, so a spectator join is
+    /// checked against <see cref="MediusGame.SpectatorPassword"/>, not the player password. CreateGame's MaxPlayers
+    /// already includes the spectator seats (players + spectators; GameStats[4] = max spectators), so spectators take
+    /// ordinary slots in the same DME world — the game itself tells the peers who is spectating.
     /// </summary>
     private async Task HandleJoinGameAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
     {
@@ -884,17 +922,19 @@ public partial class MlsServer : BaseMediusTcpServer
 
         var game  = _store.GetGameById(worldId);
         var world = game != null ? GetOrCreatePlayerGameWorld(game) : GetOrCreateDefaultGameWorld(worldId, state.AppId);
+        var joinAs = (MediusJoinType)joinType;
+        bool spectator = joinAs is MediusJoinType.MediusJoinAsSpectator or MediusJoinType.MediusJoinAsMassSpectator;
 
         var status =
             world == null                                                   ? MediusCallbackStatus.MediusGameNotFound
             : state.AccountId is int who && IsBannedFromGame(worldId, who)  ? MediusCallbackStatus.MediusPlayerBanned
-            : game != null && game.IsLocked && password != game.Password    ? MediusCallbackStatus.MediusInvalidPassword
+            : game != null && !PasswordAccepted(game, spectator, password)  ? MediusCallbackStatus.MediusInvalidPassword
             : MediusCallbackStatus.MediusSuccess;
 
         DmeClientState? slot = null;
         if (status == MediusCallbackStatus.MediusSuccess)
         {
-            slot = world!.Reserve(sessionKey, state.AccountId ?? 0);
+            slot = world!.Reserve(sessionKey, state.AccountId ?? 0, spectator);
             if (slot == null) status = MediusCallbackStatus.MediusWorldIsFull;
         }
 
@@ -928,9 +968,16 @@ public partial class MlsServer : BaseMediusTcpServer
             w.WriteNetConnectionInfo(NetConnectionType.None, null, null, 0, null, string.Empty, string.Empty);
         }
 
-        _log.LogInformation("[MLS] JoinGame world=0x{World:X} joinType={JoinType} host={Host} -> {Status} {Dme}",
-            worldId, joinType, hostType, status, world?.ToString() ?? "-");
+        _log.LogInformation("[MLS] JoinGame world=0x{World:X} as {JoinType} host={Host} by {Acct} -> {Status} {Dme}",
+            worldId, joinAs, hostType, state.AccountName, status, world?.ToString() ?? "-");
         await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.JoinGameResponse, w.ToArray()), state, ct);
+    }
+
+    /// <summary>Players must match the game password, spectators the spectator password; an empty password = open.</summary>
+    internal static bool PasswordAccepted(MediusGame game, bool spectator, string presented)
+    {
+        string required = spectator ? game.SpectatorPassword : game.Password;
+        return string.IsNullOrEmpty(required) || presented == required;
     }
 
     // Default rooms are permanent in the list but only get a DME world while someone is in them

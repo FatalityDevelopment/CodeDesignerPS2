@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using CodeDesigner.Ps2.Multiplayer.Models;
 using CodeDesigner.Ps2.Multiplayer.Protocol;
+using CodeDesigner.Ps2.Multiplayer.Storage;
+using Microsoft.Extensions.Logging;
 
 namespace CodeDesigner.Ps2.Multiplayer.Servers;
 
@@ -93,6 +95,90 @@ public partial class MlsServer
         foreach (var (rState, rTcp) in recipients)
             await SendMediusAsync(rTcp, MediusPacket.BuildLobby(MediusLobbyMessageId.ChatFwdMessage, body), rState, ct);
         return recipients.Count;
+    }
+
+    // ── Briefing rooms: who is where, and virtual players for testing the room lists on one console ──────────
+
+    /// <summary>Configured briefing rooms as store channels (seeded if needed), using the first connected or allowed AppId.</summary>
+    private List<MediusChannel> DebugRooms()
+    {
+        int appId = Clients.Values.Select(c => c.State.AppId).FirstOrDefault(a => a != 0);
+        if (appId == 0) appId = _config.AllowedAppIds.FirstOrDefault();
+        return GetBriefingRoomChannels(appId);
+    }
+
+    /// <summary>
+    /// One line per briefing room (id, name, players) followed by the players in it (name, status, game) and the
+    /// live games listed there; then the players on the community screen (world 1).
+    /// </summary>
+    public string RoomsReport()
+    {
+        var rooms = DebugRooms();
+        var online = _presence.Snapshot();
+        var sb = new System.Text.StringBuilder();
+        string Player((int AccountId, PresenceRegistry.Presence State, bool IsVirtual) p)
+        {
+            var acct = _store.GetAccountById(p.AccountId);
+            string where = p.State.Status == MediusPlayerStatus.MediusPlayerInGameWorld ? $" in game 0x{p.State.GameWorldId:X} '{p.State.GameName}'" : "";
+            return $"    {acct?.AccountName ?? "?"} (acct {p.AccountId}) {p.State.Status}{where}{(p.IsVirtual ? " [virtual]" : "")}";
+        }
+
+        foreach (var room in rooms)
+        {
+            var players = online.Where(p => p.State.LobbyWorldId == room.ChannelId).ToList();
+            sb.AppendLine($"room 0x{room.ChannelId:X} {room.ChannelName}: {players.Count}/{room.MaxPlayers} players");
+            foreach (var p in players.OrderBy(p => _store.GetAccountById(p.AccountId)?.AccountName)) sb.AppendLine(Player(p));
+            foreach (var g in _store.GetGames(room.AppId).Where(g => g.LobbyChannelId == room.ChannelId))
+            {
+                var w = g.DmeWorldId is int wid ? DmeWorld.GetById(wid) : null;
+                sb.AppendLine($"    game 0x{g.GameId:X} '{g.GameName}' host {g.HostName}: {w?.ConnectedCount ?? g.PlayerCount}/{g.MaxPlayers}" +
+                              (w is { SpectatorCount: > 0 } ? $" ({w.SpectatorCount} spectating)" : "") + (g.IsLocked ? " [password]" : "") +
+                              (g.IsSpectatorLocked ? " [spectator password]" : ""));
+            }
+            foreach (var kv in _defaultGameWorlds.Where(kv => kv.Key >> 8 == room.ChannelId && DmeWorld.GetById(kv.Value.WorldId) == kv.Value && kv.Value.ConnectedCount > 0))
+            {
+                int index = (kv.Key & 0xFF) - 2;
+                string name = index >= 0 && index < _config.DefaultGames.Count ? _config.DefaultGames[index].Name : "?";
+                sb.AppendLine($"    default game 0x{kv.Key:X} '{name}': {kv.Value.ConnectedCount}/{DefaultGameMaxPlayers}" +
+                              (kv.Value.SpectatorCount > 0 ? $" ({kv.Value.SpectatorCount} spectating)" : ""));
+            }
+        }
+
+        var community = online.Where(p => rooms.All(r => r.ChannelId != p.State.LobbyWorldId)).ToList();
+        sb.AppendLine($"community (world 1): {community.Count} players");
+        foreach (var p in community) sb.AppendLine(Player(p));
+        return sb.ToString().TrimEnd();
+    }
+
+    /// <summary>
+    /// Put a virtual player (an account created on demand) into a briefing room so the room's player list, player
+    /// count and FindPlayer show it to a real console. <paramref name="room"/> is a MediusWorldID or room name.
+    /// </summary>
+    public string VirtualPlayerJoin(string name, string? room)
+    {
+        if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException("name= is required");
+        var rooms = DebugRooms();
+        var target = string.IsNullOrWhiteSpace(room) ? rooms.FirstOrDefault()
+            : rooms.FirstOrDefault(r => string.Equals(r.ChannelName, room, StringComparison.OrdinalIgnoreCase))
+              ?? (TryParseAddr(room, out uint id) ? rooms.FirstOrDefault(r => r.ChannelId == (int)id) : null);
+        if (target == null) throw new ArgumentException($"no briefing room '{room}'; rooms: {string.Join(", ", rooms.Select(r => $"0x{r.ChannelId:X} {r.ChannelName}"))}");
+
+        var account = _store.GetAccountByName(name.Trim()) ?? _store.CreateAccount(name.Trim(), string.Empty);
+        if (_presence.IsOnline(account.AccountId) && !_presence.IsVirtual(account.AccountId))
+            throw new ArgumentException($"'{account.AccountName}' is a real online player");
+        _presence.AddVirtual(account.AccountId, target.ChannelId, target.ChannelName);
+        _log.LogInformation("[DEBUG] Virtual player '{Name}' (acct {Id}) placed in room 0x{Room:X} {RoomName}",
+            account.AccountName, account.AccountId, target.ChannelId, target.ChannelName);
+        return $"'{account.AccountName}' (acct {account.AccountId}) is now in room 0x{target.ChannelId:X} {target.ChannelName}";
+    }
+
+    /// <summary>Remove a virtual player placed with <see cref="VirtualPlayerJoin"/>.</summary>
+    public string VirtualPlayerLeave(string name)
+    {
+        var account = _store.GetAccountByName(name?.Trim() ?? "") ?? throw new ArgumentException($"no account '{name}'");
+        if (!_presence.RemoveVirtual(account.AccountId)) throw new ArgumentException($"'{account.AccountName}' is not a virtual player");
+        _log.LogInformation("[DEBUG] Virtual player '{Name}' removed", account.AccountName);
+        return $"'{account.AccountName}' left";
     }
 
     /// <summary>Write <paramref name="data"/> into the client's EE memory with SERVER_MEMORY_POKE (512-byte chunks).</summary>
