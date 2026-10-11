@@ -53,6 +53,8 @@ import {
   compactName,
   findSceneNode,
   instanceNameVariants,
+  buildVisualPlacementMap,
+  isInSubtree,
   parseGeoScene,
   positionUnitForNode,
   readGeoTransform,
@@ -2710,10 +2712,17 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       this.currentModelBindingMode = bindingMode;
       this.currentModelSourceArchive = sourceArchive;
       this.applyCurrentBinding(mdl);
-      const unitChoice = fallbackUsed
-        ? { unit: 'scale' as PositionUnit, reason: 'fallback decoder' }
-        : this.choosePositionUnit(mdl, entry.name, sourceArchive);
-      mdl = convertPositionUnit(mdl, unitChoice.unit);
+      const placed = fallbackUsed ? null : this.placeModelByGeo(mdl, this.findGeoNodeForModel(entry.name, sourceArchive));
+      let unitChoice: PositionUnitChoice;
+      if (placed) {
+        mdl = placed.model;
+        unitChoice = placed.choice;
+      } else {
+        unitChoice = fallbackUsed
+          ? { unit: 'scale' as PositionUnit, reason: 'fallback decoder' }
+          : this.choosePositionUnit(mdl, entry.name, sourceArchive);
+        mdl = convertPositionUnit(mdl, unitChoice.unit);
+      }
       this.currentPositionUnit = unitChoice.unit;
       this.selectedVisual.set('');
       if (mdl.chunks.length > 0) { this.recordDecodeInfo(entry.name, mdl, unitChoice); }
@@ -3027,6 +3036,63 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     }
     if (flagsUnit) { return { unit: flagsUnit, reason: 'GEO vparams flags' }; }
     return { unit: 'scale', reason: 'default' };
+  }
+
+  // The GEO node that defines a model (same lookup as the unit choice).
+  private findGeoNodeForModel(entryName: string | null | undefined, sourceArchiveName: string | null | undefined): GeoNode | null {
+    if (!entryName) { return null; }
+    const scene = this.companionSceneForArchive(sourceArchiveName);
+    if (!scene) { return null; }
+    for (const name of this.characterGeoNameCandidates(entryName)) {
+      const node = findSceneNode(scene, name);
+      if (node) { return node; }
+    }
+    return null;
+  }
+
+  // Put every chain-decoded chunk where its GEO node says: each visual's
+  // positions are converted with that visual's own vparams unit and then
+  // transformed by its node's accumulated matrix (relative to the model
+  // root). Returns null when the chunks carry no visual keys or none of
+  // them resolve, so callers fall back to the whole-model unit choice.
+  private placeModelByGeo(mdl: ZedModel, geoNode: GeoNode | null): { model: ZedModel; choice: PositionUnitChoice; matched: number } | null {
+    if (!geoNode) { return null; }
+    const keys = mdl.chunks.map(c => c.visualKey).filter((k): k is string => !!k);
+    if (keys.length === 0) { return null; }
+    const map = buildVisualPlacementMap(geoNode, keys);
+    if (map.matched === 0) {
+      this.log(`[placement] ${geoNode.name}: none of ${map.total} visual key(s) matched a GEO node`);
+      return null;
+    }
+    const override = this.mapPositionUnit();
+    const rootUnit: PositionUnit = positionUnitForNode(geoNode) ?? 'scale';
+    const counts = new Map<PositionUnit, number>();
+    let radius = 0;
+    const chunks = mdl.chunks.map(c => {
+      const placement = c.visualKey ? map.placements.get(c.visualKey) : undefined;
+      const unit: PositionUnit = override !== 'auto' ? override : (placement?.unit ?? rootUnit);
+      counts.set(unit, (counts.get(unit) ?? 0) + 1);
+      const from = c.positionUnit ?? 'scale';
+      const f = from === unit ? 1 : unit === 'sixteenth' ? 32768 / 16 : 16 / 32768;
+      const vertices = c.vertices.map(v => {
+        let x = v.x * f, y = v.y * f, z = v.z * f;
+        if (placement) { [x, y, z] = transformPoint(placement.matrix, x, y, z); }
+        const d = Math.hypot(x, y, z);
+        if (d > radius) { radius = d; }
+        return { ...v, x, y, z };
+      });
+      return { ...c, vertices, positionUnit: unit };
+    });
+    const vertices: ZedModel['vertices'] = [];
+    for (const c of chunks) { for (const v of c.vertices) { vertices.push(v); } }
+    const dominant = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'scale';
+    const unitNote = override !== 'auto' ? 'dropdown' : 'per-visual vparams';
+    this.log(`[placement] ${geoNode.name}: ${map.matched}/${map.total} visual(s) placed by GEO node (${map.mode}), units ${[...counts].map(([u, n]) => `${u}=${n}`).join(', ')}`);
+    return {
+      model: { ...mdl, chunks, vertices, boundingRadius: radius || 1 },
+      choice: { unit: dominant, reason: `GEO placement ${map.matched}/${map.total} visuals, ${unitNote}` },
+      matched: map.matched,
+    };
   }
 
   private recordDecodeInfo(label: string, mdl: ZedModel, choice: PositionUnitChoice): void {
@@ -4595,7 +4661,17 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
 
     const unitCounts = new Map<string, number>();
     const rawCache = new Map<string, ZedModel | null>();
+    // Nodes whose visuals were drawn through their model's chains. Their
+    // implicit descendants are part of that model, not separate placements.
+    const covered: GeoNode[] = [];
+    let skippedCovered = 0;
+    const placedCache = new Map<string, ZedModel>();
     for (const inst of instances) {
+      const explicit = inst.node.children.some(c => c.name === 'model_name');
+      if (!explicit && covered.some(a => a !== inst.node && isInSubtree(a, inst.node))) {
+        skippedCovered++;
+        continue;
+      }
       const hit = resolve(inst.modelName);
       if (!hit) { missing.push(inst.modelName); continue; }
       const bindKey = /(^|[\\/])weap_mdl(?:\([^)]+\))?\.zed$/i.test(hit.sourceFile)
@@ -4610,14 +4686,36 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
         rawCache.set(rawKey, raw);
       }
       if (!raw) { continue; }
-      const choice = this.choosePositionUnit(raw, hit.node.name, hit.sourceFile, inst.node);
-      const unitLabel = `${choice.unit} (${choice.reason})`;
-      unitCounts.set(unitLabel, (unitCounts.get(unitLabel) ?? 0) + 1);
-      const cacheKey = `${rawKey}|${choice.unit}`;
-      let mdl = meshCache.get(cacheKey);
+      // The GEO node that defines this model's visuals: the placed node
+      // itself when it owns visuals, else the model's own definition.
+      const defNode = inst.node.children.some(c => c.name === 'visuals' || c.name === 'children')
+        ? inst.node
+        : (findSceneNode(scene, hit.node.name) ?? inst.node);
+      let mdl: ZedModel | undefined;
+      const placedKey = `${rawKey}|${inst.path}|${this.mapPositionUnit()}`;
+      mdl = placedCache.get(placedKey);
       if (!mdl) {
-        mdl = convertPositionUnit(raw, choice.unit);
-        meshCache.set(cacheKey, mdl);
+        const placed = this.placeModelByGeo(raw, defNode);
+        if (placed) {
+          mdl = placed.model;
+          placedCache.set(placedKey, mdl);
+          unitCounts.set('GEO placement', (unitCounts.get('GEO placement') ?? 0) + 1);
+        }
+      } else {
+        unitCounts.set('GEO placement', (unitCounts.get('GEO placement') ?? 0) + 1);
+      }
+      if (mdl) {
+        covered.push(inst.node);
+      } else {
+        const choice = this.choosePositionUnit(raw, hit.node.name, hit.sourceFile, inst.node);
+        const unitLabel = `${choice.unit} (${choice.reason})`;
+        unitCounts.set(unitLabel, (unitCounts.get(unitLabel) ?? 0) + 1);
+        const cacheKey = `${rawKey}|${choice.unit}`;
+        mdl = meshCache.get(cacheKey);
+        if (!mdl) {
+          mdl = convertPositionUnit(raw, choice.unit);
+          meshCache.set(cacheKey, mdl);
+        }
       }
 
       const vertexBase = composedVertices.length;
@@ -4672,7 +4770,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
 
     const uniqueMissing = [...new Set(missing.map(m => m.toLowerCase()))];
     this.log('--- GEO scene composed ---', true);
-    this.log(`Root: ${root.name}, instances=${instances.length}, rendered=${rendered}, missingModels=${uniqueMissing.length}, fallbackDecodes=${fallbackUsed}`);
+    this.log(`Root: ${root.name}, instances=${instances.length}, rendered=${rendered}, coveredByParentModel=${skippedCovered}, missingModels=${uniqueMissing.length}, fallbackDecodes=${fallbackUsed}`);
     this.log(`Composed model: ${composedVertices.length} verts, ${composedIndices.length / 3 | 0} tris, ${composedChunks.length} chunks across ${meshCache.size} unique source model(s)`);
     const chainBound = composedChunks.filter(c => c.textureBinding === 'chain').length;
     const coloured = composedChunks.filter(c => c.hasVertexColors).length;

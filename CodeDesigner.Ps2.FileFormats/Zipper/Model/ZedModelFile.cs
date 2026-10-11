@@ -354,11 +354,13 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.Model
             if (chains == null) return Parse(bytes);
 
             var model = new Model { FromChains = true };
-            // Several visuals can draw the same geometry (detail levels, state
-            // alternatives): decode each chunk once, for the first visual.
-            var seenGeometry = new HashSet<int>();
+            // A visual can list the same geometry twice (alternative chains
+            // over one mesh): decode it once per visual. Different visuals
+            // sharing geometry are instances at different GEO nodes and each
+            // keeps its own copy.
             foreach (var chain in chains)
             {
+                var seenGeometry = new HashSet<int>();
                 foreach (var section in chain.Sections)
                 {
                     foreach (var r in section.Chunks)
