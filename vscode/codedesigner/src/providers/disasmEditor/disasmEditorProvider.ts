@@ -2162,7 +2162,17 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
 
     private _endLiveBackendRequest(): void {
       this._liveReadInFlight = false;
+      // A hex request that arrived while this read was in flight was dropped;
+      // replay the latest one so the byte display follows the cursor.
+      const deferred = this._deferredLiveHexRequest;
+      if (deferred) {
+        this._deferredLiveHexRequest = undefined;
+        deferred();
+      }
     }
+
+    /** Latest hex-view request that was skipped because a live read was in flight. */
+    private _deferredLiveHexRequest: (() => void) | undefined;
 
     /**
      * Returns true when a live read cannot proceed because the socket is
@@ -2318,8 +2328,15 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         highlightAddr: number,
         highlightLength: number
     ): Promise<void> {
-      // Silently skip when a read is already in-flight — see sendLiveDisasmPage.
-      if (this._isLiveReadBusy()) { return; }
+      // A read is already in-flight (typically the page fetch fired alongside
+      // this request on a page change): defer instead of dropping, otherwise
+      // the hex view stays stale until something forces a refresh.
+      if (this._isLiveReadBusy()) {
+        this._deferredLiveHexRequest = () => {
+          void this.sendLiveHexView(panel, region, baseAddress, highlightAddr, highlightLength);
+        };
+        return;
+      }
 
       if (!this._canIssueLiveBackendRequest()) {
         this._postUnavailableHexView(panel, baseAddress, highlightAddr, highlightLength);
