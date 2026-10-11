@@ -246,6 +246,13 @@ interface RdrTreeNode {
           <div class="zip-scanning-bar-inner"></div>
           <span class="zip-scanning-text">{{ packageMessage() || 'Loading package…' }}</span>
         </div>
+      } @else if (packageState() === 'failed' || packageState() === 'loaded') {
+        <div class="zip-package-status" [class.zip-package-failed]="packageState() === 'failed'">
+          <span>{{ packageMessage() }}</span>
+          @if (packageState() === 'failed') {
+            <button class="zip-btn" (click)="reloadPackage()">Retry</button>
+          }
+        </div>
       }
 
       <div class="zip-main">
@@ -837,6 +844,14 @@ interface RdrTreeNode {
                                 <span class="zip-warn">{{ name }}</span>
                               }
                             </div>
+                            <div class="zip-hint">
+                              @if (textureSourceSummary(); as src) {
+                                Searched {{ src.textures }} texture(s){{ src.archives.length ? ' from ' + src.archives.join(', ') : ' (no texture archive loaded)' }}.
+                              }
+                              @if (packageState() === 'loading') { The package is still loading; textures bind when it arrives. }
+                              @if (packageState() === 'failed') { The package failed to load. }
+                            </div>
+                            <button class="zip-btn" [disabled]="packageLoading()" (click)="reloadPackage()" title="Fetch the whole package again (bypasses the cache) and re-bind textures.">Reload package</button>
                           </div>
                         }
                       }
@@ -1250,6 +1265,26 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
   // bytes also let nested archive drill-ins skip the per-entry readNode.
   readonly packageLoading = signal(false);
   readonly packageMessage = signal('');
+  // Persistent package state for the status line under the toolbar. The
+  // loading banner alone hid failures: its message vanished with it.
+  readonly packageState = signal<'idle' | 'loading' | 'loaded' | 'failed'>('idle');
+  // Set once per opened file when a binary package arrived undecodable and
+  // a base64 copy was requested instead.
+  private packageBase64Retried = false;
+  // Root TXR/PAL archives already requested on demand for missing textures.
+  private rootTextureFetchRequested = new Set<string>();
+  // Namespaces / archives the texture lookup can currently see.
+  readonly textureSourceSummary = computed<{ textures: number; archives: string[] }>(() => {
+    const sources = this.companionTextures();
+    if (!sources) { return { textures: 0, archives: [] }; }
+    let textures = 0;
+    const archives = new Set<string>();
+    for (const key of sources.keys()) {
+      const colon = key.indexOf(':');
+      if (colon < 0) { textures++; } else { archives.add(key.slice(0, colon)); }
+    }
+    return { textures, archives: [...archives].sort() };
+  });
   // Lowercased leaf name -> bytes, for the currently-loaded ZDB.
   private packageEntryBytes = new Map<string, Uint8Array>();
 
@@ -1481,6 +1516,9 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
         this.directCompanionTextureNamespaces.clear();
         this.companionTextures.set(null);
         this.companionScene.set(null);
+        this.packageState.set('idle');
+        this.packageBase64Retried = false;
+        this.rootTextureFetchRequested.clear();
         this.resetPreview();
         this.setStatus(this.result()?.summary ?? 'File loaded.', false, false);
         this.requestPalettesIfNeeded();
@@ -1502,8 +1540,12 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       case 'zdbPackageError': {
         const message = (data['message'] as string) ?? 'unknown';
         this.packageLoading.set(false);
+        this.packageState.set('failed');
         this.packageMessage.set('Package load failed: ' + message);
-        this.log(`[package] ERROR: ${message}`);
+        this.log(`[package] ERROR: ${message}`, true);
+        // Without the package, a model in view can still get its textures
+        // from the root archives on demand.
+        this.applyModelToRenderer();
         break;
       }
       case 'archiveNodes': {
@@ -1731,7 +1773,9 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     this.companionTextures.set(null);
     this.companionScene.set(null);
     this.palettes.set(null);
+    this.rootTextureFetchRequested.clear();
     this.packageLoading.set(true);
+    this.packageState.set('loading');
     this.packageMessage.set(`Force-reloading ${filePath.split(/[\\/]/).pop()}…`);
     this.log(`[package] force-reloading ${filePath.split(/[\\/]/).pop()}`);
     this.vscode.postMessage({ type: 'reloadZdbPackage', path: filePath });
@@ -2244,6 +2288,12 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       this.log(`[companion] skipping per-layer load — package context already loaded`);
       return;
     }
+    // The package is still streaming in: it re-decodes the selected model
+    // when it lands, so loading one prefix here would only race it.
+    if (this.packageLoading()) {
+      this.log(`[companion] package still loading — textures will bind when it arrives`);
+      return;
+    }
 
     const stack = this.archiveStack();
     if (stack.length === 0) { return; }
@@ -2364,9 +2414,43 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     } catch { /* skip */ }
   }
 
+  // Missing textures after a render: fetch every root-level TXR/PAL pair
+  // that is not loaded yet (once per archive per file) and re-render when
+  // they land. Covers a package that failed or is incomplete, and models
+  // whose textures live in another prefix's archive.
+  private requestRootTexturesForMissing(missing: string[]): void {
+    if (this.packageLoading()) { return; }
+    const filePath = this.result()?.path;
+    if (!filePath || this.archiveStack().length === 0) { return; }
+    const loadedNamespaces = new Set(this.textureSourceSummary().archives);
+    const rootEntries = this.result()?.entries ?? [];
+    const requested: string[] = [];
+    for (const e of rootEntries) {
+      const leaf = (e.name.split(/[\\/]/).pop() ?? e.name).toLowerCase();
+      const m = /^(.+?)_(txr|pal)(?:\([^)]+\))?\.zed$/i.exec(leaf);
+      if (!m) { continue; }
+      const namespace = m[1].toLowerCase();
+      const kind = m[2].toLowerCase() as 'txr' | 'pal';
+      if (kind === 'txr' && loadedNamespaces.has(namespace)) { continue; }
+      if (kind === 'pal' && this.rootCompanionPalArchives.has(namespace)) { continue; }
+      if (this.packageEntryBytes.has(leaf)) { continue; }
+      if (this.rootTextureFetchRequested.has(leaf)) { continue; }
+      this.rootTextureFetchRequested.add(leaf);
+      this.rootCompanionFetches.set(e.index, kind);
+      this.vscode.postMessage({ type: 'readNode', path: filePath, entryIndex: e.index });
+      requested.push(leaf);
+    }
+    if (requested.length > 0) {
+      this.log(`[texture] ${missing.length} texture(s) missing; fetching ${requested.join(', ')} from the root archive`);
+      this.setStatus(`Fetching ${requested.length} texture archive(s) for ${missing.length} missing texture(s)…`, false, true);
+    }
+  }
+
   private rebuildAliasedPalettes(sourceName: string): void {
     if (this.rootCompanionPalArchives.size === 0) { return; }
-    const merged = new Map<string, ZedPalette>();
+    // Merge into what is loaded: palettes from the package (or an earlier
+    // companion) must survive an on-demand fetch of another archive.
+    const merged = new Map<string, ZedPalette>(this.palettes() ?? []);
     for (const [namespace, pal] of this.rootCompanionPalArchives) {
       let palettes = parsePaletteEntries(
         pal.entries.map(e => ({ name: e.name })),
@@ -2673,6 +2757,13 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     };
 
     if (leaf && hasPair(leaf)) { return leaf; }
+    // WORL_MDL entered straight from the ZDB root: the map's own TXR/PAL
+    // pair sits next to it in the root entries (M51.ZDB -> M51_TXR/PAL).
+    if (!previous) {
+      const rootLeaves = (this.result()?.entries ?? []).map(e => (e.name.split(/[\\/]/).pop() ?? e.name).toLowerCase());
+      const rootPrefix = mapPrefixFromLeaves(rootLeaves, leaf, supportPrefixes);
+      if (rootPrefix) { return rootPrefix; }
+    }
     if (previous) {
       const prefixes = new Set<string>();
       for (const entry of previous.entries) {
@@ -3454,6 +3545,10 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       } catch { failedTextureDecodes.add(req.textureName); }
     }
 
+    if (missingTextureSources.size > 0) {
+      this.requestRootTexturesForMissing([...missingTextureSources]);
+    }
+
     const traceTextureHandoff = !!entry && (
       entry.name.toLowerCase().includes('fiveseven') ||
       entry.name.toLowerCase() === 'worldmodel' ||
@@ -3679,6 +3774,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     const role = this.result()?.role ?? '';
     if (role === 'apache-patch-archive' || role === 'game-save') { return; }
     this.packageLoading.set(true);
+    this.packageState.set('loading');
     this.packageMessage.set(`Loading ${filePath.split(/[\\/]/).pop()} package…`);
     this.log(`[package] requesting full package contents for ${filePath.split(/[\\/]/).pop()}`);
     this.vscode.postMessage({ type: 'loadZdbPackage', path: filePath });
@@ -3715,13 +3811,21 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     const palArchives: Array<{ name: string; archive: InspectedZedArchive }> = [];
     const geoArchives: Array<{ name: string; archive: InspectedZedArchive }> = [];
     const hasRootPaths = nodes.some(n => /[\\/]/.test(n.name));
+    let decodedNodes = 0;
+    let undecodableNodes = 0;
+    let firstUndecodable = '';
 
     for (const node of nodes) {
       if (!node.data) { continue; }
       let bytes: Uint8Array;
       try { bytes = nodeBytes(node.data); }
-      catch { continue; }
+      catch {
+        undecodableNodes++;
+        if (!firstUndecodable) { firstUndecodable = describePayload(node.data); }
+        continue;
+      }
       if (bytes.length === 0) { continue; }
+      decodedNodes++;
       const leaf = (node.name.split(/[\\/]/).pop() ?? node.name).toLowerCase();
       const isRootPackageEntry = !hasRootPaths || /[\\/]/.test(node.name);
       if (!isRootPackageEntry) { continue; }
@@ -3738,6 +3842,23 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
         const ar = tryParse(); if (ar) { palArchives.push({ name: leaf, archive: ar }); }
       } else if (/_GEO(?:\([^)]+\))?\.zed$/i.test(leaf)) {
         const ar = tryParse(); if (ar) { geoArchives.push({ name: leaf, archive: ar }); }
+      }
+    }
+
+    if (undecodableNodes > 0) {
+      this.log(`[package] ${undecodableNodes} of ${nodes.length} payload(s) could not be decoded (first: ${firstUndecodable})`, true);
+    }
+    // A package whose payloads all failed to decode means the binary
+    // transfer did not survive the trip to the webview. Ask once for a
+    // base64 copy instead of rendering an untextured map.
+    if (decodedNodes === 0 && undecodableNodes > 0 && !this.packageBase64Retried) {
+      this.packageBase64Retried = true;
+      const filePath = this.result()?.path;
+      if (filePath) {
+        this.packageMessage.set('Package payloads arrived undecodable; requesting a base64 copy…');
+        this.log('[package] retrying the package as base64', true);
+        this.vscode.postMessage({ type: 'reloadZdbPackage', path: filePath, encoding: 'base64' });
+        return;
       }
     }
 
@@ -3813,9 +3934,11 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     }
 
     this.packageLoading.set(false);
-    this.packageMessage.set(
-      `Package loaded: ${tifMap.size} texture(s), ${mergedPalettes.size} palette(s), ${geoArchives.length} GEO archive(s).`,
-    );
+    this.packageState.set(decodedNodes > 0 ? 'loaded' : 'failed');
+    this.packageMessage.set(decodedNodes > 0
+      ? `Package: ${txrArchives.length} texture archive(s) (${txrArchives.map(t => t.name.replace(/\.zed$/i, '')).join(', ') || 'none'}), ` +
+        `${palArchives.length} palette archive(s), ${geoArchives.length} GEO archive(s).`
+      : `Package load failed: none of ${nodes.length} payload(s) could be decoded.`);
     const mdlLeaves = [...this.packageEntryBytes.keys()].filter(k => /_MDL(?:\([^)]+\))?\.zed$/i.test(k));
     this.log(`[package] ${this.packageEntryBytes.size} top-level entries; textures=${tifMap.size} palettes=${mergedPalettes.size} GEO=${geoArchives.length} MDL=${mdlLeaves.length}`);
     if (mdlLeaves.length) {
@@ -5368,13 +5491,50 @@ type NodePayload = string | ArrayBuffer | Uint8Array | null | undefined;
 function nodeBytes(payload: NodePayload): Uint8Array {
   if (!payload) { return new Uint8Array(0); }
   if (typeof payload === 'string') { return base64ToBytes(payload); }
-  if (payload instanceof Uint8Array) { return payload; }
-  if (payload instanceof ArrayBuffer) { return new Uint8Array(payload); }
-  // Structured-clone of a Buffer can arrive as a plain object with numeric
-  // keys or a { type: 'Buffer', data: [...] } shape.
+  // Tag checks instead of instanceof: buffers can be created in another
+  // frame's realm on their way into the webview.
+  const tag = Object.prototype.toString.call(payload);
+  if (tag === '[object ArrayBuffer]') { return new Uint8Array(payload as ArrayBuffer); }
+  if (ArrayBuffer.isView(payload)) {
+    const view = payload as ArrayBufferView;
+    return new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
+  }
+  // A Node Buffer that went through JSON arrives as { type: 'Buffer', data: [...] }.
   const anyPayload = payload as { data?: unknown; type?: string };
   if (anyPayload && Array.isArray(anyPayload.data)) { return Uint8Array.from(anyPayload.data as number[]); }
-  throw new Error('Unsupported node payload');
+  throw new Error(`Unsupported node payload (${tag})`);
+}
+
+function describePayload(payload: NodePayload): string {
+  if (payload === null || payload === undefined) { return String(payload); }
+  if (typeof payload === 'string') { return `string(${payload.length})`; }
+  const tag = Object.prototype.toString.call(payload);
+  const keys = typeof payload === 'object' ? Object.keys(payload as object).slice(0, 4).join(',') : '';
+  return keys ? `${tag} {${keys}}` : tag;
+}
+
+// The map prefix among root-level archive names: a <prefix>_TXR.ZED with a
+// matching _PAL.ZED that is not a shared support library. Prefers the opened
+// file's own stem (M51.ZDB -> m51).
+function mapPrefixFromLeaves(leaves: string[], preferred: string, supportPrefixes: Set<string>): string | null {
+  const set = new Set(leaves);
+  const hasPair = (p: string) =>
+    [...set].some(l => new RegExp(`^${escapeRegExp(p)}_txr(?:\\([^)]+\\))?\\.zed$`, 'i').test(l)) &&
+    [...set].some(l => new RegExp(`^${escapeRegExp(p)}_pal(?:\\([^)]+\\))?\\.zed$`, 'i').test(l));
+  const want = preferred.toLowerCase();
+  if (want && hasPair(want)) { return want; }
+  for (const l of leaves) {
+    const m = /^(.+?)_txr(?:\([^)]+\))?\.zed$/i.exec(l);
+    if (!m) { continue; }
+    const p = m[1].toLowerCase();
+    if (supportPrefixes.has(p) || /^ld\d+$/i.test(p) || /^z.+\d+$/i.test(p)) { continue; }
+    if (hasPair(p)) { return p; }
+  }
+  return null;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 interface PositionUnitChoice {

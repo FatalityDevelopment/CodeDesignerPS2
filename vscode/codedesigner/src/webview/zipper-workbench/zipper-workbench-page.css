@@ -1194,3 +1194,28 @@ input {
 .zip-texrefs span.zip-warn {
   color: var(--vscode-editorWarning-foreground, #cca700);
 }
+
+/* Package status line (after the loading banner goes away). */
+.zip-package-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground, #ccccccb3);
+  border-bottom: 1px solid var(--vscode-widget-border, #303031);
+}
+.zip-package-status span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.zip-package-status.zip-package-failed {
+  color: var(--vscode-editorWarning-foreground, #cca700);
+}
+.zip-hint {
+  margin: 6px 0;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground, #ccccccb3);
+  white-space: normal;
+}
