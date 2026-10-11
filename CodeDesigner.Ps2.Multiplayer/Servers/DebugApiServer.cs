@@ -17,7 +17,10 @@ namespace CodeDesigner.Ps2.Multiplayer.Servers;
 ///                                                reserve slot K (first free if omitted) and send
 ///                                                SERVER_CONNECT_NOTIFY for it to every joined client
 /// GET /fake/leave?world=W&amp;index=K[&amp;layout=v108|4|8]   SERVER_DISCONNECT_NOTIFY + release
-/// GET /fake/inbox?world=W[&amp;clear=1]             app payloads real clients sent to fake clients
+/// GET /fake/inbox?world=W[&amp;clear=1]             app payloads real clients sent to fake clients (To -1 = broadcast)
+/// GET /clients                                   lobby (MLS) clients: connection id, account, endpoint
+/// GET /peek?client=C&amp;addr=0x..&amp;len=N            read client EE memory (RAW_MEMORY cheat query)
+/// GET /poke?client=C&amp;addr=0x..&amp;hex=..            write client EE memory (SERVER_MEMORY_POKE)
 /// GET /raw?world=W&amp;type=0x08&amp;hex=0100...         raw RT frame to every joined client
 /// GET /app?world=W&amp;from=K&amp;hex=...                  app payload relayed as if DME client K sent it
 ///
@@ -29,10 +32,12 @@ public class DebugApiServer
 {
     private readonly MultiplayerConfig _config;
     private readonly ILogger<DebugApiServer> _log;
+    private readonly MlsServer _mls;
     private TcpListener? _listener;
 
-    public DebugApiServer(MultiplayerConfig config, ILogger<DebugApiServer> log)
+    public DebugApiServer(MultiplayerConfig config, MlsServer mls, ILogger<DebugApiServer> log)
     {
+        _mls    = mls;
         _config = config;
         _log    = log;
     }
@@ -82,7 +87,9 @@ public class DebugApiServer
             int code = 200;
             try
             {
-                body = parts.Length >= 2 ? Handle(parts[1]) : throw new ArgumentException("bad request");
+                body = parts.Length >= 2
+                    ? await HandleMemoryAsync(parts[1], ct) ?? Handle(parts[1])
+                    : throw new ArgumentException("bad request");
             }
             catch (ArgumentException ex)
             {
@@ -99,6 +106,57 @@ public class DebugApiServer
             // client went away
         }
     }
+
+    /// <summary>
+    /// Lobby-client memory endpoints (MLS connection): /clients, /peek?client=&amp;addr=&amp;len=,
+    /// /poke?client=&amp;addr=&amp;hex=. Returns null for any other path.
+    /// </summary>
+    private async Task<string?> HandleMemoryAsync(string target, CancellationToken ct)
+    {
+        var path = target.Split('?')[0];
+        var q = ParseQuery(target);
+        switch (path)
+        {
+            case "/clients":
+            {
+                var list = _mls.LobbyClients();
+                return list.Count == 0 ? "(no lobby clients)"
+                    : string.Join('\n', list.Select(c => $"{c.ConnectionId} {(c.Account.Length > 0 ? c.Account : "(not logged in)")} {c.Endpoint}"));
+            }
+            case "/peek":
+            {
+                var conn = _mls.ResolveClient(q.GetValueOrDefault("client"));
+                uint addr = (uint)ParseLong(Required(q, "addr"));
+                int len = (int)ParseLong(q.GetValueOrDefault("len", "4"));
+                if (len <= 0 || len > 0x10000) throw new ArgumentException("len must be 1..65536");
+                var data = await _mls.PeekAsync(conn, addr, len, TimeSpan.FromSeconds(5), ct);
+                return Convert.ToHexString(data);
+            }
+            case "/poke":
+            {
+                var conn = _mls.ResolveClient(q.GetValueOrDefault("client"));
+                uint addr = (uint)ParseLong(Required(q, "addr"));
+                var data = Convert.FromHexString(Required(q, "hex"));
+                if (data.Length == 0) throw new ArgumentException("hex is empty");
+                if (!await _mls.PokeAsync(conn, addr, data, ct)) throw new ArgumentException("client is gone");
+                return $"poked {data.Length} byte(s) at 0x{addr:X8}";
+            }
+            case "/chat":
+            {
+                var conn = _mls.ResolveClient(q.GetValueOrDefault("client"));
+                string from = q.GetValueOrDefault("name", "BOT");
+                int n = await _mls.InjectChatAsync(conn, from, Required(q, "text"), (int)ParseLong(q.GetValueOrDefault("account", "0")), ct);
+                return $"lobby chat from '{from}' sent to {n} player(s)";
+            }
+            default:
+                return null;
+        }
+    }
+
+    private static long ParseLong(string s)
+        => s.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+            ? Convert.ToInt64(s[2..], 16)
+            : long.TryParse(s, out var n) ? n : throw new ArgumentException($"not a number: {s}");
 
     private static string Handle(string target)
     {
@@ -154,7 +212,7 @@ public class DebugApiServer
             }
 
             default:
-                throw new ArgumentException("unknown path; try /worlds, /fake/join, /fake/leave, /fake/inbox, /raw, /app");
+                throw new ArgumentException("unknown path; try /clients, /peek, /poke, /worlds, /fake/join, /fake/leave, /fake/inbox, /raw, /app");
         }
     }
 

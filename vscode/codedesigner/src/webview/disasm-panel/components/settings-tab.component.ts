@@ -36,7 +36,7 @@ const NET_POLL_MS = 30000;
  * Organised as collapsible accordion sections:
  *  - Connection (default open): PCSX2/BIOS/Game selectors + Connect
  *  - Actions (default collapsed): Run, Restart, Import, Snapshot, Screenshot
- *  - Network (default collapsed): Server, DNS Mapping, Config
+ *  - Network (default collapsed): Start Servers, Packets, Config, Debug
  *  - Snapshots (default open): scrollable snapshot list with show-more toggle
  *  - Tools (default collapsed): AI, Packet Viewer
  *  - Memories (default collapsed): MCP Memory overlay (preserved in DOM when collapsed)
@@ -211,6 +211,11 @@ const NET_POLL_MS = 30000;
               <button id="netConfigBtn" (click)="openNetConfigClick.emit()"
                       title="Open the Multiplayer server config.json for editing">
                 <app-icon name="settings" [size]="14" /><span>Config</span>
+              </button>
+
+              <button id="debugCommandsBtn" (click)="openDebugCommandsClick.emit()"
+                      title="Debug scripts and commands (Mods/debug-commands.json): run them in a terminal">
+                <app-icon name="bug" [size]="14" /><span>Debug</span>
               </button>
 
             </div>
@@ -688,6 +693,7 @@ export class SettingsTabComponent implements OnDestroy {
   readonly openMemoryViewClick = output<string>();
   readonly openDnsMappingClick   = output<void>();
   readonly openNetConfigClick    = output<void>();
+  readonly openDebugCommandsClick = output<void>();
   readonly requestHistory        = output<void>();
   readonly clearHistory          = output<void>();
   readonly requestLabels         = output<void>();

@@ -1,5 +1,4 @@
-﻿using CodeDesigner.Ps2.Compression;
-using CodeDesigner.Ps2.FileFormats.Zipper.ZDB;
+﻿using CodeDesigner.Ps2.FileFormats.Zipper.ZDB;
 using System;
 using System.Collections.Generic;
 using System.Linq;

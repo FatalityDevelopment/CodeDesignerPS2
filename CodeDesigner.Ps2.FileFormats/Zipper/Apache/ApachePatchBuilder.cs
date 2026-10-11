@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
-using CodeDesigner.Ps2.Compression;
 using CodeDesigner.Ps2.FileFormats.Zipper.ZDB;
 
 namespace CodeDesigner.Ps2.FileFormats.Zipper.Apache

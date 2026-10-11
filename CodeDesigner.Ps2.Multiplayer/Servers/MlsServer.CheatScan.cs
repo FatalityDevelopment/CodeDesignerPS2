@@ -81,6 +81,11 @@ public partial class MlsServer
 
         uint address = BitConverter.ToUInt32(p, 5);
         var data = p[13..];
+        if (PendingPeeks.TryRemove((state.ConnectionId, BitConverter.ToInt32(p, 1)), out var waiter))
+        {
+            waiter.TrySetResult(data);                    // debug-API peek, not scanner data
+            return Task.CompletedTask;
+        }
         try
         {
             ProcessScanChunk(state, tcp, address, data);

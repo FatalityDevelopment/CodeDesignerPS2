@@ -249,6 +249,10 @@ public class ScertPacket
     /// </summary>
     public byte[] Serialize()
     {
+        // Encrypted but empty: flag set, no hash (matches what the PS2 itself sends, e.g. "8F 00 00").
+        if (Hash is { Length: EncryptedHashSize } && Payload.Length == 0)
+            return [(byte)((byte)MessageType | 0x80), 0, 0];
+
         if (Hash is { Length: EncryptedHashSize })
         {
             var enc = new byte[HeaderSize + EncryptedHashSize + Payload.Length];
@@ -285,6 +289,12 @@ public class ScertPacket
         bool isEncrypted = (buffer[offset + 0] & 0x80) != 0;
         var  msgType     = (RT_MSG_TYPE)(buffer[offset + 0] & 0x7F);
         int  payloadLen  = buffer[offset + 1] | (buffer[offset + 2] << 8);
+
+        // An encrypted frame with no payload has no hash: the PS2 sends a bare "8F 00 00" (encrypted
+        // FLUSH). Reading 4 hash bytes for it swallows the start of the next frame and desyncs the stream
+        // (seen on PCSX2 when a 24-player match started: the DME connection dropped).
+        if (payloadLen == 0)
+            isEncrypted = false;
 
         int totalSize = HeaderSize + payloadLen;
         if (isEncrypted)

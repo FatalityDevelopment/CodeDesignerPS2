@@ -1,7 +1,6 @@
 using System.Text.Json;
 using CodeDesigner.Ps2.Bridge.Services;
 using CodeDesigner.Ps2.Common;
-using CodeDesigner.Ps2.Compression;
 using CodeDesigner.Ps2.Database;
 using CodeDesigner.Ps2.DiscordBot;
 using CodeDesigner.Ps2.DiscordPresence;
