@@ -19,6 +19,6 @@ public class MediusChannel
     public int PlayerCount => _playerIds.Count;
     public bool IsFull => PlayerCount >= MaxPlayers;
 
-    public void AddPlayer(int accountId)    { if (!_playerIds.Contains(accountId)) _playerIds.Add(accountId); }
-    public void RemovePlayer(int accountId) { _playerIds.Remove(accountId); }
+    public void AddPlayer(int accountId)    { lock (_playerIds) if (!_playerIds.Contains(accountId)) _playerIds.Add(accountId); }
+    public void RemovePlayer(int accountId) { lock (_playerIds) _playerIds.Remove(accountId); }
 }

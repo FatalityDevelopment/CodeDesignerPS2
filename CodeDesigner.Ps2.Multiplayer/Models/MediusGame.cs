@@ -22,6 +22,8 @@ public class MediusGame
     public int             MaxPlayers     { get; set; } = 8;
     public int             PlayerCount    => _playerIds.Count;
     public string          Password       { get; set; } = string.Empty;
+    /// <summary>Password spectators present (CreateGame SpectatorPassword). Empty = open to spectators.</summary>
+    public string          SpectatorPassword { get; set; } = string.Empty;
     public GameWorldStatus Status         { get; set; } = GameWorldStatus.WorldPendingCreation;
     public int             GameLevel      { get; set; }
     public int             PlayerSkillLevel { get; set; }
@@ -46,7 +48,8 @@ public class MediusGame
 
     public bool IsFull   => _playerIds.Count >= MaxPlayers;
     public bool IsLocked => !string.IsNullOrEmpty(Password);
+    public bool IsSpectatorLocked => !string.IsNullOrEmpty(SpectatorPassword);
 
-    public void AddPlayer(int accountId)    { if (!_playerIds.Contains(accountId)) _playerIds.Add(accountId); }
-    public void RemovePlayer(int accountId) { _playerIds.Remove(accountId); }
+    public void AddPlayer(int accountId)    { lock (_playerIds) if (!_playerIds.Contains(accountId)) _playerIds.Add(accountId); }
+    public void RemovePlayer(int accountId) { lock (_playerIds) _playerIds.Remove(accountId); }
 }

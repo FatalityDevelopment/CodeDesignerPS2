@@ -132,6 +132,36 @@ Clients arrive here after authenticating on MAS. The lobby server handles:
 
 When a player creates or joins a game, MLS creates a DME world and returns its world ID to the client.
 
+#### SOCOM II briefing rooms — the three lists and how the client refreshes them
+
+The r0004 client exposes three script natives to its menus, `RefreshRoomList`, `RefreshGameList` and
+`RefreshRoomPlayerList`, and the server answers the requests each of them sends. The layouts below were taken
+from the client's own response callbacks (EE RAM dump `CodeDesigner.Ps2.Bridge/Resources/Dumps/r0004.bin`);
+every reply echoes the request's 21-byte MessageID and carries the status at offset 0x18.
+
+| Screen / list | Request → reply | What the client does with the reply |
+|---|---|---|
+| BRIEFING room list | `ChannelList_ExtraInfo0` (0xEC) → one 0x70-byte `ChannelList_ExtraInfoResponse` (0xED) per room | Merges rooms by name, commits when a row has EndOfList set. Player counts come from online presence. |
+| Lobby (game) list | `GameList_ExtraInfo0` (0xEA) → one 0x190-byte `GameList_ExtraInfoResponse0` (0xEB) per game | Marks every known game stale, merges rows by game name, prunes stale games at EndOfList. The server always sends the room's complete list (default rooms + player games). |
+| Filtered refresh | `ClearGameListFilter0` (0x50) → `ClearGameListFilterResponse` (0x51), then `SetGameListFilter0` (0x4E) → (0x4F), then the game list | A chain: each callback sends the next request, so **every link must be answered** or the list never refreshes. Filters are acknowledged but not applied. |
+| Players in the room | `GetLobbyPlayerNames_ExtraInfo` (0xDC, world = the room) → one 208-byte `GetLobbyPlayerNames_ExtraInfoResponse` (0xDD) per player | Polled at most every 10 s and only when no request is in flight. The client zeroes every known player's status before asking, merges rows by AccountID (name @0x20, OnlineState @0x40: status, lobby/game world, lobby/game name) and erases players still at status 0 at EndOfList. The reply therefore lists **every** player in the room with status 2 (in lobby) or 3 (in game). |
+| Players in a game | `GameWorldPlayerList` (0x2F) → 328-byte rows (0x30) | Stats @0x40, EndOfList @0x144. |
+| Join by name | `FindWorldByName` (0x37; v108 layout: Name[64] @0x26, WorldType @0x68 — 1 = room, 0 = game) → `FindWorldByNameResponse` (0x38, 0x9C bytes, MediusWorldID @0x44) | Resolves a room or game name to its world id before JoinChannel / JoinGame. |
+
+Other client requests answered so they cannot time out: `AddToBuddyListConfirmation` (LobbyExt 0x05 — the
+add-friend-by-name flow, auto-accepted and made mutual, answered with status 2 *RequestAccepted*), `AddPlayerToClan`
+(0x5E, leader adds a player and the message is posted on the clan board), `GetTotalUsers` / `GetTotalGames` /
+`GetTotalChannels`, `SessionEnd` and `SetLocalizationParams`.
+
+#### Spectators
+
+`CreateGame` carries both a game password and a spectator password; its `MaxPlayers` already includes the
+spectator seats (SOCOM II sends players + spectators, with `GameStats[4]` = max spectators — retail default rooms
+are 16 + 8 = 24). A spectator sends `JoinGame` with JoinType `MediusJoinAsSpectator` and the **spectator** password
+in the password field, so the server checks it against the spectator password (empty = open) and reserves an
+ordinary slot in the same DME world, flagged as a spectator in the server's counts and logs. The game itself tells
+the other players who is spectating through its own DME messages.
+
 ### DME — In-game Relay Server (port 10070)
 
 After MLS creates a DME world, all players in that game connect here. DME relays real-time packets between clients:
@@ -295,6 +325,21 @@ The server is tested with:
 Other SCE Medius-based PS2 games should work — add their AppIds to `AllowedAppIds` in `config.json`.
 
 ---
+
+## Debug API (localhost)
+
+Set `"DebugApiPort": 10090` under `Online` to get a plain-HTTP API on `127.0.0.1` for testing with a single console
+(`Mods/server/socom_server.py` wraps it):
+
+| Endpoint | Purpose |
+|---|---|
+| `/clients` | Lobby connections: connection id, account, endpoint |
+| `/rooms` | Briefing rooms with the players in each (status, game), the games listed there, and the community screen |
+| `/lobby/join?name=N[&room=0x44 or US EAST]` | Put a *virtual player* in a briefing room: it appears in that room's player list, player count and `FindPlayer` on a real console (`socom_server.py lobbyjoin N [ROOM]`) |
+| `/lobby/leave?name=N` | Remove a virtual player |
+| `/chat?text=..[&name=BOT]` | Lobby chat line from any name to everyone in the caller's room |
+| `/peek`, `/poke` | Read / write a connected console's EE memory over the lobby connection |
+| `/worlds`, `/fake/join`, `/fake/leave`, `/fake/inbox`, `/raw`, `/app` | DME worlds and fake in-game clients |
 
 ## In-memory storage
 

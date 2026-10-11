@@ -19,6 +19,10 @@ namespace CodeDesigner.Ps2.Multiplayer.Servers;
 /// GET /fake/leave?world=W&amp;index=K[&amp;layout=v108|4|8]   SERVER_DISCONNECT_NOTIFY + release
 /// GET /fake/inbox?world=W[&amp;clear=1]             app payloads real clients sent to fake clients (To -1 = broadcast)
 /// GET /clients                                   lobby (MLS) clients: connection id, account, endpoint
+/// GET /rooms                                     briefing rooms: players in each (status, game), games listed, community
+/// GET /lobby/join?name=N[&amp;room=0x44|US EAST]     put a virtual player in a briefing room (shows in the room's
+///                                                player list / count / FindPlayer on a real console)
+/// GET /lobby/leave?name=N                        remove a virtual player
 /// GET /peek?client=C&amp;addr=0x..&amp;len=N            read client EE memory (RAW_MEMORY cheat query)
 /// GET /poke?client=C&amp;addr=0x..&amp;hex=..            write client EE memory (SERVER_MEMORY_POKE)
 /// GET /raw?world=W&amp;type=0x08&amp;hex=0100...         raw RT frame to every joined client
@@ -141,6 +145,12 @@ public class DebugApiServer
                 if (!await _mls.PokeAsync(conn, addr, data, ct)) throw new ArgumentException("client is gone");
                 return $"poked {data.Length} byte(s) at 0x{addr:X8}";
             }
+            case "/rooms":
+                return _mls.RoomsReport();
+            case "/lobby/join":
+                return _mls.VirtualPlayerJoin(Required(q, "name"), q.GetValueOrDefault("room"));
+            case "/lobby/leave":
+                return _mls.VirtualPlayerLeave(Required(q, "name"));
             case "/chat":
             {
                 var conn = _mls.ResolveClient(q.GetValueOrDefault("client"));
@@ -212,7 +222,7 @@ public class DebugApiServer
             }
 
             default:
-                throw new ArgumentException("unknown path; try /clients, /peek, /poke, /worlds, /fake/join, /fake/leave, /fake/inbox, /raw, /app");
+                throw new ArgumentException("unknown path; try /clients, /rooms, /lobby/join, /lobby/leave, /chat, /peek, /poke, /worlds, /fake/join, /fake/leave, /fake/inbox, /raw, /app");
         }
     }
 

@@ -15,6 +15,8 @@ public class PresenceRegistry
     private sealed class Entry
     {
         public int Connections;
+        /// <summary>Debug-API virtual player: no connection behind it, stays until removed explicitly.</summary>
+        public bool IsVirtual;
         public Presence State = new(MediusPlayerStatus.MediusPlayerInChatWorld, 0, "", 0, "");
     }
 
@@ -37,9 +39,41 @@ public class PresenceRegistry
         if (!_online.TryGetValue(accountId, out var e)) return;
         lock (e)
         {
+            if (e.IsVirtual) return;
             if (--e.Connections <= 0) _online.TryRemove(accountId, out _);
         }
     }
+
+    /// <summary>
+    /// Put a virtual player into a lobby (debug API): it shows up in the briefing-room player list, the room's
+    /// player count and FindPlayer like a real player, without a console behind it. Re-adding moves it.
+    /// </summary>
+    public void AddVirtual(int accountId, int lobbyWorldId, string lobbyName)
+    {
+        var e = _online.GetOrAdd(accountId, _ => new Entry());
+        lock (e)
+        {
+            e.IsVirtual = true;
+            e.State = new Presence(MediusPlayerStatus.MediusPlayerInChatWorld, lobbyWorldId, lobbyName, 0, "");
+        }
+    }
+
+    /// <summary>Remove a virtual player. False when the account is not a virtual player.</summary>
+    public bool RemoveVirtual(int accountId)
+    {
+        if (!_online.TryGetValue(accountId, out var e)) return false;
+        lock (e)
+        {
+            if (!e.IsVirtual) return false;
+            return _online.TryRemove(accountId, out _);
+        }
+    }
+
+    public bool IsVirtual(int accountId) => _online.TryGetValue(accountId, out var e) && e.IsVirtual;
+
+    /// <summary>Every online account with its presence (debug reports).</summary>
+    public List<(int AccountId, Presence State, bool IsVirtual)> Snapshot() =>
+        _online.Select(kv => (kv.Key, kv.Value.State, kv.Value.IsVirtual)).ToList();
 
     public void JoinedGame(int accountId, int gameWorldId, string gameName)
     {
