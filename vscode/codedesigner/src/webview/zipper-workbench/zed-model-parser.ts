@@ -360,6 +360,7 @@ function parseVisualChain(bytes: Uint8Array, offset: number, key: string | null)
       case 2: {
         if (addr + 0x50 > bytes.length || addr + length > bytes.length) { return null; }
         if (readU32LE(bytes, addr) !== CHUNK_MAGIC_0 || readU32LE(bytes, addr + 4) !== CHUNK_MAGIC_1) { return null; }
+        if (!chunkCountsLookSane(bytes, addr)) { return null; }
         if (sections.length === 0) {
           sections.push({ textureName: null, materialOffset: null, materialLength: 0, chunks: [] });
         }
@@ -378,6 +379,17 @@ function parseVisualChain(bytes: Uint8Array, offset: number, key: string | null)
   }
   if (!sections.some(s => s.chunks.length > 0)) { return null; }
   return { offset, key, sections };
+}
+
+// The vertex / triangle counts of a chunk header, bounds-checked the same
+// way findChunkOffsets does for the scan path.
+function chunkCountsLookSane(bytes: Uint8Array, offset: number): boolean {
+  const view = new DataView(bytes.buffer, bytes.byteOffset + offset, 0x50);
+  const vertexCount = view.getInt32(0x30, true);
+  const triangleCount = view.getInt32(0x34, true);
+  if (vertexCount <= 0 || vertexCount > 4096) { return false; }
+  if (triangleCount < 0 || triangleCount > 4096) { return false; }
+  return offset + 0x50 + vertexCount * 0x10 + 0x08 + triangleCount * 0x04 <= bytes.length;
 }
 
 // Parse every chain the stubs point at. Chains that fail validation are
@@ -424,9 +436,15 @@ export function parseModelFromChains(bytes: Uint8Array, chainOffsets: ChainOffse
   const chains = parseVisualChains(bytes, chainOffsets);
   if (!chains) { return null; }
   const chunks: ZedModelChunk[] = [];
+  // Several visuals can draw the same geometry (detail levels, state
+  // alternatives). Decode each chunk once, for the first visual that
+  // references it, so the mesh is not stacked on itself.
+  const seenGeometry = new Set<number>();
   for (const chain of chains) {
     for (const section of chain.sections) {
       for (const ref of section.chunks) {
+        if (seenGeometry.has(ref.geometryOffset)) { continue; }
+        seenGeometry.add(ref.geometryOffset);
         const chunk = parseChunk(bytes, ref.geometryOffset, ref.geometryOffset + ref.geometryLength, positionUnit);
         if (!chunk) { continue; }
         if (section.textureName) {
@@ -475,6 +493,44 @@ function assembleModel(bytes: Uint8Array, chunks: ZedModelChunk[]): ZedModel {
     textureRefs,
     boundingRadius: radius || 1,
   };
+}
+
+// Re-express a model's positions in another unit. The two conventions
+// differ by exactly 32768 / 16, so this is a pure scale and never needs a
+// re-parse. Returns the same model when nothing changes.
+export function convertPositionUnit(model: ZedModel, unit: PositionUnit): ZedModel {
+  const factors = model.chunks.map(c => {
+    const from = c.positionUnit ?? 'scale';
+    if (from === unit) { return 1; }
+    return unit === 'sixteenth' ? 32768 / 16 : 16 / 32768;
+  });
+  if (factors.every(f => f === 1)) { return model; }
+  let radius = 0;
+  const chunks = model.chunks.map((c, i) => {
+    const f = factors[i];
+    const vertices = f === 1 ? c.vertices : c.vertices.map(v => ({ ...v, x: v.x * f, y: v.y * f, z: v.z * f }));
+    for (const v of vertices) {
+      const d = Math.hypot(v.x, v.y, v.z);
+      if (d > radius) { radius = d; }
+    }
+    return { ...c, vertices, positionUnit: unit };
+  });
+  const vertices: ZedModelVertex[] = [];
+  for (const c of chunks) { for (const v of c.vertices) { vertices.push(v); } }
+  return { ...model, chunks, vertices, boundingRadius: radius || 1 };
+}
+
+// Axis-aligned extent of a model's positions (max side of its bounding box).
+export function modelExtent(model: ZedModel): number {
+  let minX = Infinity, minY = Infinity, minZ = Infinity;
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  for (const v of model.vertices) {
+    if (v.x < minX) { minX = v.x; } if (v.x > maxX) { maxX = v.x; }
+    if (v.y < minY) { minY = v.y; } if (v.y > maxY) { maxY = v.y; }
+    if (v.z < minZ) { minZ = v.z; } if (v.z > maxZ) { maxZ = v.z; }
+  }
+  if (!Number.isFinite(minX)) { return 0; }
+  return Math.max(maxX - minX, maxY - minY, maxZ - minZ);
 }
 
 export function parseModel(bytes: Uint8Array, options: ParseModelOptions = {}): ZedModel {

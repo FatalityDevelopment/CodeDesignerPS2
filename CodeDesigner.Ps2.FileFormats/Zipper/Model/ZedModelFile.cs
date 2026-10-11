@@ -267,6 +267,7 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.Model
                     case 2:
                         if (addr + ChunkHeaderSize > bytes.Length || addr + length > bytes.Length) return null;
                         if (ReadU32(bytes, (int)addr) != Magic0 || ReadU32(bytes, (int)addr + 4) != Magic1) return null;
+                        if (!ChunkCountsLookSane(bytes, (int)addr)) return null;
                         if (chain.Sections.Count == 0) chain.Sections.Add(new ChainSection());
                         chain.Sections[^1].Chunks.Add(new ChainChunkRef
                         {
@@ -284,6 +285,15 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.Model
             bool anyChunk = false;
             foreach (var section in chain.Sections) anyChunk |= section.Chunks.Count > 0;
             return anyChunk ? chain : null;
+        }
+
+        private static bool ChunkCountsLookSane(byte[] bytes, int offset)
+        {
+            int vertexCount = ReadI32(bytes, offset + 0x30);
+            int triangleCount = ReadI32(bytes, offset + 0x34);
+            if (vertexCount <= 0 || vertexCount > 4096) return false;
+            if (triangleCount < 0 || triangleCount > 4096) return false;
+            return offset + ChunkHeaderSize + vertexCount * VertexRecordSize + TriangleCommandGap + triangleCount * TriangleRecordSize <= bytes.Length;
         }
 
         private static string? ReadChainName(byte[] bytes, int offset)
@@ -344,12 +354,16 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.Model
             if (chains == null) return Parse(bytes);
 
             var model = new Model { FromChains = true };
+            // Several visuals can draw the same geometry (detail levels, state
+            // alternatives): decode each chunk once, for the first visual.
+            var seenGeometry = new HashSet<int>();
             foreach (var chain in chains)
             {
                 foreach (var section in chain.Sections)
                 {
                     foreach (var r in section.Chunks)
                     {
+                        if (!seenGeometry.Add(r.GeometryOffset)) continue;
                         Chunk? chunk = ParseChunk(bytes, r.GeometryOffset, r.GeometryOffset + r.GeometryLength);
                         if (chunk == null) continue;
                         if (section.TextureName != null)

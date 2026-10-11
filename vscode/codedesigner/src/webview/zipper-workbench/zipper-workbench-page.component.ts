@@ -24,7 +24,7 @@ import {
   ZedPalette,
   ZedTexture,
 } from './zed-texture-parser';
-import { ChainOffset, PositionUnit, ZedModel, applyMarkerBinding, applyWeaponDescriptorBinding, decodeCharacterFallbackPayload, decodeFallbackPayload, looksLikeZedContainer, parseModel } from './zed-model-parser';
+import { ChainOffset, PositionUnit, ZedModel, applyMarkerBinding, applyWeaponDescriptorBinding, convertPositionUnit, decodeCharacterFallbackPayload, decodeFallbackPayload, looksLikeZedContainer, modelExtent, parseModel } from './zed-model-parser';
 import { InspectedZedArchive, parseZedArchive } from './zed-archive-parser';
 import { type ModelBounds3, type ModelCameraView, ZedModelRenderer } from './zed-model-renderer';
 import {
@@ -56,6 +56,8 @@ import {
   parseGeoScene,
   positionUnitForNode,
   readGeoTransform,
+  readNodeBounds,
+  readVisualFlags,
   transformPoint,
 } from './zed-geo-parser';
 import './zipper-workbench-page.css';
@@ -796,10 +798,13 @@ interface RdrTreeNode {
                       <span>Size</span><strong>{{ tex.header.width }} x {{ tex.header.height }}</strong>
                     </div>
                     <div>
-                      <span>Format</span><strong>{{ tex.header.isIndexed ? 'Indexed8' : 'RGBA32' }}</strong>
+                      <span>Format</span><strong>{{ textureFormatLabel(tex) }}</strong>
                     </div>
                     <div>
-                      <span>Palette</span><strong>{{ paletteLabel(tex) }}</strong>
+                      <span>Palette</span><strong [class.zip-warn]="tex.header.isIndexed && !tex.paletteResolved">{{ paletteLabel(tex) }}</strong>
+                    </div>
+                    <div>
+                      <span>GS registers</span><strong title="From the record's TEX0 / CLAMP / TEST / ALPHA registers">{{ textureGsLabel(tex) }}</strong>
                     </div>
                   }
                   @if (previewMode() === 'model' && model(); as mdl) {
@@ -808,6 +813,44 @@ interface RdrTreeNode {
                       <div class="zip-pane-section-title">Mesh</div>
                       <div><span>Chunks</span><strong>{{ mdl.chunks.length }}</strong></div>
                       <div><span>Vertices / Triangles</span><strong>{{ activeVertexCount() }} / {{ activeTriangleCount() }}</strong></div>
+                      @if (modelDecodeInfo(); as info) {
+                        <div>
+                          <span>Decode</span>
+                          <strong title="How textures were bound to chunks. DMA chain = exact, from the model's own draw chains.">{{ info.binding }}: {{ info.chainBound }}/{{ info.chunks }} chunks bound{{ info.visuals ? ', ' + info.visuals + ' visual' + (info.visuals === 1 ? '' : 's') : '' }}</strong>
+                        </div>
+                        <div>
+                          <span>Lighting</span>
+                          <strong>{{ info.coloured > 0 ? 'baked vertex colours (' + info.coloured + ' chunks)' : 'none in model (scene light)' }}</strong>
+                        </div>
+                        <div>
+                          <span>Position units</span>
+                          <strong title="How int16 positions were converted. Change it under Render if a model is 2048x too big or too small.">{{ info.unit === 'sixteenth' ? '1/16 units' : 'chunk scale / 32768' }} — {{ info.unitReason }}</strong>
+                        </div>
+                        @if (info.droppedChunks > 0) {
+                          <div><span>Not drawn</span><strong class="zip-warn">{{ info.droppedChunks }} chunk(s) over the geometry cap</strong></div>
+                        }
+                        @if (info.missingTextures.length > 0) {
+                          <div>
+                            <span>Missing textures ({{ info.missingTextures.length }})</span>
+                            <div class="zip-texrefs">
+                              @for (name of info.missingTextures; track name) {
+                                <span class="zip-warn">{{ name }}</span>
+                              }
+                            </div>
+                          </div>
+                        }
+                      }
+                      @if (availableVisuals().length > 1) {
+                        <div>
+                          <span>Visual</span>
+                          <select class="zip-chunk-select" [value]="selectedVisual()" (change)="onSelectedVisualChange($event)" title="Isolate one visual (N<node>_<visual> draw chain). Detail levels and state alternatives show up as separate visuals.">
+                            <option value="">All visuals ({{ availableVisuals().length }})</option>
+                            @for (key of availableVisuals(); track key) {
+                              <option [value]="key">{{ visualLabel(key) }}</option>
+                            }
+                          </select>
+                        </div>
+                      }
                       @if (mdl.chunks.length > 1) {
                         <div>
                           <span>Chunk</span>
@@ -1231,6 +1274,18 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
   private currentModelBytes: Uint8Array | null = null;
   private currentSliceOffsets: ChainOffset[] = [];
   private currentPositionUnit: PositionUnit = 'scale';
+  // How the model in view was decoded, shown in the preview pane so the
+  // user does not have to open the log to see what happened.
+  readonly modelDecodeInfo = signal<ModelDecodeInfo | null>(null);
+  // Visual (N<node>_<visual> stub) to isolate in the renderer; '' = all.
+  readonly selectedVisual = signal<string>('');
+  readonly availableVisuals = computed<string[]>(() => {
+    const mdl = this.model();
+    if (!mdl) { return []; }
+    const keys = new Set<string>();
+    for (const c of mdl.chunks) { if (c.visualKey) { keys.add(c.visualKey); } }
+    return [...keys].sort();
+  });
   private currentModelBindingMode: 'weaponDescriptor' | 'map' | 'tail' = 'tail';
   private currentModelSourceArchive: string | null = null;
   readonly mapTextureV = signal<'flipV' | 'direct'>('flipV');
@@ -1436,7 +1491,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
         this.selectInitialZanimEntryIfNeeded();
         break;
       case 'zdbPackage': {
-        const nodes = (data['nodes'] as Array<{ index: number; name: string; type: number; data: string }>) ?? [];
+        const nodes = (data['nodes'] as Array<{ index: number; name: string; type: number; data: NodePayload }>) ?? [];
         const fromCache = !!data['fromCache'];
         if (fromCache) {
           this.log(`[package] restored from extension cache (${nodes.length} entries)`);
@@ -1452,9 +1507,9 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
         break;
       }
       case 'archiveNodes': {
-        const nodes = (data['nodes'] as Array<{ index: number; name: string; type: number; data: string }>) ?? [];
+        const nodes = (data['nodes'] as Array<{ index: number; name: string; type: number; data: NodePayload }>) ?? [];
         for (const node of nodes) {
-          this.nodeCache.set(node.index, base64ToBytes(node.data));
+          this.nodeCache.set(node.index, nodeBytes(node.data));
         }
         this.archiveNodesVersion.update(v => v + 1);
         this.setStatus(`Loaded ${nodes.length} archive node payload(s).`, false, false);
@@ -1477,13 +1532,13 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
         break;
       case 'nodeData': {
         const fetchedIndex = (data['entryIndex'] as number) ?? -1;
-        const dataStr = (data['data'] as string) ?? '';
+        const dataStr = (data['data'] as NodePayload) ?? '';
         // Intercept palette fetches that came from loadNestedPalettesForCurrentLayer.
         if (this.pendingPaletteFetch && this.pendingPaletteFetch.rootEntryIndex === fetchedIndex) {
           const pending = this.pendingPaletteFetch;
           this.pendingPaletteFetch = null;
           try {
-            const palBytes = base64ToBytes(dataStr);
+            const palBytes = nodeBytes(dataStr);
             const stack = this.archiveStack();
             if (stack.length > 0) {
               this.applyPaletteBytesForCurrentLayer(palBytes, pending.palName, stack[stack.length - 1].archive);
@@ -1496,7 +1551,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
         if (compKind) {
           this.rootCompanionFetches.delete(fetchedIndex);
           try {
-            const bytes = base64ToBytes(dataStr);
+            const bytes = nodeBytes(dataStr);
             const entry = (this.result()?.entries ?? []).find(e => e.index === fetchedIndex);
             this.applyMdlCompanion(compKind, bytes, entry?.name ?? '(unknown)');
           } catch { /* ignore decode errors */ }
@@ -1919,7 +1974,8 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
   chunkLabel(idx: number, chunk: { vertexCount: number; decodedTriangleCount: number; textureName: string | null }): string {
     // User asked for ".tif should be the name" - lead the label with it.
     const tifName = chunk.textureName ?? '(no texture)';
-    const partName = this.partNameFor(idx);
+    const visual = (chunk as { visualKey?: string }).visualKey;
+    const partName = visual ?? this.partNameFor(idx);
     const stats = `${chunk.vertexCount}v/${chunk.decodedTriangleCount}t`;
     return partName
       ? `${tifName} - ${partName} (#${idx}, ${stats})`
@@ -1944,10 +2000,39 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
   }
 
   paletteLabel(tex: ZedTexture): string {
-    if (!tex.header.isIndexed) { return 'n/a (RGBA32)'; }
+    if (!tex.header.isIndexed) { return 'n/a (direct colour)'; }
+    const id = tex.header.cbp ?? tex.header.paletteId;
+    const source = tex.header.cbp !== null ? 'TEX0' : 'header';
     return tex.paletteResolved
-      ? `texpal_${tex.header.paletteId}`
-      : `missing (texpal_${tex.header.paletteId})`;
+      ? `texpal_${id} (${source})`
+      : `missing: texpal_${id} (${source})`;
+  }
+
+  textureFormatLabel(tex: ZedTexture): string {
+    const h = tex.header;
+    const psm = `PSM 0x${h.psm.toString(16).toUpperCase().padStart(2, '0')}`;
+    switch (h.bpp) {
+      case 4: return `4-bit indexed (${psm})`;
+      case 8: return `8-bit indexed (${psm})`;
+      case 16: return `16-bit A1B5G5R5 (${psm})`;
+      case 24: return `24-bit RGB (${psm})`;
+      default: return `32-bit RGBA (${psm})`;
+    }
+  }
+
+  textureGsLabel(tex: ZedTexture): string {
+    const gs = tex.header.gs;
+    if (!gs) { return 'no GS registers in record'; }
+    const alpha = gs.alphaTest === null ? 'off' : `>= ${(gs.alphaTest * 100).toFixed(0)}%`;
+    return `wrap ${gs.wrapS}/${gs.wrapT}, alpha test ${alpha}${gs.alphaBlend ? ', blended' : ''}${tex.hasTransparency ? ', has transparent texels' : ''}`;
+  }
+
+  visualLabel(key: string): string {
+    const mdl = this.model();
+    if (!mdl) { return key; }
+    const chunks = mdl.chunks.filter(c => c.visualKey === key);
+    const tris = chunks.reduce((n, c) => n + c.decodedTriangleCount, 0);
+    return `${key} (${chunks.length} chunk${chunks.length === 1 ? '' : 's'}, ${tris}t)`;
   }
 
   private resetPreview(): void {
@@ -1963,6 +2048,8 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     this.previewMessage.set('');
     this.wireframe.set(false);
     this.selectedChunk.set(-1);
+    this.selectedVisual.set('');
+    this.modelDecodeInfo.set(null);
     this.paletteOverride.set(null);
     this.pendingArchiveEntry.set(null);
     this.modelRenderer?.setModel(null);
@@ -2264,7 +2351,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
           index: e.index,
           name: e.name,
           type: e.type,
-          data: bytesToBase64(archive.entryData.get(e.index) ?? new Uint8Array(0)),
+          data: archive.entryData.get(e.index) ?? new Uint8Array(0),
         }));
         const scene = parseGeoScene(entries);
         this.companionScenesByNamespace.set(namespace, scene);
@@ -2334,10 +2421,10 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     return -1;
   }
 
-  private handleNodeData(fetchedIndex: number, base64: string): void {
+  private handleNodeData(fetchedIndex: number, payload: NodePayload): void {
     if (this.inflightNode === fetchedIndex) { this.inflightNode = null; }
     try {
-      const bytes = base64ToBytes(base64);
+      const bytes = nodeBytes(payload);
       this.nodeCache.set(fetchedIndex, bytes);
       const aliasFor = this.nodeAliasForFetch.get(fetchedIndex) ?? fetchedIndex;
       this.nodeAliasForFetch.delete(fetchedIndex);
@@ -2512,8 +2599,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
         return;
       }
 
-      const positionUnit = this.resolvePositionUnit(entry.name, sourceArchive);
-      const parseOptions = this.parseOptionsFor(sliceOffsets, positionUnit);
+      const parseOptions = this.parseOptionsFor(sliceOffsets);
       let mdl = this.isCurrentEffectModelLayer()
         ? (decodeFallbackPayload(modelBytes) ?? parseModel(modelBytes, parseOptions))
         : parseModel(modelBytes, parseOptions);
@@ -2537,11 +2623,16 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       }
       this.currentModelBytes = modelBytes;
       this.currentSliceOffsets = sliceOffsets;
-      this.currentPositionUnit = positionUnit;
       this.currentModelBindingMode = bindingMode;
       this.currentModelSourceArchive = sourceArchive;
       this.applyCurrentBinding(mdl);
-      if (mdl.chunks.length > 0 && !fallbackUsed) { this.logChainBinding(entry.name, mdl, positionUnit); }
+      const unitChoice = fallbackUsed
+        ? { unit: 'scale' as PositionUnit, reason: 'fallback decoder' }
+        : this.choosePositionUnit(mdl, entry.name, sourceArchive);
+      mdl = convertPositionUnit(mdl, unitChoice.unit);
+      this.currentPositionUnit = unitChoice.unit;
+      this.selectedVisual.set('');
+      if (mdl.chunks.length > 0) { this.recordDecodeInfo(entry.name, mdl, unitChoice); }
       this.model.set(mdl);
       if (mdl.chunks.length === 0) {
         this.previewMessage.set(
@@ -2796,19 +2887,29 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
 
   // Parse options for the current binding dropdown: chain offsets are only
   // handed to the parser in chain mode so the marker modes still show the
-  // heuristic result the user asked for.
-  private parseOptionsFor(chainOffsets: ChainOffset[], positionUnit: PositionUnit): { chainOffsets?: ChainOffset[]; positionUnit: PositionUnit } {
+  // heuristic result the user asked for. Positions are always decoded in
+  // the scale convention first; choosePositionUnit converts afterwards.
+  private parseOptionsFor(chainOffsets: ChainOffset[]): { chainOffsets?: ChainOffset[]; positionUnit: PositionUnit } {
     return this.mapMaterialBinding() === 'chain'
-      ? { chainOffsets, positionUnit }
-      : { positionUnit };
+      ? { chainOffsets, positionUnit: 'scale' }
+      : { positionUnit: 'scale' };
   }
 
-  // Position unit for a model: the dropdown override, else the GEO node's
-  // vparams flags (weapons normalise by the chunk scale, everything else is
-  // 1/16 units), else the scale convention.
-  private resolvePositionUnit(entryName: string | null | undefined, sourceArchiveName: string | null | undefined, geoNode: GeoNode | null = null): PositionUnit {
+  // Decide how a decoded model's int16 positions map to units.
+  //   1. the dropdown override
+  //   2. the GEO node's nparams bounds: the convention whose extent matches
+  //      them (the two differ by exactly 2048x, so this is unambiguous)
+  //   3. the GEO node's vparams flags (weapons normalise by the chunk
+  //      scale, everything else is 1/16 units)
+  //   4. the scale convention
+  private choosePositionUnit(
+    model: ZedModel | null,
+    entryName: string | null | undefined,
+    sourceArchiveName: string | null | undefined,
+    geoNode: GeoNode | null = null,
+  ): PositionUnitChoice {
     const override = this.mapPositionUnit();
-    if (override !== 'auto') { return override; }
+    if (override !== 'auto') { return { unit: override, reason: 'dropdown' }; }
     let node = geoNode;
     if (!node && entryName) {
       const scene = this.companionSceneForArchive(sourceArchiveName);
@@ -2819,18 +2920,44 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
         }
       }
     }
-    return positionUnitForNode(node) ?? 'scale';
+    const flagsUnit = positionUnitForNode(node);
+    const bounds = readNodeBounds(node);
+    if (model && bounds && model.vertices.length > 0) {
+      // Extent as decoded (scale convention) versus the GEO bounds.
+      const extentScale = modelExtent(model) * (model.chunks[0]?.positionUnit === 'sixteenth' ? 16 / 32768 : 1);
+      if (extentScale > 0) {
+        const ratioScale = Math.abs(Math.log(extentScale / bounds.extent));
+        const ratioSixteenth = Math.abs(Math.log((extentScale * 32768 / 16) / bounds.extent));
+        // Only trust the bounds when one convention is clearly closer.
+        if (Math.abs(ratioScale - ratioSixteenth) > 1) {
+          return { unit: ratioSixteenth < ratioScale ? 'sixteenth' : 'scale', reason: 'GEO bounds' };
+        }
+      }
+    }
+    if (flagsUnit) { return { unit: flagsUnit, reason: 'GEO vparams flags' }; }
+    return { unit: 'scale', reason: 'default' };
   }
 
-  private logChainBinding(label: string, mdl: ZedModel, unit: PositionUnit): void {
+  private recordDecodeInfo(label: string, mdl: ZedModel, choice: PositionUnitChoice): void {
     const chainBound = mdl.chunks.filter(c => c.textureBinding === 'chain').length;
     const coloured = mdl.chunks.filter(c => c.hasVertexColors).length;
     const visuals = new Set(mdl.chunks.map(c => c.visualKey).filter(Boolean)).size;
-    if (chainBound === 0 && coloured === 0 && visuals === 0) {
-      this.log(`[chain] ${label}: no DMA chains (binding=${this.mapMaterialBinding()}, units=${unit})`);
-      return;
-    }
-    this.log(`[chain] ${label}: ${visuals} visual(s), ${chainBound}/${mdl.chunks.length} chunk(s) texture-bound, ${coloured} with vertex colours, units=${unit}`);
+    const binding = chainBound > 0
+      ? 'DMA chain'
+      : (mdl.chunks.find(c => c.textureBinding)?.textureBinding ?? 'none');
+    this.modelDecodeInfo.set({
+      binding,
+      visuals,
+      chunks: mdl.chunks.length,
+      chainBound,
+      coloured,
+      unit: choice.unit,
+      unitReason: choice.reason,
+      renderedChunks: null,
+      droppedChunks: 0,
+      missingTextures: [],
+    });
+    this.log(`[decode] ${label}: binding=${binding} visuals=${visuals} chunks=${mdl.chunks.length} chain-bound=${chainBound} vertex-colours=${coloured} units=${choice.unit} (${choice.reason})`);
   }
 
   private isCurrentWeaponModelLayer(): boolean {
@@ -2951,7 +3078,6 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       ? this.characterBoneMatricesForEntry(rootEntry.name, sourceArchiveName)
       : null;
     const bindMode = isWeaponSource || isEffectSource ? 'tailScan' : this.mapMaterialBinding();
-    const positionUnit = this.resolvePositionUnit(rootEntry.name, sourceArchiveName);
     let payloadsWithChunks = 0;
     let fallbackPayloads = 0;
 
@@ -2982,7 +3108,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       let mdl: ZedModel | null = null;
       let bakedByCharacterBones = false;
       const descriptorOffsets = chainOffsets.map(c => c.offset);
-      const parseOptions = this.parseOptionsFor(chainOffsets, positionUnit);
+      const parseOptions = this.parseOptionsFor(chainOffsets);
 
       try {
         mdl = isEffectSource
@@ -3073,14 +3199,20 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       const d = Math.hypot(v.x, v.y, v.z);
       if (d > radius) { radius = d; }
     }
+    let composed: ZedModel = {
+      chunks: composedChunks,
+      vertices: composedVertices,
+      indices: composedIndices,
+      textureRefs: [...composedRefs],
+      boundingRadius: radius || 1,
+    };
+    const unitChoice = fallbackPayloads > 0
+      ? { unit: 'scale' as PositionUnit, reason: 'fallback decoder' }
+      : this.choosePositionUnit(composed, rootEntry.name, sourceArchiveName);
+    composed = convertPositionUnit(composed, unitChoice.unit);
+    this.recordDecodeInfo(rootEntry.name, composed, unitChoice);
     return {
-      model: {
-        chunks: composedChunks,
-        vertices: composedVertices,
-        indices: composedIndices,
-        textureRefs: [...composedRefs],
-        boundingRadius: radius || 1,
-      },
+      model: composed,
       payloadsWithChunks,
       fallbackPayloads,
     };
@@ -3387,11 +3519,12 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       }),
     };
 
-    this.modelRenderer.setModel(renderModel, {
+    const renderResult = this.modelRenderer.setModel(renderModel, {
       wireframe: wireframeFromMode,
       flipY: false,
       uvMode: effectiveUvMode,
       chunkIndex: this.selectedChunk(),
+      visualFilter: this.selectedVisual() || null,
       textures,
       defaultTexture: defaultTextureKey ?? defaultTif,
       textureRgba: hasWeaponPrimaryAtlas && defaultTextureKey ? textures[defaultTextureKey] ?? null : null,
@@ -3406,6 +3539,14 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       referenceBounds,
       showBounds: shouldShowMapBounds,
     });
+    const missingForPane = [...new Set([...missingTextureSources, ...failedTextureDecodes, ...renderResult.missingTextures.map(k => k.split('::')[1] ?? k)])].sort();
+    this.modelDecodeInfo.update(info => info
+      ? { ...info, renderedChunks: renderResult.renderedChunks, droppedChunks: renderResult.droppedChunks, missingTextures: missingForPane }
+      : info);
+    if (renderResult.droppedChunks > 0) {
+      this.previewMessage.set(`${renderResult.droppedChunks} chunk(s) not drawn: geometry exceeds the renderer cap (${renderResult.vertices} vertices drawn).`);
+      this.log(`[render] ${renderResult.droppedChunks} chunk(s) dropped at the geometry cap`, true);
+    }
   }
 
   // Decoded thumbnail grid for the current texture archive. Re-runs when
@@ -3565,7 +3706,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
   // ZEDs are parsed inline so model previews resolve textures cross-archive
   // (the gap that caused 64-missing-textures on M51). Other entries are
   // cached by leaf name so drill-ins don't re-fetch them.
-  private applyZdbPackage(nodes: Array<{ index: number; name: string; data: string }>): void {
+  private applyZdbPackage(nodes: Array<{ index: number; name: string; data: NodePayload }>): void {
     this.packageEntryBytes.clear();
     this.packageMpsResults.set([]);
     this.companionScenesByNamespace.clear();
@@ -3578,8 +3719,9 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     for (const node of nodes) {
       if (!node.data) { continue; }
       let bytes: Uint8Array;
-      try { bytes = base64ToBytes(node.data); }
+      try { bytes = nodeBytes(node.data); }
       catch { continue; }
+      if (bytes.length === 0) { continue; }
       const leaf = (node.name.split(/[\\/]/).pop() ?? node.name).toLowerCase();
       const isRootPackageEntry = !hasRootPaths || /[\\/]/.test(node.name);
       if (!isRootPackageEntry) { continue; }
@@ -3661,7 +3803,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
           index: e.index,
           name: e.name,
           type: e.type,
-          data: bytesToBase64(geo.archive.entryData.get(e.index) ?? new Uint8Array(0)),
+          data: geo.archive.entryData.get(e.index) ?? new Uint8Array(0),
         }));
         const scene = parseGeoScene(geoEntries);
         const namespace = namespaceFromArchiveName(geo.name);
@@ -3971,14 +4113,14 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     // takes effect immediately. We re-parse from raw bytes to discard the
     // previous binding's overrides; otherwise switching back to tailScan
     // would leave stale smartWorld picks in place.
-    if (this.currentModelBytes) {
-      try {
-        const mdl = parseModel(this.currentModelBytes, this.parseOptionsFor(this.currentSliceOffsets, this.currentPositionUnit));
-        this.applyCurrentBinding(mdl);
-        this.logChainBinding(this.selectedEntry()?.name ?? 'model', mdl, this.currentPositionUnit);
-        this.model.set(mdl);
-      } catch { /* keep old model */ }
+    if (this.currentModelBytes && this.selectedEntry()) {
+      this.refreshPreview();
+      return;
     }
+    this.applyModelToRenderer();
+  }
+  onSelectedVisualChange(event: Event): void {
+    this.selectedVisual.set((event.target as HTMLSelectElement).value);
     this.applyModelToRenderer();
   }
   onMapPositionUnitChange(event: Event): void {
@@ -4234,7 +4376,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     let rendered = 0;
     let fallbackUsed = 0;
 
-    const decodeHit = (hit: ModelHit, positionUnit: PositionUnit): ZedModel | null => {
+    const decodeHit = (hit: ModelHit): ZedModel | null => {
       const descriptorOffsetsFor = (archive: InspectedZedArchive, childIndices: number[]): ChainOffset[] =>
         chainOffsetsForChildren(archive, childIndices);
       const isWeaponSource = /(^|[\\/])weap_mdl(?:\([^)]+\))?\.zed$/i.test(hit.sourceFile);
@@ -4269,7 +4411,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       const decodePayloadModel = (bytes: Uint8Array, chainOffsets: ChainOffset[] = []): ZedModel | null => {
         let mdl: ZedModel | null = null;
         const descriptorOffsets = chainOffsets.map(c => c.offset);
-        const parseOptions = this.parseOptionsFor(chainOffsets, positionUnit);
+        const parseOptions = this.parseOptionsFor(chainOffsets);
         try {
           mdl = isEffectSource
             ? (decodeFallbackPayload(bytes) ?? parseModel(bytes, parseOptions))
@@ -4328,27 +4470,31 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       return out;
     };
 
-    const unitCounts = new Map<PositionUnit, number>();
+    const unitCounts = new Map<string, number>();
+    const rawCache = new Map<string, ZedModel | null>();
     for (const inst of instances) {
       const hit = resolve(inst.modelName);
       if (!hit) { missing.push(inst.modelName); continue; }
       const bindKey = /(^|[\\/])weap_mdl(?:\([^)]+\))?\.zed$/i.test(hit.sourceFile)
         ? 'tailScan'
         : this.mapMaterialBinding();
-      // The placed node's own vparams decide the unit; a model placed
-      // without visuals of its own falls back to its GEO definition.
-      const overrideUnit = this.mapPositionUnit();
-      const positionUnit: PositionUnit = overrideUnit !== 'auto'
-        ? overrideUnit
-        : inst.positionUnit ?? this.resolvePositionUnit(hit.node.name, hit.sourceFile);
-      unitCounts.set(positionUnit, (unitCounts.get(positionUnit) ?? 0) + 1);
-      const cacheKey = `${hit.sourceFile}|${hit.node.name}|${bindKey}|${positionUnit}`;
+      // Decode once per source model (scale convention), then pick the
+      // unit per placement from the placed node's GEO bounds / flags.
+      const rawKey = `${hit.sourceFile}|${hit.node.name}|${bindKey}`;
+      let raw = rawCache.get(rawKey);
+      if (raw === undefined) {
+        raw = decodeHit(hit);
+        rawCache.set(rawKey, raw);
+      }
+      if (!raw) { continue; }
+      const choice = this.choosePositionUnit(raw, hit.node.name, hit.sourceFile, inst.node);
+      const unitLabel = `${choice.unit} (${choice.reason})`;
+      unitCounts.set(unitLabel, (unitCounts.get(unitLabel) ?? 0) + 1);
+      const cacheKey = `${rawKey}|${choice.unit}`;
       let mdl = meshCache.get(cacheKey);
       if (!mdl) {
-        const decoded = decodeHit(hit, positionUnit);
-        if (!decoded) { continue; }
-        mdl = decoded;
-        meshCache.set(cacheKey, decoded);
+        mdl = convertPositionUnit(raw, choice.unit);
+        meshCache.set(cacheKey, mdl);
       }
 
       const vertexBase = composedVertices.length;
@@ -4388,6 +4534,12 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       boundingRadius: radius || 1,
     };
 
+    // The pane shows the unit most placements used; the log has the full
+    // per-reason breakdown.
+    const dominant = [...unitCounts.entries()].sort((a, b) => b[1] - a[1])[0];
+    const dominantUnit: PositionUnit = dominant && dominant[0].startsWith('sixteenth') ? 'sixteenth' : 'scale';
+    this.recordDecodeInfo(`GEO ${root.name}`, composedModel, { unit: dominantUnit, reason: 'per placement' });
+    this.selectedVisual.set('');
     this.model.set(composedModel);
     this.previewMode.set('model');
     this.currentModelBytes = null; // composed scene has no single payload
@@ -4403,6 +4555,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     const coloured = composedChunks.filter(c => c.hasVertexColors).length;
     const unitSummary = [...unitCounts].map(([unit, n]) => `${unit}=${n}`).join(', ');
     this.log(`[chain] ${chainBound}/${composedChunks.length} chunk(s) texture-bound by DMA chain, ${coloured} with vertex colours; position units: ${unitSummary || '(none)'}`);
+    this.modelDecodeInfo.update(info => info ? { ...info, unitReason: `per placement: ${unitSummary || 'none'}` } : info);
     const instanceBounds = this.boundsFromGeoInstances(instances);
     const composedBounds = this.boundsFromVertices(composedVertices);
     if (instanceBounds) { this.log(`[bounds] GEO instance origins ${this.formatBounds(instanceBounds)}`); }
@@ -4458,7 +4611,6 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     const composedChunks: ZedModel['chunks'] = [];
     const composedRefs = new Set<string>();
     let payloadsWithChunks = 0;
-    const positionUnit = this.resolvePositionUnit(rootEntry.name, sourceArchiveName);
 
     const descriptorOffsetsFor = (childIndices: number[]): ChainOffset[] =>
       chainOffsetsForChildren(archive, childIndices);
@@ -4473,7 +4625,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       if (bytes && bytes.length > 0) {
         let local: ZedModel | null = null;
         const chainOffsets = descriptorOffsetsFor(ent.children);
-        const parseOptions = this.parseOptionsFor(chainOffsets, positionUnit);
+        const parseOptions = this.parseOptionsFor(chainOffsets);
         try {
           local = this.isCurrentEffectModelLayer()
             ? (decodeFallbackPayload(bytes) ?? parseModel(bytes, parseOptions))
@@ -4537,13 +4689,18 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       const d = Math.hypot(v.x, v.y, v.z);
       if (d > radius) { radius = d; }
     }
-    this.model.set({
+    let composedModel: ZedModel = {
       chunks: composedChunks,
       vertices: composedVertices,
       indices: composedIndices,
       textureRefs: [...composedRefs],
       boundingRadius: radius || 1,
-    });
+    };
+    const unitChoice = this.choosePositionUnit(composedModel, rootEntry.name, sourceArchiveName);
+    composedModel = convertPositionUnit(composedModel, unitChoice.unit);
+    this.recordDecodeInfo(rootEntry.name, composedModel, unitChoice);
+    this.selectedVisual.set('');
+    this.model.set(composedModel);
     this.previewMode.set('model');
     this.currentModelBytes = null;
     this.currentSliceOffsets = [];
@@ -5201,6 +5358,41 @@ function textureVisibilityScore(tex: ZedTexture): number {
   }
   if (visible === 0) { return 0; }
   return (visible / sampled) * 10 + (lit / visible) * 20 + (colorEnergy / visible) / 16;
+}
+
+// Node payloads arrive from the extension host either as base64 (older
+// bridge responses, companion files) or as binary (ArrayBuffer / typed
+// array, the package and node reads). Normalise at the boundary.
+type NodePayload = string | ArrayBuffer | Uint8Array | null | undefined;
+
+function nodeBytes(payload: NodePayload): Uint8Array {
+  if (!payload) { return new Uint8Array(0); }
+  if (typeof payload === 'string') { return base64ToBytes(payload); }
+  if (payload instanceof Uint8Array) { return payload; }
+  if (payload instanceof ArrayBuffer) { return new Uint8Array(payload); }
+  // Structured-clone of a Buffer can arrive as a plain object with numeric
+  // keys or a { type: 'Buffer', data: [...] } shape.
+  const anyPayload = payload as { data?: unknown; type?: string };
+  if (anyPayload && Array.isArray(anyPayload.data)) { return Uint8Array.from(anyPayload.data as number[]); }
+  throw new Error('Unsupported node payload');
+}
+
+interface PositionUnitChoice {
+  unit: PositionUnit;
+  reason: string;
+}
+
+interface ModelDecodeInfo {
+  binding: string;
+  visuals: number;
+  chunks: number;
+  chainBound: number;
+  coloured: number;
+  unit: PositionUnit;
+  unitReason: string;
+  renderedChunks: number | null;
+  droppedChunks: number;
+  missingTextures: string[];
 }
 
 function bytesToBase64(bytes: Uint8Array): string {

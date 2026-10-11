@@ -13,8 +13,8 @@ const MAX_UNIQUE_MATERIALS = 64;
 // payload that isn't actually a 3D model (UI / script blobs that happen to
 // match the chunk magic). Crashing the GPU process with a 200MB typed
 // array is exactly the failure mode the user has been hitting.
-const MAX_VERTICES_TOTAL = 200_000;
-const MAX_INDICES_TOTAL = 600_000;
+const MAX_VERTICES_TOTAL = 2_000_000;
+const MAX_INDICES_TOTAL = 6_000_000;
 
 // Three.js viewer for ZED model payloads. Mirrors the structure of the PS2
 // memory-card icon renderer (resize observer, raf loop, dispose) but uses an
@@ -84,6 +84,22 @@ export interface ModelRendererOptions {
   cameraView?: ModelCameraView;
   referenceBounds?: { label?: string; bounds: ModelBounds3 } | null;
   showBounds?: boolean;
+  // Only draw chunks whose visualKey matches (null / undefined = all).
+  visualFilter?: string | null;
+}
+
+// What setModel actually drew, so the UI can say when chunks were left out.
+export interface ModelRenderResult {
+  totalChunks: number;
+  renderedChunks: number;
+  // Chunks skipped because the geometry caps were reached.
+  droppedChunks: number;
+  vertices: number;
+  triangles: number;
+  materials: number;
+  // .tif keys that were requested but had no decoded pixels.
+  missingTextures: string[];
+  usedVertexColors: boolean;
 }
 
 export class ZedModelRenderer {
@@ -149,17 +165,32 @@ export class ZedModelRenderer {
     this.animate();
   }
 
-  setModel(model: ZedModel | null, options: ModelRendererOptions = {}): void {
+  setModel(model: ZedModel | null, options: ModelRendererOptions = {}): ModelRenderResult {
     this.disposeMesh();
-    if (!model || model.chunks.length === 0) { return; }
+    const empty: ModelRenderResult = {
+      totalChunks: model?.chunks.length ?? 0,
+      renderedChunks: 0,
+      droppedChunks: 0,
+      vertices: 0,
+      triangles: 0,
+      materials: 0,
+      missingTextures: [],
+      usedVertexColors: false,
+    };
+    if (!model || model.chunks.length === 0) { return empty; }
 
-    // Restrict to a single chunk if requested.
-    const visibleChunks =
+    // Restrict to a single chunk / visual if requested.
+    let visibleChunks =
       options.chunkIndex !== undefined &&
       options.chunkIndex >= 0 &&
       options.chunkIndex < model.chunks.length
         ? [model.chunks[options.chunkIndex]]
         : model.chunks;
+    if (options.visualFilter) {
+      const filtered = visibleChunks.filter(c => c.visualKey === options.visualFilter);
+      if (filtered.length > 0) { visibleChunks = filtered; }
+    }
+    const missingTextures = new Set<string>();
 
     this.wireframe = !!options.wireframe;
     const textures = options.textures ?? {};
@@ -185,21 +216,18 @@ export class ZedModelRenderer {
     // back to a plain grey material.
     const makeMaterial = (color: number, map?: THREE.DataTexture, pixels?: ModelTexturePixels): THREE.Material => {
       // Per-texture alpha. Effects keep the soft-blend setup they had
-      // (transparentTextures). Otherwise the GS alpha test from the
-      // texture's TEST register wins, and textures with transparent texels
-      // but no test get a cutout threshold so fences, foliage and decals
-      // read correctly.
+      // (transparentTextures). Otherwise texels are only discarded when the
+      // texture's own GS TEST register enables an alpha test, exactly as
+      // the game does; decoded alpha is ignored for everything else so a
+      // palette with black entries never punches holes in a wall.
       const gsAlphaTest = pixels?.alphaTest ?? null;
       let alphaTest: number;
       let translucent: boolean;
       if (transparentTextures) {
         alphaTest = gsAlphaTest ?? 0.02;
         translucent = true;
-      } else if (gsAlphaTest !== null) {
+      } else if (gsAlphaTest !== null && pixels?.hasTransparency) {
         alphaTest = gsAlphaTest;
-        translucent = !!pixels?.hasTransparency && gsAlphaTest < 0.5;
-      } else if (pixels?.hasTransparency) {
-        alphaTest = 0.5;
         translucent = false;
       } else {
         alphaTest = 0;
@@ -245,7 +273,7 @@ export class ZedModelRenderer {
       // the renderer process by allocating dozens of WebGL textures.
       if (this.materials.length >= MAX_UNIQUE_MATERIALS) { return 0; }
       const tex = textures[key] ?? fallbackTexture;
-      if (!tex) { return 0; }
+      if (!tex) { missingTextures.add(key); return 0; }
       // Sanity-check the decoded texture so a malformed header doesn't
       // bring down the GPU process. PS2 textures are always 2^N square in
       // practice; anything bigger than 2048 or smaller than 4 is junk.
@@ -304,15 +332,17 @@ export class ZedModelRenderer {
       }
       return [outU, outV];
     };
-    let bailedOnSize = false;
+    let droppedChunks = 0;
+    let renderedChunks = 0;
     for (const chunk of visibleChunks) {
       // Hard stop: a single malformed chunk shouldn't be able to allocate
       // millions of floats and tip the renderer process over the OOM line.
-      // PS2 chunks are at most ~4k verts in practice; anything past
-      // MAX_VERTICES_TOTAL is almost certainly a mis-parsed payload (likely
-      // a UI / scripting blob that happened to satisfy the chunk magic).
-      if (vBase + chunk.vertices.length > MAX_VERTICES_TOTAL) { bailedOnSize = true; break; }
-      if (iBase + chunk.indices.length > MAX_INDICES_TOTAL) { bailedOnSize = true; break; }
+      // Chunks past the cap are counted and reported, never silently lost.
+      if (vBase + chunk.vertices.length > MAX_VERTICES_TOTAL || iBase + chunk.indices.length > MAX_INDICES_TOTAL) {
+        droppedChunks++;
+        continue;
+      }
+      renderedChunks++;
       const chunkHasColors = !!chunk.hasVertexColors;
       for (const v of chunk.vertices) {
         allPositions.push(v.x, v.y, v.z);
@@ -347,13 +377,23 @@ export class ZedModelRenderer {
       iBase += kept;
     }
 
-    if (bailedOnSize) {
+    if (droppedChunks > 0) {
       console.warn(
-        `[ZedModelRenderer] model exceeded vertex/index caps; skipping render. ` +
-          `vBase=${vBase} iBase=${iBase}`,
+        `[ZedModelRenderer] ${droppedChunks} chunk(s) exceeded the vertex/index caps and were not drawn ` +
+          `(vertices=${vBase} indices=${iBase})`,
       );
     }
-    if (allIndices.length === 0) { return; }
+    const result: ModelRenderResult = {
+      totalChunks: model.chunks.length,
+      renderedChunks,
+      droppedChunks,
+      vertices: vBase,
+      triangles: (iBase / 3) | 0,
+      materials: 0,
+      missingTextures: [...missingTextures].sort(),
+      usedVertexColors: useVertexColors,
+    };
+    if (allIndices.length === 0) { return result; }
 
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(allPositions), 3));
@@ -429,6 +469,8 @@ export class ZedModelRenderer {
     }
 
     this.applyCameraView(options.cameraView ?? (options.topDown ? 'top' : 'auto'), !!referenceBox);
+    result.materials = Math.max(0, this.materials.length - 1);
+    return result;
   }
 
   setFlipY(value: boolean): void {

@@ -68,6 +68,16 @@ public class ZedChainAndGsTests
     }
 
     [TestMethod]
+    public void Model_ParseWithChains_DecodesSharedGeometryOnce()
+    {
+        var (payload, offsets) = BuildChainModel();
+        var twice = new List<ZedModelFile.ChainOffset>(offsets) { new() { Offset = offsets[0].Offset, Key = "N001_000" } };
+        var model = ZedModelFile.Parse(payload, twice);
+        Assert.IsTrue(model.FromChains);
+        Assert.AreEqual(2, model.Chunks.Count, "a second visual over the same chunks adds nothing");
+    }
+
+    [TestMethod]
     public void Model_ParseWithChains_RejectsGarbageOffsets()
     {
         var (payload, _) = BuildChainModel();
