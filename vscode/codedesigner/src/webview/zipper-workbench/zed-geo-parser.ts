@@ -23,7 +23,21 @@ export interface NodeParams {
 
 export interface VisualParams {
   rawBytes: Uint8Array;
+  // vparams layout (SOCOM II, from the pack builders in Mods/SOCOMCA):
+  //   u32 flags, u32 lod, u16 triangles, u16 vertices, float centre x/y/z
+  // flags 0x000BC0FA = weapon (positions normalised by the chunk scale),
+  // 0x0009C0FA = prop / vehicle / map object (positions in 1/16 units).
+  flags?: number;
+  triangleCount?: number;
+  vertexCount?: number;
+  centre?: [number, number, number];
 }
+
+// vparams flag bit: vertex positions are int16 / 32768 * chunk scale (set on
+// weapons) instead of int16 * scale / 16 (props, vehicles, map objects).
+export const VPARAMS_FLAG_SCALE_NORMALISED = 0x20000;
+
+export type GeoPositionUnit = 'scale' | 'sixteenth';
 
 export interface GeoNode {
   name: string;
@@ -71,7 +85,42 @@ function parseNodeParams(bytes: Uint8Array): NodeParams | undefined {
 }
 
 function parseVisualParams(bytes: Uint8Array): VisualParams {
-  return { rawBytes: bytes };
+  const out: VisualParams = { rawBytes: bytes };
+  if (bytes.length >= 12) {
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    out.flags = view.getUint32(0, true);
+    out.triangleCount = view.getUint16(8, true);
+    out.vertexCount = view.getUint16(10, true);
+    if (bytes.length >= 24) {
+      out.centre = [view.getFloat32(12, true), view.getFloat32(16, true), view.getFloat32(20, true)];
+    }
+  }
+  return out;
+}
+
+// First vparams flags word found under `node` (its own visuals first, then
+// its descendants). Null when the subtree has no visuals.
+export function readVisualFlags(node: GeoNode | null): number | null {
+  if (!node) { return null; }
+  const visuals = node.children.find(c => c.name === 'visuals');
+  if (visuals) {
+    for (const vis of visuals.children) {
+      const vparams = vis.children.find(c => c.name === 'vparams');
+      if (vparams?.vparams?.flags !== undefined) { return vparams.vparams.flags; }
+    }
+  }
+  for (const c of node.children) {
+    const found = readVisualFlags(c);
+    if (found !== null) { return found; }
+  }
+  return null;
+}
+
+// Position unit implied by a GEO node's visual flags, or null when unknown.
+export function positionUnitForNode(node: GeoNode | null): GeoPositionUnit | null {
+  const flags = readVisualFlags(node);
+  if (flags === null) { return null; }
+  return (flags & VPARAMS_FLAG_SCALE_NORMALISED) !== 0 ? 'scale' : 'sixteenth';
 }
 
 // Walk the flat entry list using `type` as the child count for the next N
@@ -189,6 +238,8 @@ export interface GeoInstance {
   matrix: number[];
   // Source GEO node for further inspection.
   node: GeoNode;
+  // Position unit from the node's vparams flags (null when it has none).
+  positionUnit: GeoPositionUnit | null;
 }
 
 export interface CollectGeoInstancesOptions {
@@ -314,6 +365,7 @@ export function collectGeoInstances(scene: GeoScene, root: GeoNode, options: Col
         path: formatGeoPath(node, scene.root),
         matrix: worldMatrix,
         node,
+        positionUnit: positionUnitForNode(node),
       });
     }
 

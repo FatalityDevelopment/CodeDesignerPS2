@@ -24,7 +24,7 @@ import {
   ZedPalette,
   ZedTexture,
 } from './zed-texture-parser';
-import { ZedModel, applyMarkerBinding, applyWeaponDescriptorBinding, decodeCharacterFallbackPayload, decodeFallbackPayload, looksLikeZedContainer, parseModel } from './zed-model-parser';
+import { ChainOffset, PositionUnit, ZedModel, applyMarkerBinding, applyWeaponDescriptorBinding, decodeCharacterFallbackPayload, decodeFallbackPayload, looksLikeZedContainer, parseModel } from './zed-model-parser';
 import { InspectedZedArchive, parseZedArchive } from './zed-archive-parser';
 import { type ModelBounds3, type ModelCameraView, ZedModelRenderer } from './zed-model-renderer';
 import {
@@ -54,6 +54,7 @@ import {
   findSceneNode,
   instanceNameVariants,
   parseGeoScene,
+  positionUnitForNode,
   readGeoTransform,
   transformPoint,
 } from './zed-geo-parser';
@@ -888,6 +889,14 @@ interface RdrTreeNode {
                             <option value="pixel256">raw / 256 pixel tiled</option>
                           </select>
                         </div>
+                        <div class="zip-map-ctrl">
+                          <span>Position units</span>
+                          <select [value]="mapPositionUnit()" (change)="onMapPositionUnitChange($event)" title="How int16 vertex positions map to units. auto reads the GEO vparams flags: weapons normalise by the chunk scale, props / vehicles / map objects store 1/16 units.">
+                            <option value="auto">auto (GEO vparams flags)</option>
+                            <option value="scale">chunk scale / 32768 (weapons)</option>
+                            <option value="sixteenth">1/16 units (props, vehicles, map)</option>
+                          </select>
+                        </div>
                       </div>
                       @if (activeMapCameraReference(); as ref) {
                         <div><span>Nearest map bounds</span><strong>{{ ref.label }}</strong></div>
@@ -900,10 +909,11 @@ interface RdrTreeNode {
                       <div class="zip-map-controls">
                         <div class="zip-map-ctrl">
                           <span>Binding</span>
-                          <select [value]="mapMaterialBinding()" (change)="onMapMaterialBindingChange($event)">
+                          <select [value]="mapMaterialBinding()" (change)="onMapMaterialBindingChange($event)" title="chain = exact binding from the model's DMA chains (texture per material section + baked vertex colours), as the game draws it. The marker modes are string-scan heuristics for payloads without chains.">
+                            <option value="chain">DMA chain (exact, default)</option>
                             <option value="tailScan">tail scan</option>
                             <option value="smartWorld">smart world marker</option>
-                            <option value="sliceNearest">slice nearest marker (default)</option>
+                            <option value="sliceNearest">slice nearest marker</option>
                             <option value="globalNearest">global nearest marker</option>
                           </select>
                         </div>
@@ -1204,16 +1214,23 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
   // material-binding signal used in the model parser path.
   readonly mapRenderMode = signal<'view3dTexturedLit' | 'view3dTextured' | 'view3dSolid' | 'topSolid' | 'topWire' | 'view3dWire'>('view3dTexturedLit');
   readonly mapTriStride = signal<number>(1);
-  // Default to slice-nearest to match the M51 HTML model viewer: tail scan
-  // first, then nearest marker inside Nxxx child-offset slices.
-  // WEAP_MDL payloads are forced back to tail-scan in the decode paths below:
+  // Default to the DMA chain: the N<node>_<visual> stubs point at chains
+  // that name the .tif for every material section and carry the baked
+  // vertex colours, which is exactly how the game draws the model. The
+  // marker heuristics stay as fallbacks for payloads without chains.
+  // WEAP_MDL payloads are forced back to tail-scan in the marker modes:
   // weapon payloads often store helper + primary .tif names in one marker
   // block, and smart marker binding can pick the helper atlas.
-  readonly mapMaterialBinding = signal<'tailScan' | 'smartWorld' | 'sliceNearest' | 'globalNearest'>('sliceNearest');
+  readonly mapMaterialBinding = signal<'chain' | 'tailScan' | 'smartWorld' | 'sliceNearest' | 'globalNearest'>('chain');
+  // How int16 vertex positions map to units. 'auto' reads the GEO vparams
+  // flags (weapons: int16 / 32768 * chunk scale; props, vehicles and map
+  // objects: int16 * scale / 16) and falls back to the scale convention.
+  readonly mapPositionUnit = signal<'auto' | PositionUnit>('auto');
   // The raw model bytes for the currently-displayed model, kept so we can
   // re-run the binding pass on dropdown change without re-decoding.
   private currentModelBytes: Uint8Array | null = null;
-  private currentSliceOffsets: number[] = [];
+  private currentSliceOffsets: ChainOffset[] = [];
+  private currentPositionUnit: PositionUnit = 'scale';
   private currentModelBindingMode: 'weaponDescriptor' | 'map' | 'tail' = 'tail';
   private currentModelSourceArchive: string | null = null;
   readonly mapTextureV = signal<'flipV' | 'direct'>('flipV');
@@ -2403,8 +2420,15 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
         this.textureDataUrl.set(textureToDataUrl(tex));
         this.previewMessage.set(
           tex.header.isIndexed && !tex.paletteResolved
-            ? `Palette texpal_${tex.header.paletteId} not loaded`
+            ? `Palette texpal_${tex.header.cbp ?? tex.header.paletteId} not loaded`
             : ''
+        );
+        const gs = tex.header.gs;
+        this.log(
+          `[texture] ${entry.name}: ${tex.header.width}x${tex.header.height} psm=0x${tex.header.psm.toString(16)} bpp=${tex.header.bpp}` +
+          (gs ? ` cbp=${gs.cbp} cpsm=${gs.cpsm} wrap=${gs.wrapS}/${gs.wrapT} alphaTest=${gs.alphaTest === null ? 'off' : gs.alphaTest.toFixed(2)} blend=${gs.alphaBlend}` : ' (no GS tail)') +
+          (tex.header.isIndexed ? ` palette=${tex.paletteResolved ? 'ok' : 'missing'}` : '') +
+          (tex.hasTransparency ? ' transparent' : ''),
         );
       } catch (err) {
         this.texture.set(null);
@@ -2488,9 +2512,11 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
         return;
       }
 
+      const positionUnit = this.resolvePositionUnit(entry.name, sourceArchive);
+      const parseOptions = this.parseOptionsFor(sliceOffsets, positionUnit);
       let mdl = this.isCurrentEffectModelLayer()
-        ? (decodeFallbackPayload(modelBytes) ?? parseModel(modelBytes))
-        : parseModel(modelBytes);
+        ? (decodeFallbackPayload(modelBytes) ?? parseModel(modelBytes, parseOptions))
+        : parseModel(modelBytes, parseOptions);
       let fallbackUsed = false;
       // If the standard chunk format yielded nothing (common for CLIB
       // MESH_* payloads which start with their name as ASCII rather than
@@ -2511,9 +2537,11 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       }
       this.currentModelBytes = modelBytes;
       this.currentSliceOffsets = sliceOffsets;
+      this.currentPositionUnit = positionUnit;
       this.currentModelBindingMode = bindingMode;
       this.currentModelSourceArchive = sourceArchive;
       this.applyCurrentBinding(mdl);
+      if (mdl.chunks.length > 0 && !fallbackUsed) { this.logChainBinding(entry.name, mdl, positionUnit); }
       this.model.set(mdl);
       if (mdl.chunks.length === 0) {
         this.previewMessage.set(
@@ -2591,7 +2619,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     return true;
   }
 
-  private resolveAlternateModelPayload(entryName: string): { bytes: Uint8Array; sliceOffsets: number[]; sourceName: string; sourceArchiveName: string } | null {
+  private resolveAlternateModelPayload(entryName: string): { bytes: Uint8Array; sliceOffsets: ChainOffset[]; sourceName: string; sourceArchiveName: string } | null {
     if (entryName.toLowerCase() !== 'footbomb') { return null; }
     const flibBytes = this.packageEntryBytes.get('flib_mdl.zed');
     if (!flibBytes) { return null; }
@@ -2601,13 +2629,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       if (!satchel) { return null; }
       const bytes = archive.entryData.get(satchel.index);
       if (!bytes || bytes.length === 0) { return null; }
-      const sliceOffsets: number[] = [];
-      for (const childIdx of satchel.children) {
-        const childBytes = archive.entryData.get(childIdx);
-        if (!childBytes || childBytes.length !== 4) { continue; }
-        const view = new DataView(childBytes.buffer, childBytes.byteOffset, 4);
-        sliceOffsets.push(view.getUint32(0, true));
-      }
+      const sliceOffsets = chainOffsetsForChildren(archive, satchel.children);
       return { bytes, sliceOffsets, sourceName: 'flib_mdl.zed / Satchel', sourceArchiveName: 'flib_mdl.zed' };
     } catch {
       return null;
@@ -2720,20 +2742,14 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
   // These nodes hold 4-byte payloads = byte offsets into the parent model
   // payload, defining where each material slice begins. Returns [] when no
   // sub-archive context is available (e.g. opened a raw model directly).
-  private collectSliceOffsetsForCurrentEntry(options: { siblingFallback?: boolean } = {}): number[] {
+  private collectSliceOffsetsForCurrentEntry(options: { siblingFallback?: boolean } = {}): ChainOffset[] {
     const entry = this.selectedEntry();
     const stack = this.archiveStack();
     if (!entry || stack.length === 0) { return []; }
     const archive = stack[stack.length - 1].archive;
     const modelEntry = archive.entries.find(e => e.index === entry.index);
     if (!modelEntry) { return []; }
-    const offsets: number[] = [];
-    for (const childIdx of modelEntry.children) {
-      const childBytes = archive.entryData.get(childIdx);
-      if (!childBytes || childBytes.length !== 4) { continue; }
-      const view = new DataView(childBytes.buffer, childBytes.byteOffset, 4);
-      offsets.push(view.getUint32(0, true));
-    }
+    const offsets = chainOffsetsForChildren(archive, modelEntry.children);
     if (offsets.length > 0 || !options.siblingFallback) { return offsets; }
 
     // The standalone M51 viewer learned these material slices by scanning
@@ -2749,7 +2765,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       const size = siblingBytes?.length ?? sibling.size;
       if (size === 4 && /^N\d+/i.test(leaf) && siblingBytes) {
         const view = new DataView(siblingBytes.buffer, siblingBytes.byteOffset, 4);
-        offsets.push(view.getUint32(0, true));
+        offsets.push({ offset: view.getUint32(0, true), key: leaf });
         continue;
       }
       if (size > 64 || (!/^N\d+/i.test(leaf) && size !== 4)) { break; }
@@ -2765,14 +2781,56 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
   // existing chunk.textureName from findTifInRange is preserved.
   private applyCurrentBinding(mdl: ZedModel): void {
     if (!this.currentModelBytes) { return; }
+    // Chain-bound chunks already carry the exact texture per section.
+    if (mdl.chunks.some(c => c.textureBinding === 'chain')) { return; }
+    const sliceOffsets = this.currentSliceOffsets.map(c => c.offset);
     if (this.currentModelBindingMode === 'weaponDescriptor') {
-      applyWeaponDescriptorBinding(mdl, this.currentModelBytes, this.currentSliceOffsets);
+      applyWeaponDescriptorBinding(mdl, this.currentModelBytes, sliceOffsets);
       return;
     }
     if (this.currentModelBindingMode === 'tail') { return; }
     const mode = this.mapMaterialBinding();
-    if (mode === 'tailScan') { return; }
-    applyMarkerBinding(mdl, this.currentModelBytes, this.currentSliceOffsets, mode);
+    if (mode === 'tailScan' || mode === 'chain') { return; }
+    applyMarkerBinding(mdl, this.currentModelBytes, sliceOffsets, mode);
+  }
+
+  // Parse options for the current binding dropdown: chain offsets are only
+  // handed to the parser in chain mode so the marker modes still show the
+  // heuristic result the user asked for.
+  private parseOptionsFor(chainOffsets: ChainOffset[], positionUnit: PositionUnit): { chainOffsets?: ChainOffset[]; positionUnit: PositionUnit } {
+    return this.mapMaterialBinding() === 'chain'
+      ? { chainOffsets, positionUnit }
+      : { positionUnit };
+  }
+
+  // Position unit for a model: the dropdown override, else the GEO node's
+  // vparams flags (weapons normalise by the chunk scale, everything else is
+  // 1/16 units), else the scale convention.
+  private resolvePositionUnit(entryName: string | null | undefined, sourceArchiveName: string | null | undefined, geoNode: GeoNode | null = null): PositionUnit {
+    const override = this.mapPositionUnit();
+    if (override !== 'auto') { return override; }
+    let node = geoNode;
+    if (!node && entryName) {
+      const scene = this.companionSceneForArchive(sourceArchiveName);
+      if (scene) {
+        for (const name of this.characterGeoNameCandidates(entryName)) {
+          node = findSceneNode(scene, name);
+          if (node) { break; }
+        }
+      }
+    }
+    return positionUnitForNode(node) ?? 'scale';
+  }
+
+  private logChainBinding(label: string, mdl: ZedModel, unit: PositionUnit): void {
+    const chainBound = mdl.chunks.filter(c => c.textureBinding === 'chain').length;
+    const coloured = mdl.chunks.filter(c => c.hasVertexColors).length;
+    const visuals = new Set(mdl.chunks.map(c => c.visualKey).filter(Boolean)).size;
+    if (chainBound === 0 && coloured === 0 && visuals === 0) {
+      this.log(`[chain] ${label}: no DMA chains (binding=${this.mapMaterialBinding()}, units=${unit})`);
+      return;
+    }
+    this.log(`[chain] ${label}: ${visuals} visual(s), ${chainBound}/${mdl.chunks.length} chunk(s) texture-bound, ${coloured} with vertex colours, units=${unit}`);
   }
 
   private isCurrentWeaponModelLayer(): boolean {
@@ -2893,19 +2951,12 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       ? this.characterBoneMatricesForEntry(rootEntry.name, sourceArchiveName)
       : null;
     const bindMode = isWeaponSource || isEffectSource ? 'tailScan' : this.mapMaterialBinding();
+    const positionUnit = this.resolvePositionUnit(rootEntry.name, sourceArchiveName);
     let payloadsWithChunks = 0;
     let fallbackPayloads = 0;
 
-    const descriptorOffsetsFor = (childIndices: number[]): number[] => {
-      const offsets: number[] = [];
-      for (const childIdx of childIndices) {
-        const childBytes = archive.entryData.get(childIdx);
-        if (!childBytes || childBytes.length !== 4) { continue; }
-        const view = new DataView(childBytes.buffer, childBytes.byteOffset, 4);
-        offsets.push(view.getUint32(0, true));
-      }
-      return offsets;
-    };
+    const descriptorOffsetsFor = (childIndices: number[]): ChainOffset[] =>
+      chainOffsetsForChildren(archive, childIndices);
 
     const hasOnlyDescriptorChildren = (entry: InspectedZedArchive['entries'][number]): boolean =>
       entry.children.length > 0 &&
@@ -2926,15 +2977,17 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     const decodePayloadModel = (
       bytes: Uint8Array,
       entryForBytes: InspectedZedArchive['entries'][number],
-      descriptorOffsets: number[],
+      chainOffsets: ChainOffset[],
     ): DecodedPayloadModel | null => {
       let mdl: ZedModel | null = null;
       let bakedByCharacterBones = false;
+      const descriptorOffsets = chainOffsets.map(c => c.offset);
+      const parseOptions = this.parseOptionsFor(chainOffsets, positionUnit);
 
       try {
         mdl = isEffectSource
-          ? (decodeFallbackPayload(bytes) ?? parseModel(bytes))
-          : parseModel(bytes);
+          ? (decodeFallbackPayload(bytes) ?? parseModel(bytes, parseOptions))
+          : parseModel(bytes, parseOptions);
       } catch { mdl = null; }
 
       if ((!mdl || mdl.chunks.length === 0) && canUseFallbackForEntry(entryForBytes)) {
@@ -2952,11 +3005,12 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       }
 
       if (!mdl || mdl.chunks.length === 0) { return null; }
-      if (isWeaponSource) {
+      const chainBound = mdl.chunks.some(c => c.textureBinding === 'chain');
+      if (isWeaponSource && !chainBound) {
         try { applyWeaponDescriptorBinding(mdl, bytes, descriptorOffsets); }
         catch { /* keep tail-scan names */ }
       }
-      if (!isWeaponSource && !isEffectSource && bindMode !== 'tailScan') {
+      if (!isWeaponSource && !isEffectSource && !chainBound && bindMode !== 'tailScan' && bindMode !== 'chain') {
         try { applyMarkerBinding(mdl, bytes, descriptorOffsets, bindMode); }
         catch { /* keep tail-scan names */ }
       }
@@ -3106,7 +3160,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     // PS2 weapon models use a single atlas .tif per weapon - the chunks
     // sample different UV regions of the same sheet. Pick a primary atlas
     // texture for the weapon, then load any per-chunk overrides on top.
-    const textures: Record<string, { width: number; height: number; rgba: Uint8Array }> = {};
+    const textures: Record<string, ReturnType<typeof texturePixelsFor>> = {};
     const missingTextureSources = new Set<string>();
     const failedTextureDecodes = new Set<string>();
     const paletteOverride = this.paletteOverride();
@@ -3176,7 +3230,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
             const aliasForLookup = forcedPaletteAlias ?? defaultTif;
             defaultTextureKey = textureRenderKeyFor(entry.name, defaultTif, forcedPaletteAlias);
             const tex = parseModelTexture(bytes, palettes, aliasForLookup, defaultTif);
-            textures[defaultTextureKey] = { width: tex.header.width, height: tex.header.height, rgba: tex.rgba };
+            textures[defaultTextureKey] = texturePixelsFor(tex);
           } catch {
             failedTextureDecodes.add(defaultTif);
             defaultTif = null;
@@ -3211,6 +3265,9 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     // Per-chunk overrides for chunks that explicitly reference a different tif.
     const effectiveChunkTexture = (chunk: ZedModel['chunks'][number]): string | null => {
       const name = chunk.textureName;
+      // A chain-bound name is the texture the game draws this section
+      // with; none of the weapon atlas guesses apply.
+      if (chunk.textureBinding === 'chain') { return name; }
       const chunkDefaultTif = isGeoComposedModel ? weaponDefaultForComposedChunk(chunk) : defaultTif;
       if (!name || !chunkDefaultTif) { return name; }
       if (chunk.textureBinding === 'descriptor') {
@@ -3261,7 +3318,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       try {
         const aliasForLookup = req.paletteAlias ?? req.textureName;
         const tex = parseModelTexture(bytes, palettes, aliasForLookup, req.textureName);
-        textures[key] = { width: tex.header.width, height: tex.header.height, rgba: tex.rgba };
+        textures[key] = texturePixelsFor(tex);
       } catch { failedTextureDecodes.add(req.textureName); }
     }
 
@@ -3916,10 +3973,21 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     // would leave stale smartWorld picks in place.
     if (this.currentModelBytes) {
       try {
-        const mdl = parseModel(this.currentModelBytes);
+        const mdl = parseModel(this.currentModelBytes, this.parseOptionsFor(this.currentSliceOffsets, this.currentPositionUnit));
         this.applyCurrentBinding(mdl);
+        this.logChainBinding(this.selectedEntry()?.name ?? 'model', mdl, this.currentPositionUnit);
         this.model.set(mdl);
       } catch { /* keep old model */ }
+    }
+    this.applyModelToRenderer();
+  }
+  onMapPositionUnitChange(event: Event): void {
+    this.mapPositionUnit.set((event.target as HTMLSelectElement).value as ReturnType<typeof this.mapPositionUnit>);
+    // Positions are baked at parse time, so decode the selected payload
+    // again from its cached bytes.
+    if (this.currentModelBytes && this.selectedEntry()) {
+      this.refreshPreview();
+      return;
     }
     this.applyModelToRenderer();
   }
@@ -4031,7 +4099,10 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     for (let i = 0; i < mdl.chunks.length; i++) {
       const c = mdl.chunks[i];
       const binding = c.textureBinding ? ` ${c.textureBinding}` : '';
-      this.log(`  chunk[${i}] tex=${c.textureName ?? '(none)'}${binding} v=${c.vertexCount} t=${c.decodedTriangleCount}/${c.triangleCount} scale=${c.scale.toFixed(4)}`);
+      const visual = c.visualKey ? ` visual=${c.visualKey}` : '';
+      const colours = c.hasVertexColors ? ' colours=yes' : '';
+      const unit = c.positionUnit ? ` units=${c.positionUnit}` : '';
+      this.log(`  chunk[${i}] tex=${c.textureName ?? '(none)'}${binding}${visual}${colours}${unit} v=${c.vertexCount} t=${c.decodedTriangleCount}/${c.triangleCount} scale=${c.scale.toFixed(4)}`);
     }
   }
   dumpGeoReport(): void {
@@ -4129,6 +4200,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
           path: root.name,
           matrix: identityMatrix(),
           node: root,
+          positionUnit: positionUnitForNode(root),
         });
       }
     } else if (rootHit) {
@@ -4142,6 +4214,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
         path: root.name,
         matrix: identityMatrix(),
         node: root,
+        positionUnit: positionUnitForNode(root),
       }];
     }
     if (instances.length === 0) {
@@ -4161,17 +4234,9 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     let rendered = 0;
     let fallbackUsed = 0;
 
-    const decodeHit = (hit: ModelHit): ZedModel | null => {
-      const descriptorOffsetsFor = (archive: InspectedZedArchive, childIndices: number[]): number[] => {
-        const offsets: number[] = [];
-        for (const childIdx of childIndices) {
-          const childBytes = archive.entryData.get(childIdx);
-          if (!childBytes || childBytes.length !== 4) { continue; }
-          const view = new DataView(childBytes.buffer, childBytes.byteOffset, 4);
-          offsets.push(view.getUint32(0, true));
-        }
-        return offsets;
-      };
+    const decodeHit = (hit: ModelHit, positionUnit: PositionUnit): ZedModel | null => {
+      const descriptorOffsetsFor = (archive: InspectedZedArchive, childIndices: number[]): ChainOffset[] =>
+        chainOffsetsForChildren(archive, childIndices);
       const isWeaponSource = /(^|[\\/])weap_mdl(?:\([^)]+\))?\.zed$/i.test(hit.sourceFile);
       const isEffectSource = /(^|[\\/])effe_mdl(?:\([^)]+\))?\.zed$/i.test(hit.sourceFile);
       const bindMode = isWeaponSource || isEffectSource ? 'tailScan' : this.mapMaterialBinding();
@@ -4201,12 +4266,14 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
         }
       };
 
-      const decodePayloadModel = (bytes: Uint8Array, descriptorOffsets: number[] = []): ZedModel | null => {
+      const decodePayloadModel = (bytes: Uint8Array, chainOffsets: ChainOffset[] = []): ZedModel | null => {
         let mdl: ZedModel | null = null;
+        const descriptorOffsets = chainOffsets.map(c => c.offset);
+        const parseOptions = this.parseOptionsFor(chainOffsets, positionUnit);
         try {
           mdl = isEffectSource
-            ? (decodeFallbackPayload(bytes) ?? parseModel(bytes))
-            : parseModel(bytes);
+            ? (decodeFallbackPayload(bytes) ?? parseModel(bytes, parseOptions))
+            : parseModel(bytes, parseOptions);
         } catch { mdl = null; }
         if (!mdl || mdl.chunks.length === 0) {
           const fb = decodeFallbackPayload(bytes);
@@ -4215,11 +4282,12 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
             fallbackUsed++;
           }
         }
-        if (mdl && isWeaponSource && descriptorOffsets.length > 0 && mdl.chunks.length > 0) {
+        const chainBound = !!mdl && mdl.chunks.some(c => c.textureBinding === 'chain');
+        if (mdl && isWeaponSource && !chainBound && descriptorOffsets.length > 0 && mdl.chunks.length > 0) {
           try { applyWeaponDescriptorBinding(mdl, bytes, descriptorOffsets); }
           catch { /* keep tail-scan names */ }
         }
-        if (mdl && !isWeaponSource && !isEffectSource && bindMode !== 'tailScan' && mdl.chunks.length > 0) {
+        if (mdl && !isWeaponSource && !isEffectSource && !chainBound && bindMode !== 'tailScan' && bindMode !== 'chain' && mdl.chunks.length > 0) {
           try { applyMarkerBinding(mdl, bytes, descriptorOffsets, bindMode); }
           catch { /* keep tail-scan names */ }
         }
@@ -4260,16 +4328,24 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       return out;
     };
 
+    const unitCounts = new Map<PositionUnit, number>();
     for (const inst of instances) {
       const hit = resolve(inst.modelName);
       if (!hit) { missing.push(inst.modelName); continue; }
       const bindKey = /(^|[\\/])weap_mdl(?:\([^)]+\))?\.zed$/i.test(hit.sourceFile)
         ? 'tailScan'
         : this.mapMaterialBinding();
-      const cacheKey = `${hit.sourceFile}|${hit.node.name}|${bindKey}`;
+      // The placed node's own vparams decide the unit; a model placed
+      // without visuals of its own falls back to its GEO definition.
+      const overrideUnit = this.mapPositionUnit();
+      const positionUnit: PositionUnit = overrideUnit !== 'auto'
+        ? overrideUnit
+        : inst.positionUnit ?? this.resolvePositionUnit(hit.node.name, hit.sourceFile);
+      unitCounts.set(positionUnit, (unitCounts.get(positionUnit) ?? 0) + 1);
+      const cacheKey = `${hit.sourceFile}|${hit.node.name}|${bindKey}|${positionUnit}`;
       let mdl = meshCache.get(cacheKey);
       if (!mdl) {
-        const decoded = decodeHit(hit);
+        const decoded = decodeHit(hit, positionUnit);
         if (!decoded) { continue; }
         mdl = decoded;
         meshCache.set(cacheKey, decoded);
@@ -4323,6 +4399,10 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     this.log('--- GEO scene composed ---', true);
     this.log(`Root: ${root.name}, instances=${instances.length}, rendered=${rendered}, missingModels=${uniqueMissing.length}, fallbackDecodes=${fallbackUsed}`);
     this.log(`Composed model: ${composedVertices.length} verts, ${composedIndices.length / 3 | 0} tris, ${composedChunks.length} chunks across ${meshCache.size} unique source model(s)`);
+    const chainBound = composedChunks.filter(c => c.textureBinding === 'chain').length;
+    const coloured = composedChunks.filter(c => c.hasVertexColors).length;
+    const unitSummary = [...unitCounts].map(([unit, n]) => `${unit}=${n}`).join(', ');
+    this.log(`[chain] ${chainBound}/${composedChunks.length} chunk(s) texture-bound by DMA chain, ${coloured} with vertex colours; position units: ${unitSummary || '(none)'}`);
     const instanceBounds = this.boundsFromGeoInstances(instances);
     const composedBounds = this.boundsFromVertices(composedVertices);
     if (instanceBounds) { this.log(`[bounds] GEO instance origins ${this.formatBounds(instanceBounds)}`); }
@@ -4378,17 +4458,10 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     const composedChunks: ZedModel['chunks'] = [];
     const composedRefs = new Set<string>();
     let payloadsWithChunks = 0;
+    const positionUnit = this.resolvePositionUnit(rootEntry.name, sourceArchiveName);
 
-    const descriptorOffsetsFor = (childIndices: number[]): number[] => {
-      const offsets: number[] = [];
-      for (const childIdx of childIndices) {
-        const childBytes = archive.entryData.get(childIdx);
-        if (!childBytes || childBytes.length !== 4) { continue; }
-        const view = new DataView(childBytes.buffer, childBytes.byteOffset, 4);
-        offsets.push(view.getUint32(0, true));
-      }
-      return offsets;
-    };
+    const descriptorOffsetsFor = (childIndices: number[]): ChainOffset[] =>
+      chainOffsetsForChildren(archive, childIndices);
 
     const visit = (entryIndex: number, parentMatrix: number[]) => {
       const ent = archive.entries.find(e => e.index === entryIndex);
@@ -4399,10 +4472,12 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
 
       if (bytes && bytes.length > 0) {
         let local: ZedModel | null = null;
+        const chainOffsets = descriptorOffsetsFor(ent.children);
+        const parseOptions = this.parseOptionsFor(chainOffsets, positionUnit);
         try {
           local = this.isCurrentEffectModelLayer()
-            ? (decodeFallbackPayload(bytes) ?? parseModel(bytes))
-            : parseModel(bytes);
+            ? (decodeFallbackPayload(bytes) ?? parseModel(bytes, parseOptions))
+            : parseModel(bytes, parseOptions);
         } catch { local = null; }
         // CLIB / similar payloads don't use the standard chunk format —
         // fall back to VIF / vertex-cloud decoding so the hierarchical
@@ -4415,15 +4490,16 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
           // chunks while we still have the right bytes in hand. Composed
           // chunk offsets are mangled across payloads so we can't run
           // binding after merging — this is the only place it works.
-          const sliceOffsets = descriptorOffsetsFor(ent.children);
+          const sliceOffsets = chainOffsets.map(c => c.offset);
           const isWeaponSource = this.isCurrentWeaponModelLayer();
           const isEffectSource = this.isCurrentEffectModelLayer();
           const bindMode = isWeaponSource || isEffectSource ? 'tailScan' : this.mapMaterialBinding();
-          if (isWeaponSource) {
+          const chainBound = local.chunks.some(c => c.textureBinding === 'chain');
+          if (isWeaponSource && !chainBound) {
             try { applyWeaponDescriptorBinding(local, bytes, sliceOffsets); }
             catch { /* keep tail-scan names */ }
           }
-          if (!isWeaponSource && !isEffectSource && bindMode !== 'tailScan') {
+          if (!isWeaponSource && !isEffectSource && !chainBound && bindMode !== 'tailScan' && bindMode !== 'chain') {
             try { applyMarkerBinding(local, bytes, sliceOffsets, bindMode); }
             catch { /* keep tail-scan names */ }
           }
@@ -4539,6 +4615,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
           path: root.name,
           matrix: identityMatrix(),
           node: root,
+          positionUnit: positionUnitForNode(root),
         });
       }
     } else if (rootHit) {
@@ -4548,6 +4625,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
         path: root.name,
         matrix: identityMatrix(),
         node: root,
+        positionUnit: positionUnitForNode(root),
       }];
     }
 
@@ -5154,6 +5232,34 @@ function multiplyMatrices(a: number[], b: number[]): number[] {
   }
   return out;
 }
+// The N<node>_<visual> children of a model node: 4-byte payloads holding the
+// offset of that visual's DMA chain inside the parent payload. Keeps the
+// child name so chunks can be labelled with the visual they belong to.
+function chainOffsetsForChildren(archive: InspectedZedArchive, childIndices: number[]): ChainOffset[] {
+  const out: ChainOffset[] = [];
+  for (const childIdx of childIndices) {
+    const childBytes = archive.entryData.get(childIdx);
+    if (!childBytes || childBytes.length !== 4) { continue; }
+    const view = new DataView(childBytes.buffer, childBytes.byteOffset, 4);
+    const child = archive.entries.find(e => e.index === childIdx);
+    const leaf = child ? (child.name.split(/[\\/]/).pop() ?? child.name) : null;
+    out.push({ offset: view.getUint32(0, true), key: leaf });
+  }
+  return out;
+}
+
+function texturePixelsFor(tex: ZedTexture): { width: number; height: number; rgba: Uint8Array; wrapS?: 'repeat' | 'clamp'; wrapT?: 'repeat' | 'clamp'; alphaTest?: number | null; hasTransparency?: boolean } {
+  return {
+    width: tex.header.width,
+    height: tex.header.height,
+    rgba: tex.rgba,
+    wrapS: tex.header.gs?.wrapS,
+    wrapT: tex.header.gs?.wrapT,
+    alphaTest: tex.header.gs?.alphaTest ?? null,
+    hasTransparency: tex.hasTransparency,
+  };
+}
+
 // Reads the first 16 float32s of a node payload as a 4x4 matrix and rejects
 // it if any sanity check fails (scale, translation magnitude, bottom row
 // near identity). When the data doesn't look like a transform we fall back
