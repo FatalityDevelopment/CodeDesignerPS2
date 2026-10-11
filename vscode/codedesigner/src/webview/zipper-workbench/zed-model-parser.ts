@@ -436,11 +436,12 @@ export function parseModelFromChains(bytes: Uint8Array, chainOffsets: ChainOffse
   const chains = parseVisualChains(bytes, chainOffsets);
   if (!chains) { return null; }
   const chunks: ZedModelChunk[] = [];
-  // Several visuals can draw the same geometry (detail levels, state
-  // alternatives). Decode each chunk once, for the first visual that
-  // references it, so the mesh is not stacked on itself.
-  const seenGeometry = new Set<number>();
+  // A visual can list the same geometry twice (alternative chains over one
+  // mesh, e.g. wheel states): draw it once per visual. Different visuals
+  // that share geometry are instances placed at different GEO nodes, so
+  // each keeps its own copy.
   for (const chain of chains) {
+    const seenGeometry = new Set<number>();
     for (const section of chain.sections) {
       for (const ref of section.chunks) {
         if (seenGeometry.has(ref.geometryOffset)) { continue; }

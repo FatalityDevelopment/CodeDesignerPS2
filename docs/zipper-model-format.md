@@ -60,6 +60,15 @@ rule was used.
 Several visuals can reference the same geometry chunk (detail levels, state alternatives). Chain decoding reads each
 chunk once, for the first visual that references it; the **Visual** dropdown isolates one visual.
 
+## Placing visuals (GEO)
+
+Chunk positions are in their GEO node's local space. A visual key `N<node>_<visual>` names the node: `<node>` counts
+the nodes of the model's GEO subtree that own a `visuals` group, in pre-order (root first, then `children`
+recursively), and `<visual>` is the `vis` entry inside it. The editor converts each visual with its own `vparams`
+unit and transforms it by the node's matrix accumulated from the model root. When a scene is composed, the placed
+node's matrix is applied on top, and implicit child nodes already drawn through their model's chains are not placed
+a second time. The log shows `[placement]` lines with how many visuals were placed.
+
 ## Texture record (`<name>.tif` → `texdat`)
 
 ```
