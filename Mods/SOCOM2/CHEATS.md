@@ -59,8 +59,11 @@ Offsets from the Seal Pointer (`*0x0044D648`, the player's CZSealBody):
 | +0x01C | position (x, y, z) |
 | +0x0C0 | controller pointer |
 | +0x0C8 | team mask (0x40000001 SEAL, 0x80000100 terrorist) |
+| +0x0D4 / +0x0D8 | nearby soldiers: count / list of 0x30-byte entries (body, position relative to you), nearest first |
 | +0x174 | stance (0 stand, 1 crouch, 2 prone) |
-| +0x534 | current action / animation state |
+| +0x528, +0x52C, +0x530 | animation set pointers (shared table, per-movement floats) |
+| +0x534 | action / animation state (packed: low half current, high half likely next) |
+| +0x540 | UI character type |
 | +0x594 | shots fired |
 | +0x5E0 | weapon bits: 0x4 firing, 0x10 rapid / auto fire, 0x10000 auto-aim |
 | +0x6C4 | weapon record pointer per slot (0x290-byte records: name, icon, model, stats) |

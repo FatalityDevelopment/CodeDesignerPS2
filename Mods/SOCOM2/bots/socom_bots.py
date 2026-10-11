@@ -655,7 +655,10 @@ SEAL_HEALTH = 0x1044
 
 SEAL_CALLSIGN = 0x014                                        # -> name string (SPECTER, JESTER ...)
 SEAL_STANCE = 0x174                                          # 0 stand, 1 crouch, 2 prone
-SEAL_ACTION = 0x534                                          # current action / animation state id
+SEAL_NEARBY = 0x0D8                                          # -> nearby soldiers, 0x30-byte entries (count at +0x0D4)
+SEAL_ANIM_SET = 0x528                                        # animation set pointers (+0x528/+0x52C/+0x530)
+SEAL_ACTION = 0x534                                          # action / animation state (low half current)
+SEAL_UI_CHARTYPE = 0x540                                     # UI character type
 SEAL_SHOTS = 0x594                                           # shots fired counter
 SEAL_WEAPON_BITS = 0x5E0                                     # weapon state: 0x4 firing, 0x10 rapid / auto fire,
 WB_FIRING, WB_RAPID, WB_AUTOAIM = 0x4, 0x10, 0x10000         #   0x10000 auto-aim (the menu option)
