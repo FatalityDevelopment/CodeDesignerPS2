@@ -21,7 +21,7 @@ Chain at that offset: `u32 count` (low 16 bits), then `count` 16-byte tags `(lo,
 | Kind | Block | Notes |
 |---|---|---|
 | 6 | name field | NUL-terminated `.tif` name, padded to 16 or 32 bytes. Starts a material section. |
-| 3 | material | `qwc` qwords of GS register data (ALPHA / TEX1 / TEST ...) for the section. |
+| 3 | material | `qwc` qwords of GS register data for the section: ALPHA_1 (0x42) and TEX1_1 (0x14; MMIN/MXL say whether the game mipmaps the texture). |
 | 4 | colour | RGBA per vertex, `0x80` = 1.0. `v0`/`v1` are the VIF codes (`STCYCL 0x103`, `UNPACK V4-8 @6`) that put it in the third slot of each vertex. This is the baked lighting. |
 | 2 | geometry | `qwc` qwords starting at a chunk header. Uses the colour block that preceded it. |
 
@@ -43,6 +43,13 @@ without chains, and the parser falls back to them automatically when a chain doe
 then  STCYCL 0x102 + UNPACK V4-8: triangles (a*3, b*3, c*3, 3)
 then  STCYCL 0x102 + UNPACK V3-16: face normals, then MSCNT
 ```
+
+The header qword before `scale` (+0x38, +0x3C, +0x40) is the chunk **origin** in world units, added to every vertex.
+Weapons and builder-made packs store 0; retail world chunks use it because `int16 / 16` only reaches ±2048 units
+(MP53 tiles carry 0 or 2000 per axis). Converting between unit conventions scales around the origin.
+
+Chain tag kinds are bits 16-23 of the tag's first word; bit 24 is a flag seen on some retail material tags
+(`0x3103....`) and does not change the kind.
 
 Positions depend on the model kind, read from the GEO `vparams` flags (first u32):
 
@@ -118,6 +125,10 @@ undecodable, the viewer asks the extension once for a base64 copy.
 
 ## Rendering
 
+- Textures are mipmapped with trilinear and anisotropic filtering, as the game mipmaps world textures. Without it,
+  textures tiled across a map alias into speckled noise at a distance.
+- The camera frames the bulk of the geometry (2nd-98th percentile per axis), so far billboards such as the sun glow
+  do not shrink the map.
 - Models with chain colours render pre-lit: `MeshBasicMaterial` with `vertexColors`, colour = byte / 128 (the GS
   multiplies texel by colour / 128, so `0x80` is neutral and `0xFF` doubles). Scene lights only apply to models
   without colour blocks.

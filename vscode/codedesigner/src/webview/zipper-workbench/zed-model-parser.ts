@@ -5,9 +5,10 @@
 // in Mods/SOCOMCA, whose output renders in game):
 //   chunk + 0x00 = 0x01000101   STCYCL 0x101
 //   chunk + 0x04 = 0x6C048000   UNPACK V4-32 @0, 4 qwords
-//   chunk + 0x08 = GIF tag, GIF tag, (index addr, 0, verts, tris), (0, 0, 0, scale)
+//   chunk + 0x08 = GIF tag, GIF tag, (index addr, 0, verts, tris), (ox, oy, oz, scale)
 //   chunk + 0x30 = vertexCount   (int32)
 //   chunk + 0x34 = triangleCount (int32)
+//   chunk + 0x38 = origin x/y/z  (float32 x3, world units; 0 on weapons)
 //   chunk + 0x44 = scale         (float32)
 //   chunk + 0x48 = 03 02 00 01   STCYCL 0x203 (write 2 qwords of every 3: the
 //                                third slot is the colour, see below)
@@ -19,7 +20,9 @@
 //   then a V3-16 face-normal table and MSCNT.
 //
 // Positions: int16 * scale / 32768 for weapons (GEO vparams flag 0x20000 set)
-// and int16 * scale / 16 for props, vehicles and map objects (flag clear).
+// and int16 * scale / 16 for props, vehicles and map objects (flag clear),
+// plus the chunk origin. int16 / 16 only reaches +-2048 units, so world
+// chunks further out store their offset in the origin (MP53: 0 / 2000).
 //
 // A model's child stubs (N<node>_<visual>, 4-byte payload) point at DMA
 // chains that bind the chunks: per material section a kind-6 tag (the .tif
@@ -66,6 +69,9 @@ export interface ZedModelChunk {
   hasVertexColors?: boolean;
   // Which position unit was applied when decoding the vertices.
   positionUnit?: PositionUnit;
+  // Chunk origin (header +0x38..+0x40, world units), already added to the
+  // vertex positions. Unit conversions scale around it.
+  origin?: [number, number, number];
   // Original MDL/GEO source for composed scenes. Palette selection can depend
   // on the model that referenced a shared .tif page.
   sourceModelName?: string;
@@ -203,8 +209,14 @@ function parseChunk(
   if (vertexStart + vertexBlockSize > bytes.length) { return null; }
 
   // int16 -> units. Weapons normalise by the chunk scale (int16 / 32768 *
-  // scale); props, vehicles and map objects store 1/16 units.
+  // scale); props, vehicles and map objects store 1/16 units. The origin
+  // is added on top, in world units.
   const divisor = positionUnit === 'sixteenth' ? 16 : 32768;
+  const readOrigin = (o: number): number => {
+    const value = view.getFloat32(o, true);
+    return Number.isFinite(value) && Math.abs(value) < 1e6 ? value : 0;
+  };
+  const origin: [number, number, number] = [readOrigin(0x38), readOrigin(0x3c), readOrigin(0x40)];
   const vertices: ZedModelVertex[] = [];
   for (let i = 0; i < vertexCount; i++) {
     const o = vertexStart + i * 0x10;
@@ -217,9 +229,9 @@ function parseChunk(
     const ui = v.getInt16(0x08, true);
     const vi = v.getInt16(0x0a, true);
     vertices.push({
-      x: (xi * scale) / divisor,
-      y: (yi * scale) / divisor,
-      z: (zi * scale) / divisor,
+      x: (xi * scale) / divisor + origin[0],
+      y: (yi * scale) / divisor + origin[1],
+      z: (zi * scale) / divisor + origin[2],
       u: ui / 4096,
       v: vi / 4096,
     });
@@ -260,6 +272,7 @@ function parseChunk(
     textureName,
     textureBinding: textureName ? 'tail' : undefined,
     positionUnit,
+    origin,
   };
 }
 
@@ -335,7 +348,9 @@ function parseVisualChain(bytes: Uint8Array, offset: number, key: string | null)
     const tag = offset + 16 + i * 16;
     const lo = readU32LE(bytes, tag);
     const addr = readU32LE(bytes, tag + 4);
-    const kind = (lo >>> 16) & 0x3ff;
+    // Kind in bits 16-23; bit 24 is a flag (seen on material tags, 0x31...)
+    // and must not make the chain look invalid.
+    const kind = (lo >>> 16) & 0xff;
     const qwc = lo & 0xffff;
     const length = qwc * 16;
     if (addr > bytes.length) { return null; }
@@ -509,7 +524,13 @@ export function convertPositionUnit(model: ZedModel, unit: PositionUnit): ZedMod
   let radius = 0;
   const chunks = model.chunks.map((c, i) => {
     const f = factors[i];
-    const vertices = f === 1 ? c.vertices : c.vertices.map(v => ({ ...v, x: v.x * f, y: v.y * f, z: v.z * f }));
+    const [ox, oy, oz] = c.origin ?? [0, 0, 0];
+    const vertices = f === 1 ? c.vertices : c.vertices.map(v => ({
+      ...v,
+      x: (v.x - ox) * f + ox,
+      y: (v.y - oy) * f + oy,
+      z: (v.z - oz) * f + oz,
+    }));
     for (const v of vertices) {
       const d = Math.hypot(v.x, v.y, v.z);
       if (d > radius) { radius = d; }

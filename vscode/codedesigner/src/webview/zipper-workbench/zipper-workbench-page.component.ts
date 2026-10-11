@@ -3023,11 +3023,13 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     const flagsUnit = positionUnitForNode(node);
     const bounds = readNodeBounds(node);
     if (model && bounds && model.vertices.length > 0) {
-      // Extent as decoded (scale convention) versus the GEO bounds.
-      const extentScale = modelExtent(model) * (model.chunks[0]?.positionUnit === 'sixteenth' ? 16 / 32768 : 1);
-      if (extentScale > 0) {
+      // Extent of the model in each convention versus the GEO bounds (the
+      // chunk origins stay fixed, so convert rather than scale the extent).
+      const extentScale = modelExtent(convertPositionUnit(model, 'scale'));
+      const extentSixteenth = modelExtent(convertPositionUnit(model, 'sixteenth'));
+      if (extentScale > 0 && extentSixteenth > 0) {
         const ratioScale = Math.abs(Math.log(extentScale / bounds.extent));
-        const ratioSixteenth = Math.abs(Math.log((extentScale * 32768 / 16) / bounds.extent));
+        const ratioSixteenth = Math.abs(Math.log(extentSixteenth / bounds.extent));
         // Only trust the bounds when one convention is clearly closer.
         if (Math.abs(ratioScale - ratioSixteenth) > 1) {
           return { unit: ratioSixteenth < ratioScale ? 'sixteenth' : 'scale', reason: 'GEO bounds' };
@@ -3074,8 +3076,9 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       counts.set(unit, (counts.get(unit) ?? 0) + 1);
       const from = c.positionUnit ?? 'scale';
       const f = from === unit ? 1 : unit === 'sixteenth' ? 32768 / 16 : 16 / 32768;
+      const [ox, oy, oz] = c.origin ?? [0, 0, 0];
       const vertices = c.vertices.map(v => {
-        let x = v.x * f, y = v.y * f, z = v.z * f;
+        let x = (v.x - ox) * f + ox, y = (v.y - oy) * f + oy, z = (v.z - oz) * f + oz;
         if (placement) { [x, y, z] = transformPoint(placement.matrix, x, y, z); }
         const d = Math.hypot(x, y, z);
         if (d > radius) { radius = d; }

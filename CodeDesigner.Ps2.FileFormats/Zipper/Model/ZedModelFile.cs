@@ -54,11 +54,16 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.Model
         public static PositionUnit PositionUnitForFlags(uint vparamsFlags) =>
             (vparamsFlags & VparamsFlagScaleNormalised) != 0 ? PositionUnit.Scale : PositionUnit.Sixteenth;
 
-        /// <summary>A vertex position in units.</summary>
+        /// <summary>
+        /// A vertex position in units: int16 * scale / divisor plus the chunk
+        /// origin (header +0x38..+0x40). int16 / 16 only reaches +-2048 units,
+        /// so world chunks further out carry their offset in the origin.
+        /// </summary>
         public static (float X, float Y, float Z) VertexPosition(Chunk chunk, Vertex v, PositionUnit unit)
         {
             float divisor = unit == PositionUnit.Sixteenth ? 16f : 32768f;
-            return (v.X * chunk.Scale / divisor, v.Y * chunk.Scale / divisor, v.Z * chunk.Scale / divisor);
+            var (ox, oy, oz) = chunk.Origin;
+            return (v.X * chunk.Scale / divisor + ox, v.Y * chunk.Scale / divisor + oy, v.Z * chunk.Scale / divisor + oz);
         }
         public const uint Magic0 = 0x01000101;
         public const uint Magic1 = 0x6C048000;
@@ -98,6 +103,8 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.Model
             public int VertexCount { get; set; }
             public int TriangleCount { get; set; }
             public float Scale { get; set; }
+            /// <summary>Chunk origin in world units (header +0x38..+0x40; 0 on weapons).</summary>
+            public (float X, float Y, float Z) Origin { get; set; }
             public List<Vertex> Vertices { get; } = new();
             // 4 bytes per triangle: index a, b, c, flags. Indices are packed
             // VU slot offsets (real index = packed / 3).
@@ -246,7 +253,8 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.Model
                 int tag = offset + 16 + i * 16;
                 uint lo = ReadU32(bytes, tag);
                 long addr = ReadU32(bytes, tag + 4);
-                int kind = (int)((lo >> 16) & 0x3ff);
+                // Kind in bits 16-23; bit 24 is a flag (seen on material tags).
+                int kind = (int)((lo >> 16) & 0xff);
                 int length = (int)(lo & 0xffff) * 16;
                 if (addr > bytes.Length) return null;
                 switch (kind)
@@ -446,12 +454,18 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.Model
             int vertexBlockSize = vertexCount * VertexRecordSize;
             if (vertexStart + vertexBlockSize > bytes.Length) return null;
 
+            float ReadOrigin(int o)
+            {
+                float value = BitConverter.ToSingle(bytes, offset + o);
+                return float.IsFinite(value) && Math.Abs(value) < 1e6f ? value : 0f;
+            }
             var chunk = new Chunk
             {
                 Offset = offset,
                 VertexCount = vertexCount,
                 TriangleCount = triangleCount,
                 Scale = scale,
+                Origin = (ReadOrigin(0x38), ReadOrigin(0x3C), ReadOrigin(0x40)),
                 RawHeader = Slice(bytes, offset, offset + ChunkHeaderSize),
             };
 
