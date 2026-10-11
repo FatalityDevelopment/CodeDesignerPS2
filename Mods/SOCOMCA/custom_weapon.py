@@ -243,14 +243,133 @@ def build(kind, out_name, out_root):
         print("  PROBLEM:", pr)
 
 
+# ---- HUD icon: a 128x32 side view in a category 0x0C library (the HUD's own VRAM pools, like RUN/COMMON/HUDW) ----
+HUDW_SAMPLE = os.path.join(HERE, "..", "SOCOM2", "bots", "hudw_sample.json")   # retail icon template (see icon_template)
+
+
+def icon_template():
+    """Header / tail of a retail HUD icon (sigcommando_icon.tif) + the HUDW TXR/PAL ZED headers, from the disc."""
+    import json
+    if os.path.exists(HUDW_SAMPLE):
+        d = json.load(open(HUDW_SAMPLE))
+        return bytes.fromhex(d["texdat"]), {int(k): v for k, v in d["txr"].items()}, {int(k): v for k, v in d["pal"].items()}
+    import characters_readme as cr
+    iso = open("F:/SOCOM II - U.S. Navy SEALs.iso", "rb")
+    ent = cr.zdb_entries(iso, *cr.iso_listing(iso)["/RUN/MP61.ZDB"])
+    th, tn = bp.zed_read(ent["RUN\\COMMON\\HUDW_TXR.ZED"])
+    ph, _ = bp.zed_read(ent["RUN\\COMMON\\HUDW_PAL.ZED"])
+    td = next(t for t in next(n for n in tn if n.name == "textures").children
+              if t.name == "sigcommando_icon.tif").children[0].data
+    json.dump({"texdat": td.hex(), "txr": th, "pal": ph}, open(HUDW_SAMPLE, "w"))
+    return td, th, ph
+
+
+def render_icon(mesh, w=128, h=32, ss=4):
+    """Side view (camera on +z) of the mesh, shaded from its normals, transparent background -> (8-bit pixels,
+    256 x RGBA palette with alpha 0x80 = opaque, as the retail icons)."""
+    W, H = w * ss, h * ss
+    pts = [p for p, _, _ in mesh.v]
+    x0, x1 = min(p[0] for p in pts), max(p[0] for p in pts)
+    y0, y1 = min(p[1] for p in pts), max(p[1] for p in pts)
+    sc = min((W - 2 * ss) / (x1 - x0), (H - 2 * ss) / (y1 - y0))
+    ox, oy = (W - (x1 - x0) * sc) / 2, (H - (y1 - y0) * sc) / 2
+    col = [[None] * W for _ in range(H)]
+    zb = [[-1e9] * W for _ in range(H)]
+    for a, b, c in mesh.t:
+        P = [mesh.v[i] for i in (a, b, c)]
+        sx = [ox + (p[0][0] - x0) * sc for p in P]
+        sy = [H - (oy + (p[0][1] - y0) * sc) for p in P]
+        lo_y, hi_y = max(0, int(min(sy))), min(H - 1, int(max(sy)) + 1)
+        lo_x, hi_x = max(0, int(min(sx))), min(W - 1, int(max(sx)) + 1)
+        den = (sy[1] - sy[2]) * (sx[0] - sx[2]) + (sx[2] - sx[1]) * (sy[0] - sy[2])
+        if abs(den) < 1e-9:
+            continue
+        for py in range(lo_y, hi_y + 1):
+            for px in range(lo_x, hi_x + 1):
+                l0 = ((sy[1] - sy[2]) * (px - sx[2]) + (sx[2] - sx[1]) * (py - sy[2])) / den
+                l1 = ((sy[2] - sy[0]) * (px - sx[2]) + (sx[0] - sx[2]) * (py - sy[2])) / den
+                l2 = 1 - l0 - l1
+                if min(l0, l1, l2) < 0:
+                    continue
+                z = sum(l * p[0][2] for l, p in zip((l0, l1, l2), P))
+                if z <= zb[py][px]:
+                    continue
+                zb[py][px] = z
+                n = [sum(l * p[1][i] for l, p in zip((l0, l1, l2), P)) for i in range(3)]
+                ln = math.sqrt(sum(x * x for x in n)) or 1
+                shade = max(0.0, sum(n[i] / ln * LIGHT[i] for i in range(3))) * 0.75 + 0.25
+                light, dark = MATERIALS[P[0][2]]
+                col[py][px] = [int(dark[i] + (light[i] - dark[i]) * shade) for i in range(3)]
+    # downsample: coverage -> alpha, mean colour; quantize to a 6x7x6 cube (index 0 = transparent)
+    pal = [(0, 0, 0, 0)] + [(int(r * 51), int(g * 42.5), int(b * 51), 0x80)
+                            for r in range(6) for g in range(7) for b in range(6)]
+    pal += [(0, 0, 0, 0)] * (256 - len(pal))
+    pix = bytearray()
+    for y in range(h):
+        for x in range(w):
+            cell = [col[y * ss + j][x * ss + i] for j in range(ss) for i in range(ss)]
+            hit = [c for c in cell if c]
+            if len(hit) * 2 < len(cell):
+                pix.append(0)
+                continue
+            r, g, b = (sum(c[k] for c in hit) / len(hit) for k in range(3))
+            pix.append(1 + round(r / 51) * 42 + round(g / 42.5) * 6 + round(b / 51))
+    return bytes(pix), pal
+
+
+def build_icon(kind, out_name, out_root):
+    """A pack holding just the weapon's HUD icon (<out_name>.tif) in a category 0x0C library."""
+    import ca2s2
+    mesh, _ = MODELS[kind][0]()
+    sample, txr_hdr, pal_hdr = icon_template()
+    pix, pal = render_icon(mesh)
+    pal_id = ca2s2.pal_base(out_name)
+    stored = [pal[(i & ~0x18) | ((i & 0x08) << 1) | ((i & 0x10) >> 1)] for i in range(256)]       # CSM1 order
+    buf = b"".join(struct.pack("<I", r | g << 8 | b << 16 | a << 24) for r, g, b, a in stored)
+    hdr = bytearray(sample[:0x20])
+    struct.pack_into("<I", hdr, 0x8, 1)                       # index (TBP); +0x0C stays the format word (8-bit,
+                                                             #   32-bit palette: 0x08060033)
+    tail = bytearray(sample[0x20 + 0x1000:])
+    o = bp.tex0_offset(sample) - 0x20 - 0x1000
+    tex0 = struct.unpack_from("<Q", tail, o)[0]
+    tex0 = (tex0 & ~(0x3FFF | (0x3FFF << 37))) | 1 | pal_id << 37
+    struct.pack_into("<Q", tail, o, tex0)
+    tex_name = f"{out_name}.tif"
+    tex = bp.Node(tex_name, children=[bp.Node("texdat", bytes(hdr) + pix + bytes(tail))])
+    palnode = bp.Node(f"texpal_{pal_id}", children=[bp.Node("par", struct.pack("<II", pal_id, 0x400)),
+                                                    bp.Node("buf", buf)])
+    tpl = cs.template("weapon")
+    p = tpl["parts"]
+    files = {"TXR": bp.zed_write(txr_hdr, [bp.Node("renderphase", struct.pack("<I", 0x0C)),
+                                           bp.Node("textures", children=[tex])]),
+             "PAL": bp.zed_write(pal_hdr, [bp.Node("palettes", children=[palnode])]),
+             "GEO": bp.zed_write(p["GEO"][0], [bp.Node("models", children=[])]),
+             "MDL": bp.zed_write(p["MDL"][0], [])}
+    for part in files:
+        bp.zed_read(files[part])
+    out_dir = os.path.join(out_root, out_name)
+    os.makedirs(out_dir, exist_ok=True)
+    for part, blob in files.items():
+        open(os.path.join(out_dir, f"HUDX_{part}.ZED"), "wb").write(blob)
+    cdb = bp.cdb_write({f"RUN\\MP\\{out_name.upper()}\\HUDX_{k}.ZED": b for k, b in files.items()})
+    open(os.path.join(out_dir, f"{out_name.upper()}.CDB"), "wb").write(cdb)
+    import rip_textures as rt
+    rgb = b"".join(bytes(pal[i][:3]) if pal[i][3] else b"\x20\x20\x28" for i in pix)
+    rt.png(os.path.join(out_dir, "icon.png"), 128, 32, rgb)
+    print(f"{tex_name}: 128x32 HUD icon -> {out_dir}")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("kind", choices=sorted(MODELS))
     ap.add_argument("--out", default="mrgun")
+    ap.add_argument("--icon", default="mrgicon", help="pack for the HUD icon (category 0x0C library)")
     ap.add_argument("--root", default="F:/SOCOM Packs/Custom")
     a = ap.parse_args()
     bp.check_pack_name(a.out)
+    bp.check_pack_name(a.icon)
     build(a.kind, a.out, a.root)
+    build_icon(a.kind, a.icon, a.root)
 
 
 if __name__ == "__main__":

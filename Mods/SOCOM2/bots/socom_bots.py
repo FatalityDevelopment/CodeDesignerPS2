@@ -808,7 +808,7 @@ CA_WEAPONS = {                                               # converted model -
     "ca_desert_eagle": ("Desert Eagle", "desert_eagle_icon.tif", 7), "ca_glock18": ("Glock 18", "glock18_icon.tif", 17),
     "ca_hkp9s": ("HK P9S", "hkp9s_icon.tif", 9), "ca_sig226": ("P226", "p226_icon.tif", 15),
     "ca_sig_commando": ("SIG 552", "sigcommando_icon.tif", 30), "ca_mp7": ("MP7", "hk5k_icon.tif", 40),
-    "ca_raygun": ("RAY GUN", "fiveSeven_icon.tif", 20),         # custom_weapon.py raygun (pack mrgun)
+    "ca_raygun": ("RAY GUN", "mrgico2.tif", 20),         # custom_weapon.py raygun (pack mrgun)
 }
 
 def _texture_by_name(name):
@@ -829,6 +829,16 @@ def _texture_by_name(name):
                 p = blob.find(ptr, p + 1)
             o = d.find(key, o + 1)
     return 0
+
+def _first_texture(lib):
+    """The first texture object of a loaded library (entries at *(lib+0x1C), count lib+0x18; entry +0xC)."""
+    if not lib:
+        return 0
+    arr = struct.unpack("<I", rd(lib + 0x1C, 4))[0]
+    cnt = struct.unpack("<I", rd(lib + 0x18, 4))[0]
+    if not cnt:
+        return 0
+    return struct.unpack("<I", rd(struct.unpack("<I", rd(arr, 4))[0] + 0xC, 4))[0]
 
 def _record_name(rec):
     return rd(struct.unpack("<I", rd(rec + REC_NAMES[0], 4))[0], 24).split(b"\0")[0].decode("latin1")
@@ -860,6 +870,13 @@ def give_weapon(pack, slot=0, name=None, icon=None, mag=None):
         wr32(rec + REC_MAG, mag)
     if icon:
         src = _texture_by_name(icon)
+        if not src:                                          # a custom icon ships as its own pack (category 0x0C):
+            try:                                             #   <icon name without .tif>
+                find_pack(icon.rsplit(".", 1)[0])
+                lib = load_pack(icon.rsplit(".", 1)[0], "mem")
+                src = _texture_by_name(icon) or _first_texture(lib)   # runtime libraries aren't in the registry
+            except SystemExit:
+                pass
         cur_icon = rd(struct.unpack("<I", rd(rec + REC_ICON, 4))[0], 32).split(b"\0")[0].decode("latin1")
         dst = _texture_by_name(cur_icon)
         if src and dst and src != dst:
@@ -943,6 +960,8 @@ PLACEMENT = {                                                # library category 
     0x02: (0x1C88, 2, 0),                                    # weapons / gear: 0x004A1C88/8C (TexCommonCS:B1/B2)
     0x0B: (0x1CF4, 2, 0),                                    # alpha: 0x004A1CF4/F8 (TexAlpha:B1/B2) - roomy, for
                                                              #   converted props (TexWorld, 0x00, fills up fast)
+    0x0C: (0x1D00, 2, 0),                                    # HUD icons: 0x004A1D00/04 (TexHUD0:B1/B2) - like
+                                                             #   RUN/COMMON/HUDW (custom weapon icons)
     0x11: (0x1D3C, 3, 1),                                    # vehicles / turrets: 0x004A1D3C/40/44
     0x00: (0x1C70, 1, 0),                                    # map props (the map's own library): 0x004A1C70
 }
@@ -1113,7 +1132,7 @@ def load_lib(path, source="disc"):
             sys.exit(f"{other}.CDB needs ~{size // 1024} KB of heap but only ~{room // 1024} KB is left - the allocator "
                      "stops the game when it runs out; reload the map (or SOCOM_LOADLIB_AGAIN=1 to risk it)")
         need, have_blocks, category = vram_need(other)
-        if need + VRAM_MARGIN > have_blocks and os.environ.get("SOCOM_LOADLIB_AGAIN") != "1":
+        if need + (VRAM_MARGIN if category == 0x00 else 0) > have_blocks and os.environ.get("SOCOM_LOADLIB_AGAIN") != "1":
             sys.exit(f"{other}'s textures need {need:#x} VRAM blocks but the category {category:#x} pool has {have_blocks:#x} "
                      "left - past its end they wrap into the frame buffer (garbage / black); reload the map")
     current = rd(0x004417C0, 8).split(b"\0")[0].decode().upper()
