@@ -482,3 +482,97 @@ export function instanceNameVariants(rawName: string): string[] {
   variants.delete('');
   return [...variants];
 }
+
+// ---------------------------------------------------------------------------
+// Per-visual placement. A model's N<node>_<visual> stubs (and the chunks the
+// DMA chain parser tags with that key) belong to one GEO node: <node> counts
+// the nodes of the model's GEO subtree that own a `visuals` group, in
+// pre-order (root first, then `children` recursively); <visual> is the `vis`
+// entry inside it. Chunk positions are in that node's local space, so each
+// visual needs its node's accumulated matrix, and its own vparams unit.
+// (Numbering confirmed by the SOCOM II pack builders in Mods/SOCOMCA.)
+// ---------------------------------------------------------------------------
+
+export interface VisualPlacement {
+  // Node matrix accumulated from the model root (root's own local excluded),
+  // column-major like readGeoTransform.
+  matrix: number[];
+  unit: GeoPositionUnit | null;
+  nodeName: string;
+}
+
+export interface VisualPlacementMap {
+  placements: Map<string, VisualPlacement>;
+  // How <node> was counted: nodes owning visuals, or every node.
+  mode: 'visualNodes' | 'allNodes';
+  matched: number;
+  total: number;
+}
+
+// N000_000 -> {0, 0}; N003_I001_V02 -> {3, 2} (first and last numbers).
+export function parseVisualKey(key: string): { node: number; visual: number } | null {
+  const m = /^N(\d+)(?:_[A-Z]*\d+)*_[A-Z]*(\d+)$/i.exec(key.trim());
+  if (!m) { return null; }
+  return { node: Number(m[1]), visual: Number(m[2]) };
+}
+
+interface PlacedNode {
+  node: GeoNode;
+  matrix: number[];
+  vis: GeoNode[];
+}
+
+function walkModelNodes(root: GeoNode): PlacedNode[] {
+  const out: PlacedNode[] = [];
+  const visit = (node: GeoNode, matrix: number[]) => {
+    const visuals = safeFindChild(node, 'visuals');
+    out.push({ node, matrix, vis: visuals ? visuals.children.filter(c => c.name === 'vis') : [] });
+    const children = safeFindChild(node, 'children');
+    if (!children) { return; }
+    for (const child of children.children) {
+      visit(child, multiplyMatrices(matrix, readGeoTransform(child)));
+    }
+  };
+  visit(root, identityMatrix());
+  return out;
+}
+
+function unitForVis(vis: GeoNode): GeoPositionUnit | null {
+  const vparams = vis.children.find(c => c.name === 'vparams');
+  const flags = vparams?.vparams?.flags;
+  if (flags === undefined) { return null; }
+  return (flags & VPARAMS_FLAG_SCALE_NORMALISED) !== 0 ? 'scale' : 'sixteenth';
+}
+
+// Resolve every key to its node. Both numberings are tried and the one that
+// places more keys wins (ties go to the visual-node numbering).
+export function buildVisualPlacementMap(root: GeoNode, keys: string[]): VisualPlacementMap {
+  const nodes = walkModelNodes(root);
+  const visualNodes = nodes.filter(n => n.vis.length > 0);
+  const unique = [...new Set(keys)];
+  const attempt = (list: PlacedNode[]): Map<string, VisualPlacement> => {
+    const map = new Map<string, VisualPlacement>();
+    for (const key of unique) {
+      const parsed = parseVisualKey(key);
+      if (!parsed) { continue; }
+      const target = list[parsed.node];
+      if (!target || parsed.visual >= target.vis.length) { continue; }
+      map.set(key, { matrix: target.matrix, unit: unitForVis(target.vis[parsed.visual]), nodeName: target.node.name });
+    }
+    return map;
+  };
+  const byVisual = attempt(visualNodes);
+  const byAll = attempt(nodes);
+  const useAll = byAll.size > byVisual.size;
+  const placements = useAll ? byAll : byVisual;
+  return { placements, mode: useAll ? 'allNodes' : 'visualNodes', matched: placements.size, total: unique.length };
+}
+
+// True when `node` sits inside the subtree of `ancestor` (or is it).
+export function isInSubtree(ancestor: GeoNode, node: GeoNode): boolean {
+  if (ancestor === node) { return true; }
+  for (const c of ancestor.children) {
+    if (isInSubtree(c, node)) { return true; }
+  }
+  return false;
+}
