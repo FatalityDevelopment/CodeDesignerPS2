@@ -808,7 +808,7 @@ CA_WEAPONS = {                                               # converted model -
     "ca_desert_eagle": ("Desert Eagle", "desert_eagle_icon.tif", 7), "ca_glock18": ("Glock 18", "glock18_icon.tif", 17),
     "ca_hkp9s": ("HK P9S", "hkp9s_icon.tif", 9), "ca_sig226": ("P226", "p226_icon.tif", 15),
     "ca_sig_commando": ("SIG 552", "sigcommando_icon.tif", 30), "ca_mp7": ("MP7", "hk5k_icon.tif", 40),
-    "ca_raygun": ("RAY GUN", "mrgico2.tif", 20),         # custom_weapon.py raygun (pack mrgun)
+    "ca_raygun": ("RAY GUN", "fiveSeven_icon.tif", 20),   # + its hud_icon.bin drawn over the stand-in         # custom_weapon.py raygun (pack mrgun)
 }
 
 def _texture_by_name(name):
@@ -882,6 +882,25 @@ def give_weapon(pack, slot=0, name=None, icon=None, mag=None):
         if src and dst and src != dst:
             for o in range(0x18, 0x38, 4):
                 wr32(dst + o, struct.unpack("<I", rd(src + o, 4))[0])
+        custom = os.path.join(os.path.dirname(find_pack(pack)), "hud_icon.bin")
+        if src and os.path.exists(custom):                   # a custom picture (custom_weapon.py): draw it into the
+            blob = open(custom, "rb").read()                 #   stand-in's pixel / palette buffers - the HUD
+            pix = struct.unpack("<I", rd(src + 0x18, 4))[0]  #   re-uploads them from RAM every frame
+            col = struct.unpack("<I", rd(struct.unpack("<I", rd(src + 0x1C, 4))[0] + 0x14, 4))[0]
+            w, h = struct.unpack("<HH", rd(src, 4))          # the stand-in's own size (pistol icons can be 64x32):
+            size = struct.unpack("<I", rd(src + 4, 4))[0]    #   resample ours to it, never write past its buffer
+            if (w, h, size) != (128, 32, 0x1000):
+                if size != w * h or w > 128 or h > 32:
+                    sys.exit(f"  stand-in icon {icon} is {w}x{h} ({size:#x} bytes) - not drawn")
+                src_rows = [blob[y * 128:(y + 1) * 128] for y in range(32)]
+                x0 = (128 - w) // 2                          # centre crop: our icons leave the sides empty
+                pixels = bytes(src_rows[y * 32 // h][x0 + x] for y in range(h) for x in range(w))
+            else:
+                pixels = blob[:0x1000]
+            for base, data in ((pix, pixels), (col, blob[0x1000:0x1400])):
+                for i in range(0, len(data), 4):
+                    wr32(base + i, struct.unpack_from("<I", data, i)[0])
+            print(f"  HUD icon drawn over {icon}")
         elif not src:
             print(f"  icon {icon} is not loaded - keeping {cur_icon}")
     print(f"  {old} -> {name} ({model}, {mag} rounds)")

@@ -237,6 +237,7 @@ def build(kind, out_name, out_root):
     open(os.path.join(out_dir, f"{out_name.upper()}.CDB"), "wb").write(cdb)
     import render
     render.wire(os.path.join(out_dir, "preview.png"), [tuple(mesh.v[i][0] for i in t) for t in mesh.t])
+    open(os.path.join(out_dir, "hud_icon.bin"), "wb").write(hud_icon_bin(mesh))
     print(f"{model}: {len(mesh.v)} verts, {len(mesh.t)} tris, {len(chunks)} chunks, VRAM {blocks:#x}, "
           f"size {[round(hi[i] - lo[i], 2) for i in range(3)]} -> {out_dir}")
     for pr in problems:
@@ -315,6 +316,16 @@ def render_icon(mesh, w=128, h=32, ss=4):
             r, g, b = (sum(c[k] for c in hit) / len(hit) for k in range(3))
             pix.append(1 + round(r / 51) * 42 + round(g / 42.5) * 6 + round(b / 51))
     return bytes(pix), pal
+
+
+def hud_icon_bin(mesh):
+    """The HUD icon as the game holds it in RAM: 4096 pixel bytes (128x32, rows bottom-up - the HUD's textures are
+    stored flipped) + 1024 palette bytes (256 RGBA, CSM1 order). giveweapon draws it into a stand-in icon's buffers
+    (texture object +0x18 / palette object +0x14), which the HUD re-uploads every frame."""
+    pix, pal = render_icon(mesh)
+    pix = b"".join(pix[y * 128:(y + 1) * 128] for y in range(31, -1, -1))
+    stored = [pal[(i & ~0x18) | ((i & 0x08) << 1) | ((i & 0x10) >> 1)] for i in range(256)]
+    return pix + b"".join(struct.pack("<I", r | g << 8 | b << 16 | a << 24) for r, g, b, a in stored)
 
 
 def build_icon(kind, out_name, out_root):
