@@ -128,12 +128,26 @@ public class MuisServer : BaseMediusTcpServer
     {
         if (state.MuisCheatRound == 0) return; // not in a MUIS exchange
 
+        // Reply to our early test peek (see SendEarlyPeekPokeAsync) — not one of the retail rounds.
+        if (IsEarlyPeekReply(packet.Payload))
+        {
+            var p = packet.Payload;
+            _log.LogInformation("[MUIS] EARLY PEEK reply from {Ep}: addr=0x{Addr:X8} len={Len} data={Hex}",
+                state.RemoteEndpoint, BitConverter.ToUInt32(p, 5), p.Length - 13,
+                BitConverter.ToString(p, 13).Replace("-", " "));
+            return;
+        }
+
         state.MuisCheatRound++;
         _log.LogInformation("[MUIS] Cheat round {R} response received", state.MuisCheatRound - 1);
 
         switch (state.MuisCheatRound)
         {
             case 2:
+                // Experiment: push our own pokes/peek here, the earliest point the PS2 has its RC4 key
+                // and is known (round 1 just answered) to be servicing 0x1D/0x1E on this connection.
+                await SendEarlyPeekPokeAsync(state, tcp, ct);
+
                 // Round 2: send MEMORY_POKE + CHEAT_QUERY in one write.
                 await SendPacketAsync(tcp, ScertPacket.CreateMemoryPoke(), state, ct);
                 await SendPacketAsync(tcp, ScertPacket.CreateCheatQuery(), state, ct);
@@ -150,6 +164,41 @@ public class MuisServer : BaseMediusTcpServer
                 await SendUniverseInfoAsync(state.MuisMsgId, state.MuisInfoType,
                     state.MuisUseLobbyExt, state, tcp, ct);
                 break;
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Early peek/poke experiment (MuisEarlyInject / MuisEarlyPeekAddress)
+    // -------------------------------------------------------------------------
+
+    /// <summary>SequenceId stamped on the early test peek. The retail MUIS rounds use the all-zero 13-byte
+    /// query (RAW_MEMORY, seq 0), so a non-zero seq is what tells the peek reply apart from a round reply.</summary>
+    private const int EarlyPeekSeq = 0x5EEC;
+
+    private static bool IsEarlyPeekReply(byte[] p) =>
+        p.Length > 13
+        && p[0] == (byte)CheatQueryType.DME_SERVER_CHEAT_QUERY_RAW_MEMORY
+        && BitConverter.ToInt32(p, 1) == EarlyPeekSeq;
+
+    /// <summary>
+    /// Between MUIS cheat rounds 1 and 2: send the configured binary injections (plaintext MEMORY_POKEs,
+    /// same as the lobby path) and/or one RAW_MEMORY CHEAT_QUERY whose reply is logged by
+    /// <see cref="HandleCheatQueryResponseAsync"/>. Both are off unless enabled in config.
+    /// </summary>
+    private async Task SendEarlyPeekPokeAsync(MediusClientState state, TcpClient tcp, CancellationToken ct)
+    {
+        if (_config.MuisEarlyInject)
+        {
+            _log.LogInformation("[MUIS] EARLY INJECT: sending {N} configured injection(s) to {Ep}",
+                _config.Injections.Count(i => i.Enabled), state.RemoteEndpoint);
+            await SendConfiguredInjectionsAsync(tcp, ct);
+        }
+
+        if (TryParseAddr(_config.MuisEarlyPeekAddress, out uint peekAddr))
+        {
+            int len = Math.Clamp(_config.MuisEarlyPeekLength, 4, 1024);
+            _log.LogInformation("[MUIS] EARLY PEEK: RAW_MEMORY 0x{Addr:X8} +{Len} to {Ep}", peekAddr, len, state.RemoteEndpoint);
+            await SendPacketAsync(tcp, ScertPacket.CreateRawMemoryQuery(EarlyPeekSeq, peekAddr, len), state, ct);
         }
     }
 
