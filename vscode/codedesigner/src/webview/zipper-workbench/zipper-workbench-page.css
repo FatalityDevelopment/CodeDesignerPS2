@@ -1188,3 +1188,9 @@ input {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* Preview pane warnings (missing palette / textures, dropped chunks). */
+.zip-preview-info strong.zip-warn,
+.zip-texrefs span.zip-warn {
+  color: var(--vscode-editorWarning-foreground, #cca700);
+}

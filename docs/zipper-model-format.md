@@ -51,8 +51,14 @@ Positions depend on the model kind, read from the GEO `vparams` flags (first u32
 | `0x000BC0FA` (bit `0x20000` set) | weapons | `int16 * scale / 32768` |
 | `0x0009C0FA` (bit clear) | props, vehicles, map objects | `int16 * scale / 16` |
 
-The **Position units** dropdown is `auto` by default (reads the flags of the placed GEO node) and can force either
-convention.
+The **Position units** dropdown is `auto` by default and can force either convention. `auto` decodes in the scale
+convention, then compares the mesh extent with the GEO node's `nparams` bounds (floats 16-21: bounds min / max in
+units); the two conventions differ by exactly 2048x, so the matching one is unambiguous. Without usable bounds it
+falls back to the `vparams` flags, then to the scale convention. The preview pane's **Position units** row says which
+rule was used.
+
+Several visuals can reference the same geometry chunk (detail levels, state alternatives). Chain decoding reads each
+chunk once, for the first visual that references it; the **Visual** dropdown isolates one visual.
 
 ## Texture record (`<name>.tif` → `texdat`)
 
@@ -91,8 +97,14 @@ bit are transparent (how the game's cutouts look through TEXA/AEM).
 - Models with chain colours render pre-lit: `MeshBasicMaterial` with `vertexColors`, colour = byte / 128 (the GS
   multiplies texel by colour / 128, so `0x80` is neutral and `0xFF` doubles). Scene lights only apply to models
   without colour blocks.
-- Textures with an alpha test from `TEST`, or with transparent texels, draw as cutouts; translucent ones blend.
+- Texels are discarded only when the texture's own `TEST` register enables an alpha test (the game's cutouts:
+  fences, foliage, decals). Decoded alpha is ignored otherwise, so a palette with black entries never punches holes
+  in a wall. Effects keep their soft-blend setup.
 - `V orientation = flip V` (default) matches the row-flipped texture upload; leave it unless a texture reads
   upside down.
-- The log pane prints `[chain]` (visuals, chunks bound, chunks with colours, units) and `[texture]` (PSM, CBP,
-  wrap, alpha test) lines for every decode. **Dump material report** lists the visual and binding of every chunk.
+- The preview pane's **Mesh** section shows how the model was decoded (binding, visuals, chunks bound, baked
+  lighting, position units and why, chunks not drawn, missing textures); the **Texture** tab shows the real pixel
+  format, the palette id and where it came from, and the GS wrap / alpha-test settings. The log pane prints the same
+  as `[decode]`, `[chain]` and `[texture]` lines, and **Dump material report** lists every chunk.
+- The extension host sends package and node payloads to the webview as binary (`ArrayBuffer`) instead of base64
+  strings; the webview accepts both.

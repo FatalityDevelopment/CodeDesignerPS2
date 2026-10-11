@@ -16,7 +16,7 @@ export class ZipperWorkbenchProvider {
     // absolute file path. Storing nodes in the extension process means the
     // data survives the webview lifecycle (which can recreate the page).
     private _packageCache = new Map<string, {
-        nodes: Array<{ index: number; name: string; type: number; data: string }>;
+        nodes: BinaryNode[];
         loadedAt: number;
         preloadToken?: string;
     }>();
@@ -173,7 +173,7 @@ export class ZipperWorkbenchProvider {
         if (!this._ensureConnected(webview)) { return; }
         try {
             const data = await this._socketClient.zipperReadNode(filePath, entryIndex);
-            webview.postMessage({ type: 'nodeData', entryIndex, data });
+            webview.postMessage({ type: 'nodeData', entryIndex, data: base64ToArrayBuffer(data) });
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
             webview.postMessage({ type: 'nodeError', entryIndex, message });
@@ -302,7 +302,7 @@ export class ZipperWorkbenchProvider {
                     preloadStats: {
                         preloadToken: '',
                         resourceCount: nodes.length,
-                        totalBytes: nodes.reduce((sum, n) => sum + Math.floor((n.data.length * 3) / 4), 0),
+                        totalBytes: nodes.reduce((sum, n) => sum + n.data.byteLength, 0),
                         cacheHit: false,
                     },
                     looseMapPackage: true,
@@ -311,9 +311,11 @@ export class ZipperWorkbenchProvider {
             }
 
             const preload = await this._socketClient.zipperPreloadMapPackage(filePath);
-            // Current webview pipeline still expects full node payloads. We keep
-            // this for compatibility while also priming backend preload cache.
-            const nodes = await this._socketClient.zipperReadAllNodes(filePath);
+            // The webview decodes the archives itself, so hand it every node's
+            // bytes once. Payloads cross the webview boundary as ArrayBuffers
+            // (binary transfer) rather than base64 strings: a map package is
+            // tens of MB and the string round trip was the slow part.
+            const nodes = toBinaryNodes(await this._socketClient.zipperReadAllNodes(filePath));
             this._packageCache.set(filePath, { nodes, loadedAt: Date.now(), preloadToken: preload.preloadToken });
             // Trim cache to the last 4 packages so memory doesn't grow forever.
             if (this._packageCache.size > 4) {
@@ -344,7 +346,7 @@ export class ZipperWorkbenchProvider {
         return hasWorldModel && (hasMapFamily(stem) || hasMapFamily(dirPrefix) || !!this._findMapCompanionPrefix(dir));
     }
 
-    private _loadLooseMapPackageNodes(filePath: string): Array<{ index: number; name: string; type: number; data: string }> {
+    private _loadLooseMapPackageNodes(filePath: string): BinaryNode[] {
         const dir = path.dirname(filePath);
         const candidates = fs.readdirSync(dir)
             .filter(name => /\.ZED$/i.test(name))
@@ -367,7 +369,7 @@ export class ZipperWorkbenchProvider {
                 index,
                 name,
                 type: 0,
-                data: Buffer.from(bytes).toString('base64'),
+                data: bufferToArrayBuffer(bytes),
             };
         });
     }
@@ -380,7 +382,7 @@ export class ZipperWorkbenchProvider {
         if (!filePath) { return; }
         if (!this._ensureConnected(webview)) { return; }
         try {
-            const nodes = await this._socketClient.zipperReadAllNodes(filePath);
+            const nodes = toBinaryNodes(await this._socketClient.zipperReadAllNodes(filePath));
             webview.postMessage({ type: 'archiveNodes', path: filePath, nodes });
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
@@ -495,7 +497,7 @@ export class ZipperWorkbenchProvider {
     }
 
 
-    private _findParentPackageCache(filePath: string): { path: string; nodes: Array<{ index: number; name: string; type: number; data: string }>; preloadToken?: string } | undefined {
+    private _findParentPackageCache(filePath: string): { path: string; nodes: BinaryNode[]; preloadToken?: string } | undefined {
         const direct = this._packageCache.get(filePath);
         if (direct) {
             return { path: filePath, nodes: direct.nodes, preloadToken: direct.preloadToken };
@@ -808,4 +810,26 @@ export class ZipperWorkbenchProvider {
 </body>
 </html>`;
     }
+}
+
+// Node payloads are posted to the webview as ArrayBuffers. VS Code transfers
+// ArrayBuffer values inside a message efficiently (engine >= 1.57), which
+// avoids the base64 string round trip for multi-megabyte packages.
+interface BinaryNode {
+    index: number;
+    name: string;
+    type: number;
+    data: ArrayBuffer;
+}
+
+function bufferToArrayBuffer(buf: Buffer): ArrayBuffer {
+    return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
+}
+
+function base64ToArrayBuffer(base64: string): ArrayBuffer {
+    return bufferToArrayBuffer(Buffer.from(base64 ?? '', 'base64'));
+}
+
+function toBinaryNodes(nodes: Array<{ index: number; name: string; type: number; data: string }>): BinaryNode[] {
+    return nodes.map(n => ({ index: n.index, name: n.name, type: n.type, data: base64ToArrayBuffer(n.data) }));
 }

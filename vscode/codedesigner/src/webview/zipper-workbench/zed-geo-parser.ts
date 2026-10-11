@@ -55,7 +55,9 @@ export interface GeoEntry {
   index: number;
   name: string;
   type: number;
-  data: string; // base64
+  // Payload as base64 (bridge responses) or raw bytes (archives already
+  // parsed in the webview).
+  data: string | Uint8Array;
 }
 
 export interface GeoScene {
@@ -116,6 +118,30 @@ export function readVisualFlags(node: GeoNode | null): number | null {
   return null;
 }
 
+// nparams layout (SOCOM II): 16 floats of 4x4 matrix, then bounds min (3),
+// bounds max (3), then two words (node kind, flags). The bounds are in
+// units, which makes them a yardstick for the position-unit convention.
+export interface GeoNodeBounds {
+  min: [number, number, number];
+  max: [number, number, number];
+  extent: number;
+}
+
+export function readNodeBounds(node: GeoNode | null): GeoNodeBounds | null {
+  if (!node) { return null; }
+  const nparams = node.children.find(c => c.name === 'nparams');
+  const data = nparams?.rawData;
+  if (!data || data.length < 22 * 4) { return null; }
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const f = (i: number) => view.getFloat32(i * 4, true);
+  const min: [number, number, number] = [f(16), f(17), f(18)];
+  const max: [number, number, number] = [f(19), f(20), f(21)];
+  if (![...min, ...max].every(Number.isFinite)) { return null; }
+  const extent = Math.max(max[0] - min[0], max[1] - min[1], max[2] - min[2]);
+  if (!(extent > 0) || extent > 1e6) { return null; }
+  return { min, max, extent };
+}
+
 // Position unit implied by a GEO node's visual flags, or null when unknown.
 export function positionUnitForNode(node: GeoNode | null): GeoPositionUnit | null {
   const flags = readVisualFlags(node);
@@ -128,7 +154,11 @@ export function positionUnitForNode(node: GeoNode | null): GeoPositionUnit | nul
 export function parseGeoScene(entries: GeoEntry[]): GeoScene {
   const decoded: Array<{ entry: GeoEntry; data: Uint8Array | null }> = entries.map(e => ({
     entry: e,
-    data: e.data ? base64ToBytes(e.data) : null,
+    data: !e.data
+      ? null
+      : typeof e.data === 'string'
+        ? base64ToBytes(e.data)
+        : (e.data.length > 0 ? e.data : null),
   }));
 
   const byName = new Map<string, GeoNode[]>();
