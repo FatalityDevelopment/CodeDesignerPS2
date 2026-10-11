@@ -5,7 +5,10 @@ why. Every layout here was confirmed by the SOCOM II pack builders in `Mods/SOCO
 `ca2s2static.py`): packs written this way load and render in the game.
 
 Decoders: `vscode/codedesigner/src/webview/zipper-workbench/zed-model-parser.ts`, `zed-texture-parser.ts`,
-`zed-geo-parser.ts`; renderer: `zed-model-renderer.ts`.
+`zed-geo-parser.ts`; renderer: `zed-model-renderer.ts`. The C# ports used by the bridge and MCP tools are
+`CodeDesigner.Ps2.FileFormats/Zipper/Model/ZedModelFile.cs` (`ParseVisualChains`, `Parse(bytes, chainOffsets)`,
+`CollectChainOffsets`, `PositionUnitForFlags`) and `Zipper/Texture/ZedTextureFile.cs` (`ParseGsRegisters`,
+`Header.Cbp`, `Header.ResolvePaletteId()`), covered by `CodeDesigner.AI.Tests/ZedChainAndGsTests.cs`.
 
 ## Model node (`<model>` + children `N<node>_<visual>`)
 
