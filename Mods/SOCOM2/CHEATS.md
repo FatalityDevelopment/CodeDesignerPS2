@@ -14,24 +14,25 @@ Holds the chosen cheats until you stop it (Ctrl+C in its terminal, or close the 
 
 | Cheat | What it does | Field (your soldier, from the Seal Pointer) |
 |---|---|---|
-| `god` | Health stays full | +0x1044 health (float, 1.0 = full) |
+| `god` | Health stays full | +0xFFC body-part health (refilled from +0x1014) and +0x1044 health bar |
 | `ammo` | Magazines refill as you fire | +0x7B4 rounds in magazine, one per weapon slot |
 | `autoaim` | Auto-aim on (same as the menu option) | +0x5E0 weapon bits, 0x10000 |
 | `rapid` | Rapid fire / fires automatically at close enemies | +0x5E0 weapon bits, 0x10 (cleared when you stop) |
 
 With no names it runs `god ammo`. It follows you through respawns.
 
-## Revive
+## Kill and respawn
 
 ```
-python SOCOM2/bots/socom_bots.py revive
+python SOCOM2/bots/socom_bots.py kill
+python SOCOM2/bots/socom_bots.py respawn
 ```
 
-Brings you back to life where you died, the way a round reset does: refills each body part's health (+0xFFC from
-the maximums at +0x1014) and overall health (+0x1044), clears the killer / death state (+0xFB8-+0xFC4, +0xFD0,
-+0xFD8, the death record +0x109C-+0x10C4) and resets the animation to standing idle (+0x534 = 1, stance +0x174 = 0)
-so a death animation can't lock you. The network state is built from your soldier object, so other players see it.
-Experimental until tested on a death.
+`kill` zeroes each body part's health (+0xFFC) and the health bar (+0x1044), then runs the game's death check
+(0x5AB040) - the routine every hit goes through - so you die normally. `respawn` works alive or dead: it turns the
+`mp_allow_respawn` setting on (value at 0x695450) and writes the respawn trigger `0x66666666` to your soldier at
++0xFCC **once**; the game rebuilds you at a spawn point through its own path, so other players see it. (Writing it
+every frame, as the old instant-respawn code did, respawns you over and over.)
 
 ## Soldiers on the map
 
@@ -91,7 +92,9 @@ Offsets from the Seal Pointer (`*0x0044D648`, the player's CZSealBody):
 | +0x7B4 | rounds in magazine per slot |
 | +0x7DC | second per-slot counter |
 | +0xDFC-+0xE54 | recoil, spread and stance accuracy |
+| +0xEC4-+0xF0C | damage multiplier per body part (18 words: 0 = no damage, 0x52222222 = any hit kills) |
 | +0xFB8-+0xFC4 | killer / cause of death (0xFFFFFFFF / 0xFF while alive) |
+| +0xFCC | respawn trigger: write 0x66666666 once to respawn (0x19 alive, 0x20 dead) |
 | +0xFD0 / +0xFD8 | death state / timer (0x1F0001 / 0xFFFF dead, 0 / 1.0 alive) |
 | +0xFFC | health per body part (6 floats, zeroed at death); +0x1014 their maximums (online: 8, 30, 30, 50, 30, 30) |
-| +0x1044 | health |
+| +0x1044 | health bar (display, 1.0 = full) |

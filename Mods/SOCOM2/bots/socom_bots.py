@@ -718,27 +718,43 @@ SEAL_PART_HEALTH, SEAL_PART_MAX = 0xFFC, 0x1014              # per-body-part hea
 SEAL_KILLER = 0xFB8                                          # +0xFB8..+0xFC4 killer / cause: 0xFFFFFFFF, 0xFF while alive
 SEAL_DEATH_STATE, SEAL_DEATH_TIMER = 0xFD0, 0xFD8            # 0x1F0001 / 0xFFFF dead -> 0 / 1.0 alive
 SEAL_DEATH_RECORD = (0x109C, 0x10AC, 0x10B0, 0x10B4, 0x10B8, 0x10BC, 0x10C0, 0x10C4)   # where you died: cleared
-ACTION_IDLE = 0x1                                            # +0x534 standing idle
+SEAL_RESPAWN = 0xFCC                                         # write 0x66666666 once: the game respawns you through
+RESPAWN_TRIGGER = 0x66666666                                 #   its own path (sent to everyone); 0x19 alive, 0x20 dead
+SEAL_DAMAGE_MULT = 0xEC4                                     # 18 per-body-part damage multipliers (+0xEC4..+0xF0C)
+MP_ALLOW_RESPAWN = 0x0069544C + 4                            # the mp_allow_respawn setting's value (halfword, 1 = on)
+DEATH_CHECK = 0x005AB040                                     # (body, 0, 0): kills the body if its health is gone
 
-def revive():
-    """Bring your soldier back where it died (same body, as a round reset does): per-part and overall health,
-    killer / death state cleared, animation reset to standing idle (some death animations lock the body otherwise).
-    EXPERIMENTAL: the game may keep a 'dead' flag elsewhere (other players may still see a corpse)."""
+def respawn(wait=4.0):
+    """Respawn now (alive or dead): turn mp_allow_respawn on and write the respawn trigger to your soldier once.
+    Writing it every frame - as the old instant-respawn code did - respawns you over and over."""
+    require_round()
+    w = struct.unpack("<I", rd(MP_ALLOW_RESPAWN, 4))[0]
+    if w & 0xFFFF != 1:
+        wr32(MP_ALLOW_RESPAWN, (w & 0xFFFF0000) | 1)
     me = my_body()
-    if not 0x100000 < me < 0x2000000:
-        sys.exit("no player body")
+    wr32(me + SEAL_RESPAWN, RESPAWN_TRIGGER)
+    end = time.time() + wait
+    gone = False
+    while time.time() < end:
+        cur = my_body()
+        gone = gone or cur == 0
+        if gone and 0x100000 < cur < 0x2000000:
+            pos = struct.unpack("<3f", rd(cur + 0x1C, 12))
+            print(f"  respawned at {pos[0]:.1f} {pos[1]:.1f} {pos[2]:.1f}")
+            return cur
+        time.sleep(0.03)
+    print("  no respawn seen (is respawning allowed in this game? the trigger is still set)")
+
+def kill():
+    """Die now through the game's own death path: zero each body part's health and the health bar, then run the
+    death check (the routine every hit goes through)."""
+    require_round()
+    me = my_body()
     for i in range(6):
-        wr32(me + SEAL_PART_HEALTH + 4 * i, struct.unpack("<I", rd(me + SEAL_PART_MAX + 4 * i, 4))[0])
-    wr32(me + SEAL_HEALTH, 0x3F800000)
-    for o, v in ((0x0, 0xFFFFFFFF), (0x4, 0xFF), (0x8, 0xFFFFFFFF), (0xC, 0xFF)):
-        wr32(me + SEAL_KILLER + o, v)
-    wr32(me + SEAL_DEATH_STATE, 0)
-    wr32(me + SEAL_DEATH_TIMER, 0x3F800000)
-    for o in SEAL_DEATH_RECORD:
-        wr32(me + o, 0)
-    wr32(me + SEAL_STANCE, 0)
-    wr32(me + SEAL_ACTION, ACTION_IDLE)
-    print(f"  revived {me:#x}: health 1.0, animation reset")
+        wr32(me + SEAL_PART_HEALTH + 4 * i, 0)
+    wr32(me + SEAL_HEALTH, 0)
+    game_call([(DEATH_CHECK, me, 0, 0)])
+    print("  killed")
 
 def cheats(flags, seconds=1800):
     """Hold cheats on your soldier until Ctrl+C (or `seconds`): god (health 1.0), ammo (magazines refilled),
@@ -751,8 +767,12 @@ def cheats(flags, seconds=1800):
         while time.time() < end:
             me = my_body()
             if 0x100000 < me < 0x2000000:
-                if "god" in flags:
+                if "god" in flags:                       # bar + every body part's health (what the death check reads)
                     wr32(me + SEAL_HEALTH, 0x3F800000)
+                    maxes = rd(me + SEAL_PART_MAX, 24)
+                    if rd(me + SEAL_PART_HEALTH, 24) != maxes:
+                        for i in range(6):
+                            wr32(me + SEAL_PART_HEALTH + 4 * i, struct.unpack_from("<I", maxes, 4 * i)[0])
                 if "ammo" in flags:
                     clips = struct.unpack("<6I", rd(me + SEAL_PRIMARY_CLIPS, 24))
                     for i, c in enumerate(clips):
@@ -1407,8 +1427,10 @@ if __name__ == "__main__":
         prop(rest[0], rest[1] if len(rest) > 1 else None)
     elif cmd == "cheats":                             # cheats god ammo autoaim rapid  (held until Ctrl+C)
         cheats(set(rest) or {"god", "ammo"})
-    elif cmd == "revive":                             # revive  (back to life where you died; experimental)
-        revive()
+    elif cmd == "respawn":                            # respawn  (now, alive or dead - the game's own respawn)
+        respawn()
+    elif cmd == "kill":                               # kill  (die through the game's death path)
+        kill()
     elif cmd == "squadhud":                           # squadhud [JESTER WARDOG VANDAL]  (default: 3 nearest team)
         squad_hud(rest)
     elif cmd == "bodies":                             # list every soldier on the map
