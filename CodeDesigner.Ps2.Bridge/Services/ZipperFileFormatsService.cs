@@ -5,7 +5,6 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using CodeDesigner.Ps2.Compression;
 using CodeDesigner.Ps2.FileFormats.Zipper.Apache;
 using CodeDesigner.Ps2.FileFormats.Zipper.ZAR;
 using CodeDesigner.Ps2.FileFormats.Zipper.ZDB;
