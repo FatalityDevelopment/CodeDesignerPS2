@@ -49,6 +49,11 @@ Test only: points held copies of a SOCOM II weapon at a converted weapon model (
 AK-47). The game draws held weapons from the model's own instance list, so this does not show yet; weapon pickups
 are the planned route.
 
+## Weapon records
+
+0x290-byte records (one per weapon and variant, e.g. 552 and 552SD): +0x00 class 0x434D30, +0x04/+0x08/+0x0C
+name, +0x14 icon (.tif), +0x1C model name, +0x20 impact mark, +0x28 magazine size, then stats (floats).
+
 ## Field map
 
 Offsets from the Seal Pointer (`*0x0044D648`, the player's CZSealBody):
@@ -59,14 +64,17 @@ Offsets from the Seal Pointer (`*0x0044D648`, the player's CZSealBody):
 | +0x01C | position (x, y, z) |
 | +0x0C0 | controller pointer |
 | +0x0C8 | team mask (0x40000001 SEAL, 0x80000100 terrorist) |
+| +0x0E0 | flags byte: 0x40 = a body is in reach to pick up |
+| +0x0E4 / +0x0E8 | interaction flags: 0x80000 action icon on screen (pick up / drop body), 0x100000 carrying a body |
 | +0x0D4 / +0x0D8 | nearby soldiers: count / list of 0x30-byte entries (body, position relative to you), nearest first |
-| +0x174 | stance (0 stand, 1 crouch, 2 prone) |
+| +0x174 | stance (0 stand, 1 crouch, 2 prone, 9 carrying a body) |
+| +0x1C8 | action icon visible (1) |
 | +0x528, +0x52C, +0x530 | animation set pointers (shared table, per-movement floats) |
-| +0x534 | action / animation state (packed: low half current, high half likely next) |
+| +0x534 | action / animation state (packed: low half current, high half likely next; 0xD9 carrying a body) |
 | +0x540 | UI character type |
 | +0x594 | shots fired |
 | +0x5E0 | weapon bits: 0x4 firing, 0x10 rapid / auto fire, 0x10000 auto-aim |
-| +0x6C4 | weapon record pointer per slot (0x290-byte records: name, icon, model, stats) |
+| +0x6C4 | weapon records: +0x6C4 is the weapon in hand (switches to a one-handed weapon while carrying a body) |
 | +0x73C | ammo object pointer per slot |
 | +0x7B4 | rounds in magazine per slot |
 | +0x7DC | second per-slot counter |
