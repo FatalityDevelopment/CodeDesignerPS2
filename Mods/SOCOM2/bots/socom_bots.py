@@ -792,6 +792,88 @@ def cheats(flags, seconds=1800):
         w = struct.unpack("<I", rd(me + SEAL_WEAPON_BITS, 4))[0]
         wr32(me + SEAL_WEAPON_BITS, w & ~WB_RAPID)
 
+# Weapon records (0x290 bytes): +0x04/+0x08/+0x0C name, +0x14 icon (.tif name), +0x1C model name, +0x28 magazine.
+# A soldier's held weapons are built from the record's model name when it spawns. HUD icons (RUN/COMMON/HUDW, 65 of
+# them) are bound per icon texture object at map load: to change a weapon's picture, copy another icon's palette /
+# VRAM fields (texture object +0x18..+0x34) into the record's icon texture object.
+REC_NAMES, REC_ICON, REC_MODEL, REC_MAG = (0x04, 0x08, 0x0C), 0x14, 0x1C, 0x28
+TEX_REGISTRY = (0x006A0000, 0x006C0000)                      # rows {name*, 1, id, texture*}
+WEAPON_STRINGS = 0x000D2800                                  # free page area for the strings giveweapon writes
+CA_WEAPONS = {                                               # converted model -> (HUD name, SOCOM II icon, magazine)
+    "ca_fnp90": ("FN P90", "fnp90_icon.tif", 50), "ca_ak47": ("AK-47", "ak_47_icon.tif", 30),
+    "ca_m4a1": ("M4A1", "m4carbine_icon.tif", 30), "ca_m16a2": ("M16A2", "m16_icon.tif", 30),
+    "ca_mp5": ("MP5", "mp5_icon.tif", 30), "ca_iw80a2": ("IW80A2", "IW80A2_icon.tif", 30),
+    "ca_sr25": ("SR-25", "stoner_sr25_icon.tif", 20), "ca_spas12": ("SPAS-12", "spas12_icon.tif", 8),
+    "ca_m79": ("M79", "m79_icon.tif", 1), "ca_m82": ("M82", "barrettm82a.tif", 10),
+    "ca_desert_eagle": ("Desert Eagle", "desert_eagle_icon.tif", 7), "ca_glock18": ("Glock 18", "glock18_icon.tif", 17),
+    "ca_hkp9s": ("HK P9S", "hkp9s_icon.tif", 9), "ca_sig226": ("P226", "p226_icon.tif", 15),
+    "ca_sig_commando": ("SIG 552", "sigcommando_icon.tif", 30), "ca_mp7": ("MP7", "hk5k_icon.tif", 40),
+    "ca_raygun": ("RAY GUN", "fiveSeven_icon.tif", 20),         # custom_weapon.py raygun (pack mrgun)
+}
+
+def _texture_by_name(name):
+    """The icon / texture object registered under `name` (HUD icons are registered on every map), or 0."""
+    blob = rd(TEX_REGISTRY[0], 0x10000) + rd(TEX_REGISTRY[0] + 0x10000, 0x10000)
+    key = name.encode() + b"\0"
+    for base in range(0x680000, 0x6D0000, 0x10000):
+        d = rd(base, 0x10000)
+        o = d.find(key)
+        while o >= 0:
+            ptr = struct.pack("<I", base + o)
+            p = blob.find(ptr)
+            while p >= 0:                                    # a row: {name*, 1, id, texture*}
+                if p % 4 == 0 and p + 0x10 <= len(blob):
+                    one, _, tex = struct.unpack_from("<III", blob, p + 4)
+                    if one == 1 and 0x100000 < tex < 0x2000000:
+                        return tex
+                p = blob.find(ptr, p + 1)
+            o = d.find(key, o + 1)
+    return 0
+
+def _record_name(rec):
+    return rd(struct.unpack("<I", rd(rec + REC_NAMES[0], 4))[0], 24).split(b"\0")[0].decode("latin1")
+
+def give_weapon(pack, slot=0, name=None, icon=None, mag=None):
+    """Turn a weapon you carry into a converted weapon (SOCOM: Combined Assault ...): loads its pack, points the
+    weapon record (slot 0 = primary, 1 = sidearm ...) at the new model and gives it the name / magazine / HUD icon,
+    then respawns you holding it. Looks + HUD only: damage, fire rate and sound stay the old weapon's. Everyone using
+    that weapon record on this map gets the new look; a new map undoes it."""
+    require_round()
+    model = _pack_model(pack)
+    d_name, d_icon, d_mag = CA_WEAPONS.get(model, (model, None, None))
+    name, icon, mag = name or d_name, icon or d_icon, mag or d_mag
+    _put_str(MODEL_NAME_BUF, model)
+    if not game_call([(MODEL_FIND, MODEL_NAME_BUF)])[0]:
+        load_pack(pack, "mem")
+    me = my_body()
+    rec = struct.unpack("<I", rd(me + SEAL_WEAPONS + 4 * slot, 4))[0]
+    if not 0x100000 < rec < 0x2000000:
+        sys.exit(f"no weapon in slot {slot}")
+    old = _record_name(rec)
+    strings = WEAPON_STRINGS + 0x80 * (zlib_crc(model) % 16)  # 16 slots of 0x80: model @+0, name @+0x40
+    _put_str(strings, model)
+    _put_str(strings + 0x40, name)
+    wr32(rec + REC_MODEL, strings)
+    for o in REC_NAMES:
+        wr32(rec + o, strings + 0x40)
+    if mag:
+        wr32(rec + REC_MAG, mag)
+    if icon:
+        src = _texture_by_name(icon)
+        cur_icon = rd(struct.unpack("<I", rd(rec + REC_ICON, 4))[0], 32).split(b"\0")[0].decode("latin1")
+        dst = _texture_by_name(cur_icon)
+        if src and dst and src != dst:
+            for o in range(0x18, 0x38, 4):
+                wr32(dst + o, struct.unpack("<I", rd(src + o, 4))[0])
+        elif not src:
+            print(f"  icon {icon} is not loaded - keeping {cur_icon}")
+    print(f"  {old} -> {name} ({model}, {mag} rounds)")
+    respawn()
+
+def zlib_crc(s):
+    import zlib
+    return zlib.crc32(s.encode())
+
 CNODE_VTABLE = 0x00433040                                    # zdb::CNode vtable (node +0x60)
 
 def find_instances(model_ptr, lo=0x100000, hi=0x2000000):
@@ -911,7 +993,7 @@ PACK_STREAM_CODES = os.path.join(HERE, "..", "pack_stream.codes.txt")
 MEM_MOUNT, MEM_UNMOUNT = 0x000D6000, 0x000D6040                 # pack_stream.cds
 PACK_MAILBOX, PACK_STREAM, PACK_TABLE = 0x000D7000, 0x000D7040, 0x000D7800   # data page, apart from the code
 PACK_ROOTS = [os.path.join(HERE, "..", "packs"), "F:/SOCOM Packs/SOCOM2", "F:/SOCOM Packs/SOCOMCA/packs",
-              "F:/SOCOM Packs/SOCOMCA/static", "F:/SOCOM Packs/SOCOMCA/weapons"] +              [f"F:/SOCOM Packs/SOCOM2/{c}" for c in ("weapons", "gear", "vehicles", "props", "effects", "objects")] +              [p for p in os.environ.get("SOCOM_PACKS", "").split(os.pathsep) if p]
+              "F:/SOCOM Packs/SOCOMCA/static", "F:/SOCOM Packs/SOCOMCA/weapons", "F:/SOCOM Packs/Custom"] +              [f"F:/SOCOM Packs/SOCOM2/{c}" for c in ("weapons", "gear", "vehicles", "props", "effects", "objects")] +              [p for p in os.environ.get("SOCOM_PACKS", "").split(os.pathsep) if p]
 
 def find_pack(name):
     """<root>/<name>/<NAME>.CDB in the pack library folders (build_charpack, rip_socom2, Mods/SOCOMCA/ca2s2)."""
@@ -1436,6 +1518,8 @@ if __name__ == "__main__":
     elif cmd == "bodies":                             # list every soldier on the map
         for b, nm in bodies().items():
             print(f"  {b:#x} {nm}")
+    elif cmd == "giveweapon":                         # giveweapon mcw16 [slot]  (CA P90 in your primary slot)
+        give_weapon(rest[0], int(rest[1]) if len(rest) > 1 else 0)
     elif cmd == "swapweapon":                         # swapweapon m4Acarbine mcw02  (held M4s drawn as the CA AK-47)
         swap_weapon(rest[0], rest[1], rest[2] if len(rest) > 2 else None)
     elif cmd == "despawn":                            # despawn [all]  (props placed with `prop`, newest first)

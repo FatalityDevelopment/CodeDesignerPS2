@@ -105,3 +105,71 @@ def encode(visuals):
             offsets[name] = len(data)
             data += struct.pack("<4I", len(tags), 0, 0, 0) + b"".join(tags)
     return bytes(data), offsets
+
+
+# ---- authoring: triangle mesh -> geometry chunks -----------------------------------------------------------------
+# One chunk (weapon convention, decoded from retail / CA weapons):
+#   STCYCL 0x101; UNPACK V4-32 @0 n4: GIF tag (EOP, nloop 0), GIF tag (EOP, nloop = verts), (idx addr, 0, verts, tris),
+#                                     (0, 0, 0, scale float)
+#   STCYCL 0x203; UNPACK V4-16 @4 n=2*verts (flag): per vertex (x, y, z, nx) (u, v, ny, nz) - positions int16 *
+#                                     scale / 32768, normals int16 * 32767, uv 4096 = 1.0; every 3rd qword is the colour
+#   STCYCL 0x102; UNPACK V4-8 @idx n=tris (usn+flag): (a*3, b*3, c*3, 3)
+#   STCYCL 0x102; UNPACK V3-16 @idx+1 n=tris (flag): face normal int16
+#   MSCNT, NOP padding to a qword. idx = 4 + 3*verts. Keep verts <= 72, tris <= 48 (VU1 memory).
+CHUNK_VERTS, CHUNK_TRIS = 72, 48
+
+
+def _clamp16(x):
+    return max(-32767, min(32767, int(round(x))))
+
+
+def encode_chunk(verts, tris):
+    """verts: [((x, y, z), (nx, ny, nz), (u, v))], tris: [(a, b, c)] -> one chunk (bytes, qword aligned)."""
+    nv, nt = len(verts), len(tris)
+    assert 0 < nv <= 127 and 0 < nt <= 255
+    scale = max(max(abs(c) for c in p) for p, _, _ in verts) * 1.0001 or 1.0
+    idx = 4 + 3 * nv
+    out = bytearray(struct.pack("<II", 0x01000101, 0x6C048000))
+    out += struct.pack("<4I", 0x8000, 0x303EC000, 0x412, 0)
+    out += struct.pack("<4I", 0x8000 | nv, 0x303DC000, 0x412, 0)
+    out += struct.pack("<4I", idx, 0, nv, nt)
+    out += struct.pack("<3If", 0, 0, 0, scale)
+    out += struct.pack("<II", 0x01000203, 0x6D000000 | (2 * nv) << 16 | 0x8004)
+    for (x, y, z), (nx, ny, nz), (u, v) in verts:
+        out += struct.pack("<8h", _clamp16(x / scale * 32768), _clamp16(y / scale * 32768),
+                           _clamp16(z / scale * 32768), _clamp16(nx * 32767),
+                           _clamp16(u * 4096), _clamp16(v * 4096), _clamp16(ny * 32767), _clamp16(nz * 32767))
+    out += struct.pack("<II", 0x01000102, 0x6E000000 | nt << 16 | 0xC000 | idx)
+    for a, b, c in tris:
+        out += bytes((3 * a, 3 * b, 3 * c, 3))
+    out += struct.pack("<II", 0x01000102, 0x69000000 | nt << 16 | 0x8000 | (idx + 1))
+    for a, b, c in tris:
+        p0, p1, p2 = verts[a][0], verts[b][0], verts[c][0]
+        e1 = [p1[i] - p0[i] for i in range(3)]
+        e2 = [p2[i] - p0[i] for i in range(3)]
+        n = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]]
+        ln = sum(x * x for x in n) ** 0.5 or 1.0
+        out += struct.pack("<3h", *(_clamp16(x / ln * 32766) for x in n))
+    out += bytes(-len(out) % 4)
+    out += struct.pack("<I", 0x17000000)                    # MSCNT
+    out += bytes(-len(out) % 16)
+    return bytes(out)
+
+
+def encode_mesh(verts, tris):
+    """Split a mesh into chunks (each with its own vertex subset) -> [chunk bytes, ...]."""
+    chunks, i = [], 0
+    while i < len(tris):
+        remap, sub_v, sub_t = {}, [], []
+        while i < len(tris) and len(sub_t) < CHUNK_TRIS:
+            need = [k for k in tris[i] if k not in remap]
+            if len(sub_v) + len(set(need)) > CHUNK_VERTS:
+                break
+            for k in tris[i]:
+                if k not in remap:
+                    remap[k] = len(sub_v)
+                    sub_v.append(verts[k])
+            sub_t.append(tuple(remap[k] for k in tris[i]))
+            i += 1
+        chunks.append(encode_chunk(sub_v, sub_t))
+    return chunks

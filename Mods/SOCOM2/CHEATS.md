@@ -52,6 +52,27 @@ Fills the bottom-of-screen squad panel (name, health bar, order) with the named 
 teammates. **Work in progress:** the slots change but a new name doesn't appear yet - the panel builds its rows
 when the squad is assigned, and that setup path isn't found yet.
 
+## Give a weapon
+
+```
+python SOCOM2/bots/socom_bots.py giveweapon <pack> [slot]
+```
+
+Turns a weapon you carry (slot 0 primary - the default, 1 sidearm) into a converted or custom weapon and respawns you
+holding it: loads the pack, points the weapon record at the new model and sets its HUD name, magazine size and icon
+(copied from the closest SOCOM II icon). Looks and HUD only - damage, fire rate and sound stay the old weapon's.
+Everyone using that weapon on the map gets the new look; a new map undoes it.
+
+| Pack | Weapon |
+|---|---|
+| mcw02 | AK-47 (SOCOM: Combined Assault) |
+| mcw12 | Desert Eagle (CA) |
+| mcw16 | FN P90 (CA) |
+| mcw24 / mcw30 / mcw32 | MP5 / M4A1 / M16A2 (CA) |
+| mrgun | Ray gun (custom - `SOCOMCA/custom_weapon.py raygun`) |
+
+All 88 CA weapons are in `F:/SOCOM Packs/SOCOMCA/weapons` (`weapons.json`, a preview per pack).
+
 ## Weapon look swap
 
 ```

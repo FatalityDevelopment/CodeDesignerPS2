@@ -74,6 +74,51 @@ def nparams(local, lo, hi, kind, flags):
     return struct.pack("<22f2I", *f, kind, flags)
 
 
+HELD_ORDER = ["firepoint", "firepoint_shell", "aimpoint", "Gun_box"]
+
+
+def weapon_shape(geo, visuals, name, tpl):
+    """Retail weapon layout (the game reads a held weapon's children by position): <name>_high and <name>_low first
+    (the mesh, as two detail levels), then firepoint, firepoint_shell, aimpoint, Gun_box - Gun_box with the template
+    weapon's 'di' collision box. Visual keys are renumbered to match (N000 = high, N001 = low)."""
+    kids = {c.name: c for c in geo.children}
+    rows = kids["children"].children if "children" in kids else []
+    meshes = [r for r in rows if any(c.name == "visuals" for c in r.children)]
+    if len(meshes) != 1:
+        print(f"  weapon_shape: {len(meshes)} mesh nodes - left as converted")
+        return geo, visuals
+    mesh = meshes[0]
+    secs = [sec for key in sorted(visuals) for sec in visuals[key]]          # one visual with every section
+    vps = [v.children[0].data for v in next(c for c in mesh.children if c.name == "visuals").children]
+    flags, lod, tris, verts, cx, cy, cz = struct.unpack("<IIHHfff", vps[0])
+    tris = sum(struct.unpack_from("<IIH", v)[2] for v in vps)
+    verts = sum(struct.unpack_from("<IIHH", v)[3] for v in vps)
+    vp = struct.pack("<IIHHfff", flags, lod, min(tris, 0xFFFF), min(verts, 0xFFFF), cx, cy, cz)
+    nparams = next(c for c in mesh.children if c.name == "nparams")
+    base = name[3:] if name.startswith("ca_") else name
+    lods = [bp.Node(f"{base}_{tag}", children=[bp.Node("nparams", nparams.data),
+                                               bp.Node("visuals", children=[bp.Node("vis", children=[bp.Node("vparams", vp)])])])
+            for tag in ("high", "low")]
+    named = {r.name: r for r in rows}
+    t_geo = tpl["parts"]["GEO"][1][0].children[0]
+    t_box = next((r for r in next(c for c in t_geo.children if c.name == "children").children if r.name == "Gun_box"), None)
+    order = []
+    for nm in HELD_ORDER:
+        r = named.get(nm)
+        if r is None:
+            continue
+        if nm == "Gun_box" and tpl.get("weapon_di") and t_box is not None and not any(c.name == "di" for c in r.children):
+            di = next((c for c in t_box.children if c.name == "di"), None)
+            if di is not None:
+                np_ = bytearray(next(c for c in r.children if c.name == "nparams").data)
+                struct.pack_into("<I", np_, 92, struct.unpack_from("<I", np_, 92)[0] | 0x1000)
+                r = bp.Node(r.name, children=[bp.Node("nparams", bytes(np_)), di] +
+                            [c for c in r.children if c.name not in ("nparams",)])
+        order.append(r)
+    new_kids = [c for c in geo.children if c.name != "children"] + [bp.Node("children", children=lods + order)]
+    return bp.Node(geo.name, geo.data, new_kids), {"N000_000": secs, "N001_000": secs}
+
+
 def node_meshes(clib, n):
     """(textures {hash}, triangles, bbox (lo, hi) in the node's own space) of a node's mesh objects, or None."""
     import staticmesh
@@ -234,6 +279,9 @@ def convert(clib, model_index, name, out_name, out_root, tpl, lib_name="WEAP", v
             kids.append(bp.Node("children", children=[geo_node(j) for j in children]))
         return bp.Node(nm, children=kids)
     geo = geo_node(0)
+    if tpl.get("weapon"):
+        geo, visuals = weapon_shape(geo, visuals, name, tpl)
+        data, offsets = s2static.encode(visuals)
 
     # textures + palettes (as characters)
     tex_nodes, pal_nodes, pal_ids = [], [], {}
