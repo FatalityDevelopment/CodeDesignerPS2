@@ -73,6 +73,31 @@ Everyone using that weapon on the map gets the new look; a new map undoes it.
 
 All 88 CA weapons are in `F:/SOCOM Packs/SOCOMCA/weapons` (`weapons.json`, a preview per pack).
 
+## Add a weapon to the armory
+
+```
+python SOCOM2/bots/socom_bots.py armory mcw16 F90
+python SOCOM2/bots/socom_bots.py armory mrgun F57
+```
+
+Takes a weapon record that normally isn't offered (F90, F57 ...), makes it the weapon in the pack (model, name,
+magazine, icon), turns its `Enable_<weapon>` setting on for both teams (0x3F13F0(code), halfword at +4: 0x1 SEALs,
+0x8 terrorists) and renames its armory caption. Run it in the lobby: the armory spins the new model. The caption
+("SUBMACHINE GUN: F90") is a language-table message (`_1049_SubmGunF90_MSG`), not the record, and the armory copies
+the one on screen, so every copy is rewritten in place; a new name can't be longer than the old caption.
+
+In the lobby the record keeps its retail model (+0x1C): the map load builds every loadout weapon from it, and a
+pack model isn't in the new map (pointing it at one hung the load). Run the command again once the round starts:
+that loads the pack, swaps the model and the HUD icon - then respawn (or use `giveweapon`) to hold it.
+
+The record's real name (+0x04) is never changed: the loadout list keys on it (rename it and the slot shows
+`<NONE>`); only the display names (+0x08/+0x0C) are.
+
+In the lobby it also makes the armory spin the new model. Each weapon has a lobby preview node `Equip<weapon>` (the
+`<model>UI` model's +0x64) with one child mesh; the command hangs a fresh instance's `_high` mesh there (copying the
+old mesh's render mask +0x80). Lobby draws only use the category 0x00 texture pool, so the pack's textures are
+placed there as well. `.armory_ui` remembers each record's original preview model for re-runs.
+
 ## Weapon look swap
 
 ```

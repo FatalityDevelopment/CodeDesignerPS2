@@ -16,7 +16,8 @@
 //   0x000D0980 armed            0x000D0984 lib_models result     0x000D0988 injected lib
 //   0x000D098C other-mount rc   0x000D0990 other archive name    0x000D09A0 captured map archive name
 //   0x000D09C0 library path     0x000D09E0 <lib>_mdl.zed path    0x000D09FC remount rc
-// Needs lib_models.cds at 0x000D1000.
+// Needs lib_models.cds at 0x000D1000 and place_lib.cds at 0x000D1400: a weapon pack (category 0x02) comes after
+// the loader's texture placement loop (0x001E9430) and loaded invisible, so it is placed here itself.
 
 address $000D1200
 capture_mount:                            // a0 = mount ctx, a1 = archive name
@@ -74,6 +75,15 @@ inject_postload:                          // a0 = level (*(0x00435538))
     addiu $a1, $a1, $09E0
     lui   $t0, $000D
     sw    $v0, $0984($t0)
+    lw    $a0, $0988($t0)                 // weapon packs (category 0x02, lib+0x2F): the loader's texture placement
+    lbu   $t1, $002F($a0)                 //   loop (0x001E9430) already ran, so place them ourselves -
+    addiu $t2, $zero, 2                   //   place_lib(lib, 0x1C88, 2, 0) (place_lib.cds, TexCommonCS B1/B2)
+    bne   $t1, $t2, :ip_remount
+    nop
+    addiu $a1, $zero, $1C88
+    addiu $a2, $zero, 2
+    jal   $000D1400
+    daddu $a3, $zero, $zero
 ip_remount:
     lui   $a0, $004A
     jal   $003C8B80                       // ZDB_Reset

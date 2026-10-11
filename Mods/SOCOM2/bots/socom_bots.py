@@ -849,25 +849,38 @@ def give_weapon(pack, slot=0, name=None, icon=None, mag=None):
     then respawns you holding it. Looks + HUD only: damage, fire rate and sound stay the old weapon's. Everyone using
     that weapon record on this map gets the new look; a new map undoes it."""
     require_round()
-    model = _pack_model(pack)
-    d_name, d_icon, d_mag = CA_WEAPONS.get(model, (model, None, None))
-    name, icon, mag = name or d_name, icon or d_icon, mag or d_mag
-    _put_str(MODEL_NAME_BUF, model)
-    if not game_call([(MODEL_FIND, MODEL_NAME_BUF)])[0]:
-        load_pack(pack, "mem")
     me = my_body()
     rec = struct.unpack("<I", rd(me + SEAL_WEAPONS + 4 * slot, 4))[0]
     if not 0x100000 < rec < 0x2000000:
         sys.exit(f"no weapon in slot {slot}")
+    apply_weapon(rec, pack, name, icon, mag)
+    respawn()
+
+def apply_weapon(rec, pack, name=None, icon=None, mag=None, lobby_model=None, load=True):
+    """Make weapon record `rec` the weapon in `pack`: model, HUD name, magazine, icon (see give_weapon).
+    lobby_model: in the lobby, keep the record on this retail model instead - the next map load builds every
+    loadout's weapon from +0x1C, and a pack model isn't in the new map (loading into a round hung)."""
+    model = _pack_model(pack)
+    d_name, d_icon, d_mag = CA_WEAPONS.get(model, (model, None, None))
+    name, icon, mag = name or d_name, icon or d_icon, mag or d_mag
+    _put_str(MODEL_NAME_BUF, model)
+    if load and not game_call([(MODEL_FIND, MODEL_NAME_BUF)])[0]:
+        load_pack(pack, "mem")
     old = _record_name(rec)
     strings = WEAPON_STRINGS + 0x80 * (zlib_crc(model) % 16)  # 16 slots of 0x80: model @+0, name @+0x40
-    _put_str(strings, model)
+    _put_str(strings, lobby_model or model)
     _put_str(strings + 0x40, name)
     wr32(rec + REC_MODEL, strings)
-    for o in REC_NAMES:
-        wr32(rec + o, strings + 0x40)
+    for o in REC_NAMES[1:]:                                  # +0x04 stays: it's the real name the armory's loadout
+        wr32(rec + o, strings + 0x40)                        #   list keys on (renamed -> the slot shows <NONE>)
     if mag:
         wr32(rec + REC_MAG, mag)
+    if lobby_model:
+        print(f"  {old} -> {name} ({mag} rounds) - model stays {lobby_model} until you re-run this in the round")
+        return
+    if not load:                                             # the map load brings the pack: no icon work here
+        print(f"  {old} -> {name} ({model}, {mag} rounds) - loaded by the next map load")
+        return
     if icon:
         src = _texture_by_name(icon)
         if not src:                                          # a custom icon ships as its own pack (category 0x0C):
@@ -879,16 +892,20 @@ def give_weapon(pack, slot=0, name=None, icon=None, mag=None):
                 pass
         cur_icon = rd(struct.unpack("<I", rd(rec + REC_ICON, 4))[0], 32).split(b"\0")[0].decode("latin1")
         dst = _texture_by_name(cur_icon)
-        if src and dst and src != dst:
-            for o in range(0x18, 0x38, 4):
-                wr32(dst + o, struct.unpack("<I", rd(src + o, 4))[0])
         custom = os.path.join(os.path.dirname(find_pack(pack)), "hud_icon.bin")
-        if src and os.path.exists(custom):                   # a custom picture (custom_weapon.py): draw it into the
-            blob = open(custom, "rb").read()                 #   stand-in's pixel / palette buffers - the HUD
-            pix = struct.unpack("<I", rd(src + 0x18, 4))[0]  #   re-uploads them from RAM every frame
-            col = struct.unpack("<I", rd(struct.unpack("<I", rd(src + 0x1C, 4))[0] + 0x14, 4))[0]
-            w, h = struct.unpack("<HH", rd(src, 4))          # the stand-in's own size (pistol icons can be 64x32):
-            size = struct.unpack("<I", rd(src + 4, 4))[0]    #   resample ours to it, never write past its buffer
+        if os.path.exists(custom) and dst:                   # our own picture: draw it into the weapon's OWN icon -
+            canvas = dst                                     #   borrowing a stand-in's buffers also borrows its upload
+        else:                                                #   packets (+0x20/+0x24: its size and VRAM) -> garbage
+            canvas = src
+            if src and dst and src != dst:
+                for o in range(0x18, 0x38, 4):
+                    wr32(dst + o, struct.unpack("<I", rd(src + o, 4))[0])
+        if canvas and os.path.exists(custom):                # a custom picture (custom_weapon.py / weapon_icon.py):
+            blob = open(custom, "rb").read()                 #   draw it into the stand-in's pixel / palette buffers -
+            pix = struct.unpack("<I", rd(canvas + 0x18, 4))[0]   # the HUD re-uploads them from RAM every frame
+            col = struct.unpack("<I", rd(struct.unpack("<I", rd(canvas + 0x1C, 4))[0] + 0x14, 4))[0]
+            w, h = struct.unpack("<HH", rd(canvas, 4))       # the stand-in's own size (pistol icons can be 64x32):
+            size = struct.unpack("<I", rd(canvas + 4, 4))[0] #   resample ours to it, never write past its buffer
             if (w, h, size) != (128, 32, 0x1000):
                 if size != w * h or w > 128 or h > 32:
                     sys.exit(f"  stand-in icon {icon} is {w}x{h} ({size:#x} bytes) - not drawn")
@@ -900,11 +917,167 @@ def give_weapon(pack, slot=0, name=None, icon=None, mag=None):
             for base, data in ((pix, pixels), (col, blob[0x1000:0x1400])):
                 for i in range(0, len(data), 4):
                     wr32(base + i, struct.unpack_from("<I", data, i)[0])
-            print(f"  HUD icon drawn over {icon}")
+            print(f"  HUD icon drawn over {cur_icon if canvas == dst else icon}")
         elif not src:
             print(f"  icon {icon} is not loaded - keeping {cur_icon}")
     print(f"  {old} -> {name} ({model}, {mag} rounds)")
-    respawn()
+
+WEAPON_CLASS = 0x00434D30                                    # weapon record class (record +0x00)
+REC_CODE = 0x7C                                              # weapon code (byte): restrictions, loadouts
+ENABLE_FOR_CODE = 0x003F13F0                                 # (code) -> the Enable_<weapon> setting (value: halfword
+TEAM_SEAL, TEAM_TERR = 0x1, 0x8                              #   at +4, bit 0x1 SEALs, 0x8 terrorists)
+
+def find_weapon_record(name):
+    """The weapon record whose name (+0x04) is `name` (e.g. F90, F57, SR-1 Gyurza, KBP OTs-14 Groza)."""
+    for base in range(0x100000, 0x2000000, 0x10000):
+        try:
+            d = rd(base, 0x10000)
+        except Exception:                                    # noqa: BLE001
+            continue
+        o = d.find(struct.pack("<I", WEAPON_CLASS))
+        while o >= 0:
+            if o % 4 == 0:
+                try:
+                    if _record_name(base + o) == name:
+                        return base + o
+                except Exception:                            # noqa: BLE001
+                    pass
+            o = d.find(struct.pack("<I", WEAPON_CLASS), o + 1)
+    return 0
+
+def armory_weapon(pack, record, teams=TEAM_SEAL | TEAM_TERR):
+    """Add a weapon to the armory: take a weapon record the armory normally hides or that nobody needs (F90, F57,
+    SR-1 Gyurza, KBP OTs-14 Groza ...), make it the weapon in `pack` (model, name, magazine, icon) and switch its
+    Enable_<weapon> setting on for `teams`. The armory lists every weapon record whose setting allows the team."""
+    model = _pack_model(pack)
+    name = CA_WEAPONS.get(model, (model,))[0]
+    rec = find_weapon_record(record)
+    if not rec:
+        sys.exit(f"no weapon record named {record!r}")
+    ui = rd(struct.unpack("<I", rd(rec + REC_MODEL, 4))[0], 32).split(b"\0")[0].decode("latin1") + "UI"
+    if os.path.exists(PREVIEW_FILE):                         # a re-run: the record already holds our model name
+        ui = dict(l.split() for l in open(PREVIEW_FILE) if l.strip()).get(record.replace(" ", "_"), ui)
+    _put_str(MODEL_NAME_BUF, ui)
+    lobby = game_call([(MODEL_FIND, MODEL_NAME_BUF)])[0] != 0  # the armory's preview models exist only in the lobby
+    if not lobby:
+        require_round()                                      # neither (loading, menus): loading a pack there ran a
+                                                             #   remount of an empty map name
+    on_card = lobby and pack_on_card(pack)
+    if on_card:                                              # the next map load loads the pack itself (map_inject:
+        inject_lib(pack_lib_path(pack))                      #   mounts <NAME>, which falls back to the memory card),
+                                                             #   so the round builds the loadout with our model
+    apply_weapon(rec, pack, lobby_model=ui[:-2] if lobby and not on_card else None, load=not lobby)
+    if os.environ.get("SOCOM_NO_PREVIEW") != "1":            # lobby: only the renamed preview copy loads there            # test switch: skip loading the pack in the lobby
+        armory_preview(pack, model, ui, record)
+    armory_caption(record, name)
+    code = rd(rec + REC_CODE, 1)[0]
+    var = game_call([(ENABLE_FOR_CODE, code)])[0]
+    if var:
+        w = struct.unpack("<I", rd(var + 4, 4))[0]
+        wr32(var + 4, (w & 0xFFFF0000) | teams)
+        print(f"  armory: {record} (code {code:#x}) enabled for {'SEALs ' if teams & 1 else ''}{'terrorists' if teams & 8 else ''}")
+    else:
+        print(f"  code {code:#x} has no Enable_ setting - the armory may not list it")
+    if not lobby and struct.unpack("<I", rd(SEAL_PTR, 4))[0]:
+        respawn()                                            # held weapons are built at spawn
+
+MEMCARDS = os.environ.get("SOCOM_MEMCARDS", os.path.expanduser("~/OneDrive/Documents/PCSX2/memcards"))
+CARD_FOLDERS = ("test.ps2",)                                  # PCSX2 slot 1 folder card (the packs card)
+
+def pack_on_card(pack):
+    """Is <NAME>.CDB installed on a folder memory card (build_charpack.install)? ZDB_Mount finds it there."""
+    name = pack.upper()
+    return any(os.path.exists(os.path.join(MEMCARDS, c, "BASCUS-97275" + name, name + ".CDB")) for c in CARD_FOLDERS)
+
+def pack_lib_path(pack):
+    folder = os.path.dirname(find_pack(pack))
+    lib = next((f[:-8] for f in os.listdir(folder) if f.upper().endswith("_MDL.ZED")), "CLIB").lower()
+    return f"//mp/{pack.lower()}/{lib}"
+
+PREVIEW_FILE = os.path.join(HERE, ".armory_ui")             # "<record> <its lobby preview model>" lines
+PREVIEW_PLACED = 0x000D3200                                  # libraries already placed in the lobby pool (16 slots)
+
+def preview_pack(pack, model):
+    """A renamed copy of `pack` for the lobby preview (mcw25 -> mpw25, model ca_mp7 -> pv_mp7, same lengths): the
+    map-load hook loads the real pack by the same library and model names, and the lobby's copy is gone by then -
+    with one name the next map load froze. Built once next to the pack."""
+    name = pack[0] + ("p" if pack[1] != "p" else "q") + pack[2:]
+    pmodel = "pv_" + model[3:] if model.startswith("ca_") else model
+    src = os.path.dirname(find_pack(pack))
+    dst = os.path.join(os.path.dirname(src), name)
+    if not os.path.exists(os.path.join(dst, name.upper() + ".CDB")):
+        os.makedirs(dst, exist_ok=True)
+        swaps = [(pack.lower(), name.lower()), (pack.upper(), name.upper()), (model.encode().decode(), pmodel)]
+        for f in os.listdir(src):
+            if not f.upper().endswith((".ZED", ".CDB")):
+                continue
+            blob = open(os.path.join(src, f), "rb").read()
+            for a, b in swaps:
+                blob = blob.replace(a.encode(), b.encode())
+            out = name.upper() + ".CDB" if f.upper().endswith(".CDB") else f
+            open(os.path.join(dst, out), "wb").write(blob)
+    return name, pmodel
+
+def armory_preview(pack, model, ui, record):
+    """Lobby only: make the armory spin `model`. The armory shows a weapon through a lobby node Equip<weapon>
+    (*(<model>UI)+0x64, e.g. Equipfiveseven for fivesevenUI) whose single child (+0x68 count, +0x70 array) is the
+    mesh; swap in a fresh instance's <x>_high with the original child's render mask (+0x80). Lobby draws only take
+    textures from the category 0x00 pool (the weapon / alpha / HUD pools all overlap at 0x2FCC there), so the
+    pack's textures are placed there once too. Keep the visual flags 0xBC0FA: without 0x20000 the int16 positions
+    are read as 1/16 units (a huge gun)."""
+    _put_str(MODEL_NAME_BUF, ui)
+    ui_model = game_call([(MODEL_FIND, MODEL_NAME_BUF)])[0]
+    if not ui_model:
+        return                                               # in a round: no armory models
+    rows = dict(l.split() for l in open(PREVIEW_FILE) if l.strip()) if os.path.exists(PREVIEW_FILE) else {}
+    rows[record.replace(" ", "_")] = ui
+    with open(PREVIEW_FILE, "w") as f:
+        f.write("".join(f"{k} {v}\n" for k, v in rows.items()))
+    node = struct.unpack("<I", rd(ui_model + 0x64, 4))[0]
+    pack, model = preview_pack(pack, model)
+    lib = load_pack(pack, "mem")
+    _put_str(MODEL_NAME_BUF, model)
+    m = game_call([(MODEL_FIND, MODEL_NAME_BUF)])[0]
+    if not m:
+        sys.exit(f"preview model {model} did not load")
+    placed = struct.unpack("<16I", rd(PREVIEW_PLACED, 64))
+    if lib not in placed:
+        for a, v in ((int(a, 16) & 0x1FFFFFF, int(v, 16)) for a, v in (l.split() for l in open(PLACE_LIB_CODES) if l.strip())):
+            wr32(a, v)
+        game_call([(PLACE_LIB, lib, *PLACEMENT[0x00])], wait=10.0)
+        wr32(PREVIEW_PLACED + 4 * placed.index(0), lib)
+    for i in range(3):
+        wr32(CALL_BUF + 4 * i, 0)
+    inst = game_call([(INSTANTIATE, m, CALL_BUF, 0)])[0]
+    cnt, _, arr = struct.unpack("<3I", rd(inst + 0x68, 12))
+    kids = struct.unpack(f"<{cnt}I", rd(arr, 4 * cnt))
+    high = next((k for k in kids if rd(struct.unpack("<I", rd(k + 0x90, 4))[0], 32).split(b"\0")[0].endswith(b"_high")), kids[0])
+    arr = struct.unpack("<I", rd(node + 0x70, 4))[0]         # the node's own child array (the game frees it with
+    cur = struct.unpack("<I", rd(arr, 4))[0]                 #   the lobby - never point it at our memory)
+    wr32(high + 0x80, struct.unpack("<I", rd(cur + 0x80, 4))[0])
+    wr32(high + 0x64, node)
+    wr32(arr, high)
+    print(f"  armory preview: {ui} (node {node:#x}) now spins {model}")
+
+CAPTION_SHORT = {"CA FN P90": "P90"}                         # names that fit after "SUBMACHINE GUN: " etc.
+
+def armory_caption(record, name):
+    """The armory captions a weapon from the language table ("SUBMACHINE GUN: F90", _1049_SubmGunF90_MSG), not its
+    record, and copies the shown caption to the heap: rewrite every "<KIND>: <record>" in place (never longer)."""
+    import re
+    pat = re.compile(rb"[A-Z][A-Z0-9 -]*: " + re.escape(record.upper().encode()) + rb"\0")   # "PISTOL: MARK 23"
+    for base in range(0x100000, 0x2000000, 0x10000):
+        try:
+            d = rd(base, 0x10000)
+        except Exception:                                    # noqa: BLE001
+            continue
+        for m in pat.finditer(d):
+            old = m.group()[:-1].decode("latin1")
+            kind = old.rsplit(": ", 1)[0]
+            new = next(c for c in (f"{kind}: {name}", f"{kind}: {CAPTION_SHORT.get(name, name)}", name,
+                                   name[:len(old)]) if len(c) <= len(old))
+            _put_str(base + m.start(), new)
+            print(f"  armory caption {old!r} -> {new!r}")
 
 def zlib_crc(s):
     import zlib
@@ -1240,7 +1413,7 @@ def inject_lib(path):
         cur = struct.unpack("<I", rd(site, 4))[0]
         if cur not in (word, originals[site]):
             sys.exit(f"call site {site:#x} holds {cur:#010x}, not the expected jal - is the game booted to the lobby?")
-    for codes in (LIB_MODELS_CODES, INJECT_CODES):
+    for codes in (LIB_MODELS_CODES, PLACE_LIB_CODES, INJECT_CODES):   # place_lib: weapon packs place their textures
         for a, v in ((int(a, 16) & 0x1FFFFFF, int(v, 16)) for a, v in (l.split() for l in open(codes) if l.strip())):
             if a != INJ_ARMED:
                 wr32(a, v)
@@ -1556,6 +1729,9 @@ if __name__ == "__main__":
     elif cmd == "bodies":                             # list every soldier on the map
         for b, nm in bodies().items():
             print(f"  {b:#x} {nm}")
+    elif cmd == "armory":                             # armory mrgun F57 [teams]  (ray gun in the F57's armory slot)
+        armory_weapon(rest[0], " ".join(rest[1:2]) if len(rest) > 1 else "F57",
+                      int(rest[2], 0) if len(rest) > 2 else TEAM_SEAL | TEAM_TERR)
     elif cmd == "giveweapon":                         # giveweapon mcw16 [slot]  (CA P90 in your primary slot)
         give_weapon(rest[0], int(rest[1]) if len(rest) > 1 else 0)
     elif cmd == "swapweapon":                         # swapweapon m4Acarbine mcw02  (held M4s drawn as the CA AK-47)
