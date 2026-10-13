@@ -950,6 +950,10 @@ interface RdrTreeNode {
                             <option value="pixel256">raw / 256 pixel tiled</option>
                           </select>
                         </div>
+                        <label class="zip-map-ctrl zip-check">
+                          <input type="checkbox" [checked]="showSky()" (change)="onShowSkyChange($event)" />
+                          <span>Show sky (dome, sun, flare)</span>
+                        </label>
                         <div class="zip-map-ctrl">
                           <span>Lighting</span>
                           <select [value]="mapLighting()" (change)="onMapLightingChange($event)" title="Baked vertex lighting from the model. The game multiplies texture by colour / 128; some areas (church interiors) are baked very dark.">
@@ -999,7 +1003,7 @@ interface RdrTreeNode {
                           }
                         </div>
                         @if (flying()) {
-                          <div class="zip-hint">Click the view, then: W/A/S/D or arrows move, drag to look, E/Space up, Q/C down, Shift faster, wheel sets speed, Esc back to orbit.</div>
+                          <div class="zip-hint">W/A/S/D or arrows move, drag the view to look, E/Space up, Q/C down, Shift faster, wheel sets speed, Esc back to orbit. Pick another point to jump there.</div>
                         }
                       </div>
                     }
@@ -1359,6 +1363,9 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
   readonly selectedMapPoint = signal<string>('');
   readonly showMapMarkers = signal(true);
   readonly flying = signal(false);
+  // Draw the sky dome, sun and lens flare (sky archive SP<map>_MDL, the
+  // map's sky / thesun / flare nodes).
+  readonly showSky = signal(true);
   // Game units per metre (MP53.ZED MetersPerUnit 0.1 -> 10), for eye height.
   private unitsPerMeter = 10;
   // The raw model bytes for the currently-displayed model, kept so we can
@@ -3178,7 +3185,8 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
 
   private pointHeight(point: MapPoint, mdl: ZedModel | null): number | null {
     if (!mdl) { return null; }
-    const visible = { chunks: mdl.chunks.filter(c => !/sunglow|lightrays|sky/i.test(c.textureName ?? '')) };
+    // Sky domes and sun cards are never ground.
+    const visible = { chunks: mdl.chunks.filter(c => !isSkyChunk(c) && !/lightrays/i.test(c.textureName ?? '')) };
     return groundHeight(visible, point.x, point.z, this.mapGridMaxY());
   }
 
@@ -3203,6 +3211,13 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
 
   onSelectedMapPointChange(event: Event): void {
     this.selectedMapPoint.set((event.target as HTMLSelectElement).value);
+    // While flying, jump straight to the new point.
+    if (this.flying()) { this.flyFromSelectedPoint(); }
+  }
+
+  onShowSkyChange(event: Event): void {
+    this.showSky.set((event.target as HTMLInputElement).checked);
+    this.applyModelToRenderer();
   }
 
   onShowMapMarkersChange(event: Event): void {
@@ -3910,7 +3925,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     const effectiveUvMode = this.mapTextureV() === 'flipV' ? 'flipV' : 'direct';
     const renderModel = {
       ...mdl,
-      chunks: mdl.chunks.map(c => {
+      chunks: (this.showSky() ? mdl.chunks : mdl.chunks.filter(c => !isSkyChunk(c))).map(c => {
         const textureName = effectiveChunkTexture(c);
         const sourceName = sourceNameForChunk(c);
         const sourceArchiveName = sourceArchiveForChunk(c);
@@ -5848,6 +5863,14 @@ function textureVisibilityScore(tex: ZedTexture): number {
 // bridge responses, companion files) or as binary (ArrayBuffer / typed
 // array, the package and node reads). Normalise at the boundary.
 type NodePayload = string | ArrayBuffer | Uint8Array | null | undefined;
+
+// Sky geometry: the sky archive (SP<map>_MDL: sky dome, mist), the map's
+// sky / sun / flare nodes, and sky / sun textures.
+function isSkyChunk(c: { sourceArchiveName?: string | null; sourceModelName?: string | null; visualKey?: string | null; textureName?: string | null }): boolean {
+  if (/^sp\d+$/.test(namespaceFromArchiveName(c.sourceArchiveName) ?? '')) { return true; }
+  if (/^(?:sky|thesun|sun|flare|mist\d*)$/i.test(c.sourceModelName ?? '')) { return true; }
+  return /^(?:sky|sunglow|sun_|flare|lensflare|cloud)/i.test(c.textureName ?? '');
+}
 
 // A ZDB root entry's file name, lower-cased (its path may carry RUN\\...).
 function rootEntryLeaf(e: { name: string; path?: string }): string {
