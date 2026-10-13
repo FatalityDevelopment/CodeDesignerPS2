@@ -3107,6 +3107,11 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       }
     }
     if (flagsUnit) { return { unit: flagsUnit, reason: 'GEO vparams flags' }; }
+    // Map geometry is always in 1/16 units; without its GEO node (no map
+    // GEO loaded) the scale convention would shrink the map 2048x.
+    if (namespaceFromArchiveName(sourceArchiveName) === 'worl' || (entryName ?? '').toLowerCase() === 'worldmodel') {
+      return { unit: 'sixteenth', reason: 'map world model' };
+    }
     return { unit: 'scale', reason: 'default' };
   }
 
@@ -4101,6 +4106,14 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     const txrArchives: Array<{ name: string; archive: InspectedZedArchive }> = [];
     const palArchives: Array<{ name: string; archive: InspectedZedArchive }> = [];
     const geoArchives: Array<{ name: string; archive: InspectedZedArchive }> = [];
+    // The package lists every node, nested archives' nodes included. Its
+    // top-level files are named by their ZDB path: match them against the
+    // ZDB's own entry list by path and size. A ZDB can mix "RUN\\...\\X.ZED"
+    // paths with bare root names (M51), so "has a separator" alone drops
+    // most archives, and nested nodes can reuse a root's bare name (a 4-byte
+    // "WORL_MDL.ZED" reference). Without a ZDB entry list (loose map
+    // folder) every node is a file.
+    const rootKeys = this.packageRootKeys();
     const hasRootPaths = nodes.some(n => /[\\/]/.test(n.name));
     let decodedNodes = 0;
     let undecodableNodes = 0;
@@ -4118,7 +4131,10 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       if (bytes.length === 0) { continue; }
       decodedNodes++;
       const leaf = (node.name.split(/[\\/]/).pop() ?? node.name).toLowerCase();
-      const isRootPackageEntry = !hasRootPaths || /[\\/]/.test(node.name);
+      const rootKey = `${node.name.toLowerCase()}|${bytes.length}`;
+      const isRootPackageEntry = rootKeys
+        ? rootKeys.delete(rootKey)
+        : !hasRootPaths || /[\\/]/.test(node.name);
       if (!isRootPackageEntry) { continue; }
       this.packageEntryBytes.set(leaf, bytes);
 
@@ -4266,6 +4282,14 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     } else {
       this.applyModelToRenderer();
     }
+  }
+
+  // "path|size" of the opened ZDB's top-level entries, or null when the
+  // open file is not a ZDB (a loose map folder sends plain file names).
+  private packageRootKeys(): Set<string> | null {
+    const result = this.result();
+    if (!result || !/\.zdb$/i.test(result.path ?? '') || result.entries.length === 0) { return null; }
+    return new Set(result.entries.map(e => `${(e.path || e.name).toLowerCase()}|${e.size}`));
   }
 
   private parsePackageMpsResults(): MpsResult[] {
