@@ -76,6 +76,13 @@ unit and transforms it by the node's matrix accumulated from the model root. Whe
 node's matrix is applied on top, and implicit child nodes already drawn through their model's chains are not placed
 a second time. The log shows `[placement]` lines with how many visuals were placed.
 
+## Opening a map
+
+Open the map's package (`MP53.ZDB`), or a loose `WORL_MDL.ZED` in a folder holding the unpacked package. Either way
+the editor loads the map's TXR/PAL/GEO/MDL archives, `AIMAPS.MPS` (spawn points, AI grid) and the map config
+(`MP53.ZED`). `worldmodel` (terrain, buildings, the basilica) renders by itself; **Compose GEO scene** adds the
+placed props (turrets, helicopter), and **Spawn camera** flies from a start point.
+
 ## Composing the map scene
 
 **Compose GEO scene** uses the map's scene graph: the GEO archive with a `worldmodel` node, preferring the map's own
