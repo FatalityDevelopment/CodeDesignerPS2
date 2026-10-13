@@ -254,10 +254,12 @@ export class ZedModelRenderer {
     // back to a plain grey material.
     const makeMaterial = (color: number, map?: THREE.DataTexture, pixels?: ModelTexturePixels): THREE.Material => {
       // Per-texture alpha. Effects keep the soft-blend setup they had
-      // (transparentTextures). Otherwise texels are only discarded when the
-      // texture's own GS TEST register enables an alpha test, exactly as
-      // the game does; decoded alpha is ignored for everything else so a
-      // palette with black entries never punches holes in a wall.
+      // (transparentTextures). Otherwise texels are discarded when the
+      // texture's own GS TEST register enables an alpha test, or when the
+      // texture carries real transparency: world chunks draw with PRIM ABE
+      // set (alpha blending on for every draw), so leaf cards, fences and
+      // glows blend their clear texels away whatever the texture's ALPHA
+      // register says. A few stray clear texels don't count.
       const gsAlphaTest = pixels?.alphaTest ?? null;
       let alphaTest: number;
       let translucent: boolean;
@@ -267,10 +269,8 @@ export class ZedModelRenderer {
       } else if (gsAlphaTest !== null && pixels?.hasTransparency) {
         alphaTest = gsAlphaTest;
         translucent = false;
-      } else if (pixels?.alphaBlend && (pixels.transparentRatio ?? 0) > 0.02) {
-        // Alpha-blended in game with real transparency (fences, glows): a
-        // cutout keeps depth sorting simple and matches the silhouette. A
-        // few stray transparent texels (palette black entries) don't count.
+      } else if ((pixels?.transparentRatio ?? 0) > 0.02) {
+        // A cutout keeps depth sorting simple and matches the silhouette.
         alphaTest = 0.5;
         translucent = false;
       } else {
@@ -567,6 +567,8 @@ export class ZedModelRenderer {
     const now = performance.now();
     const dt = this.lastFrame ? Math.min(0.1, (now - this.lastFrame) / 1000) : 0;
     this.lastFrame = now;
+    // Debug boxes only clutter a first-person view.
+    if (this.boundsGuide) { this.boundsGuide.visible = !this.flyMode; }
     if (this.flyMode) {
       this.stepFly(dt);
       this.renderer.render(this.scene, this.camera);
