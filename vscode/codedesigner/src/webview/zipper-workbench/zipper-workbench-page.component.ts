@@ -2709,6 +2709,14 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
         this.log(`[model] ${entry.name}: using ${alternate.sourceName}`);
       }
 
+      // The map's world model previews as the whole map: terrain and
+      // buildings plus every prop the map's GEO scene places, once the
+      // package (GEO, MDL, TXR/PAL, AIMAPS) has loaded.
+      if (!alternate && this.isMapWorldModelEntry(entry.name, sourceArchive) && this.composeGeoScene({ fromSceneRoot: true })) {
+        this.previewMessage.set('');
+        return;
+      }
+
       const activeArchive = this.archiveStack().at(-1)?.archive ?? null;
       const activeNode = activeArchive?.entries.find(e => e.index === entry.index) ?? null;
       if (!alternate && activeArchive && activeNode && this.shouldAutoComposeCharacterNode(activeNode, sourceArchive)) {
@@ -3222,6 +3230,23 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     const legacy = this.companionScene();
     if (legacy && !scenes.includes(legacy)) { scenes.push(legacy); }
     return scenes;
+  }
+
+  // Decode-time settings (binding, units) need the payload decoded again:
+  // a single model from its bytes, the composed map from the package.
+  private canRedecodePreview(): boolean {
+    const entry = this.selectedEntry();
+    if (!entry) { return false; }
+    return !!this.currentModelBytes || this.isMapWorldModelEntry(entry.name, this.currentArchiveLeaf());
+  }
+
+  // The map's world model (WORL_MDL > worldmodel) when the map scene that
+  // places it has loaded.
+  private isMapWorldModelEntry(entryName: string, sourceArchive: string | null | undefined): boolean {
+    if (entryName.toLowerCase() !== 'worldmodel') { return false; }
+    if (namespaceFromArchiveName(sourceArchive ?? '') !== 'worl') { return false; }
+    const scene = this.mapScene();
+    return !!scene && !!findSceneNode(scene, 'worldmodel');
   }
 
   // The map's scene graph: the GEO archive that places the world
@@ -4493,7 +4518,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     // takes effect immediately. We re-parse from raw bytes to discard the
     // previous binding's overrides; otherwise switching back to tailScan
     // would leave stale smartWorld picks in place.
-    if (this.currentModelBytes && this.selectedEntry()) {
+    if (this.canRedecodePreview()) {
       this.refreshPreview();
       return;
     }
@@ -4507,7 +4532,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     this.mapPositionUnit.set((event.target as HTMLSelectElement).value as ReturnType<typeof this.mapPositionUnit>);
     // Positions are baked at parse time, so decode the selected payload
     // again from its cached bytes.
-    if (this.currentModelBytes && this.selectedEntry()) {
+    if (this.canRedecodePreview()) {
       this.refreshPreview();
       return;
     }
@@ -4649,17 +4674,19 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
   // merges everything into one big ZedModel. Renders via the existing
   // model preview pipeline.
   // ------------------------------------------------------------------
-  composeGeoScene(): void {
+  // fromSceneRoot composes the whole map (worldmodel plus every placed
+  // prop) whatever is selected; the world model preview uses it.
+  composeGeoScene(options: { fromSceneRoot?: boolean } = {}): boolean {
     const scene = this.mapScene();
     if (!scene) {
       this.log('[GEO] no GEO scene loaded for this package', true);
-      return;
+      return false;
     }
     const entry = this.selectedEntry();
     // Use the currently-selected node as the GEO root when it matches a
     // scene node (e.g. user clicks `worldmodel`); otherwise start at the
     // very top of the GEO tree.
-    let root = entry ? findSceneNode(scene, entry.name) : null;
+    let root = entry && !options.fromSceneRoot ? findSceneNode(scene, entry.name) : null;
     if (!root) { root = scene.root; }
     // Build a model lookup map across EVERY *_MDL.ZED in the package by
     // walking each archive's full entry tree (HTML reference behaviour —
@@ -4713,7 +4740,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     const instances = collectSceneInstances(scene, root, name => !!resolve(name));
     if (instances.length === 0) {
       this.log(`[GEO] no placeable instances found under ${root.name}`, true);
-      return;
+      return false;
     }
 
     // Compose. Each instance contributes a transformed copy of its model's
@@ -4901,7 +4928,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
 
     if (composedVertices.length === 0) {
       this.log(`[GEO] composition produced no vertices (instances=${instances.length}, missing=${missing.length})`, true);
-      return;
+      return false;
     }
 
     let radius = 0;
@@ -4947,6 +4974,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     if (uniqueMissing.length) {
       this.log(`Missing model refs: ${uniqueMissing.slice(0, 60).join(', ')}${uniqueMissing.length > 60 ? '…' : ''}`);
     }
+    return true;
   }
 
   // ------------------------------------------------------------------

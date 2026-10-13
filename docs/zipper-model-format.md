@@ -78,14 +78,15 @@ a second time. The log shows `[placement]` lines with how many visuals were plac
 
 ## Opening a map
 
-Open the map's package (`MP53.ZDB`), or a loose `WORL_MDL.ZED` in a folder holding the unpacked package. Either way
-the editor loads the map's TXR/PAL/GEO/MDL archives, `AIMAPS.MPS` (spawn points, AI grid) and the map config
-(`MP53.ZED`). `worldmodel` (terrain, buildings, the basilica) renders by itself; **Compose GEO scene** adds the
-placed props (turrets, helicopter), and **Spawn camera** flies from a start point.
+Open the map's package (`MP53.ZDB`) and enter `WORL_MDL.ZED`. The viewer preloads the package's dependencies (every
+TXR/PAL/GEO/MDL archive, `AIMAPS.MPS`, the map config `MP53.ZED`), and previewing `worldmodel` shows the whole map:
+the terrain and buildings (the basilica is part of `worldmodel`) composed with every prop the map's GEO scene places
+(MP53: three turrets, the helicopter). The **Spawn camera** section then flies from a start point. A loose
+`WORL_MDL.ZED` in a folder holding the unpacked package loads the same set.
 
 ## Composing the map scene
 
-**Compose GEO scene** uses the map's scene graph: the GEO archive with a `worldmodel` node, preferring the map's own
+The world model preview (and **Compose GEO scene** for a selected node) uses the map's scene graph: the GEO archive with a `worldmodel` node, preferring the map's own
 prefix (`MP53_GEO`). A package lists several GEO archives and `RUN\COMMON` ones come first, so "the first GEO" is
 `EFFE_GEO`. Instances are collected from the scene root (or the selected node):
 
