@@ -71,6 +71,8 @@ export interface ZedTexture {
   paletteResolved: boolean;
   // True when any decoded pixel is not fully opaque.
   hasTransparency: boolean;
+  // Fraction of texels with alpha below 50% (0..1).
+  transparentRatio: number;
 }
 
 export interface ZedPalette {
@@ -594,6 +596,16 @@ function hasTransparentPixels(rgba: Uint8Array): boolean {
   return false;
 }
 
+function transparentRatioOf(rgba: Uint8Array): number {
+  const count = rgba.length / 4;
+  if (count === 0) { return 0; }
+  let clear = 0;
+  for (let i = 3; i < rgba.length; i += 4) {
+    if (rgba[i] < 128) { clear++; }
+  }
+  return clear / count;
+}
+
 // Resolve the palette for an indexed texture. Order:
 //   1. an explicit palette alias (texpal_N / ns:texpal_N: a user override or
 //      a hand-tuned rule) when the caller passed one
@@ -692,6 +704,7 @@ export function parseTexture(
       rgba: flipRowsRgba(flat, width, height),
       paletteResolved: true,
       hasTransparency: hasTransparentPixels(flat),
+      transparentRatio: transparentRatioOf(flat),
     };
   }
 
@@ -742,5 +755,6 @@ export function parseTexture(
     rgba: flipRowsRgba(flat, width, height),
     paletteResolved: !!palette,
     hasTransparency: !!palette && hasTransparentPixels(flat),
+    transparentRatio: palette ? transparentRatioOf(flat) : 0,
   };
 }

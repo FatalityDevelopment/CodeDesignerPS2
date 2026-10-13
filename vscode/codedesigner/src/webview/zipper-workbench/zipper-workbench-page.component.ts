@@ -26,7 +26,7 @@ import {
 } from './zed-texture-parser';
 import { ChainOffset, PositionUnit, ZedModel, applyMarkerBinding, applyWeaponDescriptorBinding, convertPositionUnit, decodeCharacterFallbackPayload, decodeFallbackPayload, looksLikeZedContainer, modelExtent, parseModel } from './zed-model-parser';
 import { InspectedZedArchive, parseZedArchive } from './zed-archive-parser';
-import { type ModelBounds3, type ModelCameraView, ZedModelRenderer } from './zed-model-renderer';
+import { type ModelBounds3, type ModelCameraView, type SceneMarker, ZedModelRenderer } from './zed-model-renderer';
 import {
   RdrAnimationClip,
   RdrAnimationTrack,
@@ -62,6 +62,7 @@ import {
   transformPoint,
 } from './zed-geo-parser';
 import { chooseMapScene, collectSceneInstances, definitionNodeFor } from './zed-scene-compose';
+import { MapPoint, groundHeight, parseMapPoints } from './zed-spawn-points';
 import './zipper-workbench-page.css';
 
 interface ZipperEntryInfo {
@@ -950,6 +951,14 @@ interface RdrTreeNode {
                           </select>
                         </div>
                         <div class="zip-map-ctrl">
+                          <span>Lighting</span>
+                          <select [value]="mapLighting()" (change)="onMapLightingChange($event)" title="Baked vertex lighting from the model. The game multiplies texture by colour / 128; some areas (church interiors) are baked very dark.">
+                            <option value="baked">baked (as in game)</option>
+                            <option value="bright">baked x2 (brighter)</option>
+                            <option value="off">off (texture only)</option>
+                          </select>
+                        </div>
+                        <div class="zip-map-ctrl">
                           <span>Position units</span>
                           <select [value]="mapPositionUnit()" (change)="onMapPositionUnitChange($event)" title="How int16 vertex positions map to units. auto reads the GEO vparams flags: weapons normalise by the chunk scale, props / vehicles / map objects store 1/16 units.">
                             <option value="auto">auto (GEO vparams flags)</option>
@@ -962,6 +971,38 @@ interface RdrTreeNode {
                         <div><span>Nearest map bounds</span><strong>{{ ref.label }}</strong></div>
                       }
                     </div>
+
+                    <!-- Spawn camera: first-person view from the map's start
+                         points and AI waypoints (AIMAPS.MPS). -->
+                    @if (mapPoints().length > 0) {
+                      <div class="zip-pane-section">
+                        <div class="zip-pane-section-title">Spawn camera</div>
+                        <div class="zip-map-controls">
+                          <div class="zip-map-ctrl">
+                            <span>Point</span>
+                            <select [value]="selectedMapPoint()" (change)="onSelectedMapPointChange($event)">
+                              @for (p of mapPoints(); track p.name) {
+                                <option [value]="p.name">{{ p.name }} ({{ p.kind }})</option>
+                              }
+                            </select>
+                          </div>
+                          <label class="zip-map-ctrl zip-check">
+                            <input type="checkbox" [checked]="showMapMarkers()" (change)="onShowMapMarkersChange($event)" />
+                            <span>Show markers (green start, orange hostage, blue waypoint)</span>
+                          </label>
+                        </div>
+                        <div class="zip-dump-buttons">
+                          @if (!flying()) {
+                            <button class="zip-btn zip-primary" (click)="flyFromSelectedPoint()" title="Put a first-person camera on the selected point, at eye height.">Fly from point</button>
+                          } @else {
+                            <button class="zip-btn" (click)="exitFly()">Back to orbit (Esc)</button>
+                          }
+                        </div>
+                        @if (flying()) {
+                          <div class="zip-hint">Click the view, then: W/A/S/D or arrows move, drag to look, E/Space up, Q/C down, Shift faster, wheel sets speed, Esc back to orbit.</div>
+                        }
+                      </div>
+                    }
 
                     <!-- Materials -->
                     <div class="zip-pane-section">
@@ -1306,6 +1347,15 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
   // flags (weapons: int16 / 32768 * chunk scale; props, vehicles and map
   // objects: int16 * scale / 16) and falls back to the scale convention.
   readonly mapPositionUnit = signal<'auto' | PositionUnit>('auto');
+  // Baked vertex lighting: GS exact (x1), brightened (x2), or off.
+  readonly mapLighting = signal<'baked' | 'bright' | 'off'>('baked');
+  // Player / hostage starts and AI waypoints from the package's AIMAPS.MPS.
+  readonly mapPoints = signal<MapPoint[]>([]);
+  readonly selectedMapPoint = signal<string>('');
+  readonly showMapMarkers = signal(true);
+  readonly flying = signal(false);
+  // Game units per metre (MP53.ZED MetersPerUnit 0.1 -> 10), for eye height.
+  private unitsPerMeter = 10;
   // The raw model bytes for the currently-displayed model, kept so we can
   // re-run the binding pass on dropdown change without re-decoding.
   private currentModelBytes: Uint8Array | null = null;
@@ -1520,6 +1570,8 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
         this.companionScene.set(null);
         this.packageState.set('idle');
         this.packageBase64Retried = false;
+        this.mapPoints.set([]);
+        this.selectedMapPoint.set('');
         this.rootTextureFetchRequested.clear();
         this.resetPreview();
         this.setStatus(this.result()?.summary ?? 'File loaded.', false, false);
@@ -3040,6 +3092,111 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     return { unit: 'scale', reason: 'default' };
   }
 
+  // ------------------------------------------------------------------
+  // Spawn camera. Points come from the package's AIMAPS.MPS (see
+  // zed-spawn-points.ts); heights from the geometry in view.
+  // ------------------------------------------------------------------
+  private loadMapPoints(results: MpsResult[]): void {
+    this.mapPoints.set([]);
+    this.selectedMapPoint.set('');
+    for (const result of results) {
+      const grid = result.maps[0];
+      const leaf = (result.sourcePath.split(/[\\/]/).pop() ?? '').trim().toLowerCase();
+      const bytes = this.packageEntryBytes.get(leaf);
+      if (!grid || !bytes) { continue; }
+      const points = parseMapPoints(bytes, {
+        minX: grid.minX, minZ: grid.minZ, minY: grid.minY, maxY: grid.maxY,
+        scaleX: grid.scaleX, scaleZ: grid.scaleZ, width: grid.width, height: grid.height,
+      });
+      if (points.length > 0) {
+        this.mapPoints.set(points);
+        const first = points.find(p => p.name.toLowerCase() === 'startplayer') ?? points.find(p => p.kind === 'start') ?? points[0];
+        this.selectedMapPoint.set(first.name);
+        this.log(`[spawn] ${points.length} point(s) from ${leaf}: ${points.map(p => p.name).join(', ')}`);
+        break;
+      }
+    }
+    // MetersPerUnit lives in the map's config ZED (MP53.ZED).
+    for (const [leaf, bytes] of this.packageEntryBytes) {
+      if (!/^[a-z]+\d+\.zed$/i.test(leaf)) { continue; }
+      try {
+        const archive = parseZedArchive(bytes);
+        const entry = archive.entries.find(e => e.name === 'MetersPerUnit');
+        const data = entry ? archive.entryData.get(entry.index) : undefined;
+        if (data && data.length >= 4) {
+          const mpu = new DataView(data.buffer, data.byteOffset, 4).getFloat32(0, true);
+          if (Number.isFinite(mpu) && mpu > 0 && mpu < 100) { this.unitsPerMeter = 1 / mpu; }
+          break;
+        }
+      } catch { /* not a config archive */ }
+    }
+  }
+
+  private mapGridMaxY(): number {
+    const grid = this.packageMpsResults()[0]?.maps[0];
+    return grid ? grid.maxY + 2 * this.unitsPerMeter : Number.POSITIVE_INFINITY;
+  }
+
+  private pointHeight(point: MapPoint, mdl: ZedModel | null): number | null {
+    if (!mdl) { return null; }
+    const visible = { chunks: mdl.chunks.filter(c => !/sunglow|lightrays|sky/i.test(c.textureName ?? '')) };
+    return groundHeight(visible, point.x, point.z, this.mapGridMaxY());
+  }
+
+  // Markers only make sense on geometry that covers the AI grid (the world
+  // or a composed scene), not on a single prop.
+  private mapMarkersFor(mdl: ZedModel): SceneMarker[] | null {
+    const points = this.mapPoints();
+    if (!this.showMapMarkers() || points.length === 0) { return null; }
+    const bounds = this.boundsFromVertices(mdl.chunks.flatMap(c => c.vertices));
+    const grid = this.packageMpsResults()[0]?.maps[0];
+    if (!bounds || !grid) { return null; }
+    const coversGrid = (bounds.maxX - bounds.minX) > (grid.maxX - grid.minX) * 0.5 &&
+      (bounds.maxZ - bounds.minZ) > (grid.maxZ - grid.minZ) * 0.5;
+    if (!coversGrid) { return null; }
+    return points.map(p => ({
+      position: [p.x, this.pointHeight(p, mdl) ?? grid.minY, p.z] as [number, number, number],
+      label: p.name,
+      color: p.kind === 'start' ? (/hostage/i.test(p.name) ? 0xffa040 : 0x40e0a0) : 0x5aa0ff,
+      height: 2.5 * this.unitsPerMeter,
+    }));
+  }
+
+  onSelectedMapPointChange(event: Event): void {
+    this.selectedMapPoint.set((event.target as HTMLSelectElement).value);
+  }
+
+  onShowMapMarkersChange(event: Event): void {
+    this.showMapMarkers.set((event.target as HTMLInputElement).checked);
+    this.applyModelToRenderer();
+  }
+
+  onMapLightingChange(event: Event): void {
+    this.mapLighting.set((event.target as HTMLSelectElement).value as ReturnType<typeof this.mapLighting>);
+    this.applyModelToRenderer();
+  }
+
+  // First-person camera at the selected point: on the ground found under
+  // it, at eye height, facing the middle of the geometry.
+  flyFromSelectedPoint(): void {
+    const mdl = this.model();
+    const point = this.mapPoints().find(p => p.name === this.selectedMapPoint());
+    if (!mdl || !point || !this.modelRenderer) { return; }
+    const ground = this.pointHeight(point, mdl);
+    const grid = this.packageMpsResults()[0]?.maps[0];
+    const y = (ground ?? grid?.minY ?? 0) + 1.7 * this.unitsPerMeter;
+    const bounds = this.boundsFromVertices(mdl.chunks.flatMap(c => c.vertices));
+    const cx = bounds ? (bounds.minX + bounds.maxX) / 2 : point.x;
+    const cz = bounds ? (bounds.minZ + bounds.maxZ) / 2 : point.z + 1;
+    const yaw = Math.atan2(cx - point.x, cz - point.z);
+    this.modelRenderer.startFly([point.x, y, point.z], yaw, 6 * this.unitsPerMeter);
+    this.log(`[spawn] flying from ${point.name} at (${point.x.toFixed(0)}, ${y.toFixed(0)}, ${point.z.toFixed(0)})${ground === null ? ' (no ground found under it)' : ''}`);
+  }
+
+  exitFly(): void {
+    this.modelRenderer?.stopFly();
+  }
+
   // The GEO node that defines a model (same lookup as the unit choice).
   private findGeoNodeForModel(entryName: string | null | undefined, sourceArchiveName: string | null | undefined): GeoNode | null {
     if (!entryName) { return null; }
@@ -3346,6 +3503,8 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       for (const c of local.chunks) {
         composedChunks.push({
           ...c,
+          // The renderer draws chunk.vertices: they must carry the transform.
+          vertices: transformVertices(c.vertices, matrix),
           sourceModelName: c.sourceModelName ?? sourceModelName,
           sourceArchiveName: c.sourceArchiveName ?? sourceArchiveName ?? undefined,
           offset: c.offset + chunkBase * 0x80,
@@ -3421,6 +3580,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     }
     if (!this.modelRenderer) {
       this.modelRenderer = new ZedModelRenderer(canvas);
+      this.modelRenderer.onFlyModeChange = flying => this.flying.set(flying);
     }
   }
 
@@ -3726,6 +3886,9 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       cameraView: rendererCameraView,
       referenceBounds,
       showBounds: shouldShowMapBounds,
+      vertexColors: this.mapLighting() !== 'off',
+      vertexColorScale: this.mapLighting() === 'bright' ? 2 : 1,
+      markers: this.mapMarkersFor(mdl),
     });
     const missingForPane = [...new Set([...missingTextureSources, ...failedTextureDecodes, ...renderResult.missingTextures.map(k => k.split('::')[1] ?? k)])].sort();
     this.modelDecodeInfo.update(info => info
@@ -3957,6 +4120,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
 
     const packageMpsResults = this.parsePackageMpsResults();
     this.packageMpsResults.set(packageMpsResults);
+    this.loadMapPoints(packageMpsResults);
 
     // Build the .tif -> texdat map across every TXR archive in the package.
     const tifMap = new Map<string, Uint8Array>();
@@ -4586,6 +4750,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
         for (const c of local.chunks) {
           target.chunks.push({
             ...c,
+            vertices: transformVertices(c.vertices, matrix),
             sourceModelName: c.sourceModelName ?? sourceModelName,
             sourceArchiveName: c.sourceArchiveName ?? hit.sourceFile,
             offset: c.offset + chunkBase * 0x80,
@@ -4723,6 +4888,8 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       for (const c of mdl.chunks) {
         composedChunks.push({
           ...c,
+          // The renderer draws chunk.vertices: apply the placement there.
+          vertices: transformVertices(c.vertices, inst.matrix),
           sourceModelName: c.sourceModelName ?? hit.node.name ?? inst.modelName,
           sourceArchiveName: c.sourceArchiveName ?? hit.sourceFile,
           offset: c.offset + chunkBase * 0x80,
@@ -4882,6 +5049,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
           for (const c of local.chunks) {
             composedChunks.push({
               ...c,
+              vertices: transformVertices(c.vertices, matrix),
               sourceModelName: c.sourceModelName ?? entry.name,
               sourceArchiveName: c.sourceArchiveName ?? sourceArchiveName ?? undefined,
               offset: c.offset + chunkBase * 0x80,
@@ -5666,7 +5834,7 @@ function chainOffsetsForChildren(archive: InspectedZedArchive, childIndices: num
   return out;
 }
 
-function texturePixelsFor(tex: ZedTexture): { width: number; height: number; rgba: Uint8Array; wrapS?: 'repeat' | 'clamp'; wrapT?: 'repeat' | 'clamp'; alphaTest?: number | null; hasTransparency?: boolean } {
+function texturePixelsFor(tex: ZedTexture): { width: number; height: number; rgba: Uint8Array; wrapS?: 'repeat' | 'clamp'; wrapT?: 'repeat' | 'clamp'; alphaTest?: number | null; hasTransparency?: boolean; transparentRatio?: number; alphaBlend?: boolean } {
   return {
     width: tex.header.width,
     height: tex.header.height,
@@ -5675,6 +5843,8 @@ function texturePixelsFor(tex: ZedTexture): { width: number; height: number; rgb
     wrapT: tex.header.gs?.wrapT,
     alphaTest: tex.header.gs?.alphaTest ?? null,
     hasTransparency: tex.hasTransparency,
+    transparentRatio: tex.transparentRatio,
+    alphaBlend: tex.header.gs?.alphaBlend ?? false,
   };
 }
 
@@ -5696,6 +5866,21 @@ function tryReadLocalMatrix(bytes: Uint8Array): number[] {
   const saneBottom = Math.abs(m[3]) < 0.01 && Math.abs(m[7]) < 0.01 && Math.abs(m[11]) < 0.01 && Math.abs(Math.abs(m[15]) - 1) < 0.25;
   const saneTranslate = Math.abs(m[12]) < 100000 && Math.abs(m[13]) < 100000 && Math.abs(m[14]) < 100000;
   return saneScale && saneBottom && saneTranslate ? m : identityMatrix();
+}
+
+function isIdentityMatrix(m: number[]): boolean {
+  const id = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+  return m.length === 16 && m.every((v, i) => Math.abs(v - id[i]) < 1e-9);
+}
+
+// Copies of chunk vertices moved by a placement matrix (column-major, as
+// transformPoint). Identity returns the same array.
+function transformVertices(vertices: ZedModel['vertices'], matrix: number[]): ZedModel['vertices'] {
+  if (isIdentityMatrix(matrix)) { return vertices; }
+  return vertices.map(v => {
+    const [x, y, z] = transformPoint(matrix, v.x, v.y, v.z);
+    return { ...v, x, y, z };
+  });
 }
 
 function describeMagic(bytes: Uint8Array): string {

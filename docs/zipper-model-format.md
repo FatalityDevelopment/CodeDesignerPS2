@@ -90,6 +90,21 @@ prefix (`MP53_GEO`). A package lists several GEO archives and `RUN\COMMON` ones 
 
 The same lookup finds a model's GEO node when it is viewed on its own (`worldmodel` → `MP53_GEO`).
 
+## Spawn camera
+
+`AIMAPS.MPS` carries a table of named points after a `count` (u32) and one more u32: 24-byte records with a 16-byte
+name, a team byte (0xFF on starts), a kind byte (2 start, 1 waypoint, 0 spectator), two unused bytes and a packed
+cell (u32: x = bits 6..18, z = bits 19..31) in the first AI map's grid (`min + cell × scale`, 10 units on MP53).
+On MP53 the waypoints Delta / Echo / Foxtrot decode onto the three bunkers that hold the turrets.
+
+The preview pane's **Spawn camera** section lists the points (`startPlayer`, hostage starts, waypoints), draws them
+as marker pillars, and **Fly from point** puts a first-person camera on the ground under the point (highest surface
+below the AI map's ceiling) at eye height (1.7 m from the map config's `MetersPerUnit`), facing the middle of the map:
+W/A/S/D or arrows move, drag looks, E/Space up, Q/C down, Shift faster, the wheel sets speed, Esc returns to orbit.
+
+**Lighting** switches the baked vertex lighting between as-in-game (texel × colour / 128), doubled, and off. Some
+areas are baked very dark: the MP53 basilica's median vertex colour is 25/128.
+
 ## Texture record (`<name>.tif` → `texdat`)
 
 ```
