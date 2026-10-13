@@ -39,6 +39,20 @@ export interface ModelTexturePixels {
   alphaTest?: number | null;
   // True when the decoded pixels contain any non-opaque texel.
   hasTransparency?: boolean;
+  // Fraction of texels with alpha below 50% (0..1).
+  transparentRatio?: number;
+  // From the GS ALPHA register: the texture is alpha blended in game.
+  alphaBlend?: boolean;
+}
+
+// A point of interest drawn as a marker pillar (spawn, waypoint ...), in the
+// model's own coordinates.
+export interface SceneMarker {
+  position: [number, number, number];
+  label: string;
+  color: number;
+  // Pillar height in model units.
+  height?: number;
 }
 
 export interface ModelTextureMap {
@@ -86,6 +100,10 @@ export interface ModelRendererOptions {
   showBounds?: boolean;
   // Only draw chunks whose visualKey matches (null / undefined = all).
   visualFilter?: string | null;
+  // Multiplier on the baked vertex colours (1 = GS exact, 0x80 = 1.0).
+  vertexColorScale?: number;
+  // Marker pillars (spawn / waypoints).
+  markers?: SceneMarker[] | null;
 }
 
 // What setModel actually drew, so the UI can say when chunks were left out.
@@ -122,6 +140,19 @@ export class ZedModelRenderer {
   private pitch = -0.3;
   private distance = 4;
   private cameraZoom = 1;
+  // World -> scene offset (the geometry is re-centred on upload).
+  private sceneOffset = new THREE.Vector3();
+  private markerGroup: THREE.Group | null = null;
+  // First-person fly camera. Position in scene space; yaw/pitch in radians.
+  private flyMode = false;
+  private readonly flyPos = new THREE.Vector3();
+  private flyYaw = 0;
+  private flyPitch = 0;
+  private flySpeed = 60;
+  private readonly keys = new Set<string>();
+  private lastFrame = 0;
+  // Called when the user leaves fly mode (Esc) so the UI can update.
+  onFlyModeChange: ((flying: boolean) => void) | null = null;
   private wireframe = false;
 
   private readonly drag: DragState = { active: false, lastX: 0, lastY: 0 };
@@ -162,6 +193,10 @@ export class ZedModelRenderer {
     canvas.addEventListener('mouseup', this.onMouseUp);
     canvas.addEventListener('mouseleave', this.onMouseUp);
     canvas.addEventListener('wheel', this.onWheel, { passive: false });
+    canvas.tabIndex = 0;
+    canvas.addEventListener('keydown', this.onKeyDown);
+    canvas.addEventListener('keyup', this.onKeyUp);
+    canvas.addEventListener('blur', this.onBlur);
 
     this.resize();
     this.animate();
@@ -212,6 +247,7 @@ export class ZedModelRenderer {
     const useVertexColors = (options.vertexColors ?? true) && !solidColorMode &&
       visibleChunks.some(c => c.hasVertexColors);
     const prelit = unlit || useVertexColors;
+    const colorScale = options.vertexColorScale ?? 1;
 
     // Build the per-material texture cache. Each unique .tif becomes one
     // DataTexture + Mesh material. Chunks with no matching .tif fall
@@ -230,6 +266,12 @@ export class ZedModelRenderer {
         translucent = true;
       } else if (gsAlphaTest !== null && pixels?.hasTransparency) {
         alphaTest = gsAlphaTest;
+        translucent = false;
+      } else if (pixels?.alphaBlend && (pixels.transparentRatio ?? 0) > 0.02) {
+        // Alpha-blended in game with real transparency (fences, glows): a
+        // cutout keeps depth sorting simple and matches the silhouette. A
+        // few stray transparent texels (palette black entries) don't count.
+        alphaTest = 0.5;
         translucent = false;
       } else {
         alphaTest = 0;
@@ -359,7 +401,7 @@ export class ZedModelRenderer {
           // 0xFF doubles the brightness. Chunks without a colour block
           // draw at 1.0.
           if (chunkHasColors) {
-            allColors.push((v.r ?? 128) / 128, (v.g ?? 128) / 128, (v.b ?? 128) / 128);
+            allColors.push((v.r ?? 128) * colorScale / 128, (v.g ?? 128) * colorScale / 128, (v.b ?? 128) * colorScale / 128);
           } else {
             allColors.push(1, 1, 1);
           }
@@ -425,6 +467,7 @@ export class ZedModelRenderer {
       const cz = (fitBox.min.z + fitBox.max.z) / 2;
       originalCenter.set(cx, cy, cz);
       geometry.translate(-cx, -cy, -cz);
+      this.sceneOffset.set(cx, cy, cz);
     }
     geometry.computeBoundingSphere();
     geometry.computeBoundingBox();
@@ -453,6 +496,7 @@ export class ZedModelRenderer {
       this.mesh.rotation.x = Math.PI;
     }
     this.root.add(this.mesh);
+    this.setMarkers(options.markers ?? null);
 
     if (options.wireOverlay && !this.wireframe) {
       const wireGeometry = new THREE.WireframeGeometry(geometry);
@@ -507,6 +551,9 @@ export class ZedModelRenderer {
     this.canvas.removeEventListener('mouseup', this.onMouseUp);
     this.canvas.removeEventListener('mouseleave', this.onMouseUp);
     this.canvas.removeEventListener('wheel', this.onWheel);
+    this.canvas.removeEventListener('keydown', this.onKeyDown);
+    this.canvas.removeEventListener('keyup', this.onKeyUp);
+    this.canvas.removeEventListener('blur', this.onBlur);
     this.disposeMesh();
     this.renderer.dispose();
   }
@@ -514,6 +561,14 @@ export class ZedModelRenderer {
   private animate = (): void => {
     this.frameId = requestAnimationFrame(this.animate);
     this.resize();
+    const now = performance.now();
+    const dt = this.lastFrame ? Math.min(0.1, (now - this.lastFrame) / 1000) : 0;
+    this.lastFrame = now;
+    if (this.flyMode) {
+      this.stepFly(dt);
+      this.renderer.render(this.scene, this.camera);
+      return;
+    }
     const r = this.distance;
     this.camera.zoom = this.cameraZoom;
     this.camera.position.set(
@@ -538,6 +593,7 @@ export class ZedModelRenderer {
   }
 
   private onMouseDown = (e: MouseEvent): void => {
+    this.canvas.focus();
     this.drag.active = true;
     this.drag.lastX = e.clientX;
     this.drag.lastY = e.clientY;
@@ -549,6 +605,11 @@ export class ZedModelRenderer {
     const dy = e.clientY - this.drag.lastY;
     this.drag.lastX = e.clientX;
     this.drag.lastY = e.clientY;
+    if (this.flyMode) {
+      this.flyYaw -= dx * 0.005;
+      this.flyPitch = Math.max(-Math.PI / 2 + 0.05, Math.min(Math.PI / 2 - 0.05, this.flyPitch - dy * 0.005));
+      return;
+    }
     this.yaw -= dx * 0.01;
     this.pitch = Math.max(-Math.PI / 2 + 0.05, Math.min(Math.PI / 2 - 0.05, this.pitch + dy * 0.01));
   };
@@ -559,6 +620,11 @@ export class ZedModelRenderer {
 
   private onWheel = (e: WheelEvent): void => {
     e.preventDefault();
+    if (this.flyMode) {
+      // In fly mode the wheel sets the walking speed.
+      this.flySpeed = Math.max(5, Math.min(2000, this.flySpeed * (e.deltaY > 0 ? 1 / 1.2 : 1.2)));
+      return;
+    }
     const factor = e.deltaY > 0 ? 1 / 1.1 : 1.1;
     // Match the standalone HTML viewer's feel: zoom the view without moving
     // the camera through the object, which avoids near-plane clipping while
@@ -567,9 +633,102 @@ export class ZedModelRenderer {
     this.updateCameraProjection();
   };
 
+  // Enter first-person mode at a point in model coordinates, eye height
+  // already included, facing `yaw` (radians, 0 = +Z).
+  startFly(position: [number, number, number], yaw: number, speed = 60): void {
+    this.flyPos.set(position[0], position[1], position[2]).sub(this.sceneOffset);
+    this.flyYaw = yaw;
+    this.flyPitch = -0.05;
+    this.flySpeed = speed;
+    this.cameraZoom = 1;
+    this.flyMode = true;
+    this.camera.near = 0.5;
+    this.camera.zoom = 1;
+    this.camera.updateProjectionMatrix();
+    this.keys.clear();
+    this.canvas.focus();
+    this.onFlyModeChange?.(true);
+  }
+
+  stopFly(): void {
+    if (!this.flyMode) { return; }
+    this.flyMode = false;
+    this.keys.clear();
+    this.updateCameraProjection();
+    this.onFlyModeChange?.(false);
+  }
+
+  get isFlying(): boolean {
+    return this.flyMode;
+  }
+
+  private stepFly(dt: number): void {
+    const fast = this.keys.has('shift') ? 4 : 1;
+    const step = this.flySpeed * fast * dt;
+    const forward = new THREE.Vector3(Math.sin(this.flyYaw) * Math.cos(this.flyPitch), Math.sin(this.flyPitch), Math.cos(this.flyYaw) * Math.cos(this.flyPitch));
+    const right = new THREE.Vector3(Math.cos(this.flyYaw), 0, -Math.sin(this.flyYaw));
+    const move = new THREE.Vector3();
+    if (this.keys.has('w') || this.keys.has('arrowup')) { move.add(forward); }
+    if (this.keys.has('s') || this.keys.has('arrowdown')) { move.sub(forward); }
+    if (this.keys.has('d') || this.keys.has('arrowright')) { move.sub(right); }
+    if (this.keys.has('a') || this.keys.has('arrowleft')) { move.add(right); }
+    if (this.keys.has('e') || this.keys.has(' ')) { move.y += 1; }
+    if (this.keys.has('q') || this.keys.has('c')) { move.y -= 1; }
+    if (move.lengthSq() > 0) { this.flyPos.addScaledVector(move.normalize(), step); }
+    this.camera.position.copy(this.flyPos);
+    this.camera.lookAt(this.flyPos.clone().add(forward));
+  }
+
+  private onKeyDown = (e: KeyboardEvent): void => {
+    const key = e.key.toLowerCase();
+    if (!this.flyMode) { return; }
+    if (key === 'escape') { this.stopFly(); e.preventDefault(); return; }
+    if (['w', 'a', 's', 'd', 'q', 'e', 'c', ' ', 'shift', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(key)) {
+      this.keys.add(key);
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  };
+
+  private onKeyUp = (e: KeyboardEvent): void => {
+    this.keys.delete(e.key.toLowerCase());
+  };
+
+  private onBlur = (): void => {
+    this.keys.clear();
+  };
+
+  setMarkers(markers: SceneMarker[] | null): void {
+    if (this.markerGroup) {
+      this.root.remove(this.markerGroup);
+      this.markerGroup.traverse(obj => {
+        if (obj instanceof THREE.Mesh) {
+          obj.geometry.dispose();
+          (obj.material as THREE.Material).dispose();
+        }
+      });
+      this.markerGroup = null;
+    }
+    if (!markers || markers.length === 0) { return; }
+    const group = new THREE.Group();
+    const radius = Math.max(1, this.boundingRadius / 400);
+    for (const m of markers) {
+      const height = m.height ?? radius * 12;
+      const geometry = new THREE.CylinderGeometry(radius, radius * 0.4, height, 8);
+      const material = new THREE.MeshBasicMaterial({ color: m.color, depthTest: true });
+      const pillar = new THREE.Mesh(geometry, material);
+      pillar.position.set(m.position[0], m.position[1] + height / 2, m.position[2]).sub(this.sceneOffset);
+      pillar.name = m.label;
+      pillar.frustumCulled = false;
+      group.add(pillar);
+    }
+    this.markerGroup = group;
+    this.root.add(group);
+  }
+
   private updateCameraProjection(): void {
     const radius = Math.max(1e-3, this.boundingRadius);
-    this.camera.near = Math.max(0.01, radius / 1000);
+    this.camera.near = this.flyMode ? 0.5 : Math.max(0.01, radius / 1000);
     this.camera.far = Math.max(100, this.distance + radius * 8);
     this.camera.zoom = this.cameraZoom;
     this.camera.updateProjectionMatrix();

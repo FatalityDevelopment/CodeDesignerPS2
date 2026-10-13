@@ -1219,3 +1219,14 @@ input {
   color: var(--vscode-descriptionForeground, #ccccccb3);
   white-space: normal;
 }
+
+/* Checkbox rows in the map controls (spawn markers). */
+.zip-map-ctrl.zip-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.zip-map-ctrl.zip-check input {
+  margin: 0;
+}

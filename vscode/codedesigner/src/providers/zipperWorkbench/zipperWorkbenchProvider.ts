@@ -358,8 +358,12 @@ export class ZipperWorkbenchProvider {
     private _loadLooseMapPackageNodes(filePath: string): BinaryNode[] {
         const dir = path.dirname(filePath);
         const candidates = fs.readdirSync(dir)
-            .filter(name => /\.ZED$/i.test(name))
-            .filter(name => /(?:_(?:MDL|TXR|PAL|GEO)(?:\([^)]+\))?|^WORL_MDL)\.ZED$/i.test(name))
+            // Archives, plus the AI map (AIMAPS.MPS: spawn points, grid) and
+            // the map config (MP53.ZED: MetersPerUnit) the spawn camera uses.
+            .filter(name =>
+                /(?:_(?:MDL|TXR|PAL|GEO)(?:\([^)]+\))?|^WORL_MDL)\.ZED$/i.test(name) ||
+                /\.MPS$/i.test(name) ||
+                /^[A-Z]+\d+\.ZED$/i.test(name))
             .sort((a, b) => {
                 const rank = (name: string): number => {
                     if (/^worl_mdl/i.test(name)) { return 0; }

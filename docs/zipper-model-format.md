@@ -76,9 +76,17 @@ unit and transforms it by the node's matrix accumulated from the model root. Whe
 node's matrix is applied on top, and implicit child nodes already drawn through their model's chains are not placed
 a second time. The log shows `[placement]` lines with how many visuals were placed.
 
+## Opening a map
+
+Open the map's package (`MP53.ZDB`) and enter `WORL_MDL.ZED`. The viewer preloads the package's dependencies (every
+TXR/PAL/GEO/MDL archive, `AIMAPS.MPS`, the map config `MP53.ZED`), and previewing `worldmodel` shows the whole map:
+the terrain and buildings (the basilica is part of `worldmodel`) composed with every prop the map's GEO scene places
+(MP53: three turrets, the helicopter). The **Spawn camera** section then flies from a start point. A loose
+`WORL_MDL.ZED` in a folder holding the unpacked package loads the same set.
+
 ## Composing the map scene
 
-**Compose GEO scene** uses the map's scene graph: the GEO archive with a `worldmodel` node, preferring the map's own
+The world model preview (and **Compose GEO scene** for a selected node) uses the map's scene graph: the GEO archive with a `worldmodel` node, preferring the map's own
 prefix (`MP53_GEO`). A package lists several GEO archives and `RUN\COMMON` ones come first, so "the first GEO" is
 `EFFE_GEO`. Instances are collected from the scene root (or the selected node):
 
@@ -89,6 +97,21 @@ prefix (`MP53_GEO`). A package lists several GEO archives and `RUN\COMMON` ones 
 - any other node with visuals is tried by name.
 
 The same lookup finds a model's GEO node when it is viewed on its own (`worldmodel` → `MP53_GEO`).
+
+## Spawn camera
+
+`AIMAPS.MPS` carries a table of named points after a `count` (u32) and one more u32: 24-byte records with a 16-byte
+name, a team byte (0xFF on starts), a kind byte (2 start, 1 waypoint, 0 spectator), two unused bytes and a packed
+cell (u32: x = bits 6..18, z = bits 19..31) in the first AI map's grid (`min + cell × scale`, 10 units on MP53).
+On MP53 the waypoints Delta / Echo / Foxtrot decode onto the three bunkers that hold the turrets.
+
+The preview pane's **Spawn camera** section lists the points (`startPlayer`, hostage starts, waypoints), draws them
+as marker pillars, and **Fly from point** puts a first-person camera on the ground under the point (highest surface
+below the AI map's ceiling) at eye height (1.7 m from the map config's `MetersPerUnit`), facing the middle of the map:
+W/A/S/D or arrows move, drag looks, E/Space up, Q/C down, Shift faster, the wheel sets speed, Esc returns to orbit.
+
+**Lighting** switches the baked vertex lighting between as-in-game (texel × colour / 128), doubled, and off. Some
+areas are baked very dark: the MP53 basilica's median vertex colour is 25/128.
 
 ## Texture record (`<name>.tif` → `texdat`)
 
