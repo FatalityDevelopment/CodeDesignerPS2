@@ -4800,7 +4800,9 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     // Use the currently-selected node as the GEO root when it matches a
     // scene node (e.g. user clicks `worldmodel`); otherwise start at the
     // very top of the GEO tree.
-    let root = entry && !options.fromSceneRoot ? findSceneNode(scene, entry.name) : null;
+    // The map's world model composes the whole map, the same as its preview.
+    const wholeMap = options.fromSceneRoot || (!!entry && this.isMapWorldModelEntry(entry.name, this.currentArchiveLeaf()));
+    let root = entry && !wholeMap ? findSceneNode(scene, entry.name) : null;
     if (!root) { root = scene.root; }
     // Build a model lookup map across EVERY *_MDL.ZED in the package by
     // walking each archive's full entry tree (HTML reference behaviour —
