@@ -2712,9 +2712,19 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       // The map's world model previews as the whole map: terrain and
       // buildings plus every prop the map's GEO scene places, once the
       // package (GEO, MDL, TXR/PAL, AIMAPS) has loaded.
-      if (!alternate && this.isMapWorldModelEntry(entry.name, sourceArchive) && this.composeGeoScene({ fromSceneRoot: true })) {
-        this.previewMessage.set('');
-        return;
+      // Any failure falls back to drawing worldmodel on its own.
+      if (!alternate && this.isMapWorldModelEntry(entry.name, sourceArchive)) {
+        let composed = false;
+        try {
+          composed = this.composeGeoScene({ fromSceneRoot: true });
+        } catch (err) {
+          this.log(`[GEO] map composition failed, showing worldmodel alone: ${err instanceof Error ? err.stack ?? err.message : String(err)}`, true);
+        }
+        if (composed) {
+          this.previewMessage.set('');
+          return;
+        }
+        this.previewMode.set('model');
       }
 
       const activeArchive = this.archiveStack().at(-1)?.archive ?? null;
