@@ -1314,6 +1314,11 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
   // Set once per opened file when a binary package arrived undecodable and
   // a base64 copy was requested instead.
   private packageBase64Retried = false;
+  // Top-level map archives the bulk package payload did not deliver, fetched
+  // one by one (entry index -> leaf) and folded back into the package.
+  private packageFillFetches = new Map<number, string>();
+  private packageFillBytes = new Map<string, Uint8Array>();
+  private packageFillRequested = false;
   // Root TXR/PAL archives already requested on demand for missing textures.
   private rootTextureFetchRequested = new Set<string>();
   // Namespaces / archives the texture lookup can currently see.
@@ -1570,6 +1575,9 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
         this.companionScene.set(null);
         this.packageState.set('idle');
         this.packageBase64Retried = false;
+        this.packageFillRequested = false;
+        this.packageFillFetches.clear();
+        this.packageFillBytes.clear();
         this.mapPoints.set([]);
         this.selectedMapPoint.set('');
         this.rootTextureFetchRequested.clear();
@@ -1640,6 +1648,11 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
               this.applyPaletteBytesForCurrentLayer(palBytes, pending.palName, stack[stack.length - 1].archive);
             }
           } catch { /* ignore decode errors */ }
+          break;
+        }
+        // Root archives the package payload did not deliver.
+        if (this.packageFillFetches.has(fetchedIndex)) {
+          this.applyPackageFill(fetchedIndex, dataStr);
           break;
         }
         // Intercept root-companion (TXR/PAL/GEO) fetches for a nested MDL.
@@ -1828,6 +1841,9 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     this.companionScene.set(null);
     this.palettes.set(null);
     this.rootTextureFetchRequested.clear();
+    this.packageFillRequested = false;
+    this.packageFillFetches.clear();
+    this.packageFillBytes.clear();
     this.packageLoading.set(true);
     this.packageState.set('loading');
     this.packageMessage.set(`Force-reloading ${filePath.split(/[\\/]/).pop()}…`);
@@ -4106,13 +4122,12 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     const txrArchives: Array<{ name: string; archive: InspectedZedArchive }> = [];
     const palArchives: Array<{ name: string; archive: InspectedZedArchive }> = [];
     const geoArchives: Array<{ name: string; archive: InspectedZedArchive }> = [];
-    // The package lists every node, nested archives' nodes included. Its
-    // top-level files are named by their ZDB path: match them against the
-    // ZDB's own entry list by path and size. A ZDB can mix "RUN\\...\\X.ZED"
-    // paths with bare root names (M51), so "has a separator" alone drops
-    // most archives, and nested nodes can reuse a root's bare name (a 4-byte
-    // "WORL_MDL.ZED" reference). Without a ZDB entry list (loose map
-    // folder) every node is a file.
+    // The package lists every node, nested archives' nodes included. Match
+    // its top-level files against the ZDB's own entry list by file name and
+    // size: a ZDB can mix "RUN\\...\\X.ZED" paths with bare root names
+    // (M51), so "has a separator" alone drops most archives, and nested
+    // nodes can reuse a root's name (a 4-byte "WORL_MDL.ZED" reference).
+    // Without a ZDB entry list (loose map folder) every node is a file.
     const rootKeys = this.packageRootKeys();
     const hasRootPaths = nodes.some(n => /[\\/]/.test(n.name));
     let decodedNodes = 0;
@@ -4131,7 +4146,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       if (bytes.length === 0) { continue; }
       decodedNodes++;
       const leaf = (node.name.split(/[\\/]/).pop() ?? node.name).toLowerCase();
-      const rootKey = `${node.name.toLowerCase()}|${bytes.length}`;
+      const rootKey = `${leaf}|${bytes.length}`;
       const isRootPackageEntry = rootKeys
         ? rootKeys.delete(rootKey)
         : !hasRootPaths || /[\\/]/.test(node.name);
@@ -4154,6 +4169,9 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
 
     if (undecodableNodes > 0) {
       this.log(`[package] ${undecodableNodes} of ${nodes.length} payload(s) could not be decoded (first: ${firstUndecodable})`, true);
+    }
+    if (rootKeys && rootKeys.size > 0 && decodedNodes > 0) {
+      this.requestMissingPackageEntries(rootKeys);
     }
     // A package whose payloads all failed to decode means the binary
     // transfer did not survive the trip to the webview. Ask once for a
@@ -4289,7 +4307,54 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
   private packageRootKeys(): Set<string> | null {
     const result = this.result();
     if (!result || !/\.zdb$/i.test(result.path ?? '') || result.entries.length === 0) { return null; }
-    return new Set(result.entries.map(e => `${(e.path || e.name).toLowerCase()}|${e.size}`));
+    return new Set(result.entries.map(e => `${rootEntryLeaf(e)}|${e.size}`));
+  }
+
+  // Root archives a map preview needs: model, scene, texture, palette, AI
+  // map and map config files.
+  private static isPackageArchiveLeaf(leaf: string): boolean {
+    return /_(?:mdl|geo|txr|pal)(?:\([^)]+\))?\.zed$/i.test(leaf) || /\.mps$/i.test(leaf) || /^[a-z]+\d+\.zed$/i.test(leaf);
+  }
+
+  // Fetch the root archives the package payload did not deliver (once per
+  // file). When they have all arrived the package is applied again with
+  // them, which re-decodes the model in view.
+  private requestMissingPackageEntries(unmatched: Set<string>): void {
+    if (this.packageFillRequested) { return; }
+    const filePath = this.result()?.path;
+    if (!filePath) { return; }
+    const wanted = (this.result()?.entries ?? []).filter(e => {
+      const leaf = rootEntryLeaf(e);
+      return e.size > 0 && unmatched.has(`${leaf}|${e.size}`) && ZipperWorkbenchPageComponent.isPackageArchiveLeaf(leaf);
+    });
+    if (wanted.length === 0) { return; }
+    this.packageFillRequested = true;
+    this.packageFillFetches.clear();
+    this.packageFillBytes.clear();
+    for (const e of wanted) {
+      this.packageFillFetches.set(e.index, rootEntryLeaf(e));
+      this.vscode.postMessage({ type: 'readNode', path: filePath, entryIndex: e.index });
+    }
+    this.log(`[package] ${wanted.length} root archive(s) missing from the package payload; fetching ${wanted.map(rootEntryLeaf).join(', ')}`, true);
+  }
+
+  private applyPackageFill(entryIndex: number, payload: NodePayload): void {
+    const leaf = this.packageFillFetches.get(entryIndex);
+    if (!leaf) { return; }
+    this.packageFillFetches.delete(entryIndex);
+    try {
+      const bytes = nodeBytes(payload);
+      if (bytes.length > 0) { this.packageFillBytes.set(leaf, bytes); }
+    } catch { /* skip undecodable */ }
+    if (this.packageFillFetches.size > 0) { return; }
+    const nodes: Array<{ index: number; name: string; data: NodePayload }> = [];
+    for (const [name, bytes] of this.packageEntryBytes) {
+      if (!this.packageFillBytes.has(name)) { nodes.push({ index: nodes.length, name, data: bytes }); }
+    }
+    for (const [name, bytes] of this.packageFillBytes) { nodes.push({ index: nodes.length, name, data: bytes }); }
+    this.log(`[package] ${this.packageFillBytes.size} missing root archive(s) loaded; applying the package again`);
+    this.packageFillBytes.clear();
+    this.applyZdbPackage(nodes);
   }
 
   private parsePackageMpsResults(): MpsResult[] {
@@ -5783,6 +5848,12 @@ function textureVisibilityScore(tex: ZedTexture): number {
 // bridge responses, companion files) or as binary (ArrayBuffer / typed
 // array, the package and node reads). Normalise at the boundary.
 type NodePayload = string | ArrayBuffer | Uint8Array | null | undefined;
+
+// A ZDB root entry's file name, lower-cased (its path may carry RUN\\...).
+function rootEntryLeaf(e: { name: string; path?: string }): string {
+  const full = e.path || e.name;
+  return (full.split(/[\\/]/).pop() ?? full).toLowerCase();
+}
 
 function nodeBytes(payload: NodePayload): Uint8Array {
   if (!payload) { return new Uint8Array(0); }
