@@ -467,6 +467,8 @@ export class ZedModelRenderer {
       const cz = (fitBox.min.z + fitBox.max.z) / 2;
       originalCenter.set(cx, cy, cz);
       geometry.translate(-cx, -cy, -cz);
+      // Keep a fly camera at the same world position across re-renders.
+      if (this.flyMode) { this.flyPos.add(this.sceneOffset).sub(originalCenter); }
       this.sceneOffset.set(cx, cy, cz);
     }
     geometry.computeBoundingSphere();
@@ -554,6 +556,7 @@ export class ZedModelRenderer {
     this.canvas.removeEventListener('keydown', this.onKeyDown);
     this.canvas.removeEventListener('keyup', this.onKeyUp);
     this.canvas.removeEventListener('blur', this.onBlur);
+    this.removeWindowKeys();
     this.disposeMesh();
     this.renderer.dispose();
   }
@@ -647,6 +650,11 @@ export class ZedModelRenderer {
     this.camera.updateProjectionMatrix();
     this.keys.clear();
     this.canvas.focus();
+    // Listen on the window while flying so the keys work wherever focus is
+    // (the button that started flying keeps it in VS Code webviews).
+    window.addEventListener('keydown', this.onKeyDown);
+    window.addEventListener('keyup', this.onKeyUp);
+    window.addEventListener('blur', this.onBlur);
     this.onFlyModeChange?.(true);
   }
 
@@ -654,6 +662,7 @@ export class ZedModelRenderer {
     if (!this.flyMode) { return; }
     this.flyMode = false;
     this.keys.clear();
+    this.removeWindowKeys();
     this.updateCameraProjection();
     this.onFlyModeChange?.(false);
   }
@@ -679,9 +688,18 @@ export class ZedModelRenderer {
     this.camera.lookAt(this.flyPos.clone().add(forward));
   }
 
+  private removeWindowKeys(): void {
+    window.removeEventListener('keydown', this.onKeyDown);
+    window.removeEventListener('keyup', this.onKeyUp);
+    window.removeEventListener('blur', this.onBlur);
+  }
+
   private onKeyDown = (e: KeyboardEvent): void => {
     const key = e.key.toLowerCase();
     if (!this.flyMode) { return; }
+    // Leave typing and dropdown navigation alone.
+    const target = e.target as HTMLElement | null;
+    if (target && target !== this.canvas && /^(?:INPUT|SELECT|TEXTAREA)$/.test(target.tagName)) { return; }
     if (key === 'escape') { this.stopFly(); e.preventDefault(); return; }
     if (['w', 'a', 's', 'd', 'q', 'e', 'c', ' ', 'shift', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(key)) {
       this.keys.add(key);
