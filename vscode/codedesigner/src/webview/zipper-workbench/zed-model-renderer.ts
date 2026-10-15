@@ -276,6 +276,16 @@ export class ZedModelRenderer {
       } else if (gsAlphaTest !== null && pixels?.hasTransparency) {
         alphaTest = gsAlphaTest;
         translucent = false;
+      } else if ((pixels?.transparentRatio ?? 0) > 0.02) {
+        // A cutout keeps depth sorting simple and matches the silhouette.
+        alphaTest = 0.5;
+        translucent = false;
+        alphaTest = 0.5;
+        translucent = false;
+        alphaTest = 0.5;
+        translucent = false;
+        alphaTest = 0.5;
+        translucent = false;
       } else {
         alphaTest = 0;
         translucent = false;
@@ -594,6 +604,8 @@ export class ZedModelRenderer {
     const now = performance.now();
     const dt = this.lastFrame ? Math.min(0.1, (now - this.lastFrame) / 1000) : 0;
     this.lastFrame = now;
+    // Debug boxes only clutter a first-person view.
+    if (this.boundsGuide) { this.boundsGuide.visible = !this.flyMode; }
     if (this.flyMode) {
       this.stepFly(dt);
       this.renderer.render(this.scene, this.camera);
