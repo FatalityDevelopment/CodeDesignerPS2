@@ -414,6 +414,16 @@ namespace CodeDesigner.Ps2.Bridge
         public string? WeaponImageData { get; set; }
         /// <summary>Optional JSON for mesh edits (vertex transform + per-chunk texture rebind).</summary>
         public string? WeaponMeshEditsJson { get; set; }
+
+        // ── Asset sessions (ASSET_*): the editing surface shared by the editor webviews and the MCP tools ──
+        /// <summary>Session id returned by ASSET_OPEN.</summary>
+        public string? AssetSession { get; set; }
+        /// <summary>Root archive leaf inside the package (e.g. "M51_MDL.ZED").</summary>
+        public string? AssetArchive { get; set; }
+        /// <summary>Asset name: a model record, a .tif, a scene path.</summary>
+        public string? AssetName { get; set; }
+        /// <summary>Command-specific JSON arguments (filters, edit operations, save options).</summary>
+        public string? AssetJson { get; set; }
     }
 
     /// <summary>

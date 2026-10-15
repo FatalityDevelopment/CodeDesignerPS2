@@ -591,6 +591,10 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
     this.bridge.postMessage({ command: 'openHdd' });
   }
 
+  onOpenAssetEditor(kind: 'model' | 'map' | 'animation'): void {
+    this.bridge.postMessage({ command: 'openAssetEditor', kind });
+  }
+
   onOpenZipper(): void {
     this.bridge.postMessage({ command: 'openZipperWorkbench' });
   }

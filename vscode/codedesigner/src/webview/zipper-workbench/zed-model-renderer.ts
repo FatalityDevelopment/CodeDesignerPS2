@@ -1,13 +1,15 @@
 import * as THREE from 'three';
-import type { ZedModel } from './zed-model-parser';
+import type { ZedModel, ZedModelChunk } from './zed-model-parser';
 
 // Guard rails for the WebGL upload path. PS2 textures are always 2^N square
 // and tiny by modern standards, so anything above 2048 is almost certainly a
 // mis-parse — uploading it can blow VRAM budgets and crash the renderer
-// process. The unique material cap is the same idea: a model that
-// "wants" 200 materials is almost certainly a misclassified payload.
+// process. The unique material cap is the same idea, sized for a composed
+// map: M51 with its props and clutter uses ~110 textures, some of them in
+// both a solid and a blended material. At 64, everything past the 64th
+// texture drew as the flat grey fallback.
 const MAX_TEXTURE_DIMENSION = 2048;
-const MAX_UNIQUE_MATERIALS = 64;
+const MAX_UNIQUE_MATERIALS = 512;
 // Hard cap on the BufferGeometry the renderer will allocate. World models
 // stay well under 100k verts; anything above this is parsed garbage from a
 // payload that isn't actually a 3D model (UI / script blobs that happen to
@@ -252,26 +254,27 @@ export class ZedModelRenderer {
     // Build the per-material texture cache. Each unique .tif becomes one
     // DataTexture + Mesh material. Chunks with no matching .tif fall
     // back to a plain grey material.
-    const makeMaterial = (color: number, map?: THREE.DataTexture, pixels?: ModelTexturePixels): THREE.Material => {
-      // Per-texture alpha. Effects keep the soft-blend setup they had
-      // (transparentTextures). Otherwise texels are only discarded when the
-      // texture's own GS TEST register enables an alpha test, exactly as
-      // the game does; decoded alpha is ignored for everything else so a
-      // palette with black entries never punches holes in a wall.
+    const makeMaterial = (color: number, map?: THREE.DataTexture, pixels?: ModelTexturePixels, blended = false): THREE.Material => {
+      // Alpha as the GS applies it: alpha = texel alpha * vertex alpha / 128.
+      // Effects keep the soft-blend setup they had (transparentTextures).
+      // A blended chunk (see blendsChunk) is drawn translucent in chain order
+      // and, like the game, still writes depth; fully clear texels are
+      // dropped so they don't hide what is behind them. Otherwise texels are
+      // only discarded by the texture's own GS TEST alpha test (foliage
+      // cutouts), and alpha is ignored.
       const gsAlphaTest = pixels?.alphaTest ?? null;
       let alphaTest: number;
       let translucent: boolean;
+      let depthWrite = true;
       if (transparentTextures) {
         alphaTest = gsAlphaTest ?? 0.02;
         translucent = true;
+        depthWrite = false;
+      } else if (blended) {
+        alphaTest = Math.max(gsAlphaTest ?? 0, 0.02);
+        translucent = true;
       } else if (gsAlphaTest !== null && pixels?.hasTransparency) {
         alphaTest = gsAlphaTest;
-        translucent = false;
-      } else if (pixels?.alphaBlend && (pixels.transparentRatio ?? 0) > 0.02) {
-        // Alpha-blended in game with real transparency (fences, glows): a
-        // cutout keeps depth sorting simple and matches the silhouette. A
-        // few stray transparent texels (palette black entries) don't count.
-        alphaTest = 0.5;
         translucent = false;
       } else {
         alphaTest = 0;
@@ -282,7 +285,7 @@ export class ZedModelRenderer {
         side: THREE.DoubleSide,
         wireframe: this.wireframe,
         transparent: translucent,
-        depthWrite: !translucent,
+        depthWrite,
         alphaTest,
         vertexColors: useVertexColors,
       };
@@ -301,23 +304,43 @@ export class ZedModelRenderer {
     this.materials = [fallbackMaterial];
     const fallbackTexture = options.textureRgba ?? null;
 
-    const materialFor = (tifName: string | null): number => {
+    // A chunk is blended when its material's ALPHA_1 blends (the texture's
+    // own ALPHA_1 when the chunk has no material block) and something is
+    // actually translucent: the texture's alpha or the chunk's vertex alpha
+    // (terrain layers fade into each other through it).
+    const blendsChunk = (chunk: ZedModelChunk, tex: ModelTexturePixels): boolean => {
+      if (transparentTextures || !(chunk.materialBlend ?? tex.alphaBlend ?? false)) { return false; }
+      if (tex.hasTransparency) { return true; }
+      return useVertexColors && !!chunk.hasVertexColors && chunk.vertices.some(v => (v.a ?? 128) < 128);
+    };
+    const textureDataFor = new Map<string, THREE.DataTexture>();
+
+    const materialFor = (chunk: ZedModelChunk): number => {
       // solidColor mode short-circuits to the flat fallback material so
       // there's no per-chunk texture lookup at all.
       if (solidColorMode) { return 0; }
       // Fall back to the model-wide atlas texture if this chunk doesn't
       // carry its own .tif reference.
-      const effective = tifName ?? options.defaultTexture ?? null;
+      const effective = chunk.textureName ?? options.defaultTexture ?? null;
       if (!effective) { return 0; }
-      const key = effective.toLowerCase();
+      const tifKey = effective.toLowerCase();
+      const tex = textures[tifKey] ?? fallbackTexture;
+      if (!tex) { missingTextures.add(tifKey); return 0; }
+      const blended = blendsChunk(chunk, tex);
+      const key = `${tifKey}|${blended ? 'blend' : 'solid'}`;
       const existing = materialIndexByTif.get(key);
       if (existing !== undefined) { return existing; }
       // Cap the number of unique materials per model. Past this limit the
       // chunk just gets the fallback grey material — better than crashing
       // the renderer process by allocating dozens of WebGL textures.
       if (this.materials.length >= MAX_UNIQUE_MATERIALS) { return 0; }
-      const tex = textures[key] ?? fallbackTexture;
-      if (!tex) { missingTextures.add(key); return 0; }
+      const shared = textureDataFor.get(tifKey);
+      if (shared) {
+        const mat = makeMaterial(0xffffff, shared, tex, blended);
+        this.materials.push(mat);
+        materialIndexByTif.set(key, this.materials.length - 1);
+        return this.materials.length - 1;
+      }
       // Sanity-check the decoded texture so a malformed header doesn't
       // bring down the GPU process. PS2 textures are always 2^N square in
       // practice; anything bigger than 2048 or smaller than 4 is junk.
@@ -352,7 +375,8 @@ export class ZedModelRenderer {
       dt.wrapT = tex.wrapT === 'clamp' ? THREE.ClampToEdgeWrapping : THREE.RepeatWrapping;
       dt.needsUpdate = true;
       this.textures.push(dt);
-      const mat = makeMaterial(0xffffff, dt, tex);
+      textureDataFor.set(tifKey, dt);
+      const mat = makeMaterial(0xffffff, dt, tex, blended);
       this.materials.push(mat);
       const idx = this.materials.length - 1;
       materialIndexByTif.set(key, idx);
@@ -400,10 +424,11 @@ export class ZedModelRenderer {
           // GS modulation: texel * colour / 128, so 0x80 is neutral and
           // 0xFF doubles the brightness. Chunks without a colour block
           // draw at 1.0.
+          // Vertex alpha modulates texel alpha the same way (0x80 = 1.0).
           if (chunkHasColors) {
-            allColors.push((v.r ?? 128) * colorScale / 128, (v.g ?? 128) * colorScale / 128, (v.b ?? 128) * colorScale / 128);
+            allColors.push((v.r ?? 128) * colorScale / 128, (v.g ?? 128) * colorScale / 128, (v.b ?? 128) * colorScale / 128, Math.min(1, (v.a ?? 128) / 128));
           } else {
-            allColors.push(1, 1, 1);
+            allColors.push(1, 1, 1, 1);
           }
         }
       }
@@ -420,7 +445,7 @@ export class ZedModelRenderer {
         );
         kept += 3;
       }
-      groups.push({ start: iBase, count: kept, material: materialFor(chunk.textureName) });
+      groups.push({ start: iBase, count: kept, material: materialFor(chunk) });
       vBase += chunk.vertices.length;
       iBase += kept;
     }
@@ -447,7 +472,7 @@ export class ZedModelRenderer {
     geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(allPositions), 3));
     geometry.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(allUvs), 2));
     if (useVertexColors) {
-      geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(allColors), 3));
+      geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(allColors), 4));
     }
     geometry.setIndex(allIndices);
     geometry.computeVertexNormals();
@@ -522,6 +547,8 @@ export class ZedModelRenderer {
       if (referenceBox) {
         this.boundsGuide.add(createBoxGuide(referenceBox, 0x4ec9b0, 0.95));
       }
+      // Bounds boxes are an orbit-view aid; they cut across the view in first person.
+      this.boundsGuide.visible = !this.flyMode;
       this.root.add(this.boundsGuide);
     }
 
@@ -645,6 +672,7 @@ export class ZedModelRenderer {
     this.flySpeed = speed;
     this.cameraZoom = 1;
     this.flyMode = true;
+    if (this.boundsGuide) { this.boundsGuide.visible = false; }
     this.camera.near = 0.5;
     this.camera.zoom = 1;
     this.camera.updateProjectionMatrix();
@@ -661,6 +689,7 @@ export class ZedModelRenderer {
   stopFly(): void {
     if (!this.flyMode) { return; }
     this.flyMode = false;
+    if (this.boundsGuide) { this.boundsGuide.visible = true; }
     this.keys.clear();
     this.removeWindowKeys();
     this.updateCameraProjection();

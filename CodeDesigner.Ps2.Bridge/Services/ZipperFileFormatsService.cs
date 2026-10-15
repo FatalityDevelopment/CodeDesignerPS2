@@ -78,7 +78,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
             try
             {
                 Directory.CreateDirectory(outputDirectory);
-                string ext = Path.GetExtension(filePath).ToLowerInvariant();
+                string ext = ArchiveExtension(filePath);
                 List<string> written = ext switch
                 {
                     ".zdb" => ExtractZdb(filePath, outputDirectory),
@@ -110,7 +110,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
             try
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputPath)) ?? ".");
-                string ext = Path.GetExtension(filePath).ToLowerInvariant();
+                string ext = ArchiveExtension(filePath);
                 int index = entryIndex.Value;
 
                 switch (ext)
@@ -198,7 +198,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
 
         private static byte[] ReadNodeBytes(string filePath, int index)
         {
-            string ext = Path.GetExtension(filePath).ToLowerInvariant();
+            string ext = ArchiveExtension(filePath);
             switch (ext)
             {
                 case ".zdb":
@@ -415,7 +415,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
 
         private static byte[] ResolveRdrBytes(string filePath, string? entryName)
         {
-            string ext = Path.GetExtension(filePath).ToLowerInvariant();
+            string ext = ArchiveExtension(filePath);
             switch (ext)
             {
                 case ".rdr":
@@ -512,7 +512,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
 
         private static IReadOnlyList<object> ReadAllNodes(string filePath)
         {
-            string ext = Path.GetExtension(filePath).ToLowerInvariant();
+            string ext = ArchiveExtension(filePath);
             var flat = new List<(string Name, uint Type, byte[] Data)>();
             switch (ext)
             {
@@ -686,7 +686,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
         {
             string? pathError = ValidateInputFile(inputPath, out string filePath);
             if (pathError != null) return Responses.Error(pathError);
-            string ext = Path.GetExtension(filePath).ToLowerInvariant();
+            string ext = ArchiveExtension(filePath);
             if (ext != ".zdb" && ext != ".zar" && ext != ".zed") return Responses.Error("InputPath must be a .zdb, .zar, or .zed map package.");
 
             try
@@ -863,7 +863,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
 
         private static object Inspect(string filePath)
         {
-            string ext = Path.GetExtension(filePath).ToLowerInvariant();
+            string ext = ArchiveExtension(filePath);
             return ext switch
             {
                 ".zdb" => InspectZdb(filePath),
@@ -871,7 +871,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 ".zed" => InspectZed(filePath),
                 _ => LooksLikeSocom2Save(filePath)
                     ? InspectSocom2Save(filePath)
-                    : throw new InvalidDataException("Unsupported Zipper/FileFormats file. Supported files: .zdb, .zar, .zed, and SOCOM II SaveGame files."),
+                    : throw new InvalidDataException("Unsupported Zipper/FileFormats file. Supported files: .zdb, .cdb (memory-card packs), .zar, .zed, and SOCOM II SaveGame files."),
             };
         }
 
@@ -894,7 +894,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
 
             return new
             {
-                format = isApache ? "APACHE.ZDB" : "ZDB",
+                format = isApache ? "APACHE.ZDB" : filePath.EndsWith(".cdb", StringComparison.OrdinalIgnoreCase) ? "CDB pack" : "ZDB",
                 role = isApache ? "apache-patch-archive" : "archive",
                 path = Path.GetFullPath(filePath),
                 fileName = Path.GetFileName(filePath),
@@ -1126,7 +1126,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
             var basename = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             long totalBytes = 0;
 
-            string ext = Path.GetExtension(filePath).ToLowerInvariant();
+            string ext = ArchiveExtension(filePath);
             if (ext == ".zdb")
             {
                 using ZdbArchive zdb = ZdbArchive.Open(filePath);
@@ -1333,5 +1333,27 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 Message = message,
                 Data = JsonSerializer.Serialize(data, JsonOptions),
             });
+
+        /// <summary>
+        /// The lower-case extension, with archives read by their layout: memory-card packs (.cdb) and .zar files that
+        /// are ZDB archives rather than ZED containers (SOCOM: Combined Assault's RUN/&lt;hash&gt;.ZAR: type-2 header 0xFC
+        /// holding nested ZDB v6 files) are read as .zdb.
+        /// </summary>
+        private static string ArchiveExtension(string filePath)
+        {
+            string ext = Path.GetExtension(filePath).ToLowerInvariant();
+            if (ext == ".cdb") return ".zdb";
+            if (ext == ".zar" && File.Exists(filePath))
+            {
+                try
+                {
+                    using var f = File.OpenRead(filePath);
+                    var head = new byte[4];
+                    if (f.Read(head, 0, 4) == 4 && BitConverter.ToUInt32(head, 0) is 0xFC or 0xC8 or 0x110) return ".zdb";
+                }
+                catch (IOException) { /* fall back to the extension */ }
+            }
+            return ext;
+        }
     }
 }

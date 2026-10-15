@@ -12,6 +12,7 @@ import { StructureVisualizerProvider } from './providers/structureVisualizer/str
 import { MemoryCardBrowserProvider } from './providers/memoryCardBrowser/memoryCardBrowserProvider';
 import { HddBrowserProvider } from './providers/hddBrowser/hddBrowserProvider';
 import { ZipperWorkbenchProvider } from './providers/zipperWorkbench/zipperWorkbenchProvider';
+import { ANIMATION_EDITOR_PAGE, MAP_EDITOR_PAGE, ModelEditorProvider } from './providers/modelEditor/modelEditorProvider';
 import { WelcomeProvider, WelcomeDataDelegate } from './providers/welcome/welcomeProvider';
 import { SocketClient } from './socketClient';
 
@@ -436,6 +437,37 @@ export function activate(context: vscode.ExtensionContext) {
 		},
 	);
 	context.subscriptions.push(openZipperWorkbenchCommand);
+
+	// Model Editor: SOCOM II models and textures through bridge asset sessions
+	// (the same ASSET_* commands the assets_* MCP tools use).
+	const modelEditorProvider = new ModelEditorProvider(context.extensionUri, socketClient);
+	context.subscriptions.push(vscode.commands.registerCommand(
+		'codedesigner.openModelEditor',
+		(target?: vscode.Uri | string, model?: { archive: string; name: string }) => {
+			const filePath = typeof target === 'string' ? target : target?.fsPath ?? vscode.window.activeTextEditor?.document.uri.fsPath;
+			modelEditorProvider.open(filePath, model);
+		},
+	));
+
+	// Map Editor: the composed map (props, clutter, AIMAPS points) on the same asset sessions.
+	const mapEditorProvider = new ModelEditorProvider(context.extensionUri, socketClient, MAP_EDITOR_PAGE);
+	context.subscriptions.push(vscode.commands.registerCommand(
+		'codedesigner.openMapEditor',
+		(target?: vscode.Uri | string) => {
+			const filePath = typeof target === 'string' ? target : target?.fsPath ?? vscode.window.activeTextEditor?.document.uri.fsPath;
+			mapEditorProvider.open(filePath);
+		},
+	));
+
+	// Animation Editor: character clips (package MOTION_S.ZAR + shared MOTION_P.ZAR) played on the package's characters.
+	const animationEditorProvider = new ModelEditorProvider(context.extensionUri, socketClient, ANIMATION_EDITOR_PAGE);
+	context.subscriptions.push(vscode.commands.registerCommand(
+		'codedesigner.openAnimationEditor',
+		(target?: vscode.Uri | string) => {
+			const filePath = typeof target === 'string' ? target : target?.fsPath ?? vscode.window.activeTextEditor?.document.uri.fsPath;
+			animationEditorProvider.open(filePath);
+		},
+	));
 
 	// ── Structure Visualizer ────────────────────────────────────────────────
 	// Standalone webview that renders Mermaid diagrams of a game's structure:

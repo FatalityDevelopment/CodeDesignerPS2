@@ -724,6 +724,126 @@ SEAL_DAMAGE_MULT = 0xEC4                                     # 18 per-body-part 
 MP_ALLOW_RESPAWN = 0x0069544C + 4                            # the mp_allow_respawn setting's value (halfword, 1 = on)
 DEATH_CHECK = 0x005AB040                                     # (body, 0, 0): kills the body if its health is gone
 
+# ---- animations: SOCOM: Combined Assault clips played by SOCOM II soldiers ------------------------------------
+# Loaded clips (MOTION_P.ZAR, kept in RAM as-is) are listed by registry records found through the soldier's
+# animation set: 0x5EB560(*(body+0x528), id) -> {+0 name, +4 counts (low 16 = frame intervals), +8 clip+0x20,
+# +0x10 play length (s)}. The loader rewrites each clip's 16-byte bone records: position data, rotation data,
+# (skeleton index << 24) | kind (0x0C 1, 0x2C 3, 0x1C 5, 0x3C F), name. PlayAnim 0x58E160(body, id, stance, 0,
+# t0 flags) - our wrapper sets t0 = 0x0D like the action handler. Ids: 1 seal_stand, 59 seal_apply_restraints,
+# 61 seal_put_onground, 271 seal_place_claymore ... (socom_bots.py anim ids).
+ANIM_LOOKUP, ANIM_PLAY = 0x005EB560, 0x0058E160
+ANIM_WRAP = 0x000D3300                                       # t0 = 0x0D; j PlayAnim
+ANIM_BUF, ANIM_BUF_SIZE = 0x000D8000, 0x8000                  # one installed clip (free RAM, zero at boot)
+ANIM_BACKUP = os.path.join(HERE, ".anim_backup")              # "<record> <original 0x20 bytes hex>" lines
+ANIM_KIND = {0x0C: 1, 0x2C: 3, 0x1C: 5, 0x3C: 0xF}
+
+
+def _ca_anim():
+    sys.path.insert(0, os.path.join(HERE, "..", "..", "SOCOMCA"))
+    import ca_anim
+    return ca_anim
+
+
+def anim_record(anim_id):
+    me = my_body()
+    rec = game_call([(ANIM_LOOKUP, struct.unpack("<I", rd(me + 0x528, 4))[0], anim_id)])[0]
+    if not rec:
+        sys.exit(f"animation id {anim_id} is not in your soldier's animation set")
+    return rec
+
+
+def _anim_backups():
+    if not os.path.exists(ANIM_BACKUP):
+        return {}
+    return {int(a, 16): bytes.fromhex(b) for a, b in (l.split() for l in open(ANIM_BACKUP) if l.strip())}
+
+
+def _anim_wrapper():
+    for i, v in enumerate((0x2408000D, 0x08000000 | (ANIM_PLAY >> 2), 0)):
+        wr32(ANIM_WRAP + 4 * i, v)
+
+
+def anim_install(name, anim_id=59, fps=8.0):
+    """Convert CA clip `name` (Mods/SOCOMCA/ca_anim.py, banks in F:/SOCOM Packs/SOCOMCA/anims) and make animation
+    `anim_id` play it: the clip goes to ANIM_BUF with its bone records fixed up like the loader does, the id's
+    registry record points at it. Built on seal_stand's layout (still root, motion on the hips): a template with
+    root motion left the arms stretched when the clip ended. The original record is kept in .anim_backup."""
+    require_round()
+    an = _ca_anim()
+    rec = anim_record(anim_id)
+    backups = _anim_backups()
+    for r, b in backups.items():                             # one buffer: put any other installed clip back first
+        if r != rec:
+            for i in range(0, 0x20, 4):
+                wr32(r + i, struct.unpack_from("<I", b, i)[0])
+    orig = backups.get(rec) or rd(rec, 0x20)
+    open(ANIM_BACKUP, "w").write(f"{rec:x} {orig.hex()}\n")
+    w = struct.unpack("<8I", orig)
+    clip = w[2] - 0x20                                        # the original clip: skeleton index per bone name
+    ids = {}
+    for b in range(struct.unpack("<I", rd(clip + 0xC, 4))[0]):
+        r = struct.unpack("<4I", rd(clip + 0x20 + 16 * b, 16))
+        ids[rd(r[3], 24).split(b"\0")[0].decode("latin1").lstrip("-")] = r[2] & 0xFF000000
+    while True:
+        blob = bytearray(an.encode_s2(an.convert(name, fps)))
+        if len(blob) <= ANIM_BUF_SIZE or fps <= 2:
+            break
+        fps /= 1.5                                            # long clip: fewer samples (CA keys are sparse anyway)
+    if len(blob) > ANIM_BUF_SIZE:
+        sys.exit(f"{name}: {len(blob)} bytes do not fit the {ANIM_BUF_SIZE:#x}-byte buffer")
+    _, dur, iv, nb, _, _, noff, aoff = struct.unpack_from("<IfIIffII", blob, 0)
+    n, o, p = iv + 1, aoff, noff
+    for b in range(nb):
+        t = struct.unpack_from("<I", blob, o)[0]
+        pos = ANIM_BUF + o + 4
+        if t in (0x3C, 0x2C):
+            rot, o = ANIM_BUF + o + 12, o + (20 if t == 0x3C else 12 + 8 * n)
+        else:
+            q = (o + 4 + 6 * n + 3) & ~3
+            rot, o = ANIM_BUF + q, q + (8 if t == 0x1C else 8 * n)
+        e = blob.index(b"\0", p)
+        bone = blob[p:e].decode("latin1").lstrip("-")
+        struct.pack_into("<4I", blob, 0x20 + 16 * b, pos, rot, ids.get(bone, 0) | ANIM_KIND[t], ANIM_BUF + p)
+        p = e + 1
+    blob += bytes(-len(blob) % 4)
+    bridge({"Command": "WRITEMEM", "Address": ANIM_BUF, "Data": bytes(blob).hex(), "Region": "ee"})
+    _anim_wrapper()
+    wr32(rec + 4, (w[1] & 0xFFFF0000) | iv)
+    wr32(rec + 8, ANIM_BUF + 0x20)
+    wr32(rec + 0x10, struct.unpack("<I", struct.pack("<f", dur - 0.05))[0])   # stop just before the last sample
+    old = rd(w[0], 32).split(b"\0")[0].decode("latin1")
+    print(f"  animation {anim_id} ({old}) now plays CA {name}: {dur:.1f} s, {iv + 1} frames at {fps:.1f} fps, "
+          f"{len(blob)} bytes")
+
+
+def anim_play(anim_id=59):
+    """Play animation `anim_id` on your soldier now (it holds the last frame until you move)."""
+    require_round()
+    me = my_body()
+    stance = struct.unpack("<h", rd(me + 0x174, 2))[0]
+    _anim_wrapper()
+    game_call([(ANIM_WRAP, me, anim_id, stance, 0)])
+    print(f"  playing animation {anim_id}")
+
+
+def anim_restore():
+    for rec, b in _anim_backups().items():
+        for i in range(0, 0x20, 4):
+            wr32(rec + i, struct.unpack_from("<I", b, i)[0])
+        print(f"  restored {rd(struct.unpack_from('<I', b, 0)[0], 32).split(bytes(1))[0].decode('latin1')}")
+    if os.path.exists(ANIM_BACKUP):
+        os.remove(ANIM_BACKUP)
+
+
+def anim_ids(limit=400):
+    """Print animation id -> clip name for your soldier's animation set."""
+    aset = struct.unpack("<I", rd(my_body() + 0x528, 4))[0]
+    for base in range(0, limit, 6):
+        ids = list(range(base, min(base + 6, limit)))
+        for i, rec in zip(ids, game_call([(ANIM_LOOKUP, aset, i) for i in ids])):
+            if rec:
+                print(f"  {i:4d} {rd(struct.unpack('<I', rd(rec, 4))[0], 40).split(bytes(1))[0].decode('latin1')}")
+
 def respawn(wait=4.0):
     """Respawn now (alive or dead): turn mp_allow_respawn on and write the respawn trigger to your soldier once.
     Writing it every frame - as the old instant-respawn code did - respawns you over and over."""
@@ -1758,6 +1878,16 @@ if __name__ == "__main__":
             spawn_ai(rest[0], int(nums[0]) if nums else None, pos, team, lib, tmpl)
     elif cmd == "bomb":                               # bomb [x y z]
         bomb(tuple(map(float, rest[0:3])) if len(rest) >= 3 else None)
+    elif cmd == "anim":                               # anim <CA clip> [id] [fps] | anim play [id] | restore | ids
+        if rest[:1] == ["play"]:
+            anim_play(int(rest[1]) if len(rest) > 1 else 59)
+        elif rest[:1] == ["restore"]:
+            anim_restore()
+        elif rest[:1] == ["ids"]:
+            anim_ids()
+        else:
+            anim_install(rest[0], int(rest[1]) if len(rest) > 1 else 59, float(rest[2]) if len(rest) > 2 else 8.0)
+            anim_play(int(rest[1]) if len(rest) > 1 else 59)
     elif cmd == "action":                             # action K ACTION [ARG ARG2 FLAG]
         action(int(rest[0]), *(int(v, 0) for v in rest[1:5]))
     elif cmd == "grenade":                            # grenade K [x y z]

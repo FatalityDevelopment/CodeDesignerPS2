@@ -422,15 +422,18 @@ function rgba5551ToRgba8888(clut: Uint8Array): Uint8Array {
   return out;
 }
 
+// 32-bit CLUT entries keep their real alpha (GS 0..0x80): foliage, grass and
+// tree facades cut their silhouettes from it through the texture's alpha
+// test or blend. Whether alpha is used at all is the renderer's call, from
+// the texture's GS registers.
 function rgba32PaletteToRgba8888(clut: Uint8Array): Uint8Array {
   const out = new Uint8Array(256 * 4);
   for (let i = 0; i < 256; i++) {
     const p = i * 4;
-    const alpha = ps2AlphaToPngAlpha(clut[p + 3]);
     out[p + 0] = clut[p + 0];
     out[p + 1] = clut[p + 1];
     out[p + 2] = clut[p + 2];
-    out[p + 3] = alpha > 0 || clut[p + 0] !== 0 || clut[p + 1] !== 0 || clut[p + 2] !== 0 ? 255 : 0;
+    out[p + 3] = ps2AlphaToPngAlpha(clut[p + 3]);
   }
   return out;
 }

@@ -24,7 +24,7 @@ import {
   ZedPalette,
   ZedTexture,
 } from './zed-texture-parser';
-import { ChainOffset, PositionUnit, ZedModel, applyMarkerBinding, applyWeaponDescriptorBinding, convertPositionUnit, decodeCharacterFallbackPayload, decodeFallbackPayload, looksLikeZedContainer, modelExtent, parseModel } from './zed-model-parser';
+import { ChainOffset, PositionUnit, ZedModel, applyMarkerBinding, applyWeaponDescriptorBinding, chainsAreLineOnly, convertPositionUnit, decodeCharacterFallbackPayload, decodeFallbackPayload, looksLikeZedContainer, modelExtent, parseModel } from './zed-model-parser';
 import { InspectedZedArchive, parseZedArchive } from './zed-archive-parser';
 import { type ModelBounds3, type ModelCameraView, type SceneMarker, ZedModelRenderer } from './zed-model-renderer';
 import {
@@ -61,7 +61,8 @@ import {
   readVisualFlags,
   transformPoint,
 } from './zed-geo-parser';
-import { chooseMapScene, collectSceneInstances, definitionNodeFor } from './zed-scene-compose';
+import { choosePositionUnit, placeModelByGeo, type PositionUnitChoice } from '../zipper-core/model-placement';
+import { chooseMapScene, collectSceneInstances, definitionNodeFor, mapSceneRoot, parseClutterPlacements, type SceneInstance } from './zed-scene-compose';
 import { MapPoint, groundHeight, parseMapPoints } from './zed-spawn-points';
 import './zipper-workbench-page.css';
 
@@ -194,7 +195,7 @@ interface RdrTreeNode {
       <div class="zip-toolbar">
         <div class="zip-title">
           <app-icon name="database" [size]="16" />
-          <span>Zipper FileFormats</span>
+          <span>Asset Viewer</span>
         </div>
         <div class="zip-toolbar-spacer"></div>
         <button class="zip-btn zip-primary" [disabled]="busy()" (click)="openFile()">
@@ -1041,6 +1042,9 @@ interface RdrTreeNode {
                     <div class="zip-pane-section">
                       <div class="zip-pane-section-title">Tools</div>
                       <div class="zip-dump-buttons">
+                        <button class="zip-btn zip-primary" [disabled]="!canOpenInModelEditor()" (click)="openInModelEditor()" title="Open this model in the Model Editor (inspect, retexture, tint, replace textures, save a copy or a pack).">
+                          Open in Model Editor
+                        </button>
                         <button class="zip-btn zip-primary" [disabled]="!companionScene()" (click)="composeGeoScene()" title="Walk the GEO scene tree, resolve each placed instance to a model from the loaded package, and render the composed mesh.">
                           Compose GEO scene
                         </button>
@@ -3101,10 +3105,8 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     sourceArchiveName: string | null | undefined,
     geoNode: GeoNode | null = null,
   ): PositionUnitChoice {
-    const override = this.mapPositionUnit();
-    if (override !== 'auto') { return { unit: override, reason: 'dropdown' }; }
     let node = geoNode;
-    if (!node && entryName) {
+    if (!node && entryName && this.mapPositionUnit() === 'auto') {
       const scene = this.companionSceneForArchive(sourceArchiveName);
       if (scene) {
         for (const name of this.characterGeoNameCandidates(entryName)) {
@@ -3113,29 +3115,8 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
         }
       }
     }
-    const flagsUnit = positionUnitForNode(node);
-    const bounds = readNodeBounds(node);
-    if (model && bounds && model.vertices.length > 0) {
-      // Extent of the model in each convention versus the GEO bounds (the
-      // chunk origins stay fixed, so convert rather than scale the extent).
-      const extentScale = modelExtent(convertPositionUnit(model, 'scale'));
-      const extentSixteenth = modelExtent(convertPositionUnit(model, 'sixteenth'));
-      if (extentScale > 0 && extentSixteenth > 0) {
-        const ratioScale = Math.abs(Math.log(extentScale / bounds.extent));
-        const ratioSixteenth = Math.abs(Math.log(extentSixteenth / bounds.extent));
-        // Only trust the bounds when one convention is clearly closer.
-        if (Math.abs(ratioScale - ratioSixteenth) > 1) {
-          return { unit: ratioSixteenth < ratioScale ? 'sixteenth' : 'scale', reason: 'GEO bounds' };
-        }
-      }
-    }
-    if (flagsUnit) { return { unit: flagsUnit, reason: 'GEO vparams flags' }; }
-    // Map geometry is always in 1/16 units; without its GEO node (no map
-    // GEO loaded) the scale convention would shrink the map 2048x.
-    if (namespaceFromArchiveName(sourceArchiveName) === 'worl' || (entryName ?? '').toLowerCase() === 'worldmodel') {
-      return { unit: 'sixteenth', reason: 'map world model' };
-    }
-    return { unit: 'scale', reason: 'default' };
+    const isWorld = namespaceFromArchiveName(sourceArchiveName) === 'worl' || (entryName ?? '').toLowerCase() === 'worldmodel';
+    return choosePositionUnit(model, node, this.mapPositionUnit(), isWorld);
   }
 
   // ------------------------------------------------------------------
@@ -3310,44 +3291,15 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
   // root). Returns null when the chunks carry no visual keys or none of
   // them resolve, so callers fall back to the whole-model unit choice.
   private placeModelByGeo(mdl: ZedModel, geoNode: GeoNode | null): { model: ZedModel; choice: PositionUnitChoice; matched: number } | null {
-    if (!geoNode) { return null; }
-    const keys = mdl.chunks.map(c => c.visualKey).filter((k): k is string => !!k);
-    if (keys.length === 0) { return null; }
-    const map = buildVisualPlacementMap(geoNode, keys);
-    if (map.matched === 0) {
-      this.log(`[placement] ${geoNode.name}: none of ${map.total} visual key(s) matched a GEO node`);
+    const placed = placeModelByGeo(mdl, geoNode, this.mapPositionUnit());
+    if (!placed) {
+      if (geoNode && mdl.chunks.some(c => c.visualKey)) {
+        this.log(`[placement] ${geoNode.name}: none of the visual keys matched a GEO node`);
+      }
       return null;
     }
-    const override = this.mapPositionUnit();
-    const rootUnit: PositionUnit = positionUnitForNode(geoNode) ?? 'scale';
-    const counts = new Map<PositionUnit, number>();
-    let radius = 0;
-    const chunks = mdl.chunks.map(c => {
-      const placement = c.visualKey ? map.placements.get(c.visualKey) : undefined;
-      const unit: PositionUnit = override !== 'auto' ? override : (placement?.unit ?? rootUnit);
-      counts.set(unit, (counts.get(unit) ?? 0) + 1);
-      const from = c.positionUnit ?? 'scale';
-      const f = from === unit ? 1 : unit === 'sixteenth' ? 32768 / 16 : 16 / 32768;
-      const [ox, oy, oz] = c.origin ?? [0, 0, 0];
-      const vertices = c.vertices.map(v => {
-        let x = (v.x - ox) * f + ox, y = (v.y - oy) * f + oy, z = (v.z - oz) * f + oz;
-        if (placement) { [x, y, z] = transformPoint(placement.matrix, x, y, z); }
-        const d = Math.hypot(x, y, z);
-        if (d > radius) { radius = d; }
-        return { ...v, x, y, z };
-      });
-      return { ...c, vertices, positionUnit: unit };
-    });
-    const vertices: ZedModel['vertices'] = [];
-    for (const c of chunks) { for (const v of c.vertices) { vertices.push(v); } }
-    const dominant = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'scale';
-    const unitNote = override !== 'auto' ? 'dropdown' : 'per-visual vparams';
-    this.log(`[placement] ${geoNode.name}: ${map.matched}/${map.total} visual(s) placed by GEO node (${map.mode}), units ${[...counts].map(([u, n]) => `${u}=${n}`).join(', ')}`);
-    return {
-      model: { ...mdl, chunks, vertices, boundingRadius: radius || 1 },
-      choice: { unit: dominant, reason: `GEO placement ${map.matched}/${map.total} visuals, ${unitNote}` },
-      matched: map.matched,
-    };
+    this.log(`[placement] ${geoNode!.name}: ${placed.matched}/${placed.total} visual(s) placed by GEO node (${placed.mode}), units ${[...placed.unitCounts].map(([u, n]) => `${u}=${n}`).join(', ')}`);
+    return placed;
   }
 
   private recordDecodeInfo(label: string, mdl: ZedModel, choice: PositionUnitChoice): void {
@@ -3841,7 +3793,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     const needed = new Map<string, NeededTexture>();
     for (const c of mdl.chunks) {
       const texName = effectiveChunkTexture(c);
-      if (!texName) { continue; }
+      if (!texName || isPlaceholderTexture(texName)) { continue; }
       const sourceName = sourceNameForChunk(c);
       const sourceArchiveName = sourceArchiveForChunk(c);
       const paletteAlias = paletteAliasFor(sourceName, texName, sourceArchiveName);
@@ -3852,11 +3804,12 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     }
     for (const [key, req] of needed) {
       if (textures[key]) { continue; }
+      const preferredNamespace = this.textureNamespaceForArchiveName(req.sourceArchiveName);
       const bytes = textureBytesFor(
         sources,
         req.textureName,
         req.sourceArchiveName,
-        this.textureNamespaceForArchiveName(req.sourceArchiveName),
+        preferredNamespace,
       );
       if (!bytes) {
         missingTextureSources.add(req.textureName);
@@ -3864,7 +3817,10 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       }
       try {
         const aliasForLookup = req.paletteAlias ?? req.textureName;
-        const tex = parseModelTexture(bytes, palettes, aliasForLookup, req.textureName);
+        // The palette pairs with the TXR the pixels came from, which is not
+        // always the model's own (MP71's sky textures live in RM71_TXR).
+        const ownerNamespace = textureOwnerNamespace(sources, req.textureName, bytes, preferredNamespace);
+        const tex = parseModelTexture(bytes, palettes, aliasForLookup, req.textureName, ownerNamespace);
         textures[key] = texturePixelsFor(tex);
       } catch { failedTextureDecodes.add(req.textureName); }
     }
@@ -3925,7 +3881,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     const effectiveUvMode = this.mapTextureV() === 'flipV' ? 'flipV' : 'direct';
     const renderModel = {
       ...mdl,
-      chunks: (this.showSky() ? mdl.chunks : mdl.chunks.filter(c => !isSkyChunk(c))).map(c => {
+      chunks: mdl.chunks.filter(c => (this.showSky() || !isSkyChunk(c)) && !isPlaceholderTexture(c.textureName)).map(c => {
         const textureName = effectiveChunkTexture(c);
         const sourceName = sourceNameForChunk(c);
         const sourceArchiveName = sourceArchiveForChunk(c);
@@ -4091,7 +4047,7 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     const filePath = this.result()?.path;
     if (!filePath) { return; }
     const leaf = filePath.split(/[\\/]/).pop() ?? filePath;
-    const isZdb = /\.zdb$/i.test(leaf);
+    const isZdb = /\.(zdb|cdb)$/i.test(leaf);
     const isLooseMapWorld = /\.zed$/i.test(leaf) && (
       /^worl_mdl(?:\([^)]+\))?\.zed$/i.test(leaf) ||
       !/_(?:MDL|TXR|PAL|GEO)(?:\([^)]+\))?\.ZED$/i.test(leaf)
@@ -4321,14 +4277,14 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
   // open file is not a ZDB (a loose map folder sends plain file names).
   private packageRootKeys(): Set<string> | null {
     const result = this.result();
-    if (!result || !/\.zdb$/i.test(result.path ?? '') || result.entries.length === 0) { return null; }
+    if (!result || !/\.(zdb|cdb)$/i.test(result.path ?? '') || result.entries.length === 0) { return null; }
     return new Set(result.entries.map(e => `${rootEntryLeaf(e)}|${e.size}`));
   }
 
   // Root archives a map preview needs: model, scene, texture, palette, AI
-  // map and map config files.
+  // map, map config and clutter files.
   private static isPackageArchiveLeaf(leaf: string): boolean {
-    return /_(?:mdl|geo|txr|pal)(?:\([^)]+\))?\.zed$/i.test(leaf) || /\.mps$/i.test(leaf) || /^[a-z]+\d+\.zed$/i.test(leaf);
+    return /_(?:mdl|geo|txr|pal)(?:\([^)]+\))?\.zed$/i.test(leaf) || /\.mps$/i.test(leaf) || /^[a-z]+\d+\.zed$/i.test(leaf) || /^clutter\.zar$/i.test(leaf);
   }
 
   // Fetch the root archives the package payload did not deliver (once per
@@ -4790,6 +4746,21 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
   // ------------------------------------------------------------------
   // fromSceneRoot composes the whole map (worldmodel plus every placed
   // prop) whatever is selected; the world model preview uses it.
+  // The selected record of a root *_MDL.ZED of an opened .ZDB, editable in the Model Editor.
+  canOpenInModelEditor(): boolean {
+    const stack = this.archiveStack();
+    return !!this.selectedEntry() && stack.length === 1 && /\.(zdb|cdb)$/i.test(this.result()?.path ?? '') &&
+      /_MDL(?:\([^)]+\))?\.zed$/i.test(this.currentArchiveLeaf() ?? '');
+  }
+
+  openInModelEditor(): void {
+    const entry = this.selectedEntry();
+    const archive = this.currentArchiveLeaf();
+    const path = this.result()?.path;
+    if (!entry || !archive || !path) { return; }
+    this.vscode.postMessage({ type: 'openModelEditor', path, archive, name: entry.name });
+  }
+
   composeGeoScene(options: { fromSceneRoot?: boolean } = {}): boolean {
     const scene = this.mapScene();
     if (!scene) {
@@ -4801,7 +4772,8 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     // scene node (e.g. user clicks `worldmodel`); otherwise start at the
     // very top of the GEO tree.
     let root = entry && !options.fromSceneRoot ? findSceneNode(scene, entry.name) : null;
-    if (!root) { root = scene.root; }
+    const wholeMap = !root;
+    if (!root) { root = mapSceneRoot(scene); }
     // Build a model lookup map across EVERY *_MDL.ZED in the package by
     // walking each archive's full entry tree (HTML reference behaviour —
     // CLIB / FLIB style packages have model nodes nested as MESH_*
@@ -4852,6 +4824,8 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
     // are placed once with their whole subtree; model_name references are
     // always placed; other nodes with visuals are tried by name.
     const instances = collectSceneInstances(scene, root, name => !!resolve(name));
+    // The whole map also gets its vegetation and rocks from CLUTTER.ZAR.
+    if (wholeMap) { instances.push(...this.clutterInstances(scene, root, resolve)); }
     if (instances.length === 0) {
       this.log(`[GEO] no placeable instances found under ${root.name}`, true);
       return false;
@@ -4911,6 +4885,10 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
             ? (decodeFallbackPayload(bytes) ?? parseModel(bytes, parseOptions))
             : parseModel(bytes, parseOptions);
         } catch { mdl = null; }
+        // Line-strip models (wires) are not drawn; the fallback scan made ribbons of them.
+        if ((!mdl || mdl.chunks.length === 0) && chainOffsets.length > 0 && chainsAreLineOnly(bytes, chainOffsets)) {
+          return null;
+        }
         if (!mdl || mdl.chunks.length === 0) {
           const fb = decodeFallbackPayload(bytes);
           if (fb && fb.chunks.length > 0) {
@@ -5089,6 +5067,39 @@ export class ZipperWorkbenchPageComponent implements OnInit, OnDestroy, AfterVie
       this.log(`Missing model refs: ${uniqueMissing.slice(0, 60).join(', ')}${uniqueMissing.length > 60 ? '…' : ''}`);
     }
     return true;
+  }
+
+  // CLUTTER.ZAR placements as scene instances. Each is drawn with its
+  // prototype's GEO definition (the node in the scene's `models` list).
+  private clutterInstances(scene: GeoScene, root: GeoNode, resolve: (name: string) => unknown): SceneInstance[] {
+    const bytes = this.packageEntryBytes.get('clutter.zar');
+    if (!bytes || bytes.length === 0) { return []; }
+    let placements;
+    try { placements = parseClutterPlacements(parseZedArchive(bytes)); }
+    catch (err) {
+      this.log(`[clutter] CLUTTER.ZAR could not be read: ${err instanceof Error ? err.message : String(err)}`);
+      return [];
+    }
+    const out: SceneInstance[] = [];
+    const counts = new Map<string, number>();
+    const unresolved = new Set<string>();
+    for (const p of placements) {
+      if (!resolve(p.modelName)) { unresolved.add(p.modelName); continue; }
+      const node = findSceneNode(scene, p.modelName) ?? root;
+      out.push({
+        modelName: p.modelName,
+        instanceName: p.modelName,
+        path: `/clutter/${p.modelName}`,
+        matrix: p.matrix,
+        node,
+        positionUnit: positionUnitForNode(node),
+        kind: 'clutter',
+      });
+      counts.set(p.modelName, (counts.get(p.modelName) ?? 0) + 1);
+    }
+    this.log(`[clutter] ${out.length}/${placements.length} placement(s): ${[...counts].map(([n, c]) => `${n}×${c}`).join(', ') || 'none'}` +
+      (unresolved.size ? `; no model for ${[...unresolved].join(', ')}` : ''));
+    return out;
   }
 
   // ------------------------------------------------------------------
@@ -5642,6 +5653,23 @@ function textureBytesFor(
   return sources.get(tex);
 }
 
+// The TXR namespace that holds these exact texture bytes (`ns:name.tif` in
+// the source map), preferring `preferred`; null when no namespaced copy is.
+function textureOwnerNamespace(
+  sources: Map<string, Uint8Array>,
+  tifName: string,
+  bytes: Uint8Array,
+  preferred: string | null,
+): string | null {
+  const tex = tifName.toLowerCase();
+  if (preferred && sources.get(`${preferred}:${tex}`) === bytes) { return preferred; }
+  const suffix = `:${tex}`;
+  for (const [key, value] of sources) {
+    if (value === bytes && key.endsWith(suffix)) { return key.slice(0, -suffix.length); }
+  }
+  return null;
+}
+
 // WEAP_TXR texture header ids are not sufficient for every weapon. Several
 // pages are colour variants sharing the same index art; keep confirmed fixes
 // here so model binding and palette binding stay separate.
@@ -5731,6 +5759,7 @@ function parseModelTexture(
   palettes: Map<string, ZedPalette> | null,
   primaryAlias: string | null,
   fallbackAlias: string | null = null,
+  textureNamespace: string | null = null,
 ): ZedTexture {
   const aliases: Array<string | null> = [];
   const addAlias = (alias: string | null) => {
@@ -5744,6 +5773,19 @@ function parseModelTexture(
   try {
     header = parseTextureHeader(bytes);
   } catch { /* parseTexture will report the real error below */ }
+
+  // TEX0.CBP is the palette the game binds: texpal_<CBP> in the texture's
+  // own TXR/PAL pair. When that palette is loaded it wins over the guesses
+  // below (header ids are TBP slots, not palette ids, and the "most visible"
+  // pick preferred bright wrong palettes: pale opaque tree cards, off
+  // colours across M51 / MP71). An explicit palette alias (a user override
+  // or a weapon fix) still comes first.
+  const explicitPalette = !!primaryAlias && /(^|:)texpal_\d+$/i.test(primaryAlias);
+  const cbpNamespace = textureNamespace ?? namespace;
+  if (header && header.cbp !== null && cbpNamespace && !explicitPalette && !strictAliasFirst) {
+    const exactKey = `${cbpNamespace}:texpal_${header.cbp}`;
+    if (palettes?.has(exactKey)) { return parseTexture(bytes, palettes, exactKey); }
+  }
 
   if (strictAliasFirst) {
     addAlias(primaryAlias);
@@ -5864,6 +5906,13 @@ function textureVisibilityScore(tex: ZedTexture): number {
 // array, the package and node reads). Normalise at the boundary.
 type NodePayload = string | ArrayBuffer | Uint8Array | null | undefined;
 
+// `null_xmas.bmp` and similar: a placeholder no texture archive holds, on
+// small flat helper polygons (turret bases, world markers). The game shows
+// nothing there; drawn, they were grey tiles listed as missing textures.
+function isPlaceholderTexture(name: string | null | undefined): boolean {
+  return /^null[_.]/i.test(name ?? '');
+}
+
 // Sky geometry: the sky archive (SP<map>_MDL: sky dome, mist), the map's
 // sky / sun / flare nodes, and sky / sun textures.
 function isSkyChunk(c: { sourceArchiveName?: string | null; sourceModelName?: string | null; visualKey?: string | null; textureName?: string | null }): boolean {
@@ -5927,10 +5976,6 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-interface PositionUnitChoice {
-  unit: PositionUnit;
-  reason: string;
-}
 
 interface ModelDecodeInfo {
   binding: string;

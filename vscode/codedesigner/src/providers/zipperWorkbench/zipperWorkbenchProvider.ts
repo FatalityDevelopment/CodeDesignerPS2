@@ -41,7 +41,7 @@ export class ZipperWorkbenchProvider {
         this._pendingInitialPath = initialPath ?? this._lastInspectPath ?? '';
         const panel = vscode.window.createWebviewPanel(
             ZipperWorkbenchProvider.viewType,
-            'Zipper FileFormats',
+            'Asset Viewer',
             vscode.ViewColumn.Active,
             {
                 enableScripts: true,
@@ -165,6 +165,13 @@ export class ZipperWorkbenchProvider {
                 if (msg['reveal']) { getZdbChannel().show(true); }
                 break;
             }
+            case 'openModelEditor':
+                await vscode.commands.executeCommand(
+                    'codedesigner.openModelEditor',
+                    msg['path'] as string,
+                    { archive: msg['archive'] as string, name: msg['name'] as string },
+                );
+                break;
             case 'bootstrapError':
                 getOutputChannel().error('[ZipperWorkbench] Bootstrap error: ' + msg['error']);
                 break;
@@ -358,11 +365,13 @@ export class ZipperWorkbenchProvider {
     private _loadLooseMapPackageNodes(filePath: string): BinaryNode[] {
         const dir = path.dirname(filePath);
         const candidates = fs.readdirSync(dir)
-            // Archives, plus the AI map (AIMAPS.MPS: spawn points, grid) and
-            // the map config (MP53.ZED: MetersPerUnit) the spawn camera uses.
+            // Archives, plus the AI map (AIMAPS.MPS: spawn points, grid), the
+            // map config (MP53.ZED: MetersPerUnit) the spawn camera uses and
+            // the vegetation placements (CLUTTER.ZAR).
             .filter(name =>
                 /(?:_(?:MDL|TXR|PAL|GEO)(?:\([^)]+\))?|^WORL_MDL)\.ZED$/i.test(name) ||
                 /\.MPS$/i.test(name) ||
+                /^CLUTTER\.ZAR$/i.test(name) ||
                 /^[A-Z]+\d+\.ZED$/i.test(name))
             .sort((a, b) => {
                 const rank = (name: string): number => {
@@ -548,7 +557,7 @@ export class ZipperWorkbenchProvider {
             canSelectFolders: false,
             canSelectMany: false,
             filters: {
-                'Zipper/FileFormats': ['zdb', 'zar', 'zed'],
+                'Zipper/FileFormats': ['zdb', 'cdb', 'zar', 'zed'],
                 'All Files': ['*'],
             },
         });

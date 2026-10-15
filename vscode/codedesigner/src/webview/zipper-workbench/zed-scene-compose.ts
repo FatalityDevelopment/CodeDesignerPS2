@@ -10,6 +10,7 @@
 //
 // Pure functions so they can be checked outside the webview.
 
+import type { InspectedZedArchive } from './zed-archive-parser';
 import type { GeoInstance, GeoNode, GeoScene } from './zed-geo-parser';
 import { findSceneNode, positionUnitForNode, readGeoTransform } from './zed-geo-parser';
 
@@ -40,8 +41,9 @@ export function chooseMapScene(candidates: SceneCandidate[], preferredNamespace:
 
 export interface SceneInstance extends GeoInstance {
   // How the instance was found: the node resolves to a model, it references
-  // one through model_name, or it owns visuals no model covers.
-  kind: 'model' | 'reference' | 'visuals';
+  // one through model_name, it owns visuals no model covers, or CLUTTER.ZAR
+  // places it.
+  kind: 'model' | 'reference' | 'visuals' | 'clutter';
 }
 
 function identityMatrix(): number[] {
@@ -98,19 +100,19 @@ export function collectSceneInstances(scene: GeoScene, root: GeoNode, resolves: 
       const ref = node.children.find(c => c.name === 'model_name');
       const refName = ref ? cleanName(asciiOf(ref.rawData)) : '';
       const hasVisuals = node.children.some(c => c.name === 'visuals');
-      const isSky = name.toLowerCase() === 'sky';
-      if (!isSky) {
-        if (refName && resolves(refName)) {
-          out.push({ modelName: refName, instanceName: name, path, matrix, node, positionUnit: positionUnitForNode(node), kind: 'reference' });
-        } else if (!covered && resolves(name)) {
-          out.push({ modelName: name, instanceName: name, path, matrix, node, positionUnit: positionUnitForNode(node), kind: 'model' });
-          coveredBelow = true;
-        } else if (!covered && hasVisuals) {
-          out.push({ modelName: name, instanceName: name, path, matrix, node, positionUnit: positionUnitForNode(node), kind: 'visuals' });
-        } else if (refName && !covered) {
-          // Unresolvable reference: still reported so the log lists it.
-          out.push({ modelName: refName, instanceName: name, path, matrix, node, positionUnit: positionUnitForNode(node), kind: 'reference' });
-        }
+      // The sky dome (`sky` -> SP53_MDL / M51_MDL) is placed like any other
+      // reference; the preview's Show sky toggle hides it, and camera framing
+      // and ground detection already leave sky geometry out.
+      if (refName && resolves(refName)) {
+        out.push({ modelName: refName, instanceName: name, path, matrix, node, positionUnit: positionUnitForNode(node), kind: 'reference' });
+      } else if (!covered && resolves(name)) {
+        out.push({ modelName: name, instanceName: name, path, matrix, node, positionUnit: positionUnitForNode(node), kind: 'model' });
+        coveredBelow = true;
+      } else if (!covered && hasVisuals) {
+        out.push({ modelName: name, instanceName: name, path, matrix, node, positionUnit: positionUnitForNode(node), kind: 'visuals' });
+      } else if (refName && !covered) {
+        // Unresolvable reference: still reported so the log lists it.
+        out.push({ modelName: refName, instanceName: name, path, matrix, node, positionUnit: positionUnitForNode(node), kind: 'reference' });
       }
     }
     for (const c of node.children) {
@@ -119,6 +121,60 @@ export function collectSceneInstances(scene: GeoScene, root: GeoNode, resolves: 
     }
   };
   visit(root, identityMatrix(), '', false);
+  return out;
+}
+
+// The node the map scene is composed from: `worldmodel`, which places the
+// terrain and buildings and references every prop. The scene's `models`
+// list also holds the prototypes those references (and CLUTTER.ZAR) point
+// at, defined at the origin; walking from the scene root drew each of them
+// once at (0, 0, 0).
+export function mapSceneRoot(scene: GeoScene): GeoNode {
+  return findSceneNode(scene, 'worldmodel') ?? scene.root;
+}
+
+// One CLUTTER.ZAR placement: a model name and its column-major transform.
+export interface ClutterPlacement {
+  modelName: string;
+  matrix: number[];
+}
+
+// CLUTTER.ZAR (same container as a ZED): Clutter > <model> > a_clutter >
+// params (96 bytes) + scale_inverse. It places a map's trees, bushes, grass
+// and rocks. `params` is either a 4x4 matrix laid out like nparams
+// (translation in floats 12-14) or a quaternion (floats 0-3, x y z w,
+// normalised here), floats 4-7 = 0 0 0 1, the position in floats 8-10 and
+// the uniform scale in float 11 (= 1 / scale_inverse).
+export function parseClutterPlacements(archive: InspectedZedArchive): ClutterPlacement[] {
+  const out: ClutterPlacement[] = [];
+  const byIndex = new Map(archive.entries.map(e => [e.index, e]));
+  for (const entry of archive.entries) {
+    if (entry.name !== 'params') { continue; }
+    const owner = byIndex.get(byIndex.get(entry.parent)?.parent ?? -1);
+    const data = archive.entryData.get(entry.index);
+    if (!owner || !data || data.length < 64) { continue; }
+    const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+    const f = (i: number) => view.getFloat32(i * 4, true);
+    const isMatrix = f(3) === 0 && f(7) === 0 && f(11) === 0 && f(15) === 1;
+    const isQuat = f(4) === 0 && f(5) === 0 && f(6) === 0 && f(7) === 1 && f(11) > 0;
+    let matrix: number[];
+    if (isMatrix) {
+      matrix = Array.from({ length: 16 }, (_, i) => f(i));
+    } else if (isQuat) {
+      const len = Math.hypot(f(0), f(1), f(2), f(3)) || 1;
+      const [x, y, z, w] = [f(0) / len, f(1) / len, f(2) / len, f(3) / len];
+      const s = f(11);
+      matrix = [
+        (1 - 2 * (y * y + z * z)) * s, 2 * (x * y + w * z) * s, 2 * (x * z - w * y) * s, 0,
+        2 * (x * y - w * z) * s, (1 - 2 * (x * x + z * z)) * s, 2 * (y * z + w * x) * s, 0,
+        2 * (x * z + w * y) * s, 2 * (y * z - w * x) * s, (1 - 2 * (x * x + y * y)) * s, 0,
+        f(8), f(9), f(10), 1,
+      ];
+    } else {
+      continue;
+    }
+    if (matrix.every(Number.isFinite)) { out.push({ modelName: owner.name, matrix }); }
+  }
   return out;
 }
 

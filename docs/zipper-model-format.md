@@ -79,22 +79,43 @@ a second time. The log shows `[placement]` lines with how many visuals were plac
 ## Opening a map
 
 Open the map's package (`MP53.ZDB`) and enter `WORL_MDL.ZED`. The viewer preloads the package's dependencies (every
-TXR/PAL/GEO/MDL archive, `AIMAPS.MPS`, the map config `MP53.ZED`), and previewing `worldmodel` shows the whole map:
-the terrain and buildings (the basilica is part of `worldmodel`) composed with every prop the map's GEO scene places
-(MP53: three turrets, the helicopter). The **Spawn camera** section then flies from a start point. A loose
+TXR/PAL/GEO/MDL archive, `AIMAPS.MPS`, the map config `MP53.ZED`, `CLUTTER.ZAR`), and previewing `worldmodel` shows
+the whole map: the terrain and buildings (the basilica is part of `worldmodel`) composed with every prop the map's GEO
+scene places (MP53: three turrets, the helicopter, the sky dome) and the vegetation `CLUTTER.ZAR` places. The **Spawn camera** section then flies from a start point. A loose
 `WORL_MDL.ZED` in a folder holding the unpacked package loads the same set.
 
 ## Composing the map scene
 
 The world model preview (and **Compose GEO scene** for a selected node) uses the map's scene graph: the GEO archive with a `worldmodel` node, preferring the map's own
 prefix (`MP53_GEO`). A package lists several GEO archives and `RUN\COMMON` ones come first, so "the first GEO" is
-`EFFE_GEO`. Instances are collected from the scene root (or the selected node):
+`EFFE_GEO`. The whole map is collected from the scene's `worldmodel` node (**Compose GEO scene** uses the selected
+node). The scene's `models` list also holds prototypes (M51: every tree, bush, toilet and crate; MP6: 87 windows,
+doors, poles, trucks), defined at the origin and drawn only where something references them; walking the whole list
+drew each of them once more at its definition.
 
 - a node that is itself a model (`worldmodel`, a selected weapon root) is placed once, and its descendants are drawn
   by that model's own chains;
-- a `model_name` reference is always placed (MP53: three `LMG_turret_ledge` on the bunkers, `pavehawk`), and its
-  visuals are placed by the model's definition in its own library scene (`TLLM_GEO`, `PAVE_GEO`);
+- a `model_name` reference is always placed (MP53: three `LMG_turret_ledge` on the bunkers, `pavehawk`, the `sky`
+  dome from `SP53_MDL`), and its visuals are placed by the model's definition in its own library scene (`TLLM_GEO`,
+  `PAVE_GEO`);
 - any other node with visuals is tried by name.
+
+### Clutter (`CLUTTER.ZAR`)
+
+Trees, bushes, grass, rocks and small props (fence posts, benches, dumpsters) are not in the GEO scene. The map's
+`CLUTTER.ZAR` (a ZED container) places them: `Clutter` > `<model>` > one `a_clutter` per placement > `params` (96
+bytes) + `scale_inverse` (f32). `params` comes in two layouts:
+
+| Floats | Matrix layout | Quaternion layout |
+|---|---|---|
+| 0-3 | row 0 (as `nparams`) | rotation x y z w (not always unit length; normalised) |
+| 4-7 | row 1 | 0 0 0 1 |
+| 8-11 | row 2 | position x y z, uniform scale (= 1 / `scale_inverse`) |
+| 12-15 | translation, 1 | |
+
+Each placement draws its prototype by the prototype's GEO definition. M51 has 2078 placements (1089 `bush2_near`,
+692 `grassclump1`, 102 `oaktree_near`, tree facades); MP53, MP71 and the other 192-byte files have none. The log
+prints a `[clutter]` line with the counts per model.
 
 The same lookup finds a model's GEO node when it is viewed on its own (`worldmodel` → `MP53_GEO`).
 
@@ -135,13 +156,18 @@ then  GIF tag + A+D register pairs: ALPHA, TEX1, TEX0, TEST, CLAMP
 `CLAMP` gives the wrap mode per axis, `TEST` the alpha test (`ATE`, `ATST`, `AREF`), `ALPHA` the blend equation.
 The editor applies all three to the Three.js material.
 
-Palette resolution order: `TEX0.CBP` in the texture's own namespace (`m51:texpal_44`), `CBP` globally, the
-`.tif` alias from the same TXR/PAL pair, then the old header-id guesses (only for records without a GS tail).
+Palette resolution order: `TEX0.CBP` in the namespace of the TXR the pixels came from (`m51:texpal_44`; MP71's sky
+textures are in `RM71_TXR`, not the map's pair), `CBP` globally, the `.tif` alias from the same TXR/PAL pair, then
+the old header-id guesses (only for records without a GS tail). The header id disagrees with CBP on most textures
+(2374 map and 641 character textures across the retail maps); choosing by it, or by the "most visible" candidate,
+gave M51 sandy cliffs and pale opaque tree cards and MP71 a psychedelic sky. Weapon (`WEAP`, `FLIB`) palettes keep
+their hand-checked aliases.
 
 8-bit CLUTs are stored in CSM1 order: entries 8-15 and 16-23 are swapped in every block of 32 (bits 3 and 4 of the
 index exchanged). 4-bit textures use storage entries 0-15 of a 256-entry CLUT, low nibble first.
 
-Alpha: GS alpha runs 0..0x80, mapped to 0..255. In 16-bit palettes and textures bit 15 is the STP/alpha bit;
+Alpha: GS alpha runs 0..0x80, mapped to 0..255; 32-bit palettes keep it per entry (foliage and facade silhouettes,
+terrain blend layers, shadow decals are all drawn from it). In 16-bit palettes and textures bit 15 is the STP/alpha bit;
 when no entry sets it the image is opaque, otherwise coloured entries stay visible and black entries without the
 bit are transparent (how the game's cutouts look through TEXA/AEM).
 
@@ -169,9 +195,20 @@ undecodable, the viewer asks the extension once for a base64 copy.
 - Models with chain colours render pre-lit: `MeshBasicMaterial` with `vertexColors`, colour = byte / 128 (the GS
   multiplies texel by colour / 128, so `0x80` is neutral and `0xFF` doubles). Scene lights only apply to models
   without colour blocks.
-- Texels are discarded only when the texture's own `TEST` register enables an alpha test (the game's cutouts:
-  fences, foliage, decals). Decoded alpha is ignored otherwise, so a palette with black entries never punches holes
-  in a wall. Effects keep their soft-blend setup.
+- Alpha follows the GS: alpha = texel alpha × vertex alpha / 128. Every retail world draw has PRIM ABE set
+  (`0x7D`); whether it blends is the section material's `ALPHA_1` (chain kind 3): `0x44` = (Cs - Cd) × As + Cd,
+  `0` = copy. A chunk with a blending material and real translucency (texture alpha, or vertex alpha below 0x80)
+  draws translucent in chain order and still writes depth, dropping fully clear texels. Terrain is built this way:
+  `ground_gravel02`, `water` and `db_stone_plain` fade over the base layers through vertex alpha (average 35-64 /
+  128 on M51); drawn opaque they painted over the ground. Copy materials discard texels only through the texture's
+  `TEST` alpha test (foliage cutouts such as `shrub01`, `grassclump1`); alpha is ignored otherwise. Effects keep
+  their soft-blend setup.
+- A composed map needs a few hundred materials (M51: ~110 textures, some in a solid and a blended variant). The
+  renderer allows 512; at the old 64, every texture past the 64th drew as the flat grey fallback (MP71's turret).
+- Chunks textured with a `null_*.bmp` placeholder (flat helper polygons under turrets and world markers) are not
+  drawn. Line-strip models (chain tag kind 1, PRIM type 2: MP6's power-line wires) are not decoded yet and are left
+  out rather than drawn as ribbons by the fallback scan.
+- The bounds boxes are hidden while flying.
 - `V orientation = flip V` (default) matches the row-flipped texture upload; leave it unless a texture reads
   upside down.
 - The preview pane's **Mesh** section shows how the model was decoded (binding, visuals, chunks bound, baked

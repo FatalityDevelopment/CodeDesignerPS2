@@ -89,8 +89,23 @@
       },
       {
         "command": "codedesigner.openZipperWorkbench",
-        "title": "CodeDesigner: Open Zipper FileFormats",
+        "title": "CodeDesigner: Open Asset Viewer (Zipper)",
         "icon": "$(archive)"
+      },
+      {
+        "command": "codedesigner.openModelEditor",
+        "title": "CodeDesigner: Open Model Editor",
+        "icon": "$(symbol-structure)"
+      },
+      {
+        "command": "codedesigner.openMapEditor",
+        "title": "CodeDesigner: Open Map Editor",
+        "icon": "$(globe)"
+      },
+      {
+        "command": "codedesigner.openAnimationEditor",
+        "title": "CodeDesigner: Open Animation Editor",
+        "icon": "$(play)"
       },
       {
         "command": "codedesigner.openCheatsEditor",
@@ -237,7 +252,22 @@
         },
         {
           "command": "codedesigner.openZipperWorkbench",
-          "when": "resourceExtname == .zdb || resourceExtname == .zar || resourceExtname == .zed || resourceFilename =~ /^SaveGame/",
+          "when": "resourceExtname == .zdb || resourceExtname == .cdb || resourceExtname == .zar || resourceExtname == .zed || resourceFilename =~ /^SaveGame/",
+          "group": "navigation"
+        },
+        {
+          "command": "codedesigner.openModelEditor",
+          "when": "resourceExtname == .zdb || resourceExtname == .ZDB || resourceExtname == .cdb || resourceExtname == .CDB || resourceExtname == .zed || resourceExtname == .ZED || resourceExtname == .zar || resourceExtname == .ZAR",
+          "group": "navigation"
+        },
+        {
+          "command": "codedesigner.openMapEditor",
+          "when": "resourceExtname == .zdb || resourceExtname == .ZDB || resourceExtname == .cdb || resourceExtname == .CDB || resourceExtname == .zed || resourceExtname == .ZED || resourceExtname == .zar || resourceExtname == .ZAR",
+          "group": "navigation"
+        },
+        {
+          "command": "codedesigner.openAnimationEditor",
+          "when": "resourceExtname == .zdb || resourceExtname == .ZDB || resourceExtname == .cdb || resourceExtname == .CDB || resourceExtname == .zed || resourceExtname == .ZED || resourceExtname == .zar || resourceExtname == .ZAR",
           "group": "navigation"
         }
       ]

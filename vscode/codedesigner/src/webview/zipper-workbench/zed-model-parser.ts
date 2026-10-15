@@ -67,6 +67,10 @@ export interface ZedModelChunk {
   visualKey?: string;
   // True when every vertex carries r/g/b/a from the chain's colour block.
   hasVertexColors?: boolean;
+  // From the section material's ALPHA_1: true when the chunk is alpha
+  // blended (0x44, (Cs - Cd) * As + Cd), false for a plain copy (0, used
+  // with an alpha test by foliage cutouts). Absent without a material block.
+  materialBlend?: boolean;
   // Which position unit was applied when decoding the vertices.
   positionUnit?: PositionUnit;
   // Chunk origin (header +0x38..+0x40, world units), already added to the
@@ -407,6 +411,23 @@ function chunkCountsLookSane(bytes: Uint8Array, offset: number): boolean {
   return offset + 0x50 + vertexCount * 0x10 + 0x08 + triangleCount * 0x04 <= bytes.length;
 }
 
+// True when the stubs point at chains that draw only kind-1 packets: GS line
+// strips (PRIM type 2), e.g. MP6's power-line wires. They have no triangle
+// chunks, and the string-scan fallback turned them into wide ribbons.
+export function chainsAreLineOnly(bytes: Uint8Array, offsets: ChainOffset[]): boolean {
+  let lines = 0;
+  for (const { offset } of offsets) {
+    if (offset < 0 || offset + 16 > bytes.length) { return false; }
+    const count = readU32LE(bytes, offset) & 0xffff;
+    if (count === 0 || offset + 16 + count * 16 > bytes.length) { return false; }
+    for (let i = 0; i < count; i++) {
+      const kind = (readU32LE(bytes, offset + 16 + i * 16) >>> 16) & 0xff;
+      if (kind === 1) { lines++; } else if (kind !== 3 && kind !== 4 && kind !== 6) { return false; }
+    }
+  }
+  return lines > 0;
+}
+
 // Parse every chain the stubs point at. Chains that fail validation are
 // dropped; returns null when none validate.
 export function parseVisualChains(bytes: Uint8Array, offsets: ChainOffset[]): VisualChain[] | null {
@@ -469,12 +490,31 @@ export function parseModelFromChains(bytes: Uint8Array, chainOffsets: ChainOffse
         }
         chunk.visualKey = chain.key ?? `chain@0x${chain.offset.toString(16)}`;
         attachVertexColors(chunk, bytes, ref);
+        const blend = readMaterialBlend(bytes, section);
+        if (blend !== null) { chunk.materialBlend = blend; }
         chunks.push(chunk);
       }
     }
   }
   if (chunks.length === 0) { return null; }
   return assembleModel(bytes, chunks);
+}
+
+// ALPHA_1 (GS register 0x42) in a section's material block: blended when the
+// equation reads the destination colour. Null when the block has no ALPHA_1.
+function readMaterialBlend(bytes: Uint8Array, section: ChainSection): boolean | null {
+  if (section.materialOffset === null) { return null; }
+  const end = Math.min(bytes.length, section.materialOffset + section.materialLength);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  for (let o = section.materialOffset; o + 16 <= end; o += 16) {
+    if (view.getUint32(o + 8, true) !== 0x42 || view.getUint32(o + 12, true) !== 0) { continue; }
+    const lo = view.getUint32(o, true);
+    const a = lo & 0x3;
+    const b = (lo >>> 2) & 0x3;
+    const d = (lo >>> 6) & 0x3;
+    return b === 1 || d === 1 || (a === 1 && d !== 1);
+  }
+  return null;
 }
 
 function assembleModel(bytes: Uint8Array, chunks: ZedModelChunk[]): ZedModel {

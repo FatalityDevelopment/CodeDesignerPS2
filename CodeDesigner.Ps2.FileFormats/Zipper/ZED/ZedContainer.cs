@@ -176,6 +176,20 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.ZED
         /// <summary>Alias for archive-style callers.</summary>
         public ZedNode AddEntry(string name, byte[] data, uint type = 0) => AddNode(name, data, type);
 
+        /// <summary>
+        /// Inserts a node at <paramref name="index"/> in the pre-order record list. The caller keeps the tree
+        /// consistent (parent child counts); see <see cref="ZedTree"/>.
+        /// </summary>
+        public ZedNode InsertNode(int index, string name, byte[] data, uint type = 0)
+        {
+            EnsureOpen();
+            string normalizedName = NormalizeName(name);
+            RememberName(normalizedName);
+            var node = new ZedNode { Name = normalizedName, Data = (byte[])data.Clone(), Type = type };
+            _nodes.Insert(index, node);
+            return node;
+        }
+
         /// <summary>Renames an existing node.</summary>
         public void RenameNode(int index, string newName)
         {

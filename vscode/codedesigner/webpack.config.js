@@ -103,6 +103,9 @@ const webviewConfig = {
     'memory-card-browser': './src/webview/memory-card-browser/main.ts',
     'hdd-browser': './src/webview/hdd-browser/main.ts',
     'zipper-workbench': './src/webview/zipper-workbench/main.ts',
+    'model-editor': './src/webview/model-editor/main.ts',
+    'map-editor': './src/webview/map-editor/main.ts',
+    'animation-editor': './src/webview/animation-editor/main.ts',
     'welcome':         './src/webview/welcome/main.ts',
   },
   output: {

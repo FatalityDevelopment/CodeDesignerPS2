@@ -632,6 +632,17 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 case 'openZipperWorkbench':
                     await vscode.commands.executeCommand('codedesigner.openZipperWorkbench');
                     break;
+                // ── Asset editors (Assets section) ────────────────────────
+                case 'openAssetEditor': {
+                    const commands: Record<string, string> = {
+                        model: 'codedesigner.openModelEditor',
+                        map: 'codedesigner.openMapEditor',
+                        animation: 'codedesigner.openAnimationEditor',
+                    };
+                    const command = commands[String(msg.kind)];
+                    if (command) { await vscode.commands.executeCommand(command); }
+                    break;
+                }
                 // ── HDD Image Manager ─────────────────────────────────────
                 case 'openHdd':
                     await vscode.commands.executeCommand('codedesigner.openHddBrowser');

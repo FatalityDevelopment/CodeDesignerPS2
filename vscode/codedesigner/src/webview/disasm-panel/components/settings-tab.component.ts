@@ -380,10 +380,6 @@ const NET_POLL_MS = 30000;
                       title="Open the PS2 HDD Browser">
                 <app-icon name="harddrive" [size]="14" /><span>HDD</span>
               </button>
-              <button (click)="openZipperClick.emit()"
-                      title="Open the Zipper FileFormats workbench">
-                <app-icon name="database" [size]="14" /><span>Zipper</span>
-              </button>
               <button (click)="openSnapshotManagerClick.emit()"
                       title="Open the Snapshot Manager to browse and manage memory snapshots">
                 <app-icon name="camera" [size]="14" /><span>Snapshots</span>
@@ -399,6 +395,37 @@ const NET_POLL_MS = 30000;
               <button (click)="openCheatsEditorClick.emit()"
                       title="Open the PS2 cheats editor">
                 <app-icon name="sparkles" [size]="14" /><span>Cheats</span>
+              </button>
+            </div>
+          </div>
+        }
+      </div>
+
+      <!-- ── Assets ───────────────────────────────────────────────────────── -->
+      <div class="acc-section">
+        <button class="acc-header" (click)="assetsOpen.set(!assetsOpen())">
+          <app-icon class="acc-chevron" [name]="assetsOpen() ? 'chevrondown' : 'chevronright'" [size]="13" />
+          <app-icon class="acc-ico" name="database" [size]="14" />
+          <span class="acc-title">Assets</span>
+        </button>
+        @if (assetsOpen()) {
+          <div class="acc-body">
+            <div class="btn-grid">
+              <button (click)="openZipperClick.emit()"
+                      title="Open the asset viewer: browse .ZDB / .ZAR / .ZED packages and preview their files">
+                <app-icon name="database" [size]="14" /><span>Viewer</span>
+              </button>
+              <button (click)="openAssetEditorClick.emit('model')"
+                      title="Open the Model Editor: models, textures and characters of a package">
+                <app-icon name="library" [size]="14" /><span>Models</span>
+              </button>
+              <button (click)="openAssetEditorClick.emit('map')"
+                      title="Open the Map Editor: props, clutter and spawn points of a map package">
+                <app-icon name="globe" [size]="14" /><span>Maps</span>
+              </button>
+              <button (click)="openAssetEditorClick.emit('animation')"
+                      title="Open the Animation Editor: character animations and weapon firing effects">
+                <app-icon name="repeat" [size]="14" /><span>Animations</span>
               </button>
             </div>
           </div>
@@ -690,6 +717,8 @@ export class SettingsTabComponent implements OnDestroy {
   readonly openMemoryCardClick   = output<void>();
   readonly openHddClick          = output<void>();
   readonly openZipperClick       = output<void>();
+  /** An asset editor from the Assets section: 'model' | 'map' | 'animation'. */
+  readonly openAssetEditorClick  = output<'model' | 'map' | 'animation'>();
   readonly openMemoryViewClick = output<string>();
   readonly openDnsMappingClick   = output<void>();
   readonly openNetConfigClick    = output<void>();
@@ -731,6 +760,7 @@ export class SettingsTabComponent implements OnDestroy {
   readonly agentsOpen  = signal(false);
   readonly orchOpen    = signal(false);
   readonly toolsOpen   = signal(false);
+  readonly assetsOpen  = signal(false);
 
   /** Multi-agent mode is on when any orchestration plan is active. */
   readonly multiAgentMode = computed(() => this.orchestrations().some(o => o.isActive));

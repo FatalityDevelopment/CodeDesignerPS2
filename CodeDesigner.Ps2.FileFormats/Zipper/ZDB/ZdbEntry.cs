@@ -26,6 +26,16 @@
         internal uint DbId { get; set; }
         internal uint Checksum { get; set; }
 
+        /// <summary>
+        /// Type 1 (ZDB v6, SOCOM 3 / Combined Assault): the resource tag (<c>ISLE</c>, <c>ASST</c>, <c>CHAR</c>, <c>DEP_</c>
+        /// ...), stored where type-1 readers call it VarName; empty for type 2.
+        /// </summary>
+        public string Tag => VarName == 0 ? string.Empty
+            : new string(BitConverter.GetBytes(VarName).Select(b => b is >= 0x20 and < 0x7F ? (char)b : '?').ToArray());
+
+        /// <summary>Type 1: the resource's format version (DbId in type-1 readers).</summary>
+        public uint ResourceVersion => DbId;
+
         // Type-2 only — preserved for lossless round-trip.
         // The 0x40-byte name field contains non-zero garbage after the null terminator
         // in real archives (confirmed in M51.ZDB). The word at entry+0x58 is also

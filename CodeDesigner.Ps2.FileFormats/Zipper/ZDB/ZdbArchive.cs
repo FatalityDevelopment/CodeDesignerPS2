@@ -104,8 +104,15 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.ZDB
         // Properties
         // ------------------------------------------------------------------
 
-        /// <summary>Archive variant (1 or 2). Returns 0 when nothing is loaded.</summary>
+        /// <summary>Archive variant (1 or 2; 3 = memory-card pack .CDB). Returns 0 when nothing is loaded.</summary>
         public int ArchiveType => _archiveType;
+
+        /// <summary>True for a memory-card pack (<c>&lt;NAME&gt;.CDB</c>).</summary>
+        public bool IsMemoryCardPack => _archiveType == 3;
+
+        /// <summary>True when <paramref name="path"/> names a .ZDB package or a .CDB memory-card pack.</summary>
+        public static bool IsArchivePath(string path) =>
+            path.EndsWith(".zdb", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".cdb", StringComparison.OrdinalIgnoreCase);
 
         /// <summary>All entries in the archive.</summary>
         public IReadOnlyList<ZdbEntry> Entries => _entries;
@@ -162,6 +169,16 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.ZDB
 
             _entries.Add(entry);
             return entry;
+        }
+
+        /// <summary>Type 1 (ZDB v6): adds a resource with its tag (ASST, BONE ...) and format version.</summary>
+        public ZdbEntry AddResource(string name, byte[] data, string tag, uint version)
+        {
+            if (_archiveType != 1) throw new InvalidOperationException("Resources (tag + version) are a type-1 (ZDB v6) feature");
+            if (tag.Length != 4) throw new ArgumentException("A resource tag is 4 characters", nameof(tag));
+            var e = AddEntry(name, data, BitConverter.ToUInt32(System.Text.Encoding.ASCII.GetBytes(tag)));
+            e.DbId = version;
+            return e;
         }
 
         /// <summary>
@@ -252,7 +269,12 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.ZDB
         public byte[] ToBytes()
         {
             EnsureOpen();
-            return _archiveType == 1 ? SerializeType1() : SerializeType2();
+            return _archiveType switch
+            {
+                1 => SerializeType1(),
+                3 => Package.PackageSave.BuildCdb(_entries.Select(e => (e.FullPath, e.Data)).ToList()),
+                _ => SerializeType2(),
+            };
         }
 
         // ------------------------------------------------------------------
@@ -487,9 +509,12 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.ZDB
             {
                 case 0xC8: LoadType1(data); break;
                 case 0xFC: LoadType2(data); break;
+                // Memory-card pack (<NAME>.CDB, the loader mounts mc0:/BASCUS-97275<NAME>/): the type-2 entry table
+                // with a 0x110 header and 0x70-byte entries; written back the way PackageSave.BuildCdb writes packs.
+                case 0x110: LoadType2(data); _archiveType = 3; break;
                 default:
                     throw new InvalidDataException(
-                        $"Unrecognised ZDB magic 0x{magic:X8}. Expected 0xC8 or 0xFC.");
+                        $"Unrecognised ZDB magic 0x{magic:X8}. Expected 0xC8, 0xFC or 0x110 (memory-card pack).");
             }
         }
 
@@ -639,7 +664,7 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.ZDB
             {
                 bw.Write(_entries[i].Data);
                 uint written = (uint)_entries[i].Data.Length;
-                while ((written & 0xF) != 0) { bw.Write(0u); written += 4; }
+                while ((written & 0xF) != 0) { bw.Write((byte)0); written++; }
             }
 
             return ms.ToArray();

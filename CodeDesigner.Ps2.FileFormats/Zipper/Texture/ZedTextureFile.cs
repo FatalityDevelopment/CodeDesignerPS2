@@ -420,6 +420,38 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.Texture
             return new Palette { PaletteId = paletteId, Rgba = rgba, Is16Bit = is16Bit };
         }
 
+        /// <summary>
+        /// Inverse of <see cref="DecodeClutBuffer"/>: 256 logical RGBA8888 entries (PNG alpha) to a PAL <c>buf</c>,
+        /// CSM1 storage order, as 32-bit (1024 bytes, GS alpha 0..0x80) or 16-bit A1B5G5R5 (512 bytes, STP on
+        /// entries with alpha >= 0x80).
+        /// </summary>
+        public static byte[] EncodeClutBuffer(byte[] logicalRgba, bool is16Bit)
+        {
+            if (logicalRgba.Length < 1024) throw new ArgumentException("Palette must be 256 RGBA8888 entries.", nameof(logicalRgba));
+            byte[] stored = UnswizzlePs2Clut8(logicalRgba); // the swap is its own inverse
+            if (!is16Bit)
+            {
+                var buf = new byte[1024];
+                for (int i = 0; i < 256; i++)
+                {
+                    buf[i * 4] = stored[i * 4];
+                    buf[i * 4 + 1] = stored[i * 4 + 1];
+                    buf[i * 4 + 2] = stored[i * 4 + 2];
+                    buf[i * 4 + 3] = PngAlphaToPs2Alpha(stored[i * 4 + 3]);
+                }
+                return buf;
+            }
+            var buf16 = new byte[512];
+            for (int i = 0; i < 256; i++)
+            {
+                int o = i * 4;
+                int v = (stored[o] >> 3) | ((stored[o + 1] >> 3) << 5) | ((stored[o + 2] >> 3) << 10) | (stored[o + 3] >= 0x80 ? 0x8000 : 0);
+                buf16[i * 2] = (byte)v;
+                buf16[i * 2 + 1] = (byte)(v >> 8);
+            }
+            return buf16;
+        }
+
         private static bool HasTransparentPixels(byte[] rgba)
         {
             for (int i = 3; i < rgba.Length; i += 4)
@@ -614,17 +646,20 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.Texture
             return outBuf;
         }
 
+        // 32-bit CLUT entries keep their real alpha (GS 0..0x80): foliage, grass
+        // and tree facades cut their silhouettes from it, terrain blend layers
+        // and shadow decals fade by it. Whether alpha is used at all is the
+        // renderer's call, from the GS registers (matches zed-texture-parser.ts).
         private static byte[] Rgba32PaletteToRgba8888(byte[] clut, int offset, int length)
         {
             var outBuf = new byte[256 * 4];
             for (int i = 0; i < 256; i++)
             {
                 int p = offset + i * 4;
-                byte alpha = Ps2AlphaToPngAlpha(clut[p + 3]);
                 outBuf[i * 4 + 0] = clut[p + 0];
                 outBuf[i * 4 + 1] = clut[p + 1];
                 outBuf[i * 4 + 2] = clut[p + 2];
-                outBuf[i * 4 + 3] = (alpha > 0 || clut[p + 0] != 0 || clut[p + 1] != 0 || clut[p + 2] != 0) ? (byte)255 : (byte)0;
+                outBuf[i * 4 + 3] = Ps2AlphaToPngAlpha(clut[p + 3]);
             }
             return outBuf;
         }
