@@ -81,9 +81,10 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 // running-state register file changes every cycle. Skip cleanly
                 // when running so callers don't pay for a 38 MB read that
                 // would already be stale by the time it lands.
+                uint livePc;
                 try
                 {
-                    _ctx.Client.GetProgramCounter(out bool paused);
+                    livePc = _ctx.Client.GetProgramCounter(out bool paused);
                     if (!paused)
                     {
                         _mirrorValid = false;
@@ -96,6 +97,13 @@ namespace CodeDesigner.Ps2.Bridge.Services
                     return;
                 }
 
+                // Still paused at the same PC: nothing has executed, so the cached
+                // mirror is current. Re-mirroring here used to copy ~38 MB on every
+                // disassembly refresh while paused.
+                if (!force && _mirrorValid && livePc == _pcAtMirror)
+                {
+                    return;
+                }
                 if (!force && _mirrorValid &&
                     (DateTime.UtcNow - _mirroredAtUtc) < FreshnessWindow)
                 {

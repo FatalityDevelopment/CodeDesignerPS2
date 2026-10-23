@@ -144,11 +144,20 @@ namespace CodeDesigner.Ps2.Common
         /// Pass <c>true</c> only when a real, live CPU snapshot is available.
         /// </param>
         /// <param name="seedCpu">
-        /// Optional pre-populated CPU snapshot (registers + memory bus) to start simulation
-        /// from. Used at breakpoint time so the analyzer sees real runtime state — concrete
-        /// register values, real pointer targets — rather than the all-zero default. The
-        /// snapshot is cloned before use; the analyzer's mutating execution doesn't pollute
-        /// the caller's copy.
+        /// Optional pre-populated CPU snapshot (registers) captured at <paramref name="seedPc"/>.
+        /// Used at breakpoint time so the analyzer sees real runtime state. The snapshot is
+        /// cloned before use; the analyzer's mutating execution doesn't pollute the caller's copy.
+        /// </param>
+        /// <param name="seedPc">
+        /// Address the seed snapshot was taken at. Rows before it are analyzed from a blank
+        /// state and the snapshot is applied when the walk reaches this row; state hints
+        /// (<c>[TAKEN]</c>) are only emitted from here up to the next control-flow change.
+        /// When null, the snapshot applies from the first row (legacy behaviour).
+        /// </param>
+        /// <param name="loadBus">
+        /// Memory the simulation's loads read from. Defaults to <paramref name="bus"/>. Pass a
+        /// cheaper bus (page bytes + local mirror) when <paramref name="bus"/> can reach a slow
+        /// live connection: hint peeks are one per row, simulated loads can be many.
         /// </param>
         /// <returns>Dictionary mapping instruction address to comment string</returns>
         public static Dictionary<uint, string> AnalyzeInstructions(
@@ -158,93 +167,176 @@ namespace CodeDesigner.Ps2.Common
             IPs2MemoryBus? bus = null,
             Func<uint, string?>? lookupLabel = null,
             bool includeStateHints = false,
-            CpuState? seedCpu = null)
+            CpuState? seedCpu = null,
+            uint? seedPc = null,
+            IPs2MemoryBus? loadBus = null)
         {
             var comments = new Dictionary<uint, string>();
+            var rows = instructions as IList<(uint instruction, uint address)> ?? instructions.ToList();
 
-            // CPU state for tracking register values during simulated execution. When
-            // a seed snapshot is provided (e.g. mirrored from PCSX2 at a breakpoint),
-            // clone it so the analyzer's mutating ExecuteGeneric calls don't pollute
-            // the cache, and reuse its Bus so simulated loads see real memory. Without
-            // a seed the analyzer starts from a fresh zeroed state with no bus, which
-            // is the safe default for cold batch disassembly.
-            CpuState? cpu;
+            // Simulated loads and stores go through a private overlay, so stores never
+            // reach real memory and a reload of a spilled value sees what was stored.
+            var simBus = new AnalysisOverlayBus(loadBus ?? bus ?? seedCpu?.Bus);
+
+            CpuState? cpu = null;
+            bool stateHints = false;
             if (executeInstructions)
             {
-                cpu = seedCpu?.CreateAnalysisSnapshot() ?? new CpuState();
-                if (seedCpu is not null) cpu.Bus = seedCpu.Bus;
-            }
-            else
-            {
-                cpu = null;
-            }
-            
-            uint currentPc = startPc;
-            
-            foreach (var (instruction, address) in instructions)
-            {
-                try
+                if (seedCpu is not null && seedPc is null)
                 {
-                    // Get the instruction object and analyze it
-                    var (instrObj, args) = MipsDisassembler.GetInstructionObject(instruction);
-                    
-                    if (instrObj != null && args != null)
+                    cpu = seedCpu.CreateAnalysisSnapshot();
+                    stateHints = includeStateHints;
+                }
+                else
+                {
+                    cpu = NewBlankState();
+                }
+                cpu.Bus = simBus;
+            }
+
+            for (int i = 0; i < rows.Count; i++)
+            {
+                var (word, address) = rows[i];
+
+                if (cpu != null && seedCpu is not null && seedPc == address)
+                {
+                    cpu = seedCpu.CreateAnalysisSnapshot();
+                    cpu.Bus = simBus;
+                    stateHints = includeStateHints;
+                }
+
+                var usage = GprUsage.Of(word);
+                bool hasDelaySlot = usage.Flow != FlowKind.None
+                    && i + 1 < rows.Count && rows[i + 1].address == address + 4;
+
+                if (cpu != null && usage.Flow == FlowKind.Call && hasDelaySlot)
+                {
+                    // A call's arguments are often set in its delay slot, so run the
+                    // delay slot first and describe the call with the state it sees.
+                    var (slotWord, slotAddress) = rows[i + 1];
+                    AnalyzeRow(slotWord, slotAddress, cpu, stateHints, bus, lookupLabel, comments);
+                    AnalyzeRow(word, address, cpu, stateHints, bus, lookupLabel, comments, execute: false);
+                    Simulate(word, address, cpu, usage);
+                    cpu.GprKnown &= ~CallerSavedMask;
+                    stateHints = false;
+                    i++;
+                    continue;
+                }
+
+                AnalyzeRow(word, address, cpu, stateHints, bus, lookupLabel, comments);
+
+                if (cpu != null && usage.Flow != FlowKind.None)
+                {
+                    if (hasDelaySlot)
                     {
-                        // Compute branch/jump target before execution (register state is still pre-exec)
-                        uint? target = (bus != null || lookupLabel != null)
-                            ? TryGetBranchJumpTarget(instruction, currentPc, cpu)
-                            : null;
-
-                        // Execute the instruction to update CPU state (if enabled)
-                        if (cpu != null && executeInstructions)
-                        {
-                            try
-                            {
-                                instrObj.ExecuteGeneric(cpu, args);
-                            }
-                            catch
-                            {
-                                // Silently ignore execution errors (e.g., syscall, break, etc.)
-                            }
-                        }
-                        
-                        // Call the instruction's Analyze method to get analysis comment
-                        string analysis = instrObj.AnalyzeGeneric(args, cpu, currentPc);
-
-                        // Strip state-dependent branch hints when the caller opts out.
-                        // [TAKEN] / [NOT TAKEN] are misleading when the CPU starts from a blank state.
-                        if (!includeStateHints)
-                            analysis = StripStateHints(analysis);
-
-                        // Only add comment if analysis returned something meaningful
-                        if (!string.IsNullOrWhiteSpace(analysis))
-                        {
-                            // Branch/jump targets are *code* addresses — peeking their bytes
-                            // as ASCII or following them as pointers gives nonsense.
-                            // Label substitution still happens inline below; the address
-                            // is just kept out of the byte-peek path.
-                            HashSet<uint>? codeTargets = target.HasValue
-                                ? new HashSet<uint> { target.Value }
-                                : null;
-
-                            // Inline-substitute labels for any addresses in the comment,
-                            // and (for non-code addresses only) append MMIO / string /
-                            // pointer / raw-word hints when bus + heuristics allow.
-                            analysis = AppendAddressHints(analysis, bus, lookupLabel, codeTargets);
-
-                            comments[address] = $"; {analysis}";
-                        }
+                        var (slotWord, slotAddress) = rows[i + 1];
+                        AnalyzeRow(slotWord, slotAddress, cpu, stateHints, bus, lookupLabel, comments);
+                        i++;
                     }
+                    // Whatever follows a jump is reached from somewhere else; whatever
+                    // follows a call runs after the callee clobbered the caller-saved set.
+                    if (usage.Flow == FlowKind.Jump)
+                        cpu.GprKnown &= PreservedAcrossJumpMask;
+                    else if (usage.Flow == FlowKind.Call)
+                        cpu.GprKnown &= ~CallerSavedMask;
+                    stateHints = false;
                 }
-                catch
-                {
-                    // Skip instructions that fail to analyze
-                }
-                
-                currentPc += 4;
             }
 
             return comments;
+        }
+
+        /// <summary>Registers whose value survives a call: s0-s7, gp, sp, fp (and $zero).</summary>
+        private const uint CalleeSavedMask =
+            (0xFFu << 16) | (1u << 28) | (1u << 29) | (1u << 30) | 1u;
+
+        private const uint CallerSavedMask = ~CalleeSavedMask;
+
+        /// <summary>Code after an unconditional jump belongs to another path; only $gp carries over.</summary>
+        private const uint PreservedAcrossJumpMask = (1u << 28) | 1u;
+
+        private static CpuState NewBlankState() => new() { GprKnown = 1u };
+
+        /// <summary>
+        /// Analyzes one row against the pre-execution <paramref name="cpu"/> state, records
+        /// its comment, then (unless <paramref name="execute"/> is false) simulates it.
+        /// </summary>
+        private static void AnalyzeRow(
+            uint word, uint address, CpuState? cpu, bool stateHints,
+            IPs2MemoryBus? bus, Func<uint, string?>? lookupLabel,
+            Dictionary<uint, string> comments,
+            bool execute = true)
+        {
+            try
+            {
+                var (instrObj, args) = MipsDisassembler.GetInstructionObject(word);
+                if (instrObj == null || args == null) return;
+
+                var usage = GprUsage.Of(word);
+                CpuState? view = cpu;
+                bool readsKnown = view == null || (usage.Reads & ~view.GprKnown) == 0;
+
+                // A value hint from an unknown input would just print garbage. The
+                // stack-frame note on `addiu sp, sp, ±N` is still useful without one.
+                bool stackAdjust = (word >> 26) == 0x09 && ((word >> 16) & 0x3FF) == (29u << 5 | 29u);
+                string analysis = usage.IsAlu && !readsKnown && !stackAdjust
+                    ? string.Empty
+                    : instrObj.AnalyzeGeneric(args, view, address);
+
+                if (!stateHints || !readsKnown)
+                    analysis = StripStateHints(analysis);
+
+                if (!string.IsNullOrWhiteSpace(analysis))
+                {
+                    // Branch/jump targets are code — kept out of the ASCII/pointer peek path.
+                    uint? target = TryGetBranchJumpTarget(word, address, view != null && readsKnown ? view : null);
+                    HashSet<uint>? codeTargets = target.HasValue ? new HashSet<uint> { target.Value } : null;
+                    analysis = AppendAddressHints(analysis, bus, lookupLabel, codeTargets);
+                    comments[address] = $"; {analysis}";
+                }
+
+                if (execute && cpu != null)
+                    Simulate(word, address, cpu, usage);
+            }
+            catch
+            {
+                // Skip instructions that fail to analyze
+            }
+        }
+
+        /// <summary>
+        /// Executes <paramref name="word"/> on the analysis state and updates which
+        /// registers are known. Instructions with unknown inputs aren't executed (a store
+        /// to a garbage address would poison later loads); their outputs become unknown.
+        /// </summary>
+        private static void Simulate(uint word, uint address, CpuState cpu, GprUsage usage)
+        {
+            bool readsKnown = (usage.Reads & ~cpu.GprKnown) == 0;
+            bool produced = false;
+            if (readsKnown)
+            {
+                var (instrObj, args) = MipsDisassembler.GetInstructionObject(word);
+                if (instrObj != null && args != null)
+                {
+                    cpu.PC = address;
+                    try
+                    {
+                        instrObj.ExecuteGeneric(cpu, args);
+                        produced = usage.DeterministicWrite || usage.IsLoad;
+                    }
+                    catch
+                    {
+                        // Syscalls, unreadable loads, … — the outputs just stay unknown.
+                    }
+                }
+            }
+
+            cpu.GprKnown = produced
+                ? cpu.GprKnown | usage.Writes
+                : cpu.GprKnown & ~usage.Writes;
+            cpu.GprKnown |= 1u;
+            cpu.RegsLo[0] = 0;
+            cpu.RegsHi[0] = 0;
         }
 
         /// <summary>
@@ -272,6 +364,14 @@ namespace CodeDesigner.Ps2.Common
                 var (instrObj, args) = MipsDisassembler.GetInstructionObject(instruction);
                 if (instrObj == null || args == null)
                     return string.Empty;
+
+                // Loads are described before they run, so they read their value
+                // through the bus; give the snapshot a read-only view of it.
+                if (cpu.Bus == null && bus != null)
+                {
+                    cpu = cpu.CreateAnalysisSnapshot();
+                    cpu.Bus = new AnalysisOverlayBus(bus);
+                }
 
                 string analysis = instrObj.AnalyzeGeneric(args, cpu, pc);
                 if (string.IsNullOrWhiteSpace(analysis))
@@ -312,57 +412,6 @@ namespace CodeDesigner.Ps2.Common
         // -----------------------------------------------------------------------
 
         /// <summary>
-        /// Attempts to detect LUI+ADDIU or LUI+ORI pointer load patterns.
-        /// When an ADDIU or ORI instruction uses a register that was recently loaded
-        /// with LUI, returns the combined 32-bit address.
-        /// </summary>
-        /// <param name="instruction">The 32-bit instruction word (ADDIU or ORI).</param>
-        /// <param name="cpu">CPU state with register values from prior LUI.</param>
-        /// <returns>The combined pointer address, or null if not a pointer load pattern.</returns>
-        private static uint? TryGetPointerLoadTarget(uint instruction, CpuState? cpu)
-        {
-            if (cpu == null) return null;
-
-            uint opcode = (instruction >> 26) & 0x3Fu;
-            
-            // ADDIU = opcode 0x09, ORI = opcode 0x0D
-            if (opcode != 0x09u && opcode != 0x0Du)
-                return null;
-
-            uint rs = (instruction >> 21) & 0x1Fu;  // source register
-            uint rt = (instruction >> 16) & 0x1Fu;  // target register
-            ushort imm = (ushort)(instruction & 0xFFFFu);
-
-            // For ADDIU: addr = (rs upper 16 bits) + sign_extend(imm)
-            // For ORI:   addr = (rs upper 16 bits) | imm
-            // Check if rs contains a value that looks like it came from LUI
-            // (upper 16 bits set, lower 16 bits zero or near-zero)
-            ulong rsValue = cpu.RegsLo[rs];
-            uint rsUpper = (uint)(rsValue >> 16) & 0xFFFFu;
-            uint rsLower = (uint)rsValue & 0xFFFFu;
-
-            // LUI sets upper 16 bits and zeros lower 16 bits
-            // We accept a small tolerance for the lower bits (≤ 0x100) to handle
-            // cases where there may have been a small offset added
-            if (rsUpper == 0 || rsLower > 0x100)
-                return null;
-
-            if (opcode == 0x09u) // ADDIU
-            {
-                // Sign-extend the immediate for ADDIU
-                int offset = (short)imm;
-                uint addr = (uint)((long)rsValue + offset);
-                return addr;
-            }
-            else // ORI = 0x0D
-            {
-                // OR the immediate (zero-extend)
-                uint addr = (uint)rsValue | imm;
-                return addr;
-            }
-        }
-
-        /// <summary>
         /// Attempts to compute the target address of a branch or jump instruction.
         /// Returns <c>null</c> when the instruction is not a branch/jump or the
         /// target cannot be determined without a CPU state.
@@ -378,10 +427,7 @@ namespace CodeDesigner.Ps2.Common
             {
                 case 0x02: // J
                 case 0x03: // JAL
-                {
-                    uint addr = instruction & 0x03FFFFFFu;
-                    return ((pc + 4) & 0xF0000000u) | (addr << 2);
-                }
+                    return CpuHelpers.JumpTarget(pc, instruction);
 
                 case 0x04: // BEQ
                 case 0x05: // BNE
@@ -415,7 +461,8 @@ namespace CodeDesigner.Ps2.Common
                     uint funct = instruction & 0x3Fu;
                     if ((funct == 0x08u || funct == 0x09u) && cpu != null) // JR / JALR
                     {
-                        uint rs = (instruction >> 21) & 0x1Fu;
+                        int rs = (int)((instruction >> 21) & 0x1Fu);
+                        if (!CpuHelpers.IsRegisterKnown(cpu, rs)) break;
                         return (uint)cpu.RegsLo[rs];
                     }
                     break;
@@ -697,6 +744,9 @@ namespace CodeDesigner.Ps2.Common
                 return true;
             // Scratchpad: 0x70000000–0x70003FFF
             if (addr >= 0x70000000u && addr < 0x70004000u)
+                return true;
+            // IOP RAM through the EE mirror: 0x1C000000–0x1C1FFFFF
+            if (addr >= 0x1C000000u && addr < 0x1C200000u)
                 return true;
             // BIOS ROM: 0x1FC00000–0x1FFFFFFF and mirrors
             if (addr >= 0x1FC00000u && addr < 0x20000000u)

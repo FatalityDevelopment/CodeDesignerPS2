@@ -46,7 +46,7 @@ namespace CodeDesigner.Ps2.TestProject
         {
             var cpu = MakeCpu();
             var comments = MipsAnalyzer.AnalyzeInstructions(
-                new[] { (encoded, 0x80000000u) }, 0x80000000u, true);
+                new[] { (encoded, 0x80000000u) }, 0x80000000u, true, seedCpu: cpu);
             return comments.GetValueOrDefault(0x80000000u, string.Empty);
         }
 

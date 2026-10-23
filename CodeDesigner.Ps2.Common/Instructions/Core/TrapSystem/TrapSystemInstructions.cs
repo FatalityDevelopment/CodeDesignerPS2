@@ -38,24 +38,19 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
         public override string Disasm(Args_R args, uint? pc = null)
         {
             // SYSCALL has an optional code field in bits 25-6
-            if (args.Rs != 0 || args.Rt != 0 || args.Rd != 0 || args.Shamt != 0)
-            {
-                uint code = ((uint)args.Rs << 6) | ((uint)args.Rt << 11) | ((uint)args.Rd << 16) | ((uint)args.Shamt << 21);
-                return $"{Name} 0x{code:X}";
-            }
-            return Name;
+            uint code = CpuHelpers.CodeField(args);
+            return code != 0 ? $"{Name} 0x{code:X}" : Name;
         }
 
         public override uint Asm(int[] args)
         {
             uint code = args.Length > 0 ? (uint)args[0] : 0;
-            return (uint)((code << 6) | (uint)(Funct ?? 0x0C));
+            return (uint)(((code & 0xFFFFF) << 6) | (uint)(Funct ?? 0x0C));
         }
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            // Extract the 20-bit code field from the instruction (bits 25:6)
-            uint code = ((uint)args.Rs << 14) | ((uint)args.Rt << 9) | ((uint)args.Rd << 4) | (uint)(args.Shamt >> 1);
+            uint code = CpuHelpers.CodeField(args);
             string codePart = code != 0 ? $" #{code}" : string.Empty;
 
             // Resolve via PCSX2's full BIOS table (128 entries, 0x00–0x7F).
@@ -64,7 +59,7 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
             string? name = code <= 0xFF ? CodeDesigner.Ps2.Common.Disassembler.EeSyscallTable.Resolve((int)code) : null;
             string namePart = name != null ? $" ({name})" : string.Empty;
 
-            if (cpu != null && code == 0)
+            if (cpu != null && code == 0 && CpuHelpers.IsRegisterKnown(cpu, 3))
             {
                 // When code is not embedded in the instruction, $v1 (reg 3) holds
                 // the syscall number. PS2 convention also uses negated numbers
@@ -103,18 +98,14 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
         public override string Disasm(Args_R args, uint? pc = null)
         {
             // BREAK has an optional code field in bits 25-6
-            if (args.Rs != 0 || args.Rt != 0 || args.Rd != 0 || args.Shamt != 0)
-            {
-                uint code = ((uint)args.Rs << 6) | ((uint)args.Rt << 11) | ((uint)args.Rd << 16) | ((uint)args.Shamt << 21);
-                return $"{Name} 0x{code:X}";
-            }
-            return Name;
+            uint code = CpuHelpers.CodeField(args);
+            return code != 0 ? $"{Name} 0x{code:X}" : Name;
         }
 
         public override uint Asm(int[] args)
         {
             uint code = args.Length > 0 ? (uint)args[0] : 0;
-            return (uint)((code << 6) | (uint)(Funct ?? 0x0D));
+            return (uint)(((code & 0xFFFFF) << 6) | (uint)(Funct ?? 0x0D));
         }
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)

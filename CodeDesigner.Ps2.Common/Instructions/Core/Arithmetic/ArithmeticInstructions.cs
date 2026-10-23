@@ -450,16 +450,19 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
             int imm = CpuHelpers.SignExtend16(args.Imm);
             uint result = (uint)(rsVal + imm);
 
+            bool known = CpuHelpers.IsRegisterKnown(cpu, args.Rs);
+
             // Detect stack frame allocation/deallocation: ADDIU $sp, $sp, ±N
             if (args.Rt == 29 && args.Rs == 29)
             {
+                string value = known ? $" → $sp = 0x{result:X8}" : string.Empty;
                 if (imm < 0)
-                    return $"allocate {-imm}-byte stack frame → $sp = 0x{result:X8}";
+                    return $"allocate {-imm}-byte stack frame{value}";
                 if (imm > 0)
-                    return $"free {imm}-byte stack frame → $sp = 0x{result:X8}";
+                    return $"free {imm}-byte stack frame{value}";
             }
 
-            return $"{CpuHelpers.RegName(args.Rt)} = 0x{result:X8}";
+            return known ? $"{CpuHelpers.RegName(args.Rt)} = 0x{result:X8}" : string.Empty;
         }
     }
 

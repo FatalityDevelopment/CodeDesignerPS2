@@ -64,21 +64,23 @@ namespace CodeDesigner.Ps2.Common.CPU
             string sign = (short)disp < 0 ? "-" : "+";
             string absHex = $"0x{(uint)System.Math.Abs((short)disp):X4}";
 
-            if (cpu != null)
+            if (TryGetEffectiveAddress(cpu, baseReg, offset, out uint addr))
             {
-                ulong baseLo = cpu.RegsLo[baseReg];
-                ulong baseHi = cpu.RegsHi[baseReg];
-                // $zero is always known. Any other register that is still 0 (lo+hi)
-                // in the cloned analysis state is treated as unresolved.
-                bool baseKnown = baseReg == 0 || baseLo != 0 || baseHi != 0;
-                if (baseKnown)
-                {
-                    uint addr = (uint)((int)baseLo + offset);
-                    return $"0x{addr:X8}";
-                }
+                return $"0x{addr:X8}";
             }
 
             return $"{RegName(baseReg)} {sign} {absHex}";
+        }
+
+        /// <summary>
+        /// Resolves <c>base + offset</c> when the base register's value is known.
+        /// </summary>
+        public static bool TryGetEffectiveAddress(CpuState? cpu, int baseReg, int offset, out uint addr)
+        {
+            addr = 0;
+            if (cpu == null || !IsRegisterKnown(cpu, baseReg)) return false;
+            addr = (uint)((int)cpu.RegsLo[baseReg] + offset);
+            return true;
         }
 
         /// <summary>
@@ -103,28 +105,57 @@ namespace CodeDesigner.Ps2.Common.CPU
         }
 
         /// <summary>
-        /// Format a GPR load analysis comment after the instruction has executed.
+        /// Format a GPR load analysis comment from the state <em>before</em> the
+        /// load executes. The loaded value is read through <see cref="CpuState.Bus"/>
+        /// when the address is known and a bus is attached; otherwise only the
+        /// address is shown. <paramref name="size"/> is the access width in bytes
+        /// (1, 2, 4 or 8); pass 0 for partial loads (lwl/lwr/ldl/ldr/lq) whose
+        /// result can't be shown as one value.
         /// </summary>
-        public static string FormatGprLoadAnalysis(CpuState? cpu, int targetReg, int baseReg, int offset)
+        public static string FormatGprLoadAnalysis(CpuState? cpu, int targetReg, int baseReg, int offset,
+            int size = 4, bool signed = true)
         {
             if (cpu == null) return string.Empty;
             string address = FormatMemoryReference(cpu, baseReg, offset);
-            return $"{RegName(targetReg)} ← [{address}] = {FormatRegisterValueHex(cpu.RegsLo[targetReg])}";
+            string text = $"{RegName(targetReg)} ← [{address}]";
+            if (size > 0 && cpu.Bus != null && TryGetEffectiveAddress(cpu, baseReg, offset, out uint addr))
+            {
+                try
+                {
+                    ulong value = size switch
+                    {
+                        1 => signed ? (ulong)(long)(sbyte)cpu.Bus.ReadByte(addr) : cpu.Bus.ReadByte(addr),
+                        2 => signed ? (ulong)(long)(short)cpu.Bus.ReadHalf(addr) : cpu.Bus.ReadHalf(addr),
+                        4 => signed ? (ulong)(long)(int)cpu.Bus.ReadWord(addr) : cpu.Bus.ReadWord(addr),
+                        _ => cpu.Bus.ReadDoubleWord(addr),
+                    };
+                    text += size == 8 ? $" = 0x{value:X16}" : $" = {FormatRegisterValueHex(value)}";
+                }
+                catch { /* unreadable address — show the reference only */ }
+            }
+            return text;
         }
 
         /// <summary>
         /// Format a GPR store analysis comment using the source register value.
+        /// The value is omitted when the source register is unknown.
         /// </summary>
         public static string FormatGprStoreAnalysis(CpuState? cpu, int sourceReg, int baseReg, int offset)
         {
             if (cpu == null) return string.Empty;
             string address = FormatMemoryReference(cpu, baseReg, offset);
-            return $"[{address}] ← {RegName(sourceReg)} = {FormatRegisterValueHex(cpu.RegsLo[sourceReg])}";
+            return IsRegisterKnown(cpu, sourceReg)
+                ? $"[{address}] ← {RegName(sourceReg)} = {FormatRegisterValueHex(cpu.RegsLo[sourceReg])}"
+                : $"[{address}] ← {RegName(sourceReg)}";
         }
 
-        private static bool IsRegisterKnown(CpuState cpu, int reg)
+        /// <summary>
+        /// True when the analysis state knows <paramref name="reg"/>'s value
+        /// (<see cref="CpuState.GprKnown"/>). <c>$zero</c> is always known.
+        /// </summary>
+        public static bool IsRegisterKnown(CpuState cpu, int reg)
         {
-            return reg == 0 || cpu.RegsLo[reg] != 0 || cpu.RegsHi[reg] != 0;
+            return reg == 0 || ((cpu.GprKnown >> reg) & 1u) != 0;
         }
 
         /// <summary>
@@ -142,6 +173,49 @@ namespace CodeDesigner.Ps2.Common.CPU
         public static string FormatRegisterValueHex(ulong value)
         {
             return $"0x{(uint)value:X8}";
+        }
+
+        /// <summary>
+        /// Target of a <c>j</c>/<c>jal</c> at <paramref name="pc"/>: the upper four bits
+        /// of <c>pc + 4</c> with the 26-bit index shifted in. IOP code viewed through
+        /// the EE mirror (0x1C000000–0x1C7FFFFF) really runs at 0x00000000, so its
+        /// targets are mapped back into the mirror instead of into EE hardware space.
+        /// </summary>
+        public static uint JumpTarget(uint pc, uint index26)
+        {
+            uint low = (index26 & 0x03FFFFFFu) << 2;
+            if (pc >= 0x1C000000u && pc < 0x1C800000u)
+                return 0x1C000000u | (low & 0x007FFFFFu);
+            return ((pc + 4) & 0xF0000000u) | low;
+        }
+
+        /// <summary>
+        /// The 20-bit code field (bits 25:6) of <c>syscall</c>/<c>break</c>,
+        /// reassembled from the R-type fields it overlaps.
+        /// </summary>
+        public static uint CodeField(CodeDesigner.Ps2.Common.Cpu.InstrArgs.Args_R args)
+        {
+            return ((uint)args.Rs << 15) | ((uint)args.Rt << 10) | ((uint)args.Rd << 5) | (uint)args.Shamt;
+        }
+
+        /// <summary>
+        /// Target of a PC-relative branch at <paramref name="pc"/>.
+        /// </summary>
+        public static uint BranchTarget(uint pc, int imm16)
+        {
+            return (uint)(pc + 4 + (SignExtend16(imm16) << 2));
+        }
+
+        /// <summary>
+        /// Formats raw IEEE-754 single bits as a float hint, e.g. <c>1.5f (0x3FC00000)</c>.
+        /// </summary>
+        public static string FormatFloat(uint bits)
+        {
+            float f = BitConverter.UInt32BitsToSingle(bits);
+            string text = float.IsFinite(f)
+                ? f.ToString("0.0######", System.Globalization.CultureInfo.InvariantCulture) + "f"
+                : f.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            return $"{text} (0x{bits:X8})";
         }
 
         /// <summary>

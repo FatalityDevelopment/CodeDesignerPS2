@@ -168,11 +168,10 @@ namespace CodeDesigner.Ps2.Common.Instructions.CoprocessorInstructions
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            if (cpu != null)
+            if (cpu != null && CpuHelpers.IsRegisterKnown(cpu, args.Rt))
             {
                 uint bits = (uint)(cpu.RegsLo[args.Rt] & 0xFFFFFFFF);
-                float value = BitConverter.UInt32BitsToSingle(bits);
-                return $"$f{args.Rd} ← {CpuHelpers.RegName(args.Rt)} = 0x{bits:X8} ({value})";
+                return $"$f{args.Rd} ← {CpuHelpers.RegName(args.Rt)} = {CpuHelpers.FormatFloat(bits)}";
             }
             return $"$f{args.Rd} ← {CpuHelpers.RegName(args.Rt)}";
         }
@@ -373,9 +372,18 @@ namespace CodeDesigner.Ps2.Common.Instructions.CoprocessorInstructions
             int offset = CpuHelpers.SignExtend16(args.Imm);
             if (cpu != null)
             {
+                // Analyzed before the load runs: read the value through the bus.
                 string address = CpuHelpers.FormatMemoryReference(cpu, args.Rs, offset);
-                uint bits = BitConverter.SingleToUInt32Bits(cpu.FPR[args.Rt]);
-                return $"$f{args.Rt} ← [{address}] = 0x{bits:X8}";
+                if (cpu.Bus != null && CpuHelpers.TryGetEffectiveAddress(cpu, args.Rs, offset, out uint addr))
+                {
+                    try
+                    {
+                        uint bits = cpu.Bus.ReadWord(addr);
+                        return $"$f{args.Rt} ← [{address}] = {CpuHelpers.FormatFloat(bits)}";
+                    }
+                    catch { /* unreadable — show the reference only */ }
+                }
+                return $"$f{args.Rt} ← [{address}]";
             }
             return $"$f{args.Rt} ← [{CpuHelpers.FormatMemoryOffset(offset)}]";
         }

@@ -828,6 +828,14 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 CodeDesigner.Ps2.Common.Interfaces.IPs2MemoryBus analysisBus =
                     new PageBytesMemoryBus(byteBuf, baseAddr, mirrorBus);
 
+                // Simulated loads can be many per page, so they only read the page
+                // and the local analysis mirror — never the live PINE connection.
+                CodeDesigner.Ps2.Common.Interfaces.IPs2MemoryBus loadBus =
+                    new PageBytesMemoryBus(byteBuf, baseAddr,
+                        _ctx.AnalysisClient != null
+                            ? new ByteEditorMemoryBusAdapter(new DebugClientByteEditor(_ctx.AnalysisClient))
+                            : null);
+
                 // Walk the byte buffer.  For every offset, check whether an
                 // override covers it; if so emit data rows, otherwise emit an
                 // instruction row for the current 4-byte word.
@@ -984,9 +992,10 @@ namespace CodeDesigner.Ps2.Bridge.Services
                     }
 
                     // No override at this address.  Treat as a 4-byte instruction
-                    // row — if we have fewer than 4 bytes left fall back to a
-                    // byte row to keep the output aligned with the source.
-                    if (byteIndex + 4 > byteBuf.Length)
+                    // row — if we have fewer than 4 bytes left, or a string/override
+                    // ended off a word boundary, emit byte rows until the next
+                    // boundary so every following instruction decodes aligned.
+                    if (byteIndex + 4 > byteBuf.Length || (rowAddr & 3u) != 0)
                     {
                         string asm   = FormatDataDirective(byteBuf, byteIndex, Database.Entities.DataFormatKind.Byte, out string? hexStr);
                         results.Add(new InstructionResult
@@ -1061,16 +1070,14 @@ namespace CodeDesigner.Ps2.Bridge.Services
                     byteIndex += 4;
                 }
 
-                // State-aware analysis: when the live client is paused at a
-                // breakpoint and the disassembled range overlaps the paused PC
-                // (±64 KB), seed the analyzer with the mirrored register
-                // snapshot from AnalysisStateService. This unlocks concrete
-                // [TAKEN]/[NOT TAKEN] hints, real branch targets and resolved
-                // pointer/string values in the comment column.
-                // Far-away cold disassembly keeps the old blank-state behaviour
-                // so it doesn't show misleading state-dependent hints for
-                // unreached code.
+                // State-aware analysis: when the live client is paused and the
+                // paused PC is on this page, seed the analyzer with the mirrored
+                // register snapshot from AnalysisStateService at that row. Rows
+                // above the PC stay on blank state (the snapshot describes the
+                // PC, not the code before it), and [TAKEN]/[NOT TAKEN] hints are
+                // only shown from the PC to the next control-flow change.
                 CodeDesigner.Ps2.Common.CPU.CpuState? seedCpu = null;
+                uint? seedPc = null;
                 bool includeStateHints = false;
                 if (_ctx.AnalysisState is not null)
                 {
@@ -1080,14 +1087,11 @@ namespace CodeDesigner.Ps2.Bridge.Services
                         var snap = _ctx.AnalysisState.TryAcquire();
                         if (snap is not null)
                         {
-                            const uint NearWindow = 0x10000u; // 64 KB either side of PC
-                            uint disasmStart = startAddress ?? 0u;
-                            uint disasmEnd   = (uint)(disasmStart + (uint)byteBuf.Length);
-                            uint pcLo = snap.PcAtMirror >= NearWindow ? snap.PcAtMirror - NearWindow : 0u;
-                            uint pcHi = snap.PcAtMirror + NearWindow;
-                            if (disasmStart < pcHi && disasmEnd > pcLo)
+                            uint pc = ToPagePhysical(snap.PcAtMirror);
+                            if (pc >= rangeStart && pc < rangeEnd)
                             {
                                 seedCpu = snap.Cpu;
+                                seedPc = pc;
                                 includeStateHints = true;
                             }
                         }
@@ -1105,14 +1109,40 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 // a blank register file. Only MIPS-instruction rows participate
                 // — data-format rows (.byte/.half/.word/...) are skipped so the
                 // analyzer does not try to "execute" embedded data.
+                // Lead-in: simulate the words just before this page (without
+                // emitting rows for them) so a `lui` on the previous page's last
+                // rows still resolves the `addiu`/`ori` at the top of this one.
+                var analyzedList = instructionList;
+                if (hintClient != null && baseAddr >= LeadInBytes && instructionList.Count > 0)
+                {
+                    try
+                    {
+                        byte[] leadIn = new DebugClientByteEditor(hintClient)
+                            .Read((int)(baseAddr - LeadInBytes), LeadInBytes);
+                        if (leadIn.Length == LeadInBytes)
+                        {
+                            analyzedList = new List<(uint instruction, uint address)>(instructionList.Count + LeadInBytes / 4);
+                            for (int off = 0; off < LeadInBytes; off += 4)
+                                analyzedList.Add((BitConverter.ToUInt32(leadIn, off), baseAddr - LeadInBytes + (uint)off));
+                            analyzedList.AddRange(instructionList);
+                        }
+                    }
+                    catch
+                    {
+                        // Unreadable lead-in (region start, read failure): analyze the page alone.
+                    }
+                }
+
                 var comments = MipsAnalyzer.AnalyzeInstructions(
-                    instructionList,
+                    analyzedList,
                     startAddress ?? 0,
                     executeInstructions: true,
                     bus: analysisBus,
                     lookupLabel: addr => _ctx.Labels.TryGetValue(addr, out var e) ? e.Label : null,
                     includeStateHints: includeStateHints,
-                    seedCpu: seedCpu);
+                    seedCpu: seedCpu,
+                    seedPc: seedPc,
+                    loadBus: loadBus);
 
                 // Apply comments and labels to results.  Look each row up by
                 // address rather than by index because the row stride is now
@@ -1130,8 +1160,16 @@ namespace CodeDesigner.Ps2.Bridge.Services
                     if (_ctx.Labels.TryGetValue(addr, out var labelEntry))
                     {
                         row.Label = labelEntry.Label;
-                        if (string.IsNullOrEmpty(row.Comment) && labelEntry.Comment != null)
-                            row.Comment = labelEntry.Comment;
+                        // A comment the user wrote comes first; the generated hint
+                        // follows it instead of hiding it.
+                        if (!string.IsNullOrWhiteSpace(labelEntry.Comment))
+                        {
+                            string userComment = labelEntry.Comment.Trim();
+                            string? hint = row.Comment?.TrimStart(';', ' ');
+                            row.Comment = string.IsNullOrEmpty(hint) || hint == userComment.TrimStart(';', ' ')
+                                ? userComment
+                                : $"{userComment} | {hint}";
+                        }
                     }
                 }
 
@@ -1426,6 +1464,18 @@ namespace CodeDesigner.Ps2.Bridge.Services
         private static string EscapeCommentString(string text) =>
             text.Replace("\\", "\\\\").Replace("\"", "\\\"");
 
+        /// <summary>Bytes before a page that the analyzer simulates (not shown) to carry register state in.</summary>
+        private const int LeadInBytes = 0x80;
+
+        /// <summary>
+        /// Maps a CPU address to the form live panels disassemble at: KSEG0/KSEG1
+        /// aliases (0x80000000–0xBFFFFFFF) drop to their physical address.
+        /// </summary>
+        private static uint ToPagePhysical(uint address)
+        {
+            return address >= 0x80000000u && address < 0xC0000000u ? address & 0x1FFFFFFFu : address;
+        }
+
         /// <summary>True when <paramref name="address"/> falls inside the EE RAM windows usable as a pointer target.</summary>
         private static bool LooksLikeRamPointer(uint address)
         {
@@ -1500,55 +1550,62 @@ namespace CodeDesigner.Ps2.Bridge.Services
         }
 
         /// <summary>
-        /// Walks backward from <paramref name="syscallIndex"/> through
-        /// <paramref name="results"/> looking for the nearest preceding
-        /// instruction that writes a known immediate to <c>$v1</c>. Returns the
-        /// loaded immediate (sign-extended for addi/addiu, zero-extended for
-        /// ori), or null when no such write is found within a short window.
+        /// Computes the value <c>$v1</c> holds at <paramref name="syscallIndex"/> by
+        /// walking forward over the few instruction rows before it. Handles
+        /// <c>li</c> (addiu/ori from $zero), <c>lui</c>, and <c>lui</c> followed by
+        /// <c>ori</c>/<c>addiu</c> (sign-extended add). Any other write to
+        /// <c>$v1</c>, or a jump in the window, makes the value unknown.
+        /// Data rows are skipped. Returns null when the value isn't known.
         /// </summary>
         private static int? FindV1ImmediateBefore(List<InstructionResult> results, int syscallIndex)
         {
-            const int LookbackWindow = 4; // li / addiu / ori is almost always the row above
-            int luiHi = 0;
-            bool sawLuiV1 = false;
-            for (int k = syscallIndex - 1; k >= 0 && k >= syscallIndex - LookbackWindow; k--)
+            const int Window = 6; // instruction rows; li/lui+ori sit right above the syscall
+
+            int start = syscallIndex;
+            for (int seen = 0; start > 0 && seen < Window; )
+            {
+                start--;
+                var r = results[start];
+                if (r.Success && r.ByteLength is null or 4) seen++;
+            }
+
+            bool known = false;
+            int v1 = 0;
+            for (int k = start; k < syscallIndex; k++)
             {
                 var r = results[k];
-                if (!r.Success) continue;
-                if (r.ByteLength is not null and not 4) continue;
-                if (!TryParseHex(r.Hex, out uint instr)) continue;
+                if (!r.Success || r.ByteLength is not null and not 4) continue;
+                if (!TryParseHex(r.Hex, out uint instr)) { known = false; continue; }
+
+                var usage = CodeDesigner.Ps2.Common.GprUsage.Of(instr);
+                if (usage.Flow == CodeDesigner.Ps2.Common.FlowKind.Jump) known = false;
+                if ((usage.Writes & (1u << RegV1)) == 0) continue;
 
                 uint op = instr >> 26;
-                int  rt = (int)((instr >> 16) & 0x1F);
-                short imm16 = unchecked((short)(instr & 0xFFFF));
-
-                if (rt != RegV1) continue;
-
-                // addi (8) / addiu (9): sign-extended 16-bit immediate
-                if (op == 0x08 || op == 0x09)
+                int  rs = (int)((instr >> 21) & 0x1F);
+                int  imm = unchecked((short)(instr & 0xFFFF));
+                switch (op)
                 {
-                    if (sawLuiV1) return (luiHi << 16) | (ushort)imm16; // lui+addi pair
-                    return (int)(short)imm16;
+                    case 0x08: case 0x09: case 0x19:   // addi / addiu / daddiu
+                        if (rs == 0) { v1 = imm; known = true; }
+                        else if (rs == RegV1 && known) v1 += imm;
+                        else known = false;
+                        break;
+                    case 0x0D:                         // ori
+                        if (rs == 0) { v1 = imm & 0xFFFF; known = true; }
+                        else if (rs == RegV1 && known) v1 |= imm & 0xFFFF;
+                        else known = false;
+                        break;
+                    case 0x0F:                         // lui
+                        v1 = (imm & 0xFFFF) << 16;
+                        known = true;
+                        break;
+                    default:
+                        known = false;
+                        break;
                 }
-                // ori (13): zero-extended immediate; combine with prior lui $v1 if present
-                if (op == 0x0D)
-                {
-                    ushort imm = (ushort)imm16;
-                    if (sawLuiV1) return (luiHi << 16) | imm;
-                    return imm;
-                }
-                // lui (15): remember the high half for a potential ori/addiu pair
-                if (op == 0x0F)
-                {
-                    luiHi = (ushort)imm16;
-                    sawLuiV1 = true;
-                    continue;
-                }
-                // Any other instruction writing $v1 (e.g. add $v1, ...) makes the
-                // immediate analysis unreliable — bail.
-                return null;
             }
-            return null;
+            return known ? v1 : null;
         }
 
         private static bool TryParseHex(string? hex, out uint value)

@@ -63,7 +63,7 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            return CpuHelpers.FormatGprLoadAnalysis(cpu, args.Rt, args.Rs, offset);
+            return CpuHelpers.FormatGprLoadAnalysis(cpu, args.Rt, args.Rs, offset, 1, true);
         }
     }
 
@@ -109,7 +109,7 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            return CpuHelpers.FormatGprLoadAnalysis(cpu, args.Rt, args.Rs, offset);
+            return CpuHelpers.FormatGprLoadAnalysis(cpu, args.Rt, args.Rs, offset, 1, false);
         }
     }
 
@@ -157,7 +157,7 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            return CpuHelpers.FormatGprLoadAnalysis(cpu, args.Rt, args.Rs, offset);
+            return CpuHelpers.FormatGprLoadAnalysis(cpu, args.Rt, args.Rs, offset, 2, true);
         }
     }
 
@@ -204,7 +204,7 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            return CpuHelpers.FormatGprLoadAnalysis(cpu, args.Rt, args.Rs, offset);
+            return CpuHelpers.FormatGprLoadAnalysis(cpu, args.Rt, args.Rs, offset, 2, false);
         }
     }
 
@@ -256,7 +256,7 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            return CpuHelpers.FormatGprLoadAnalysis(cpu, args.Rt, args.Rs, offset);
+            return CpuHelpers.FormatGprLoadAnalysis(cpu, args.Rt, args.Rs, offset, 4, true);
         }
     }
 
@@ -307,7 +307,7 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            return CpuHelpers.FormatGprLoadAnalysis(cpu, args.Rt, args.Rs, offset);
+            return CpuHelpers.FormatGprLoadAnalysis(cpu, args.Rt, args.Rs, offset, 4, false);
         }
     }
 
@@ -362,7 +362,7 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            return CpuHelpers.FormatGprLoadAnalysis(cpu, args.Rt, args.Rs, offset);
+            return CpuHelpers.FormatGprLoadAnalysis(cpu, args.Rt, args.Rs, offset, 8, false);
         }
     }
 
@@ -422,7 +422,7 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            return CpuHelpers.FormatGprLoadAnalysis(cpu, args.Rt, args.Rs, offset);
+            return CpuHelpers.FormatGprLoadAnalysis(cpu, args.Rt, args.Rs, offset, 0, false);
         }
     }
 
@@ -481,7 +481,7 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            return CpuHelpers.FormatGprLoadAnalysis(cpu, args.Rt, args.Rs, offset);
+            return CpuHelpers.FormatGprLoadAnalysis(cpu, args.Rt, args.Rs, offset, 0, false);
         }
     }
 
@@ -541,7 +541,7 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            return CpuHelpers.FormatGprLoadAnalysis(cpu, args.Rt, args.Rs, offset);
+            return CpuHelpers.FormatGprLoadAnalysis(cpu, args.Rt, args.Rs, offset, 0, false);
         }
     }
 
@@ -601,7 +601,7 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            return CpuHelpers.FormatGprLoadAnalysis(cpu, args.Rt, args.Rs, offset);
+            return CpuHelpers.FormatGprLoadAnalysis(cpu, args.Rt, args.Rs, offset, 0, false);
         }
     }
 
@@ -668,7 +668,7 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            return CpuHelpers.FormatGprLoadAnalysis(cpu, args.Rt, args.Rs, offset);
+            return CpuHelpers.FormatGprLoadAnalysis(cpu, args.Rt, args.Rs, offset, 0, false);
         }
     }
 }
