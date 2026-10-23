@@ -14,6 +14,7 @@ import { PacketViewerProvider, loadMediusPorts } from '../packetViewer/packetVie
 import { SnapshotManagerProvider, SnapshotDataDelegate } from '../snapshotManager/snapshotManagerProvider';
 import { DebugCommandsProvider } from '../debugCommands/debugCommandsProvider';
 import { DiffViewerProvider } from '../diffViewer/diffViewerProvider';
+import { CheatPorterProvider } from '../cheatPorter/cheatPorterProvider';
 import { MemoryRegion } from '../../shared/memoryRegions';
 import { JokerMakerProvider } from '../jokerMaker/jokerMakerProvider';
 import { CompatBrowserProvider } from '../compatBrowser/compatBrowserProvider';
@@ -303,6 +304,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         };
         this._snapshotManagerProvider = new SnapshotManagerProvider(_extensionUri, delegate);
         this._diffViewerProvider      = new DiffViewerProvider(_extensionUri, delegate, socketClient);
+        this._cheatPorterProvider     = new CheatPorterProvider(_extensionUri, socketClient);
     }
 
     private readonly _mcpProgressReportEditorProvider: McpProgressReportEditorProvider;
@@ -312,6 +314,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private readonly _debugCommandsProvider: DebugCommandsProvider;
     private readonly _snapshotManagerProvider: SnapshotManagerProvider;
     private readonly _diffViewerProvider: DiffViewerProvider;
+    private readonly _cheatPorterProvider: CheatPorterProvider;
 
     // Register the provider with VS Code
     public register(context: vscode.ExtensionContext) {
@@ -620,6 +623,10 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 // ── Diff Viewer ───────────────────────────────────────────
                 case 'openDiffViewer':
                     this._diffViewerProvider.open();
+                    break;
+                // ── Cheat Porter ──────────────────────────────────────────
+                case 'openCheatPorter':
+                    this._cheatPorterProvider.open();
                     break;
                 // ── Label Manager ─────────────────────────────────────────
                 case 'openLabelManager':

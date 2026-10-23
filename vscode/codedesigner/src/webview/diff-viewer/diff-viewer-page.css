@@ -1,16 +1,30 @@
 /* ══════════════════════════════════════════════════════════════════════════
-   Diff Viewer — matches label-manager / disasm-editor visual style
+   Memory Diff — GitHub-style unified/split diff of EE RAM images.
+   Chrome follows the disasm-panel conventions (rounded bordered cards,
+   VS Code theme vars); diff colours come from the diffEditor theme tokens.
    ══════════════════════════════════════════════════════════════════════════ */
 
-* { box-sizing: border-box; margin: 0; padding: 0; }
-
-body, html {
+html, body {
   height: 100%;
-  font-family: monospace;
-  font-size: 12px;
-  color: #d4d4d4;
-  background: #1e1e1e;
   overflow: hidden;
+  background: var(--vscode-editor-background, #1e1e1e);
+  color: var(--vscode-foreground, #d4d4d4);
+}
+
+:root {
+  --dv-border:   var(--vscode-panel-border, #313131);
+  --dv-muted:    var(--vscode-descriptionForeground, #8f8f8f);
+  --dv-mono:     var(--vscode-editor-font-family, Consolas, 'Courier New', monospace);
+  --dv-del-bg:   var(--vscode-diffEditor-removedLineBackground, rgba(248, 81, 73, 0.10));
+  --dv-del-hl:   var(--vscode-diffEditor-removedTextBackground, rgba(248, 81, 73, 0.40));
+  --dv-del-gut:  rgba(248, 81, 73, 0.18);
+  --dv-add-bg:   var(--vscode-diffEditor-insertedLineBackground, rgba(46, 160, 67, 0.15));
+  --dv-add-hl:   var(--vscode-diffEditor-insertedTextBackground, rgba(46, 160, 67, 0.40));
+  --dv-add-gut:  rgba(63, 185, 80, 0.28);
+  --dv-hunk-bg:  rgba(56, 139, 253, 0.10);
+  --dv-hunk-btn: rgba(56, 139, 253, 0.22);
+  --dv-del-fg:   #f85149;
+  --dv-add-fg:   #3fb950;
 }
 
 .dv-outer {
@@ -18,216 +32,419 @@ body, html {
   flex-direction: column;
   height: 100vh;
   overflow: hidden;
-  font-family: monospace;
-  font-size: 12px;
-  color: #d4d4d4;
-  background: #1e1e1e;
 }
 
-/* ── Tab bar ─────────────────────────────────────────────────────────────── */
-.dv-tab-bar {
-  display: flex;
-  background: #252526;
-  border-bottom: 1px solid #3e3e42;
-  flex-shrink: 0;
-}
-
-.dv-tab {
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
-  color: #ccc;
-  padding: 7px 16px;
-  font-size: 12px;
-  font-family: monospace;
-  cursor: pointer;
-  white-space: nowrap;
-  opacity: 0.75;
-}
-
-.dv-tab:hover { opacity: 1; background: #2a2d2e; }
-
-.dv-tab.dv-tab-active {
-  border-bottom-color: #3794ff;
-  color: #d4d4d4;
-  opacity: 1;
-}
-
-/* ── Panel ───────────────────────────────────────────────────────────────── */
-.dv-panel {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  overflow: hidden;
-}
-
-.dv-hidden { display: none !important; }
-
-/* ── Mode selector toolbar ───────────────────────────────────────────────── */
-.dv-mode-bar {
+/* ── Compare bar ─────────────────────────────────────────────────────────── */
+.dv-compare-bar {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 10px;
-  background: #252526;
-  border-bottom: 1px solid #3e3e42;
-  flex-shrink: 0;
   flex-wrap: wrap;
-}
-
-.dv-mode-label {
-  font-size: 11px;
-  color: #9cdcfe;
-  white-space: nowrap;
-  font-family: monospace;
-}
-
-.dv-mode-btn {
-  background: #3c3c3c;
-  border: 1px solid #555;
-  color: #d4d4d4;
-  padding: 2px 8px;
-  font-size: 11px;
-  font-family: monospace;
-  border-radius: 3px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.dv-mode-btn:hover:not(:disabled) { background: #4c4c4c; }
-.dv-mode-btn.dv-mode-active { background: #264f78; border-color: #3794ff; color: #fff; }
-
-/* ── Source controls (each row is a toolbar row) ─────────────────────────── */
-.dv-controls {
-  display: flex;
-  flex-direction: column;
-  background: #252526;
-  border-bottom: 1px solid #3e3e42;
+  gap: 8px;
+  margin: 10px 12px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--dv-border);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
   flex-shrink: 0;
 }
 
-.dv-source-row,
-.dv-action-row {
+.dv-side {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 10px;
-  border-bottom: 1px solid #2e2e2e;
+  flex: 1 1 260px;
+  min-width: 0;
 }
 
-.dv-source-row:last-of-type { border-bottom: none; }
-.dv-action-row { border-bottom: none; }
-
-.dv-label {
-  font-size: 11px;
-  color: #9cdcfe;
-  font-family: monospace;
-  white-space: nowrap;
-  min-width: 80px;
+.dv-side-tag {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
   flex-shrink: 0;
 }
+.dv-side-a { background: var(--dv-del-gut); color: var(--dv-del-fg); }
+.dv-side-b { background: var(--dv-add-gut); color: var(--dv-add-fg); }
 
-/* Matches #lm-set-select exactly */
-.dv-snap-select {
-  background: #3c3c3c;
-  color: #d4d4d4;
-  border: 1px solid #555;
-  border-radius: 3px;
+.dv-select,
+.dv-input {
+  background: var(--vscode-input-background, #3c3c3c);
+  color: var(--vscode-input-foreground, #d4d4d4);
+  border: 1px solid var(--vscode-input-border, #3c3c3c);
+  border-radius: 4px;
   padding: 3px 6px;
   font-size: 12px;
-  font-family: monospace;
-  flex: 1;
-  max-width: 360px;
-  min-width: 120px;
-}
-
-.dv-goto-input {
-  background: #3c3c3c;
-  color: #d4d4d4;
-  border: 1px solid #555;
-  border-radius: 3px;
-  padding: 3px 6px;
-  font-family: monospace;
-  font-size: 12px;
-  width: 130px;
+  font-family: inherit;
   outline: none;
+  min-width: 0;
 }
-.dv-goto-input:focus { border-color: #007acc; }
+.dv-select:focus,
+.dv-input:focus { border-color: var(--vscode-focusBorder, #0078d4); }
+.dv-side .dv-select { flex: 1; }
 
-.dv-toggle {
-  display: flex;
-  align-items: center;
-  gap: 4px;
+.dv-range { display: flex; align-items: center; gap: 4px; }
+.dv-field-label {
   font-size: 11px;
-  font-family: monospace;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dv-muted);
+  margin-right: 2px;
+}
+.dv-addr-input { width: 84px; font-family: var(--dv-mono); }
+
+.dv-icon-btn {
+  display: inline-grid;
+  place-items: center;
+  min-width: 26px;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--dv-border);
+  border-radius: 4px;
+  background: var(--vscode-button-secondaryBackground, #2f2f30);
+  color: var(--vscode-button-secondaryForeground, #d4d4d4);
   cursor: pointer;
-  color: #d4d4d4;
-  user-select: none;
+  font-size: 13px;
 }
+.dv-icon-btn:hover { background: var(--vscode-button-secondaryHoverBackground, #3a3a3b); }
 
-/* ── Status bar ─────────────────────────────────────────────────────────── */
-.dv-status {
-  padding: 3px 10px;
-  font-size: 11px;
-  font-family: monospace;
-  background: #252526;
-  border-bottom: 1px solid #3e3e42;
-  flex-shrink: 0;
-  color: #73c991;
+.dv-primary-btn {
+  height: 26px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: var(--vscode-button-background, #0e639c);
+  color: var(--vscode-button-foreground, #fff);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
 }
-.dv-status.dv-status-error { color: #f48771; }
+.dv-primary-btn:hover:not(:disabled) { background: var(--vscode-button-hoverBackground, #1177bb); }
+.dv-primary-btn:disabled { opacity: 0.5; cursor: default; }
 
-/* ── Scanning / diff progress bar ────────────────────────────────────────── */
-.dv-scanning-bar {
+/* ── Progress / status ───────────────────────────────────────────────────── */
+.dv-progress {
   position: relative;
+  margin: 8px 12px 0;
   height: 22px;
-  background: #1e1e1e;
-  border-bottom: 1px solid #3e3e42;
+  border: 1px solid var(--dv-border);
+  border-radius: 6px;
   overflow: hidden;
   flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  color: var(--dv-muted);
 }
-.dv-scanning-bar-inner {
+.dv-progress span { position: relative; }
+.dv-progress-inner {
   position: absolute;
   top: 0; left: 0;
   height: 100%;
   width: 30%;
-  background: linear-gradient(90deg, transparent, #264f78, #3794ff, #264f78, transparent);
-  animation: dv-scan-slide 1.5s ease-in-out infinite;
+  background: linear-gradient(90deg, transparent, rgba(56, 139, 253, 0.35), transparent);
+  animation: dv-slide 1.4s ease-in-out infinite;
 }
-@keyframes dv-scan-slide {
-  0%   { left: -30%; }
-  100% { left: 100%; }
+@keyframes dv-slide { 0% { left: -30%; } 100% { left: 100%; } }
+
+.dv-status {
+  margin: 8px 12px 0;
+  padding: 5px 10px;
+  border: 1px solid var(--dv-border);
+  border-radius: 6px;
+  font-size: 12px;
+  color: #73c991;
+  flex-shrink: 0;
 }
-.dv-scanning-text {
-  position: absolute;
-  inset: 0;
+.dv-status.dv-status-error { color: #f48771; border-color: rgba(244, 135, 113, 0.4); }
+
+/* ── Results toolbar ─────────────────────────────────────────────────────── */
+.dv-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 12px 8px;
+  flex-shrink: 0;
+}
+.dv-summary { font-size: 12px; color: var(--dv-muted); }
+.dv-summary b { color: var(--vscode-foreground, #d4d4d4); }
+.dv-warn { color: #cca700; margin-left: 4px; }
+.dv-toolbar-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.dv-jump-input { width: 150px; font-family: var(--dv-mono); }
+.dv-ctx-select { width: auto; }
+
+.dv-seg {
+  display: inline-flex;
+  border: 1px solid var(--dv-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.dv-seg button {
+  border: none;
+  border-right: 1px solid var(--dv-border);
+  background: transparent;
+  color: var(--dv-muted);
+  padding: 3px 10px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.dv-seg button:last-child { border-right: none; }
+.dv-seg button:hover { background: rgba(255, 255, 255, 0.05); color: var(--vscode-foreground, #d4d4d4); }
+.dv-seg button.dv-seg-on {
+  background: var(--vscode-button-secondaryBackground, #2f2f30);
+  color: var(--vscode-foreground, #d4d4d4);
+  font-weight: 600;
+}
+
+/* ── Body: navigator + diff ──────────────────────────────────────────────── */
+.dv-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  gap: 12px;
+  padding: 0 12px 12px;
+}
+
+.dv-nav {
+  width: 190px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  border: 1px solid var(--dv-border);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+}
+.dv-nav-head {
+  padding: 6px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dv-muted);
+}
+.dv-nav-empty { padding: 6px 8px; font-size: 12px; color: var(--dv-muted); }
+.dv-nav-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--vscode-foreground, #d4d4d4);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+.dv-nav-item:hover { background: rgba(255, 255, 255, 0.06); }
+.dv-nav-addr { font-family: var(--dv-mono); color: #9cdcfe; }
+.dv-nav-count { font-size: 11px; color: var(--dv-muted); }
+.dv-nav-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: auto;
+  padding: 6px 4px 2px;
+  font-size: 11px;
+  color: var(--dv-muted);
+}
+
+.dv-main { flex: 1; min-width: 0; overflow: auto; }
+
+/* ── File box ────────────────────────────────────────────────────────────── */
+.dv-file {
+  border: 1px solid var(--dv-border);
+  border-radius: 6px;
+  overflow: hidden;
+  /* Fill the pane, but grow to the table's minimum width (then .dv-main scrolls sideways). */
+  width: fit-content;
+  min-width: 100%;
+}
+.dv-file-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--dv-border);
+  background: var(--vscode-sideBar-background, #252526);
+  font-size: 12px;
+}
+.dv-file-name { font-weight: 600; font-family: var(--dv-mono); }
+.dv-file-range { font-family: var(--dv-mono); }
+.dv-stat-del { color: var(--dv-del-fg); font-weight: 600; }
+.dv-stat-add { color: var(--dv-add-fg); font-weight: 600; }
+.dv-diffstat { display: inline-flex; gap: 1px; }
+.dv-ds { display: inline-block; width: 8px; height: 8px; border-radius: 1px; }
+.dv-ds-del     { background: var(--dv-del-fg); }
+.dv-ds-add     { background: var(--dv-add-fg); }
+.dv-ds-neutral { background: rgba(255, 255, 255, 0.15); }
+.dv-file-sides { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; color: var(--vscode-foreground, #d4d4d4); }
+
+.dv-note { padding: 5px 10px; font-size: 11px; color: #cca700; border-bottom: 1px solid var(--dv-border); }
+.dv-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 24px;
+  justify-content: center;
+  color: var(--dv-muted);
+}
+
+/* ── Diff table ──────────────────────────────────────────────────────────── */
+.dv-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-family: var(--dv-mono);
+  font-size: var(--vscode-editor-font-size, 12px);
+  line-height: 20px;
+}
+.dv-table + .dv-table { border-top: 1px solid var(--dv-border); }
+
+.dv-c-addr  { width: 10ch; }
+.dv-c-sign  { width: 2.5ch; }
+.dv-view-bytes .dv-c-hex { width: 51ch; }
+.dv-view-bytes .dv-c-extra { width: 18ch; }
+.dv-view-words .dv-c-hex { width: 38ch; }
+.dv-view-words .dv-c-extra { width: 1ch; }
+.dv-view-instr .dv-c-hex { width: 10ch; }
+.dv-view-instr .dv-c-extra { width: 36ch; }
+/* Unified: the last column soaks up the remaining width. */
+.dv-table:not(.dv-split) col:last-child { width: auto; }
+/* Explicit minimums (sum of the fixed columns + cell padding) so the box never
+   has to size itself from a percentage-width table. */
+.dv-table.dv-view-bytes { min-width: calc(82ch + 48px); }
+.dv-table.dv-view-words { min-width: calc(52ch + 48px); }
+.dv-table.dv-view-instr { min-width: calc(59ch + 48px); }
+.dv-table.dv-split.dv-view-bytes { min-width: calc(163ch + 96px); }
+.dv-table.dv-split.dv-view-words { min-width: calc(103ch + 96px); }
+.dv-table.dv-split.dv-view-instr { min-width: calc(117ch + 96px); }
+
+.dv-table td { padding: 0 6px; white-space: pre; overflow: hidden; text-overflow: ellipsis; vertical-align: top; }
+
+.dv-num {
+  text-align: right;
+  color: var(--dv-muted);
+  user-select: none;
+  opacity: 0.85;
+}
+.dv-sign { text-align: center; user-select: none; padding: 0 !important; }
+.dv-tok { margin-right: 1ch; border-radius: 2px; }
+.dv-tok:last-child { margin-right: 0; }
+.dv-tok.dv-gap { margin-right: 2ch; }
+.dv-view-instr .dv-tok { margin-right: 0; }
+.dv-asm { color: #9cdcfe; }
+.dv-extra { color: var(--dv-muted); }
+.dv-split-mid { border-right: 1px solid var(--dv-border); }
+
+/* Line colouring — unified rows carry the kind on <tr>, split rows per cell. */
+tr.dv-del td,
+td.dv-del { background: var(--dv-del-bg); }
+tr.dv-add td,
+td.dv-add { background: var(--dv-add-bg); }
+tr.dv-del td.dv-num, tr.dv-del td.dv-sign, td.dv-num.dv-del, td.dv-sign.dv-del { background: var(--dv-del-gut); }
+tr.dv-add td.dv-num, tr.dv-add td.dv-sign, td.dv-num.dv-add, td.dv-sign.dv-add { background: var(--dv-add-gut); }
+tr.dv-del .dv-sign, .dv-sign.dv-del { color: var(--dv-del-fg); }
+tr.dv-add .dv-sign, .dv-sign.dv-add { color: var(--dv-add-fg); }
+
+tr.dv-del .dv-hl, .dv-del .dv-hl { background: var(--dv-del-hl); color: var(--vscode-foreground, #fff); }
+tr.dv-add .dv-hl, .dv-add .dv-hl { background: var(--dv-add-hl); color: var(--vscode-foreground, #fff); }
+.dv-del .dv-extra .dv-hl, tr.dv-del .dv-extra .dv-hl,
+.dv-add .dv-extra .dv-hl, tr.dv-add .dv-extra .dv-hl { color: var(--vscode-foreground, #fff); }
+
+tr.dv-ctx td { color: var(--vscode-foreground, #d4d4d4); }
+tr.dv-ctx td.dv-num, tr.dv-ctx td.dv-extra { color: var(--dv-muted); }
+tr.dv-line:hover td.dv-num { color: var(--vscode-foreground, #d4d4d4); }
+
+/* ── Hunk header + expanders ─────────────────────────────────────────────── */
+.dv-hunk-row td { background: var(--dv-hunk-bg); color: var(--dv-muted); }
+.dv-expand-cell { padding: 0 !important; text-align: center; white-space: nowrap; }
+.dv-expand-btn {
+  width: 50%;
+  min-width: 22px;
+  height: 22px;
+  border: none;
+  background: var(--dv-hunk-btn);
+  color: var(--dv-muted);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  vertical-align: top;
+}
+.dv-expand-btn:only-child { width: 100%; }
+.dv-expand-btn:hover { background: var(--vscode-button-background, #0e639c); color: var(--vscode-button-foreground, #fff); }
+.dv-hunk-text { font-size: 12px; }
+.dv-hunk-inner { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.dv-hunk-title { color: #9cdcfe; }
+.dv-hunk-gap { font-style: italic; }
+.dv-hunk-actions {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: auto;
+  position: sticky;
+  right: 0;
+  font-family: var(--vscode-font-family, sans-serif);
+}
+.dv-hunk-actions .lm-row-btn { display: inline-flex; align-items: center; gap: 4px; }
+.dv-hunk-tail td { border-top: 1px solid var(--dv-border); }
+
+.dv-more-row td {
+  padding: 4px 10px;
+  text-align: center;
+  font-family: var(--vscode-font-family, sans-serif);
+  font-size: 12px;
+  color: var(--dv-muted);
+  background: rgba(255, 255, 255, 0.02);
+}
+.dv-link-btn {
+  border: none;
+  background: none;
+  color: var(--vscode-textLink-foreground, #3794ff);
+  cursor: pointer;
+  font: inherit;
+  margin-right: 6px;
+}
+.dv-link-btn:hover { text-decoration: underline; }
+
+/* ── Pager + placeholder ─────────────────────────────────────────────────── */
+.dv-pager {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
-  font-family: monospace;
-  color: #9cdcfe;
-  text-shadow: 0 0 4px #000;
+  gap: 8px;
+  padding: 12px 0 4px;
+  font-size: 12px;
+  color: var(--dv-muted);
 }
 
-/* ── Diff row colouring ──────────────────────────────────────────────────── */
-.dv-changed-row .dv-changed { color: #cca700; }
-.dv-col-addr { white-space: nowrap; }
-.dv-col-val-a,
-.dv-col-val-b { font-size: 11px; }
-
-/* ── Live memory badge ───────────────────────────────────────────────────── */
-.dv-live-badge {
-  font-size: 11px;
-  font-family: monospace;
-  color: #73c991;
-  padding: 2px 8px;
-  background: #0a2a10;
-  border: 1px solid #0a4020;
-  border-radius: 3px;
-  white-space: nowrap;
+.dv-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex: 1;
+  margin: 12px;
+  border: 1px dashed var(--dv-border);
+  border-radius: 6px;
+  color: var(--dv-muted);
+  font-size: 12px;
+  text-align: center;
+  padding: 24px;
 }
-.dv-live-status { font-size: 11px; font-family: monospace; color: #f48771; }
-.dv-live-status.dv-live-ok { color: #73c991; }
-
-/* ── Porter tab — no extra padding, fills full height ───────────────────── */
-.dv-porter-panel { padding: 0; }
+.dv-placeholder-title { color: var(--vscode-foreground, #d4d4d4); font-size: 14px; font-weight: 600; }

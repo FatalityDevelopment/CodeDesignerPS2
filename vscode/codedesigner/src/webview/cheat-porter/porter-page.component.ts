@@ -61,8 +61,10 @@ type ViewRow = GroupHeader | CodeRow;
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
-  /* Component-specific styles only. Table/pagination/button primitives come from
-     PaginatedTableComponent inline styles and shared.css (loaded by diff-viewer-page). */
+  /* Component-specific styles. Button primitives come from shared.css and the
+     scanning bar from disasm-editor.css (both loaded by cheat-porter-page). The
+     filter/table rules mirror PaginatedTableComponent, whose stylesheet is only
+     injected when a paginated table is on the page. */
   styles: [`
 app-porter-page {
   display: flex;
@@ -70,6 +72,40 @@ app-porter-page {
   height: 100%;
   overflow: hidden;
 }
+
+/* ── Filter row + table (mirrors PaginatedTableComponent) ────────────────── */
+app-porter-page .lm-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-bottom: 1px solid #3e3e42;
+  flex-shrink: 0;
+}
+app-porter-page .lm-filter {
+  flex: 1;
+  background: #3c3c3c;
+  color: #d4d4d4;
+  border: 1px solid #555;
+  border-radius: 3px;
+  padding: 3px 8px;
+  font-size: 12px;
+  font-family: inherit;
+}
+app-porter-page .lm-table-wrap { overflow-y: auto; flex: 1; min-height: 80px; }
+app-porter-page .lm-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+app-porter-page .lm-table th {
+  position: sticky;
+  top: 0;
+  background: #252526;
+  color: #999;
+  font-weight: 500;
+  text-align: left;
+  padding: 5px 8px;
+  border-bottom: 1px solid #3e3e42;
+}
+app-porter-page .lm-table td { padding: 4px 8px; border-bottom: 1px solid #2a2a2a; vertical-align: middle; }
+app-porter-page .lm-table tr:hover td { background: #2a2d2e; }
 
 /* ── Toolbar ─────────────────────────────────────────────────────────────── */
 .pp-toolbar {
