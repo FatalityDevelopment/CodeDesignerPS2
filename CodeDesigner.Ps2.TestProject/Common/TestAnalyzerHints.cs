@@ -107,6 +107,24 @@ namespace CodeDesigner.Ps2.TestProject
         }
 
         [TestMethod]
+        public void HintLevel_AddressesKeepsPlacesAndDropsPlainValues()
+        {
+            var rows = Rows(Addiu(T0, Zero, 5), Lui(A0, 0x30), Addiu(A0, A0, 0x1234), Jal(0x00200000), Nop);
+            var c = MipsAnalyzer.AnalyzeInstructions(rows, hintLevel: HintLevel.Addresses);
+            Assert.AreEqual(string.Empty, At(c, 0), "t0 = 5 is a plain value");
+            StringAssert.Contains(At(c, 2), "0x00301234");
+            StringAssert.Contains(At(c, 3), "0x00200000");
+        }
+
+        [TestMethod]
+        public void HintLevel_OffShowsNothingButStillSimulates()
+        {
+            var rows = Rows(Lui(A0, 0x30), Addiu(A0, A0, 0x1234));
+            var c = MipsAnalyzer.AnalyzeInstructions(rows, hintLevel: HintLevel.Off);
+            Assert.AreEqual(0, c.Count);
+        }
+
+        [TestMethod]
         public void Call_ForgetsCallerSavedRegisters()
         {
             var c = MipsAnalyzer.AnalyzeInstructions(

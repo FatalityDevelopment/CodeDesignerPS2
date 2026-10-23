@@ -1200,6 +1200,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
                     }
                 }
 
+                HintLevel hintLevel = CurrentHintLevel();
                 var comments = MipsAnalyzer.AnalyzeInstructions(
                     analyzedList,
                     startAddress ?? 0,
@@ -1210,7 +1211,8 @@ namespace CodeDesigner.Ps2.Bridge.Services
                     seedCpu: seedCpu,
                     seedPc: seedPc,
                     loadBus: loadBus,
-                    functionStarts: functionStarts);
+                    functionStarts: functionStarts,
+                    hintLevel: hintLevel);
 
                 // Apply comments and labels to results.  Look each row up by
                 // address rather than by index because the row stride is now
@@ -1255,7 +1257,8 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 // from PCSX2's EE BIOS table without needing the live register
                 // file. This gives game code the same "syscall (FlushCache)"
                 // annotation that paused-PC analysis already produces.
-                AnnotateSyscallsFromPriorV1Load(results);
+                if (hintLevel != HintLevel.Off)
+                    AnnotateSyscallsFromPriorV1Load(results);
 
                 var response = new CommandResponse
                 {
@@ -1539,6 +1542,40 @@ namespace CodeDesigner.Ps2.Bridge.Services
 
         private static string EscapeCommentString(string text) =>
             text.Replace("\\", "\\\\").Replace("\"", "\\\"");
+
+        /// <summary>Settings key for the comment-column hint level: "full", "addresses" or "off".</summary>
+        internal const string HintLevelSetting = "disasm.hintLevel";
+
+        private HintLevel _hintLevel = HintLevel.Full;
+        private static DateTime s_hintLevelReadUtc = DateTime.MinValue;
+
+        /// <summary>Forces the next disassembly to re-read the hint level (after SETSETTING changes it).</summary>
+        internal static void InvalidateHintLevelCache() => s_hintLevelReadUtc = DateTime.MinValue;
+
+        /// <summary>
+        /// Current hint level from the settings database, re-read at most every two
+        /// seconds (disassembly runs every second while the game runs).
+        /// </summary>
+        private HintLevel CurrentHintLevel()
+        {
+            if ((DateTime.UtcNow - s_hintLevelReadUtc) < TimeSpan.FromSeconds(2)) return _hintLevel;
+            s_hintLevelReadUtc = DateTime.UtcNow;
+            try
+            {
+                string? value = _ctx.SettingsRepo.GetAsync(HintLevelSetting).GetAwaiter().GetResult();
+                _hintLevel = value?.Trim().ToLowerInvariant() switch
+                {
+                    "addresses" => HintLevel.Addresses,
+                    "off"       => HintLevel.Off,
+                    _           => HintLevel.Full,
+                };
+            }
+            catch
+            {
+                // Settings unavailable (no database): keep the last level.
+            }
+            return _hintLevel;
+        }
 
         /// <summary>A label for <paramref name="address"/> (as stored or as its KSEG0 alias), else the hex address.</summary>
         private string LabelOrAddress(uint address)

@@ -78,6 +78,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   private static readonly PAGE_SIZE = 1000;
   private static readonly BUFFER_PAGES = 2;
   private static readonly LIVE_READ_BACKOFF_MS = 5000;
+  /** Bridge settings key for the comment-column hint level (see AssemblerService.HintLevelSetting). */
+  private static readonly HINT_LEVEL_SETTING = 'disasm.hintLevel';
   /** Placeholder game ID used when no disc image is selected; the backend resolves
    *  this to null and returns only the Built-in label set for all read operations. */
   private static readonly NO_GAME_SELECTED = 'no-game-selected';
@@ -333,7 +335,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
           if (!/building/i.test(status)) { break; }
         }
         getOutputChannel().appendLine(`[XREF] Cross-reference index ready (${name}).`);
-        for (const p of this._livePanels) { p.webview.postMessage({ type: 'xrefIndexReady' }); }
+        for (const p of this._livePanels) { p.webview.postMessage({ type: 'reloadPage' }); }
       } catch (err: any) {
         this._xrefRegionsRequested.delete(name);
         getOutputChannel().appendLine(`[XREF] Index build failed (${name}): ${err?.message ?? err}`);
@@ -1568,6 +1570,9 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 // the current setting even when the panel was just opened.
                 panel.webview.postMessage({ type: 'followAiState', enabled: this._followAiEnabled });
                 this._ensureXrefIndex(info.memoryRegion);
+                this.socketClient?.getSetting(DisasmEditorProvider.HINT_LEVEL_SETTING)
+                    .then(level => { if (level) { panel.webview.postMessage({ type: 'hintLevel', level }); } })
+                    .catch(() => { /* no setting yet: the webview defaults to full */ });
                 // Deliver a goto that arrived while this panel was still opening.
                 info.ready = true;
                 if (info.pendingGoto !== undefined) {
@@ -2020,6 +2025,19 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                     message.kinds as string[] | undefined);
             } else if (message.type === 'rebuildXrefIndex') {
                 this.rebuildXrefIndexes();
+            } else if (message.type === 'setHintLevel') {
+                const level = String(message.level ?? 'full');
+                try {
+                    await this.socketClient?.setSetting(DisasmEditorProvider.HINT_LEVEL_SETTING, level);
+                } catch (err: any) {
+                    getOutputChannel().appendLine(`[DISASM] Could not save hint level: ${err?.message ?? err}`);
+                    return;
+                }
+                // Every panel shows the same level; redraw their visible pages with it.
+                for (const p of this._livePanels) {
+                    p.webview.postMessage({ type: 'hintLevel', level });
+                    p.webview.postMessage({ type: 'reloadPage' });
+                }
             } else if (message.type === 'convertCheat') {
                 try {
                     const result = await this.socketClient!.convertCheat(

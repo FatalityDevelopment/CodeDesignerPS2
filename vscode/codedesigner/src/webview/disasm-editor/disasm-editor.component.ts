@@ -511,6 +511,15 @@ export class DisasmEditorComponent implements AfterViewInit {
   // Edit Overlay Event Handlers (Phase 10)
   // ═══════════════════════════════════════════════════════════════════════════
 
+  /** Comment-column hint level, shared by every memory panel (stored by the bridge). */
+  protected readonly hintLevel = signal<'full' | 'addresses' | 'off'>('full');
+
+  protected onHintLevelChange(event: Event): void {
+    const level = (event.target as HTMLSelectElement).value as 'full' | 'addresses' | 'off';
+    this.hintLevel.set(level);
+    this.vscode.postMessage({ type: 'setHintLevel', level });
+  }
+
   /** Label and user comment the edit overlay opened with, to save only real changes. */
   private editOverlayOriginal: { label: string; comment: string } | null = null;
 
@@ -1769,6 +1778,13 @@ export class DisasmEditorComponent implements AfterViewInit {
       this.zone.run(() => {
         this.editOverlayRef()?.setHistory(history ?? []);
       });
+    }
+
+    if (data['type'] === 'hintLevel') {
+      const level = data['level'];
+      if (level === 'full' || level === 'addresses' || level === 'off') {
+        this.zone.run(() => this.hintLevel.set(level));
+      }
     }
 
     if (data['type'] === 'addressRefsResult') {

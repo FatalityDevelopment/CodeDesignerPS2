@@ -59,6 +59,8 @@ namespace CodeDesigner.Ps2.Bridge.Services
             try
             {
                 _ctx.SettingsRepo.SetAsync(key.Trim(), value).GetAwaiter().GetResult();
+                if (string.Equals(key.Trim(), AssemblerService.HintLevelSetting, StringComparison.OrdinalIgnoreCase))
+                    AssemblerService.InvalidateHintLevelCache();
                 return Responses.Success($"Setting '{key}' saved.");
             }
             catch (Exception ex)

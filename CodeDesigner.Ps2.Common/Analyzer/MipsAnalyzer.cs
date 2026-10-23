@@ -8,6 +8,17 @@ using CodeDesigner.Ps2.Common.CPU;
 
 namespace CodeDesigner.Ps2.Common
 {
+    /// <summary>How much the comment column says about each instruction.</summary>
+    public enum HintLevel
+    {
+        /// <summary>Every hint: values, addresses, call arguments, stack frames.</summary>
+        Full,
+        /// <summary>Only hints that name a place: calls/branches, loads/stores, built addresses, syscalls, strings.</summary>
+        Addresses,
+        /// <summary>No generated hints (the instructions are still simulated).</summary>
+        Off,
+    }
+
     /// <summary>
     /// Analyzes MIPS instructions using the built-in Analyze() method on each instruction class
     /// </summary>
@@ -170,7 +181,8 @@ namespace CodeDesigner.Ps2.Common
             CpuState? seedCpu = null,
             uint? seedPc = null,
             IPs2MemoryBus? loadBus = null,
-            IReadOnlySet<uint>? functionStarts = null)
+            IReadOnlySet<uint>? functionStarts = null,
+            HintLevel hintLevel = HintLevel.Full)
         {
             var comments = new Dictionary<uint, string>();
             var rows = instructions as IList<(uint instruction, uint address)> ?? instructions.ToList();
@@ -226,8 +238,8 @@ namespace CodeDesigner.Ps2.Common
                     // A call's arguments are often set in its delay slot, so run the
                     // delay slot first and describe the call with the state it sees.
                     var (slotWord, slotAddress) = rows[i + 1];
-                    AnalyzeRow(slotWord, slotAddress, cpu, stateHints, bus, lookupLabel, comments);
-                    AnalyzeRow(word, address, cpu, stateHints, bus, lookupLabel, comments, execute: false);
+                    AnalyzeRow(slotWord, slotAddress, cpu, stateHints, bus, lookupLabel, comments, hintLevel: hintLevel);
+                    AnalyzeRow(word, address, cpu, stateHints, bus, lookupLabel, comments, execute: false, hintLevel: hintLevel);
                     Simulate(word, address, cpu, usage);
                     cpu.GprKnown &= ~CallerSavedMask;
                     stateHints = false;
@@ -235,14 +247,14 @@ namespace CodeDesigner.Ps2.Common
                     continue;
                 }
 
-                AnalyzeRow(word, address, cpu, stateHints, bus, lookupLabel, comments);
+                AnalyzeRow(word, address, cpu, stateHints, bus, lookupLabel, comments, hintLevel: hintLevel);
 
                 if (cpu != null && usage.Flow != FlowKind.None)
                 {
                     if (hasDelaySlot)
                     {
                         var (slotWord, slotAddress) = rows[i + 1];
-                        AnalyzeRow(slotWord, slotAddress, cpu, stateHints, bus, lookupLabel, comments);
+                        AnalyzeRow(slotWord, slotAddress, cpu, stateHints, bus, lookupLabel, comments, hintLevel: hintLevel);
                         i++;
                     }
                     // Whatever follows a jump is reached from somewhere else; whatever
@@ -277,7 +289,8 @@ namespace CodeDesigner.Ps2.Common
             uint word, uint address, CpuState? cpu, bool stateHints,
             IPs2MemoryBus? bus, Func<uint, string?>? lookupLabel,
             Dictionary<uint, string> comments,
-            bool execute = true)
+            bool execute = true,
+            HintLevel hintLevel = HintLevel.Full)
         {
             try
             {
@@ -305,6 +318,9 @@ namespace CodeDesigner.Ps2.Common
                 if (!stateHints || !readsKnown)
                     analysis = StripStateHints(analysis);
 
+                if (!KeepAtLevel(hintLevel, word, usage, analysis))
+                    analysis = string.Empty;
+
                 if (!string.IsNullOrWhiteSpace(analysis))
                 {
                     // Branch/jump targets are code — kept out of the ASCII/pointer peek path.
@@ -321,6 +337,29 @@ namespace CodeDesigner.Ps2.Common
             {
                 // Skip instructions that fail to analyze
             }
+        }
+
+        private static readonly Regex s_hexWordRegex = new(@"0x([0-9A-Fa-f]{8})", RegexOptions.Compiled);
+
+        /// <summary>
+        /// Whether a hint survives <paramref name="level"/>. At
+        /// <see cref="HintLevel.Addresses"/> a hint stays when it names a place:
+        /// control flow, a load/store, a syscall, or a value that is a plausible
+        /// address (a <c>lui</c>/<c>addiu</c> pair building a pointer).
+        /// </summary>
+        private static bool KeepAtLevel(HintLevel level, uint word, GprUsage usage, string analysis)
+        {
+            if (level == HintLevel.Full) return true;
+            if (level == HintLevel.Off || string.IsNullOrWhiteSpace(analysis)) return false;
+
+            uint op = word >> 26;
+            if (usage.Flow != FlowKind.None) return true;
+            if (op == 0x00 && (word & 0x3F) == 0x0C) return true;                 // syscall
+            if (usage.IsLoad || op is 0x1F or >= 0x28 and <= 0x2E or 0x31 or 0x36 or 0x39 or 0x3E or 0x3F)
+                return true;                                                       // loads / stores
+            foreach (Match m in s_hexWordRegex.Matches(analysis))
+                if (IsPlausibleAddress(Convert.ToUInt32(m.Groups[1].Value, 16))) return true;
+            return false;
         }
 
         /// <summary>
