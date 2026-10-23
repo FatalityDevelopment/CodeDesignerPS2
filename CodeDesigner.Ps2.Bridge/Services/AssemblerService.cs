@@ -945,6 +945,50 @@ namespace CodeDesigner.Ps2.Bridge.Services
                         continue;
                     }
 
+                    // ── Inferred data table (switch / pointer / float) ────────
+                    // From the cross-reference index: entries render as data
+                    // rows instead of being decoded as instructions. A user's
+                    // own data format (above) always wins.
+                    if ((rowAddr & 3u) == 0 && byteIndex + 4 <= byteBuf.Length
+                        && _ctx.Xrefs.TryGetDataTable(rowAddr, out var table, out int entry))
+                    {
+                        var kind = table.Kind == XrefIndexService.DataTableKind.Float
+                            ? Database.Entities.DataFormatKind.Float
+                            : Database.Entities.DataFormatKind.Word;
+                        string asm = FormatDataDirective(byteBuf, byteIndex, kind, out string? hexStr);
+                        uint val = BitConverter.ToUInt32(byteBuf, byteIndex);
+                        string? cmt = table.Kind switch
+                        {
+                            XrefIndexService.DataTableKind.Jump    => $"case {entry} -> {LabelOrAddress(val)}",
+                            XrefIndexService.DataTableKind.Pointer => TryResolvePointerComment(val, analysisBus) ?? $"-> {LabelOrAddress(val)}",
+                            _ => null,
+                        };
+                        if (entry == 0)
+                        {
+                            string title = table.Kind switch
+                            {
+                                XrefIndexService.DataTableKind.Jump    => "switch table",
+                                XrefIndexService.DataTableKind.Pointer => "pointer table",
+                                _                                      => "float table",
+                            };
+                            cmt = $"{title}, {table.Count} entries" + (cmt is null ? "" : $" | {cmt}");
+                        }
+
+                        results.Add(new InstructionResult
+                        {
+                            Address        = rowAddr,
+                            ByteLength     = 4,
+                            Hex            = hexStr,
+                            Assembly       = asm,
+                            Success        = true,
+                            Comment        = cmt,
+                            DataFormatKind = DataFormatService.KindToWire(kind),
+                            AutoFormatted  = true,
+                        });
+                        byteIndex += 4;
+                        continue;
+                    }
+
                     // ── Auto-detected string at this offset ───────────────────
                     // Emit byte rows for the printable-ASCII run + null
                     // terminator (and any trailing zero-pad needed to reach the
@@ -1495,6 +1539,16 @@ namespace CodeDesigner.Ps2.Bridge.Services
 
         private static string EscapeCommentString(string text) =>
             text.Replace("\\", "\\\\").Replace("\"", "\\\"");
+
+        /// <summary>A label for <paramref name="address"/> (as stored or as its KSEG0 alias), else the hex address.</summary>
+        private string LabelOrAddress(uint address)
+        {
+            if (_ctx.Labels.TryGetValue(address, out var e) && !string.IsNullOrEmpty(e.Label)) return e.Label;
+            uint alias = address >= 0x80000000u && address < 0xC0000000u ? address & 0x1FFFFFFFu : address | 0x80000000u;
+            if (alias < 0x20000000u || alias >= 0x80000000u)
+                if (_ctx.Labels.TryGetValue(alias, out e) && !string.IsNullOrEmpty(e.Label)) return e.Label;
+            return $"0x{address:X8}";
+        }
 
         /// <summary>Bytes before a page that the analyzer simulates (not shown) to carry register state in.</summary>
         private const int LeadInBytes = 0x80;

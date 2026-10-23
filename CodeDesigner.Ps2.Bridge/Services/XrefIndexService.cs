@@ -32,7 +32,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
     {
         private const int MaxResults = 1000;
 
-        internal enum XrefKind : byte { Call, Jump, Branch, RegisterJump, Address, Load, Store, Pointer }
+        internal enum XrefKind : byte { Call, Jump, Branch, RegisterJump, Address, Load, Store, Pointer, Case }
 
         private readonly struct Xref
         {
@@ -53,6 +53,8 @@ namespace CodeDesigner.Ps2.Bridge.Services
             public uint[] FuncStarts { get; init; } = [];
             /// <summary>Last instruction of each function in <see cref="FuncStarts"/> (inclusive).</summary>
             public uint[] FuncEnds { get; init; } = [];
+            /// <summary>Inferred jump / pointer / float tables, ascending by start.</summary>
+            public DataTable[] Tables { get; init; } = [];
         }
 
         private readonly IBridgeContext _ctx;
@@ -233,6 +235,16 @@ namespace CodeDesigner.Ps2.Bridge.Services
             known[0] = true;
             bool resetAfterSlot = false;
 
+            // Switch tables: `lui rB, hi` + `addu rB, rB, rIndex` leaves rB = table base
+            // plus an unknown index (luiPart); `lw rT, lo(rB)` then loads an entry
+            // (tableLoad); `jr rT` jumps through it. `sltiu at, rIndex, N` bounds it.
+            var luiPart = new uint?[32];
+            var tableLoad = new uint?[32];
+            var jumpTables = new List<(uint Table, uint JrPc, int Bound)>();
+            var floatLoads = new HashSet<uint>();
+            uint lastSltiuPc = 0, lastSltiuImm = 0;
+            bool haveSltiu = false;
+
             void Add(uint target, uint from, XrefKind kind)
             {
                 uint t = Normalize(target, iop);
@@ -296,31 +308,227 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 {
                     uint ea = unchecked(values[rs] + (uint)(short)(w & 0xFFFF));
                     Add(ea, pc, IsStore(op) ? XrefKind.Store : XrefKind.Load);
+                    if (op is 0x31 or 0x36) floatLoads.Add(Normalize(ea, iop)); // lwc1 / lqc2 read floats
                 }
 
-                if (!handled)
+                // Switch-table tracking (see the comment on luiPart).
+                int tableReg = -1;
+                uint? newLuiPart = null, newTableLoad = null;
+                uint funct = w & 0x3F;
+                if (op == 0x00 && funct is 0x21 or 0x2D)                        // addu / daddu
                 {
-                    for (int r = 1; r < 32; r++)
-                        if ((usage.Writes & (1u << r)) != 0) known[r] = false;
+                    int rd = (int)((w >> 11) & 0x1F);
+                    tableReg = rd;
+                    if (rs != 0 && known[rs] && !known[rt]) newLuiPart = values[rs];
+                    else if (rt != 0 && known[rt] && !known[rs]) newLuiPart = values[rt];
+                }
+                else if (op == 0x23 && luiPart[rs] is uint part)              // lw rt, lo(rB)
+                {
+                    tableReg = rt;
+                    newTableLoad = unchecked(part + (uint)(short)(w & 0xFFFF));
+                }
+                else if (op == 0x00 && funct == 0x08 && rs != 31 && tableLoad[rs] is uint table)
+                {
+                    int bound = haveSltiu && pc - lastSltiuPc <= 0x40 ? (int)lastSltiuImm : 0;
+                    jumpTables.Add((table, pc, bound));
+                }
+                else if (op == 0x0B)                                           // sltiu
+                {
+                    haveSltiu = true;
+                    lastSltiuPc = pc;
+                    lastSltiuImm = w & 0xFFFF;
+                }
+
+                for (int r = 1; r < 32; r++)
+                {
+                    if ((usage.Writes & (1u << r)) == 0) continue;
+                    if (!handled) known[r] = false;
+                    luiPart[r] = null;
+                    tableLoad[r] = null;
+                }
+                if (tableReg > 0)
+                {
+                    luiPart[tableReg] = newLuiPart;
+                    tableLoad[tableReg] = newTableLoad;
                 }
 
                 // Registers don't carry over the end of a function (jr ra / j).
                 if (resetAfterSlot)
                 {
                     Array.Clear(known, 1, 31);
+                    Array.Clear(luiPart);
+                    Array.Clear(tableLoad);
+                    haveSltiu = false;
                     resetAfterSlot = false;
                 }
                 if (usage.Flow == FlowKind.Jump) resetAfterSlot = true;
             }
 
+            var tables = new List<DataTable>();
+            AddJumpTables(start, bytes, iop, jumpTables, tables, refs);
+
             var sorted = refs.ToArray();
             Array.Sort(sorted, (a, b) => a.Target != b.Target ? a.Target.CompareTo(b.Target) : a.From.CompareTo(b.From));
             var (funcStarts, funcEnds) = FindFunctions(start, bytes, iop, sorted);
+            AddDataTables(start, bytes, iop, funcStarts, funcEnds, floatLoads, tables, sorted);
+            tables.Sort((a, b) => a.Start.CompareTo(b.Start));
             return new RegionIndex
             {
                 Region = key, Base = start, Bytes = bytes, Refs = sorted, BuiltUtc = DateTime.UtcNow,
-                FuncStarts = funcStarts, FuncEnds = funcEnds,
+                FuncStarts = funcStarts, FuncEnds = funcEnds, Tables = tables.ToArray(),
             };
+        }
+
+        // ── Data tables ──────────────────────────────────────────────────────
+
+        internal enum DataTableKind : byte { Jump, Pointer, Float }
+
+        /// <summary>A run of 4-byte entries inferred to be data rather than code.</summary>
+        internal readonly record struct DataTable(uint Start, int Count, DataTableKind Kind)
+        {
+            public uint End => Start + (uint)Count * 4;   // exclusive
+        }
+
+        private const int MaxTableEntries = 1024;
+
+        /// <summary>
+        /// Reads each switch table found during the scan: entries run while they are
+        /// code addresses near the <c>jr</c> (or up to the <c>sltiu</c> bound). Every
+        /// entry also becomes a <see cref="XrefKind.Case"/> reference to its target.
+        /// </summary>
+        private static void AddJumpTables(uint start, byte[] bytes, bool iop,
+            List<(uint Table, uint JrPc, int Bound)> found, List<DataTable> tables, List<Xref> refs)
+        {
+            uint end = start + (uint)bytes.Length;
+            var seen = new HashSet<uint>();
+            foreach (var (rawTable, jrPc, bound) in found)
+            {
+                uint table = Normalize(rawTable, iop);
+                if ((table & 3) != 0 || table < start || table + 4 > end || !seen.Add(table)) continue;
+
+                int limit = bound > 0 ? Math.Min(bound, MaxTableEntries) : MaxTableEntries;
+                int count = 0;
+                for (; count < limit; count++)
+                {
+                    uint at = table + (uint)count * 4;
+                    if (at + 4 > end) break;
+                    uint target = Normalize(BitConverter.ToUInt32(bytes, (int)(at - start)), iop);
+                    bool valid = (target & 3) == 0 && target >= start && target < end
+                                 && Math.Abs((long)target - jrPc) < 0x20000;
+                    if (!valid) break;
+                    refs.Add(new Xref(target, at, XrefKind.Case));
+                }
+                if (count >= 2) tables.Add(new DataTable(table, count, DataTableKind.Jump));
+            }
+        }
+
+        /// <summary>
+        /// Pointer tables (4+ consecutive pointer words outside any function whose start
+        /// something outside the run references) and float tables (data that lwc1/lqc2
+        /// load from, extended while the words are sane floats).
+        /// </summary>
+        private static void AddDataTables(uint start, byte[] bytes, bool iop,
+            uint[] funcStarts, uint[] funcEnds, HashSet<uint> floatLoads, List<DataTable> tables, Xref[] refs)
+        {
+            bool ReferencedFromOutside(uint at, uint runEnd)
+            {
+                var (lo, hi) = Range(refs, at);
+                for (int i = lo; i < hi; i++)
+                    if (refs[i].From < at || refs[i].From >= runEnd) return true;
+                return false;
+            }
+            uint end = start + (uint)bytes.Length;
+            uint Word(uint a) => BitConverter.ToUInt32(bytes, (int)(a - start));
+
+            bool InFunction(uint a)
+            {
+                int i = Array.BinarySearch(funcStarts, a);
+                if (i < 0) i = ~i - 1;
+                return i >= 0 && a <= funcEnds[i];
+            }
+            var covered = new HashSet<uint>();
+            foreach (var t in tables)
+                for (uint a = t.Start; a < t.End; a += 4) covered.Add(a);
+            void AddTable(DataTable t)
+            {
+                tables.Add(t);
+                for (uint a = t.Start; a < t.End; a += 4) covered.Add(a);
+            }
+            bool IsPointer(uint w) => (w & 3) == 0 && w != 0 && IsPlausibleTarget(Normalize(w, iop), XrefKind.Pointer);
+
+            // Pointer tables.
+            const int MinPointerRun = 4;
+            uint runStart = 0;
+            int run = 0;
+            void FlushRun()
+            {
+                if (run >= MinPointerRun && !InFunction(runStart) && !covered.Contains(runStart)
+                    && ReferencedFromOutside(runStart, runStart + (uint)run * 4))
+                    AddTable(new DataTable(runStart, Math.Min(run, MaxTableEntries), DataTableKind.Pointer));
+                run = 0;
+            }
+            for (uint a = start; a + 4 <= end; a += 4)
+            {
+                if (IsPointer(Word(a)))
+                {
+                    if (run == 0) runStart = a;
+                    run++;
+                    continue;
+                }
+                FlushRun();
+            }
+            FlushRun();
+
+            // Float tables.
+            foreach (uint t in floatLoads.OrderBy(x => x))
+            {
+                if ((t & 3) != 0 || t < start || t + 4 > end || InFunction(t) || covered.Contains(t)) continue;
+                int count = 0;
+                while (count < 256 && t + (uint)(count + 1) * 4 <= end
+                       && IsSaneFloat(Word(t + (uint)count * 4)) && !covered.Contains(t + (uint)count * 4))
+                    count++;
+                if (count > 0) AddTable(new DataTable(t, count, DataTableKind.Float));
+            }
+        }
+
+        /// <summary>Zero, or a finite float between about 1e-10 and 1e10 in magnitude.</summary>
+        private static bool IsSaneFloat(uint bits)
+        {
+            if ((bits & 0x7FFFFFFFu) == 0) return true;
+            uint exp = (bits >> 23) & 0xFF;
+            return exp >= 0x5E && exp <= 0x9F;
+        }
+
+        /// <summary>Data tables found in <paramref name="bytes"/> (for tests).</summary>
+        internal static IReadOnlyList<DataTable> TablesInBytes(uint start, byte[] bytes, bool iop = false) =>
+            Build("test", start, bytes, iop).Tables;
+
+        /// <summary>
+        /// The inferred data table holding <paramref name="address"/>, with the entry
+        /// index. Used by the disassembler to show table entries as data rows.
+        /// </summary>
+        public bool TryGetDataTable(uint address, out DataTable table, out int entry)
+        {
+            uint a = Normalize(address, iopContext: false);
+            foreach (var index in Snapshot())
+            {
+                var tables = index.Tables;
+                int lo = 0, hi = tables.Length - 1, found = -1;
+                while (lo <= hi)
+                {
+                    int mid = (lo + hi) >> 1;
+                    if (tables[mid].Start <= a) { found = mid; lo = mid + 1; } else hi = mid - 1;
+                }
+                if (found >= 0 && a < tables[found].End && ((a - tables[found].Start) & 3) == 0)
+                {
+                    table = tables[found];
+                    entry = (int)((a - table.Start) / 4);
+                    return true;
+                }
+            }
+            table = default;
+            entry = -1;
+            return false;
         }
 
         private const uint JrRa = 0x03E00008u;
@@ -514,7 +722,8 @@ namespace CodeDesigner.Ps2.Bridge.Services
 
         private static bool Wanted(XrefKind kind, ReferenceScanKinds kinds) => kind switch
         {
-            XrefKind.Call or XrefKind.Jump or XrefKind.Branch or XrefKind.RegisterJump => kinds.HasFlag(ReferenceScanKinds.ControlFlow),
+            XrefKind.Call or XrefKind.Jump or XrefKind.Branch or XrefKind.RegisterJump or XrefKind.Case
+                => kinds.HasFlag(ReferenceScanKinds.ControlFlow),
             XrefKind.Pointer => kinds.HasFlag(ReferenceScanKinds.Pointer),
             _ => kinds.HasFlag(ReferenceScanKinds.ResolvedAddress),
         };
@@ -536,10 +745,12 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 XrefKind.Address      => ("resolved", "Address", "Builds"),
                 XrefKind.Load         => ("resolved", "Load", "Loads from"),
                 XrefKind.Store        => ("resolved", "Store", "Stores to"),
+                XrefKind.Case         => ("controlFlow", "Switch case", "Switch table entry for"),
                 _                     => ("pointer", "Pointer", "Pointer to"),
             };
 
-            string instruction = x.Kind == XrefKind.Pointer ? string.Empty : SafeDisassemble(word, x.From);
+            bool dataWord = x.Kind is XrefKind.Pointer or XrefKind.Case;
+            string instruction = dataWord ? string.Empty : SafeDisassemble(word, x.From);
             return new ReferenceEntry
             {
                 Address = $"{x.From:X8}",
@@ -549,8 +760,8 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 TargetAddress = $"{requested:X8}",
                 Instruction = instruction,
                 Summary = $"{summary} 0x{x.Target:X8}",
-                MatchedValue = x.Kind == XrefKind.Pointer ? $"0x{word:X8}" : $"0x{x.Target:X8}",
-                MatchLength = x.Kind == XrefKind.Pointer ? 4 : 0,
+                MatchedValue = dataWord ? $"0x{word:X8}" : $"0x{x.Target:X8}",
+                MatchLength = dataWord ? 4 : 0,
                 SourceAddresses = [$"{x.From:X8}"],
             };
         }
@@ -580,7 +791,12 @@ namespace CodeDesigner.Ps2.Bridge.Services
         {
             lock (_gate)
             {
-                var parts = _indexes.Values.Select(i => $"{i.Region} {i.Refs.Length:N0} refs (built {i.BuiltUtc:HH:mm:ss} UTC)").ToList();
+                var parts = _indexes.Values.Select(i =>
+                    $"{i.Region} {i.Refs.Length:N0} refs, {i.FuncStarts.Length:N0} functions, "
+                    + $"{i.Tables.Count(t => t.Kind == DataTableKind.Jump)} switch / "
+                    + $"{i.Tables.Count(t => t.Kind == DataTableKind.Pointer)} pointer / "
+                    + $"{i.Tables.Count(t => t.Kind == DataTableKind.Float)} float tables "
+                    + $"(built {i.BuiltUtc:HH:mm:ss} UTC)").ToList();
                 parts.AddRange(_building.Keys.Select(k => $"{k} building"));
                 return parts.Count == 0 ? "No cross-reference index" : string.Join("; ", parts);
             }

@@ -94,6 +94,55 @@ namespace CodeDesigner.Ps2.TestProject
         }
 
         [TestMethod]
+        public void SwitchTable_IsFoundWithItsBoundAndCases()
+        {
+            // 0x100000: sltiu at, a0, 3 ; beq at, zero, +... ; sll t0, a0, 2 ; lui t1, 0x10
+            //           addu t1, t1, t0 ; lw t1, 0x40(t1) ; jr t1 ; nop
+            // 0x100040: table of 3 case targets (in this code)
+            var words = new uint[0x14];
+            words[0] = A("sltiu $at, $a0, 3");
+            words[1] = A("beq $at, $zero, 10");
+            words[2] = A("sll $t0, $a0, 2");
+            words[3] = A("lui $t1, 0x0010");
+            words[4] = A("addu $t1, $t1, $t0");
+            words[5] = A("lw $t1, 0x40($t1)");
+            words[6] = A("jr $t1");
+            words[0x10] = Base + 0x20;
+            words[0x11] = Base + 0x24;
+            words[0x12] = Base + 0x28;
+            words[0x13] = Base + 0x2C;   // beyond the sltiu bound: not part of the table
+
+            var tables = XrefIndexService.TablesInBytes(Base, Words(words));
+            CollectionAssert.Contains(tables.ToList(), new DataTable(Base + 0x40, 3, DataTableKind.Jump));
+            var refs = IndexBytes(Base, Words(words));
+            CollectionAssert.Contains(refs.ToList(), (Base + 0x24, Base + 0x44, XrefKind.Case));
+        }
+
+        [TestMethod]
+        public void PointerTable_NeedsAReferenceToItsStart()
+        {
+            uint[] table = [0x00200000, 0x00200010, 0x00200020, 0x00200030];
+            var unreferenced = XrefIndexService.TablesInBytes(Base, Words([0, .. table]));
+            Assert.AreEqual(0, unreferenced.Count, "no code points at it");
+
+            uint[] words = [A("lui $a0, 0x0010"), A("addiu $a0, $a0, 0x10"), JrRa, 0, .. table];
+            var referenced = XrefIndexService.TablesInBytes(Base, Words(words));
+            CollectionAssert.Contains(referenced.ToList(), new DataTable(Base + 0x10, 4, DataTableKind.Pointer));
+        }
+
+        [TestMethod]
+        public void FloatTable_StartsAtAnLwc1Target()
+        {
+            var words = new uint[]
+            {
+                A("lui $a0, 0x0010"), A("lwc1 $f0, 0x10($a0)"), JrRa, 0,
+                BitConverter.SingleToUInt32Bits(1.5f), BitConverter.SingleToUInt32Bits(-2f), 0, 0x7FC00000,
+            };
+            var tables = XrefIndexService.TablesInBytes(Base, Words(words));
+            CollectionAssert.Contains(tables.ToList(), new DataTable(Base + 0x10, 3, DataTableKind.Float));
+        }
+
+        [TestMethod]
         public void Analyzer_ResetsStateAtFunctionStart()
         {
             // a0 is set in the previous function; the next function must not see it.
