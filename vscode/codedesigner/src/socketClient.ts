@@ -956,6 +956,8 @@ interface InstructionResult {
     XrefCount?: number;
     /** Data words pointing at this row, from the cross-reference index. */
     DataRefCount?: number;
+    /** True when a detected function begins at this row. */
+    FunctionStart?: boolean;
 }
 
 export type DataFormatKind = 'byte' | 'half' | 'word' | 'dword' | 'qword' | 'float' | 'double';

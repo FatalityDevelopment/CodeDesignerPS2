@@ -49,6 +49,10 @@ namespace CodeDesigner.Ps2.Bridge.Services
             public required byte[] Bytes { get; init; }
             public required Xref[] Refs { get; init; }   // sorted by Target, then From
             public required DateTime BuiltUtc { get; init; }
+            /// <summary>Function entry points, ascending (normalized addresses).</summary>
+            public uint[] FuncStarts { get; init; } = [];
+            /// <summary>Last instruction of each function in <see cref="FuncStarts"/> (inclusive).</summary>
+            public uint[] FuncEnds { get; init; } = [];
         }
 
         private readonly IBridgeContext _ctx;
@@ -62,6 +66,26 @@ namespace CodeDesigner.Ps2.Bridge.Services
         {
             reg.Add(c => HandleIndex(c.Region, c.Address, c.Length, c.XrefRebuild == true, c.XrefWait == true), "XREFINDEX");
             reg.Add(c => HandleXrefsTo(c.TargetAddress, c.Region, c.ReferenceKinds), "XREFSTO", "XREFS_TO");
+            reg.Add(c => HandleFunctionAt(c.TargetAddress ?? c.Address), "FUNCTIONAT", "FUNCTION_AT");
+        }
+
+        private string HandleFunctionAt(uint? address)
+        {
+            if (!address.HasValue)
+                return Responses.Error("TargetAddress is required for FUNCTIONAT");
+            if (!HasIndex)
+                return Responses.Error("No cross-reference index yet — run XREFINDEX first");
+            if (!TryGetFunction(address.Value, out uint start, out uint end))
+                return Responses.Error($"0x{address.Value:X8} is not inside a detected function");
+
+            var (callers, pointers) = CountTo(start);
+            return JsonSerializer.Serialize(new CommandResponse
+            {
+                Success = true,
+                Command = "FUNCTIONAT",
+                Message = $"Function 0x{start:X8}-0x{end:X8} ({end - start + 4} bytes, {(end - start) / 4 + 1} instructions); "
+                        + $"{callers} code reference(s), {pointers} data pointer(s) to its entry",
+            });
         }
 
         // ── Public queries (used by the disassembler) ────────────────────────
@@ -291,7 +315,129 @@ namespace CodeDesigner.Ps2.Bridge.Services
 
             var sorted = refs.ToArray();
             Array.Sort(sorted, (a, b) => a.Target != b.Target ? a.Target.CompareTo(b.Target) : a.From.CompareTo(b.From));
-            return new RegionIndex { Region = key, Base = start, Bytes = bytes, Refs = sorted, BuiltUtc = DateTime.UtcNow };
+            var (funcStarts, funcEnds) = FindFunctions(start, bytes, iop, sorted);
+            return new RegionIndex
+            {
+                Region = key, Base = start, Bytes = bytes, Refs = sorted, BuiltUtc = DateTime.UtcNow,
+                FuncStarts = funcStarts, FuncEnds = funcEnds,
+            };
+        }
+
+        private const uint JrRa = 0x03E00008u;
+
+        /// <summary>
+        /// Function boundaries in a region:
+        /// <list type="bullet">
+        ///   <item>every call target (jal / bal / jalr through a known register) is a start;</item>
+        ///   <item>so is the first instruction after a <c>jr ra</c> + delay slot (skipping zero
+        ///   padding) when it opens a stack frame (<c>addiu sp, sp, -N</c>) or a data pointer
+        ///   points at it (functions only called through tables).</item>
+        /// </list>
+        /// A function ends at the last non-padding word before the next start.
+        /// </summary>
+        private static (uint[] starts, uint[] ends) FindFunctions(uint start, byte[] bytes, bool iop, Xref[] refs)
+        {
+            uint end = start + (uint)bytes.Length;
+            uint Word(uint addr) => BitConverter.ToUInt32(bytes, (int)(addr - start));
+            bool InRegion(uint a) => a >= start && a + 4 <= end && (a & 3) == 0;
+
+            // Normalized ↔ region address: the region is indexed in its own form
+            // (physical EE or the IOP mirror), which is what Normalize produces.
+            var starts = new HashSet<uint>();
+            var pointerTargets = new HashSet<uint>();
+            foreach (var x in refs)
+            {
+                if (!InRegion(x.Target)) continue;
+                if (x.Kind == XrefKind.Call) starts.Add(x.Target);
+                else if (x.Kind == XrefKind.Pointer) pointerTargets.Add(x.Target);
+            }
+
+            for (uint a = start; a + 12 <= end; a += 4)
+            {
+                if (Word(a) != JrRa) continue;
+                uint next = a + 8;
+                while (next + 4 <= end && Word(next) == 0) next += 4;
+                if (next + 4 > end) break;
+                uint w = Word(next);
+                bool opensFrame = (w & 0xFFFF0000u) == 0x27BD0000u && (short)(w & 0xFFFF) < 0;
+                if (opensFrame || pointerTargets.Contains(next)) starts.Add(next);
+            }
+
+            var sortedStarts = starts.ToArray();
+            Array.Sort(sortedStarts);
+            var ends = new uint[sortedStarts.Length];
+            for (int i = 0; i < sortedStarts.Length; i++)
+            {
+                uint limit = i + 1 < sortedStarts.Length ? sortedStarts[i + 1] : end;
+                uint last = limit - 4;
+                // Trailing alignment padding belongs to no function.
+                while (last > sortedStarts[i] && Word(last) == 0 && Word(last - 4) != JrRa) last -= 4;
+                ends[i] = last;
+            }
+            return (sortedStarts, ends);
+        }
+
+        /// <summary>Function boundaries found in <paramref name="bytes"/> (for tests).</summary>
+        internal static IReadOnlyList<(uint Start, uint End)> FunctionsInBytes(uint start, byte[] bytes, bool iop = false)
+        {
+            var index = Build("test", start, bytes, iop);
+            return index.FuncStarts.Zip(index.FuncEnds).ToList();
+        }
+
+        // ── Function queries (used by the disassembler) ──────────────────────
+
+        /// <summary>
+        /// The detected function containing <paramref name="address"/>, if any region's
+        /// index covers it. <paramref name="start"/>/<paramref name="end"/> are inclusive
+        /// instruction addresses in the panel's (normalized) form.
+        /// </summary>
+        public bool TryGetFunction(uint address, out uint start, out uint end)
+        {
+            start = end = 0;
+            uint a = Normalize(address, iopContext: false);
+            foreach (var index in Snapshot())
+            {
+                int i = Array.BinarySearch(index.FuncStarts, a);
+                if (i < 0) i = ~i - 1;
+                if (i < 0 || a > index.FuncEnds[i]) continue;
+                start = index.FuncStarts[i];
+                end = index.FuncEnds[i];
+                return true;
+            }
+            return false;
+        }
+
+        /// <summary>True when a detected function begins at <paramref name="address"/>.</summary>
+        public bool IsFunctionStart(uint address)
+        {
+            uint a = Normalize(address, iopContext: false);
+            foreach (var index in Snapshot())
+                if (Array.BinarySearch(index.FuncStarts, a) >= 0) return true;
+            return false;
+        }
+
+        /// <summary>
+        /// Bytes <c>[address, address + length)</c> from the snapshot the index was built
+        /// from, or null when no index holds the whole range. Lets the disassembler
+        /// simulate a function from its start without another live read.
+        /// </summary>
+        public byte[]? TryGetSnapshotBytes(uint address, int length)
+        {
+            uint a = Normalize(address, iopContext: false);
+            foreach (var index in Snapshot())
+            {
+                long offset = (long)a - index.Base;
+                if (offset < 0 || offset + length > index.Bytes.Length) continue;
+                var copy = new byte[length];
+                Buffer.BlockCopy(index.Bytes, (int)offset, copy, 0, length);
+                return copy;
+            }
+            return null;
+        }
+
+        private RegionIndex[] Snapshot()
+        {
+            lock (_gate) return _indexes.Values.ToArray();
         }
 
         /// <summary>Indexes <paramref name="bytes"/> at <paramref name="start"/> and returns every reference (for tests).</summary>

@@ -213,6 +213,20 @@ public sealed class GetXrefsTool(IEmulatorBridge bridge)
     }
 }
 
+[CdTool("get_function", ToolDomain.Memory, ToolRisk.ReadOnly,
+    "Return the detected function containing an address: entry, last instruction, size and how many places call or point to it. Functions come from the cross-reference index (call targets and stack-frame prologues after jr ra). Risk: read-only.")]
+public sealed class GetFunctionTool(IEmulatorBridge bridge)
+{
+    [ToolEntryPoint] public async Task<string> InvokeAsync(
+        [Description("Any address inside the function (hex/decimal).")] string address,
+        CancellationToken ct = default)
+    {
+        var a = CdText.TryParseAddress(address);
+        if (a is null) return CdText.Error($"invalid address '{address}'.");
+        return CdText.Message(await bridge.SendAsync(new { Command = "FUNCTIONAT", TargetAddress = a.Value }, ct));
+    }
+}
+
 [CdTool("rebuild_xrefs", ToolDomain.Memory, ToolRisk.ReadOnly,
     "Rebuild the cross-reference index for a region after the game loads new code or data. Waits for the build. Risk: read-only (reads RAM).")]
 public sealed class RebuildXrefsTool(IEmulatorBridge bridge)

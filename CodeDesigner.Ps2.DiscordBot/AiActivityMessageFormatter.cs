@@ -66,6 +66,7 @@ public static class AiActivityMessageFormatter
         ("callgraph_", "🕸️", "Call Graph"),
         ("find_code_references", "🕸️", "Call Graph"),
         ("get_xrefs", "🕸️", "Call Graph"),
+        ("get_function", "🕸️", "Call Graph"),
         ("rebuild_xrefs", "🕸️", "Call Graph"),
         ("mc_", "💾", "Memory Card"),
         ("hdd_", "💾", "HDD"),

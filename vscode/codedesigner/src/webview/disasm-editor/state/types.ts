@@ -19,6 +19,8 @@ export interface DisasmRow {
   xrefs?: number;
   /** Data words pointing at this row, from the cross-reference index. */
   dataRefs?: number;
+  /** A detected function begins at this row. */
+  functionStart?: boolean;
 }
 
 // ── Search ────────────────────────────────────────────────────────────────────

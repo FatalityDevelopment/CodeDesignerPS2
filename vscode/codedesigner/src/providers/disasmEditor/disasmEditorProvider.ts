@@ -45,6 +45,8 @@ interface DisassembledRow {
   xrefs?: number;
   /** Data words pointing at this row, from the xref index. */
   dataRefs?: number;
+  /** A detected function begins at this row. */
+  functionStart?: boolean;
 }
 
 /** Metadata for one open live memory panel: label, address range, bootstrap state. */
@@ -981,6 +983,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             dataFormatKind: result.DataFormatKind,
             xrefs: result.XrefCount,
             dataRefs: result.DataRefCount,
+            functionStart: result.FunctionStart || undefined,
           });
         } else if (result.Error) {
           // Handle error case

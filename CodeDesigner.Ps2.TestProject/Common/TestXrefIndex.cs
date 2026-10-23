@@ -76,6 +76,38 @@ namespace CodeDesigner.Ps2.TestProject
             Assert.IsFalse(refs.Any(r => r.Kind == XrefKind.Load));
         }
 
+        private const uint JrRa = 0x03E00008;
+        private static uint A(string line) => MipsAssembler.Assemble(line);
+
+        [TestMethod]
+        public void Functions_FromCallTargetsAndPrologues()
+        {
+            // 0x100000: caller            jal 0x100010; nop; jr ra; nop
+            // 0x100010: callee (called)   addiu sp,-16; jr ra; addiu sp,16; nop (padding)
+            // 0x100020: uncalled function opening a frame after jr ra + padding
+            var found = XrefIndexService.FunctionsInBytes(Base, Words(
+                A("jal 0x00100010"), 0, JrRa, 0,
+                A("addiu $sp, $sp, -16"), JrRa, A("addiu $sp, $sp, 16"), 0,
+                A("addiu $sp, $sp, -32"), JrRa, A("addiu $sp, $sp, 32")));
+            CollectionAssert.Contains(found.ToList(), (Base + 0x10, Base + 0x18));   // padding nop trimmed
+            CollectionAssert.Contains(found.ToList(), (Base + 0x20, Base + 0x28));
+        }
+
+        [TestMethod]
+        public void Analyzer_ResetsStateAtFunctionStart()
+        {
+            // a0 is set in the previous function; the next function must not see it.
+            var rows = new List<(uint, uint)>
+            {
+                (A("lui $a0, 0x0030"), Base),
+                (A("addiu $a1, $a0, 4"), Base + 4),        // same function: known
+                (A("addiu $a1, $a0, 4"), Base + 8),        // new function: unknown
+            };
+            var comments = MipsAnalyzer.AnalyzeInstructions(rows, functionStarts: new HashSet<uint> { Base + 8 });
+            StringAssert.Contains(comments.GetValueOrDefault(Base + 4, ""), "0x00300004");
+            Assert.AreEqual("", comments.GetValueOrDefault(Base + 8, ""));
+        }
+
         [TestMethod]
         public void IopCode_MapsTargetsIntoTheMirror()
         {

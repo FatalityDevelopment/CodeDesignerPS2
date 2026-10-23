@@ -59,6 +59,9 @@ namespace CodeDesigner.Ps2.Bridge
 
         /// <summary>Data words that point at this row, from the cross-reference index.</summary>
         public int? DataRefCount { get; set; }
+
+        /// <summary>True when a detected function begins at this row.</summary>
+        public bool? FunctionStart { get; set; }
     }
 }
 

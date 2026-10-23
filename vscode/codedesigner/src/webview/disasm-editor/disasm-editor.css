@@ -4714,6 +4714,17 @@ app-icon,
     font-weight: 700;
 }
 
+/* First row of a detected function: a divider above it, IDA-style. */
+.row.fn-start {
+    border-top: 1px solid var(--vscode-editorRuler-foreground, var(--cd-panel-border, #3c3c3c));
+}
+
+/* Placeholder name for an unnamed detected function (not a saved label). */
+.fn-auto-label {
+    opacity: 0.6;
+    font-style: italic;
+}
+
 /* Incoming cross-reference count in the label column ("◂3", "◂3+2"). */
 .xref-badge {
     color: var(--vscode-descriptionForeground, #8b8b8b);

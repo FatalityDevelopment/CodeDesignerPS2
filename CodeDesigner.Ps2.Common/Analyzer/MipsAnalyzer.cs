@@ -169,7 +169,8 @@ namespace CodeDesigner.Ps2.Common
             bool includeStateHints = false,
             CpuState? seedCpu = null,
             uint? seedPc = null,
-            IPs2MemoryBus? loadBus = null)
+            IPs2MemoryBus? loadBus = null,
+            IReadOnlySet<uint>? functionStarts = null)
         {
             var comments = new Dictionary<uint, string>();
             var rows = instructions as IList<(uint instruction, uint address)> ?? instructions.ToList();
@@ -203,6 +204,17 @@ namespace CodeDesigner.Ps2.Common
                     cpu = seedCpu.CreateAnalysisSnapshot();
                     cpu.Bus = simBus;
                     stateHints = includeStateHints;
+                }
+                else if (cpu != null && functionStarts != null && functionStarts.Contains(address))
+                {
+                    // A new function: nothing from the code above carries in except $gp,
+                    // which the whole program shares.
+                    bool gpKnown = CpuHelpers.IsRegisterKnown(cpu, 28);
+                    ulong gp = cpu.RegsLo[28];
+                    cpu = NewBlankState();
+                    cpu.Bus = simBus;
+                    if (gpKnown) { cpu.RegsLo[28] = gp; cpu.GprKnown |= 1u << 28; }
+                    stateHints = false;
                 }
 
                 var usage = GprUsage.Of(word);

@@ -160,6 +160,7 @@ DELETE FROM McpConfigs WHERE [Key] = 'read_memory_desc'
 | `decompile_to_cds` | Read a memory range, disassemble it, and emit a CDS source file. |
 | `find_code_references` | Find all MIPS instructions in EE RAM that reference a given address. |
 | `get_xrefs` | Cross-references to an address from the bridge's index (calls, jumps, branches, built addresses, loads, stores, pointers). Built once per region, so lookups are instant. |
+| `get_function` | The detected function containing an address: entry, end, size and incoming reference counts. |
 | `rebuild_xrefs` | Rebuild the cross-reference index for `ee`, `iop` or `bios` after the game loads new code. |
 | `trace_calls` | Step instruction-by-instruction from the current PC and log the call tree. |
 | `navigate_to` | Tell the VS Code disasm editor to jump to a specific address. |

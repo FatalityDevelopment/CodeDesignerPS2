@@ -32,6 +32,7 @@ import { toPhysAddr } from '../utils/address.utils';
       [class.branch-highlight]="isBranchHighlight()"
       [class.branch-path]="isBranchPath()"
       [class.data-formatted]="isDataFormatted()"
+      [class.fn-start]="!!data().functionStart"
       [class.search-match]="isSearchMatch()"
       [class.search-current]="isCurrentMatch()"
       [class.breakpoint]="hasBreakpoint()"
@@ -212,6 +213,10 @@ export class DisasmRowComponent {
     const parts: string[] = [];
 
     if (rawLabel) { parts.push(this.renderLabelText(rawLabel)); }
+    else if (row.functionStart) {
+      // Unnamed detected function: show a placeholder name (not a saved label).
+      parts.push(`<span class="lm-label-fnc fn-auto-label" title="Detected function entry (not a saved label)">FNC_${this.escapeHtml(row.addr)}</span>`);
+    }
     if (cheat) {
       parts.push(`<span class="cheat-label-annotation" title="Transient cheat-list overlay">⚡ ${this.escapeHtml(cheat)}</span>`);
     }

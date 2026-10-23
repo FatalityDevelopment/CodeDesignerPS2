@@ -1109,27 +1109,50 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 // a blank register file. Only MIPS-instruction rows participate
                 // — data-format rows (.byte/.half/.word/...) are skipped so the
                 // analyzer does not try to "execute" embedded data.
-                // Lead-in: simulate the words just before this page (without
-                // emitting rows for them) so a `lui` on the previous page's last
-                // rows still resolves the `addiu`/`ori` at the top of this one.
+                // Lead-in: simulate the code just before this page (without
+                // emitting rows for it) so register values set above the page
+                // still resolve hints on it. With a function index that is the
+                // whole function from its entry (from the index's snapshot, no
+                // live read); otherwise the last 0x80 bytes.
                 var analyzedList = instructionList;
-                if (hintClient != null && baseAddr >= LeadInBytes && instructionList.Count > 0)
+                HashSet<uint>? functionStarts = null;
+                if (instructionList.Count > 0)
                 {
-                    try
+                    byte[]? leadIn = null;
+                    uint leadStart = 0;
+                    if (_ctx.Xrefs.TryGetFunction(baseAddr, out uint fnStart, out _) && fnStart < baseAddr)
                     {
-                        byte[] leadIn = new DebugClientByteEditor(hintClient)
-                            .Read((int)(baseAddr - LeadInBytes), LeadInBytes);
-                        if (leadIn.Length == LeadInBytes)
+                        leadStart = Math.Max(fnStart, baseAddr >= MaxFunctionLeadIn ? baseAddr - MaxFunctionLeadIn : 0u);
+                        leadIn = _ctx.Xrefs.TryGetSnapshotBytes(leadStart, (int)(baseAddr - leadStart));
+                    }
+                    if (leadIn == null && hintClient != null && baseAddr >= LeadInBytes)
+                    {
+                        try
                         {
-                            analyzedList = new List<(uint instruction, uint address)>(instructionList.Count + LeadInBytes / 4);
-                            for (int off = 0; off < LeadInBytes; off += 4)
-                                analyzedList.Add((BitConverter.ToUInt32(leadIn, off), baseAddr - LeadInBytes + (uint)off));
-                            analyzedList.AddRange(instructionList);
+                            leadStart = baseAddr - LeadInBytes;
+                            leadIn = new DebugClientByteEditor(hintClient).Read((int)leadStart, LeadInBytes);
+                            if (leadIn.Length != LeadInBytes) leadIn = null;
+                        }
+                        catch
+                        {
+                            // Unreadable lead-in (region start, read failure): analyze the page alone.
+                            leadIn = null;
                         }
                     }
-                    catch
+                    if (leadIn != null)
                     {
-                        // Unreadable lead-in (region start, read failure): analyze the page alone.
+                        analyzedList = new List<(uint instruction, uint address)>(instructionList.Count + leadIn.Length / 4);
+                        for (int off = 0; off + 4 <= leadIn.Length; off += 4)
+                            analyzedList.Add((BitConverter.ToUInt32(leadIn, off), leadStart + (uint)off));
+                        analyzedList.AddRange(instructionList);
+                    }
+
+                    // Register state resets at every function entry on (or before) the page.
+                    if (_ctx.Xrefs.HasIndex)
+                    {
+                        functionStarts = new HashSet<uint>();
+                        foreach (var (_, a) in analyzedList)
+                            if (_ctx.Xrefs.IsFunctionStart(a)) functionStarts.Add(a);
                     }
                 }
 
@@ -1142,7 +1165,8 @@ namespace CodeDesigner.Ps2.Bridge.Services
                     includeStateHints: includeStateHints,
                     seedCpu: seedCpu,
                     seedPc: seedPc,
-                    loadBus: loadBus);
+                    loadBus: loadBus,
+                    functionStarts: functionStarts);
 
                 // Apply comments and labels to results.  Look each row up by
                 // address rather than by index because the row stride is now
@@ -1162,6 +1186,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
                         var (code, data) = _ctx.Xrefs.CountTo(addr);
                         if (code > 0) row.XrefCount = code;
                         if (data > 0) row.DataRefCount = data;
+                        if (functionStarts != null && functionStarts.Contains(addr)) row.FunctionStart = true;
                     }
 
                     if (_ctx.Labels.TryGetValue(addr, out var labelEntry))
@@ -1473,6 +1498,12 @@ namespace CodeDesigner.Ps2.Bridge.Services
 
         /// <summary>Bytes before a page that the analyzer simulates (not shown) to carry register state in.</summary>
         private const int LeadInBytes = 0x80;
+
+        /// <summary>
+        /// Longest stretch of a function above the page that is simulated. Real
+        /// functions are far shorter; this only bounds a mis-detected one.
+        /// </summary>
+        private const uint MaxFunctionLeadIn = 0x4000;
 
         /// <summary>
         /// Maps a CPU address to the form live panels disassemble at: KSEG0/KSEG1
