@@ -2,6 +2,7 @@ import { Injectable, OnDestroy, inject } from '@angular/core';
 import { Subject, Subscription } from 'rxjs';
 import { VsCodeBridgeService } from '../shared/vscode-bridge.service';
 import { EditorState } from './state/editor.state';
+import { findRowIndexForByteOffset } from './state/row-locator';
 import {
   DisasmRow,
   type DataFormatKind,
@@ -456,7 +457,9 @@ export class DisasmEditorService implements OnDestroy {
       const pageStart = this.getPageStart(instrIdx);
       const page      = updatedPages.get(pageStart) ?? this.state.loadedPages.get(pageStart);
       if (!page) { continue; }
-      const local = instrIdx - pageStart;
+      // Rows aren't one per 4 bytes once a page holds .byte/.half/string rows,
+      // so find the row by its address rather than by index.
+      const local = findRowIndexForByteOffset(page, this.state.baseAddress, physAddr - physBase);
       if (local >= 0 && local < page.length) {
         if ((page[local].comment ?? '') === (comment ?? '')) { continue; }
         const nextPage = page.slice();

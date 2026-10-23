@@ -43,6 +43,19 @@ interface DisassembledRow {
   dataFormatKind?: DataFormatKind;
 }
 
+/** Metadata for one open live memory panel: label, address range, bootstrap state. */
+interface LivePanelInfo {
+  panel: vscode.WebviewPanel;
+  label: string;
+  region: string;                // legacy 'ee' | 'iop' tag passed to disasm reads
+  memoryRegion: MemoryRegion;    // canonical region enum used by navigateToAddress
+  baseAddress: number;
+  totalBytes: number;
+  physBaseAddress: number;  // pre-computed physical base for fast address lookup
+  ready: boolean;           // webview has bootstrapped and received its init message
+  pendingGoto?: number;     // goto queued while the panel was still bootstrapping
+}
+
 /** Cached scanner results stored per panel. */
 interface PanelScanCache {
   strings?:   StringEntry[];
@@ -66,15 +79,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   /** All currently-open live memory panels. Used to broadcast pause/resume state. */
   private _livePanels: vscode.WebviewPanel[] = [];
   /** Metadata for each live panel: label, address range. Used for reuse and address lookup. */
-  private _livePanelInfo: Array<{
-    panel: vscode.WebviewPanel;
-    label: string;
-    region: string;                // legacy 'ee' | 'iop' tag passed to disasm reads
-    memoryRegion: MemoryRegion;    // canonical region enum used by navigateToAddress
-    baseAddress: number;
-    totalBytes: number;
-    physBaseAddress: number;  // pre-computed physical base for fast address lookup
-  }> = [];
+  private _livePanelInfo: LivePanelInfo[] = [];
   /** The single open intro/splash panel. Undefined when the user closes it. */
   private _introPanel: vscode.WebviewPanel | undefined;
   /** The single open Label Manager tab panel. Undefined when the user closes it. */
@@ -136,8 +141,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   public onPauseStateChange?: (paused: boolean) => void;
 
   /**
-   * Optional callback invoked when a webview requests opening a live memory region by label
-   * (e.g. from the memory-region-selector toolbar buttons in the disasm editor).
+   * Optional callback invoked to open a live memory region by label, either on request
+   * from a webview or on demand when a goto targets a region with no open panel.
    * Set by DisasmPanelProvider so it can open the appropriate optional memory view.
    */
   public onOpenMemoryView?: (label: string) => Promise<void>;
@@ -229,7 +234,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
 
     if (target) {
         target.panel.reveal(undefined, false);
-        target.panel.webview.postMessage({ type: 'gotoAddress', address: displayAddr });
+        this._postGoto(target, displayAddr);
         // Record this routed navigation in the server-side history using the
         // caller's source so user jumps and Follow AI jumps stay distinct.
         this._recordNav(displayAddr, source);
@@ -246,10 +251,24 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 const opened = this._findPanelForAddress(info.region, displayAddr);
                 if (!opened) return; // open failed silently — leave the user where they are.
                 opened.panel.reveal(undefined, false);
-                opened.panel.webview.postMessage({ type: 'gotoAddress', address: displayAddr });
+                this._postGoto(opened, displayAddr);
                 this._recordNav(displayAddr, source);
             })
             .catch(err => getOutputChannel().warn(`[navigateToAddress] open failed: ${err}`));
+    }
+  }
+
+  /**
+   * Sends a `gotoAddress` to a live panel. A panel that was just opened has not
+   * bootstrapped its webview yet and would drop the message (and its later
+   * `init` resets the view to the top of the region), so the goto is parked on
+   * the panel and delivered once its `ready` handshake completes.
+   */
+  private _postGoto(info: LivePanelInfo, address: number): void {
+    if (info.ready) {
+      info.panel.webview.postMessage({ type: 'gotoAddress', address });
+    } else {
+      info.pendingGoto = address;
     }
   }
 
@@ -455,11 +474,26 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   }
 
 
-  /** Merge server labels with game-specific labels. Game labels take priority on conflicts. */
+  /**
+   * Merge server labels with game-specific labels. Entries for the same physical
+   * address (0x00100000, 00100000 and 0x80100000 are one address) are combined:
+   * the game label's non-empty fields win, and a missing comment keeps the
+   * server's instead of erasing it.
+   */
   private _mergeLabels(serverLabels: LabelEntry[], gameLabels: LabelEntry[]): LabelEntry[] {
+    const key = (address: string): string => {
+      const n = parseInt(address.replace(/^0x/i, ''), 16);
+      return Number.isFinite(n) ? DisasmEditorProvider._toPhysAddr(n).toString(16) : address.toLowerCase();
+    };
     const map = new Map<string, LabelEntry>();
-    for (const l of serverLabels) { map.set(l.address.toLowerCase(), l); }
-    for (const l of gameLabels)   { map.set(l.address.toLowerCase(), l); }
+    for (const l of serverLabels) { map.set(key(l.address), l); }
+    for (const l of gameLabels) {
+      const k = key(l.address);
+      const prev = map.get(k);
+      map.set(k, prev
+        ? { ...prev, ...l, label: l.label || prev.label, comment: l.comment || prev.comment }
+        : l);
+    }
     return Array.from(map.values());
   }
 
@@ -905,17 +939,39 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             args: "",
             comment: `; Error: ${result.Error}`,
           });
+        } else {
+          // Neither Success nor Error: keep the row so every following row stays
+          // at its own address instead of shifting up.
+          rows.push({
+            addr: currentAddr.toString(16).toUpperCase().padStart(8, "0"),
+            bytes: (offset >= 0 && offset + byteLen <= buffer.length)
+              ? this.formatBytesForDisplay(buffer, offset, byteLen)
+              : '',
+            label: result.Label || "",
+            op: ".word",
+            args: "",
+            comment: result.Comment || "",
+          });
         }
       }
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       console.error(`[DISASM] Failed to disassemble with backend: ${errorMsg}`);
-      vscode.window.showErrorMessage(`Disassembly failed: ${errorMsg}`);
-      // Return empty array on error
+      // The live view refreshes every second, so a popup here would repeat;
+      // log once per distinct message instead. Callers keep the previous page.
+      if (errorMsg !== this._lastDisassembleError) {
+        this._lastDisassembleError = errorMsg;
+        getOutputChannel().appendLine(`[DISASM] Disassembly failed: ${errorMsg}`);
+      }
+      return rows;
     }
 
+    this._lastDisassembleError = '';
     return rows;
   }
+
+  /** Last backend disassembly failure, so a repeating error is logged once. */
+  private _lastDisassembleError = '';
 
   openCustomDocument(uri: vscode.Uri): vscode.CustomDocument {
     return { uri, dispose: () => {} };
@@ -1070,7 +1126,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             const results = await this.socketClient.assemble(message.instruction as string);
             const first = results?.[0];
             if (first?.Success && first.Hex) {
-              const hexBytes = first.Hex.replace(/^0x/i, '').toUpperCase();
+              const hexBytes = first.Hex.replace(/0x/gi, '').replace(/\s+/g, '').toUpperCase();
               webviewPanel.webview.postMessage({ type: 'assembleInstrResult', hexBytes });
             } else {
               webviewPanel.webview.postMessage({ type: 'assembleInstrResult', hexBytes: null });
@@ -1346,16 +1402,17 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     ): Promise<void> {
         const connected = this.socketClient?.isConnected() ?? false;
 
-        // Reuse an already-open panel with the same label (e.g. after reconnect)
-        const existingInfo = this._livePanelInfo.find(i => i.label === label);
+        // Reuse an already-open panel with the same label (e.g. after reconnect).
+        // Its message handler captured the region, base and size it was opened
+        // with, so a panel asked to show a different range is replaced instead.
+        let existingInfo = this._livePanelInfo.find(i => i.label === label);
+        if (existingInfo && (existingInfo.baseAddress !== baseAddress
+            || existingInfo.totalBytes !== totalBytes || existingInfo.region !== region)) {
+            existingInfo.panel.dispose();
+            existingInfo = undefined;
+        }
         if (existingInfo) {
             existingInfo.panel.reveal(vscode.ViewColumn.One, true);
-            // Update the stored base address and physical base so that
-            // _revealPanelForAddress uses the correct range after an address change
-            // (e.g. BIOS ROM shown at KSEG0 0x9FC00000 instead of physical 0x1FC00000).
-            existingInfo.baseAddress = baseAddress;
-            existingInfo.physBaseAddress = DisasmEditorProvider._toPhysAddr(baseAddress);
-            existingInfo.memoryRegion   = classifyAddress(baseAddress).region;
             // Re-initialize with live data now that we have a connection
             if (connected) {
                 const totalInstructions = Math.floor(totalBytes / DisasmEditorProvider.INSTRUCTION_SIZE);
@@ -1397,7 +1454,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         // by region rather than naive numeric range (IOP physical 0x000xxxxx
         // would otherwise collide with EE RAM).
         const memoryRegion = classifyAddress(baseAddress).region;
-        const info = { panel, label, region, memoryRegion, baseAddress, totalBytes, physBaseAddress: physBase };
+        const info: LivePanelInfo = { panel, label, region, memoryRegion, baseAddress, totalBytes, physBaseAddress: physBase, ready: false };
         this._livePanels.push(panel);
         this._livePanelInfo.push(info);
         panel.onDidDispose(() => {
@@ -1448,6 +1505,13 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 // Sync the Follow AI toggle state so the toolbar button reflects
                 // the current setting even when the panel was just opened.
                 panel.webview.postMessage({ type: 'followAiState', enabled: this._followAiEnabled });
+                // Deliver a goto that arrived while this panel was still opening.
+                info.ready = true;
+                if (info.pendingGoto !== undefined) {
+                    const address = info.pendingGoto;
+                    info.pendingGoto = undefined;
+                    panel.webview.postMessage({ type: 'gotoAddress', address });
+                }
                 return;
             }
             if (message.type === 'bootstrapError') {
@@ -1695,7 +1759,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                     // Reveal the panel in its current column (undefined preserves the
                     // panel's existing position rather than forcing it into column one).
                     target.panel.reveal(undefined, false);
-                    target.panel.webview.postMessage({ type: 'gotoAddress', address: addr });
+                    this._postGoto(target, addr);
                     this._recordNav(addr, 'user');
                 } else {
                     // No panel currently covers this address — auto-open the
@@ -1714,7 +1778,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                                     return;
                                 }
                                 opened.panel.reveal(undefined, false);
-                                opened.panel.webview.postMessage({ type: 'gotoAddress', address: addr });
+                                this._postGoto(opened, addr);
                                 this._recordNav(addr, 'user');
                             })
                             .catch(err => {
@@ -1730,25 +1794,30 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             } else if (message.type === 'patchBytes') {
                 if (this.socketClient?.isConnected()) {
                     try {
-                        // The bytes field (populated by formatBytesForDisplay) shows bytes in
-                        // big-endian (word) order.  Reverse the byte pairs to get the correct
-                        // little-endian layout expected by EE memory before writing.
-                        const hexStr = message.hexBytes as string;
-                        const leHex = (hexStr.match(/.{2}/g) ?? [hexStr]).reverse().join('');
-                        await this.socketClient.writeMemory(
-                            message.address as number,
-                            leHex,
-                            'ee'
-                        );
+                        // The bytes field (populated by formatBytesForDisplay) shows each
+                        // word big-endian. Reverse the bytes within every 4-byte word (not
+                        // the whole string — that would also swap the word order of a
+                        // multi-word patch) to get the little-endian layout memory expects.
+                        const hexStr = (message.hexBytes as string).replace(/0x/gi, '').replace(/\s+/g, '');
+                        const leHex = (hexStr.match(/.{1,8}/g) ?? [])
+                            .map(word => (word.match(/.{2}/g) ?? [word]).reverse().join(''))
+                            .join('');
+                        const address = message.address as number;
+                        // Write through the panel's own region so IOP panels patch IOP RAM.
+                        await this.socketClient.writeMemory(address, leHex, region);
                         // Recompute the page that contains this address and refresh it.
                         const instrIndex = Math.floor(
-                            ((message.address as number) - baseAddress) / DisasmEditorProvider.INSTRUCTION_SIZE
+                            (DisasmEditorProvider._toPhysAddr(address) - DisasmEditorProvider._toPhysAddr(baseAddress))
+                            / DisasmEditorProvider.INSTRUCTION_SIZE
                         );
                         const pageStart = Math.floor(instrIndex / DisasmEditorProvider.PAGE_SIZE)
                             * DisasmEditorProvider.PAGE_SIZE;
                         await this.sendLiveDisasmPage(panel, region, baseAddress, totalBytes, pageStart);
+                        await this.sendLiveHexView(panel, region, baseAddress, address, leHex.length / 2);
                     } catch (err: any) {
-                        console.error(`[LIVE] PatchBytes failed: ${err?.message ?? err}`);
+                        const msg = err?.message ?? String(err);
+                        getOutputChannel().appendLine(`[LIVE] PatchBytes failed: ${msg}`);
+                        vscode.window.showErrorMessage(`Patch failed: ${msg}`);
                     }
                 }
             } else if (message.type === 'setRegister') {
@@ -1849,7 +1918,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                         const first = results?.[0];
                         if (first?.Success && first.Hex) {
                             // Strip the "0x" prefix so patchBytes/saveEditOverlay receive a raw hex string.
-                            const hexBytes = first.Hex.replace(/^0x/i, '').toUpperCase();
+                            const hexBytes = first.Hex.replace(/0x/gi, '').replace(/\s+/g, '').toUpperCase();
                             panel.webview.postMessage({ type: 'assembleInstrResult', hexBytes });
                         } else {
                             panel.webview.postMessage({ type: 'assembleInstrResult', hexBytes: null });
@@ -1992,8 +2061,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                     vscode.window.showErrorMessage(`Failed to set data format: ${msg}`);
                     return;
                 }
-                const refreshStart = (message.startIndex as number | undefined) ?? 0;
-                await this.sendLiveDisasmPage(panel, region, baseAddress, totalBytes, refreshStart);
+                await this._refreshPagesForRange(panel, region, baseAddress, totalBytes,
+                    message.address as number, message.length as number);
             } else if (message.type === 'clearDataFormat') {
                 if (!this.socketClient?.isConnected()) { return; }
                 try {
@@ -2008,13 +2077,36 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                     vscode.window.showErrorMessage(`Failed to clear data format: ${msg}`);
                     return;
                 }
-                const refreshStart = (message.startIndex as number | undefined) ?? 0;
-                await this.sendLiveDisasmPage(panel, region, baseAddress, totalBytes, refreshStart);
+                await this._refreshPagesForRange(panel, region, baseAddress, totalBytes,
+                    message.address as number, message.length as number);
             }
         });
 
         // Set html AFTER registering the message handler so 'ready' is captured.
         panel.webview.html = this.getHtml(panel.webview);
+    }
+
+    /**
+     * Re-disassemble every page that `[address, address + length)` touches. A
+     * data format applied near the end of a page (a .qword on the last row, or
+     * a string that runs on) also changes the first rows of the next page.
+     */
+    private async _refreshPagesForRange(
+        panel: vscode.WebviewPanel,
+        region: string,
+        baseAddress: number,
+        totalBytes: number,
+        address: number,
+        length: number,
+    ): Promise<void> {
+        const pageBytes = DisasmEditorProvider.PAGE_SIZE * DisasmEditorProvider.INSTRUCTION_SIZE;
+        const start = DisasmEditorProvider._toPhysAddr(address) - DisasmEditorProvider._toPhysAddr(baseAddress);
+        const end = start + Math.max(1, length) - 1;
+        const firstPage = Math.max(0, Math.floor(start / pageBytes));
+        const lastPage = Math.min(Math.floor(end / pageBytes), Math.floor((totalBytes - 1) / pageBytes));
+        for (let page = firstPage; page <= lastPage; page++) {
+            await this.sendLiveDisasmPage(panel, region, baseAddress, totalBytes, page * DisasmEditorProvider.PAGE_SIZE);
+        }
     }
 
     /**
@@ -2065,7 +2157,12 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         const pcInfo = classifyAddress(statusMsg.pc);
         const physPc = pcInfo.physicalAddress >>> 0;
         const target = this._findPanelForAddress(pcInfo.region, physPc);
-        if (!target) { return; }
+        if (!target) {
+            // No open panel shows the PC (e.g. paused in IOP code with only EE RAM
+            // open): open the region's panel and move to the PC once it loads.
+            this.navigateToAddress(statusMsg.pc);
+            return;
+        }
 
         const instructionIndex = Math.floor((physPc - target.physBaseAddress) / DisasmEditorProvider.INSTRUCTION_SIZE);
         if (instructionIndex < 0) { return; }
@@ -2141,8 +2238,10 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     private static _toPhysAddr(addr: number): number {
         const v = addr >>> 0;
         if (v >= 0x80000000 && v <= 0xBFFFFFFF) return (v & 0x1FFFFFFF) >>> 0;
-        if (v >= 0x20100000 && v <= 0x21FFFFFF) return (v - 0x20000000) >>> 0;
-        if (v >= 0x30100000 && v <= 0x31FFFFFF) return (v - 0x30000000) >>> 0;
+        // Same windows as the webview's toPhysAddr (address.utils.ts), so host and
+        // webview agree on which panel owns an address.
+        if (v >= 0x20000000 && v <= 0x21FFFFFF) return (v - 0x20000000) >>> 0;
+        if (v >= 0x30000000 && v <= 0x31FFFFFF) return (v - 0x30000000) >>> 0;
         return v;
     }
 
@@ -2162,17 +2261,29 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
 
     private _endLiveBackendRequest(): void {
       this._liveReadInFlight = false;
-      // A hex request that arrived while this read was in flight was dropped;
-      // replay the latest one so the byte display follows the cursor.
-      const deferred = this._deferredLiveHexRequest;
-      if (deferred) {
-        this._deferredLiveHexRequest = undefined;
-        deferred();
-      }
+      // Page and hex requests that arrived while this read was in flight were
+      // parked; replay the latest of each so a paused view (no refresh timer)
+      // still gets the page it asked for. The first replay takes the lock and
+      // the rest park themselves again until it finishes.
+      const deferred = [...this._deferredLiveRequests.values()];
+      this._deferredLiveRequests.clear();
+      for (const replay of deferred) { replay(); }
     }
 
-    /** Latest hex-view request that was skipped because a live read was in flight. */
-    private _deferredLiveHexRequest: (() => void) | undefined;
+    /**
+     * Latest live read per panel and kind ("hex", "page:<startIndex>") that was
+     * skipped because another read was in flight. Keyed so a burst of requests
+     * collapses to the newest one.
+     */
+    private _deferredLiveRequests = new Map<string, () => void>();
+    private _panelIds = new WeakMap<vscode.WebviewPanel, number>();
+    private _nextPanelId = 1;
+
+    private _deferLiveRequest(panel: vscode.WebviewPanel, kind: string, replay: () => void): void {
+      let id = this._panelIds.get(panel);
+      if (id === undefined) { id = this._nextPanelId++; this._panelIds.set(panel, id); }
+      this._deferredLiveRequests.set(`${id}:${kind}`, replay);
+    }
 
     /**
      * Returns true when a live read cannot proceed because the socket is
@@ -2280,12 +2391,15 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         const readLength  = Math.min(totalBytes - startOffset, maxBytes);
         if (readLength <= 0) { return; }
 
-        // When the socket is merely busy with another in-flight read, silently
-        // skip this refresh cycle.  Pushing placeholder zero-rows while the
-        // previous read is still pending causes the visible "flickering" between
-        // real memory and zeroes.
+        // When the socket is merely busy with another in-flight read, park this
+        // request and replay it once the read finishes. Pushing placeholder
+        // zero-rows while the previous read is still pending causes the visible
+        // "flickering" between real memory and zeroes, and dropping it left a
+        // paused view (no refresh timer) without the page it asked for.
         if (this._isLiveReadBusy()) {
-          panel.webview.postMessage({ type: 'disasmRefreshSkipped', startIndex });
+          this._deferLiveRequest(panel, `page:${startIndex}`, () => {
+            void this.sendLiveDisasmPage(panel, region, baseAddress, totalBytes, startIndex, bypassOverrides);
+          });
           return;
         }
 
@@ -2308,7 +2422,11 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             const buffer = await socketClient.readMemory(startAddr, readLength, region);
             const rows   = await this.disassembleWithBackend(startAddr, buffer, bypassOverrides);
           this._handleLiveReadSuccess();
-            panel.webview.postMessage({ type: 'disasmPage', rows, startIndex });
+            // An empty result for a non-empty read means the backend failed;
+            // keep whatever page the webview already shows rather than blanking it.
+            if (rows.length > 0 || buffer.length === 0) {
+                panel.webview.postMessage({ type: 'disasmPage', rows, startIndex });
+            }
         } catch (err: any) {
           this._handleLiveReadFailure(`sendLiveDisasmPage at 0x${startAddr.toString(16)}`, err);
           panel.webview.postMessage({
@@ -2332,9 +2450,9 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       // this request on a page change): defer instead of dropping, otherwise
       // the hex view stays stale until something forces a refresh.
       if (this._isLiveReadBusy()) {
-        this._deferredLiveHexRequest = () => {
+        this._deferLiveRequest(panel, 'hex', () => {
           void this.sendLiveHexView(panel, region, baseAddress, highlightAddr, highlightLength);
-        };
+        });
         return;
       }
 
@@ -2344,7 +2462,14 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       }
 
         const socketClient = this.socketClient!;
-        const alignedAddr = Math.max(baseAddress, ((highlightAddr & ~0xf) >>> 0) - 0x10);
+        // Keep the window inside the panel's region: a read past the end (e.g.
+        // the last row of scratchpad) fails and would put every panel into
+        // read backoff.
+        const totalBytes = this._livePanelInfo.find(i => i.panel === panel)?.totalBytes;
+        let alignedAddr = Math.max(baseAddress, ((highlightAddr & ~0xf) >>> 0) - 0x10);
+        if (totalBytes !== undefined) {
+            alignedAddr = Math.max(baseAddress, Math.min(alignedAddr, baseAddress + totalBytes - DisasmEditorProvider.HEX_VIEW_SIZE));
+        }
         if (!this._tryBeginLiveBackendRequest()) {
           return;
         }
@@ -3135,7 +3260,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         labels = this._mergeLabels(labels, setLabels);
         labels = this._mergeLabels(labels, this._gameLabels);
         if (this._pointerLabels.length > 0) { labels = this._mergeLabels(labels, this._pointerLabels); }
-        panel.webview.postMessage({ type: 'labelsUpdated', labels });
+        this._postLabelsEverywhere(panel, labels);
         return;
       } else if (this._gameLabelsPath()) {
         // Offline fallback: socket not connected — save to per-game labels.json.
@@ -3152,9 +3277,25 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         : [];
       labels = this._mergeLabels(labels, this._gameLabels);
       if (this._pointerLabels.length > 0) { labels = this._mergeLabels(labels, this._pointerLabels); }
-      panel.webview.postMessage({ type: 'labelsUpdated', labels });
+      this._postLabelsEverywhere(panel, labels);
     } catch (err: any) {
       console.error(`[SYMBOLS] AddLabel failed: ${err?.message ?? err}`);
+    }
+  }
+
+  /**
+   * Send a freshly merged label list to the panel that changed it and to every
+   * live panel, with the struct and archive overlays every panel otherwise gets
+   * from {@link _broadcastMergedLabels}. Previously only the editing panel was
+   * updated, so other open regions kept showing the old label.
+   */
+  private _postLabelsEverywhere(panel: vscode.WebviewPanel, labels: LabelEntry[]): void {
+    let merged = labels;
+    if (this._structLabels.length > 0) { merged = this._mergeLabels(merged, this._structLabels); }
+    if (this._archiveLabels.length > 0) { merged = this._mergeLabels(merged, this._archiveLabels); }
+    const targets = new Set<vscode.WebviewPanel>([panel, ...this._livePanels]);
+    for (const p of targets) {
+      p.webview.postMessage({ type: 'labelsUpdated', labels: merged });
     }
   }
 
@@ -3184,7 +3325,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         labels = this._mergeLabels(labels, setLabels);
         labels = this._mergeLabels(labels, this._gameLabels);
         if (this._pointerLabels.length > 0) { labels = this._mergeLabels(labels, this._pointerLabels); }
-        panel.webview.postMessage({ type: 'labelsUpdated', labels });
+        this._postLabelsEverywhere(panel, labels);
         return;
       } else if (this._gameLabelsPath()) {
         // Offline fallback: socket not connected — remove from per-game labels.json.
@@ -3201,7 +3342,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         : [];
       labels = this._mergeLabels(labels, this._gameLabels);
       if (this._pointerLabels.length > 0) { labels = this._mergeLabels(labels, this._pointerLabels); }
-      panel.webview.postMessage({ type: 'labelsUpdated', labels });
+      this._postLabelsEverywhere(panel, labels);
     } catch (err: any) {
       console.error(`[SYMBOLS] DeleteLabel failed: ${err?.message ?? err}`);
     }

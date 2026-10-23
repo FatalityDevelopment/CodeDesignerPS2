@@ -6,7 +6,7 @@
 // as Angular Signals, enabling fine-grained reactivity without zone.js.
 //
 // Components inject EditorState and read signals directly. Updates happen via
-// EditorActions which call signal.set() or signal.update().
+// handlers that call signal.set() or signal.update().
 //
 // ═══════════════════════════════════════════════════════════════════════════
 
