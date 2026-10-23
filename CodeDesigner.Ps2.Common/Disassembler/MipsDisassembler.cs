@@ -408,6 +408,10 @@ namespace CodeDesigner.Ps2.Common
 
                 case 0x1C:
                 {
+                    // pmfhl formats are .lw/.uw/.slw/.lh/.sh (sa 0-4); pmthl only has .lw.
+                    int sa = MipsDecoder.GetShamt(instruction);
+                    if ((funct == 0x30 && sa > 4) || (funct == 0x31 && sa != 0))
+                        return (null, null, $"Unknown MMI format (funct=0x{funct:X2}, sa={sa})");
                     if (RTypeInstructions.TryGetValue((opcode, funct), out var mmi))
                         return (mmi, MipsDecoder.DecodeR(instruction), "");
                     if (funct is 0x08 or 0x09 or 0x28 or 0x29 &&

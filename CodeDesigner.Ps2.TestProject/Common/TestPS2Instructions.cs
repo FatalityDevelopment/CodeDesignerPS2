@@ -581,7 +581,7 @@ namespace CodeDesigner.Ps2.TestProject
         {
             Assert.IsTrue(MipsDisassembler.Disassemble(0x02114020).Contains("add"),  "ADD should still work");
             Assert.IsTrue(MipsDisassembler.Disassemble(0x46010800).Contains("add.s"), "ADD.S should still work");
-            Assert.IsTrue(MipsDisassembler.Disassemble(0x4A000028).Contains("vadd"),  "VADD should still work");
+            Assert.IsTrue(MipsDisassembler.Disassemble(0x4BE00028).Contains("vadd"),  "VADD should still work");
             Assert.IsTrue(MipsDisassembler.Disassemble(0x42000018).Contains("eret"),  "ERET should still work");
         }
 

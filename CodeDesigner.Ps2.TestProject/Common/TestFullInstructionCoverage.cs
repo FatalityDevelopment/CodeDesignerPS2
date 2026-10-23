@@ -50,12 +50,19 @@ namespace CodeDesigner.Ps2.TestProject
             return comments.GetValueOrDefault(0x80000000u, string.Empty);
         }
 
-        /// <summary>Asserts the disassembly of <paramref name="encoded"/> contains <paramref name="mnemonic"/>.</summary>
+        /// <summary>
+        /// Asserts the disassembly of <paramref name="encoded"/> contains <paramref name="mnemonic"/>
+        /// and that the printed text assembles back to an instruction printing the same text.
+        /// </summary>
         private static void AssertDisasm(uint encoded, string mnemonic)
         {
             string disasm = MipsDisassembler.Disassemble(encoded);
             Assert.IsTrue(disasm.ToLowerInvariant().Contains(mnemonic.ToLowerInvariant()),
                 $"Expected mnemonic '{mnemonic}' in disassembly but got: {disasm}");
+            Assert.IsTrue(MipsAssembler.TryAssemble(disasm, out uint back, out string? error),
+                $"'{disasm}' (0x{encoded:X8}) does not assemble: {error}");
+            Assert.AreEqual(disasm, MipsDisassembler.Disassemble(back),
+                $"'{disasm}' (0x{encoded:X8}) re-assembles to 0x{back:X8}");
         }
 
         /// <summary>Asserts that assembling <paramref name="asmLine"/> produces <paramref name="expected"/>.</summary>

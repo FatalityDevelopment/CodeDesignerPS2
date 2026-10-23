@@ -2415,9 +2415,11 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
 
     private _isLiveReadConnectionFailure(err: unknown): boolean {
       const msg = String((err as any)?.message ?? err ?? '').toLowerCase();
+      // A plain "READMEM error" is usually one bad address (e.g. past a region's
+      // end), not a lost emulator: it must not pause every panel's reads. Real
+      // connection loss still matches the phrases below.
       return msg.includes('actively refused')
         || msg.includes('client not ready')
-        || msg.includes('readmem error')
         || msg.includes('connection refused')
         || msg.includes('command timeout')
         || msg.includes('getpc error')

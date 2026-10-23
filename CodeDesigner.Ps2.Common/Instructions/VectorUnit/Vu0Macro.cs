@@ -379,9 +379,13 @@ namespace CodeDesigner.Ps2.Common.Instructions.VectorUnitInstructions
         {
             if ((word >> 26) != 0x12 || (word & (1u << 25)) == 0) return null;
             int funct = (int)(word & 0x3F);
-            if (funct >= 0x3C)
-                return Special2[(int)((word & 3) | ((word >> 4) & 0x7C))];
-            return Special1[funct];
+            var op = funct >= 0x3C
+                ? Special2[(int)((word & 3) | ((word >> 4) & 0x7C))]
+                : Special1[funct];
+            // An op that writes no component does nothing; real code never has one,
+            // so the word is data (and "vadd vf1, vf2, vf3" can't express it).
+            if (op is { HasDest: true } && ((word >> 21) & 0xF) == 0) return null;
+            return op;
         }
 
         /// <summary>True when <paramref name="mnemonic"/> (without a dest suffix) is a VU0 macro op.</summary>
