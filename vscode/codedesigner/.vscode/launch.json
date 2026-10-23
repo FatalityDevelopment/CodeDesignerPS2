@@ -16,6 +16,20 @@
 				"${workspaceFolder}/dist/**/*.js"
 			],
 			"preLaunchTask": "${defaultBuildTask}"
+		},
+		{
+			// Same as above, but keeps webpack in watch mode: saving a webview
+			// component rebuilds it and the dev host reloads the open panels.
+			"name": "Run Extension (watch)",
+			"type": "extensionHost",
+			"request": "launch",
+			"args": [
+				"--extensionDevelopmentPath=${workspaceFolder}"
+			],
+			"outFiles": [
+				"${workspaceFolder}/dist/**/*.js"
+			],
+			"preLaunchTask": "npm: watch"
 		}
 	]
 }

@@ -15,6 +15,7 @@ import { ZipperWorkbenchProvider } from './providers/zipperWorkbench/zipperWorkb
 import { ANIMATION_EDITOR_PAGE, MAP_EDITOR_PAGE, ModelEditorProvider } from './providers/modelEditor/modelEditorProvider';
 import { WelcomeProvider, WelcomeDataDelegate } from './providers/welcome/welcomeProvider';
 import { SocketClient } from './socketClient';
+import { registerWebviewDevReload } from './utils/devReload';
 
 let socketClient: SocketClient | null = null;
 let outputChannel: vscode.LogOutputChannel;
@@ -71,6 +72,9 @@ export function getZdbChannel(): vscode.OutputChannel {
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
+
+	// Dev host only: reload open webviews when `npm run watch` rebuilds them.
+	registerWebviewDevReload(context);
 
 	// Create output channel for logging — log: true gives colour-coded severity
 	// levels (info/warn/error) with icons rendered in the Output panel.
