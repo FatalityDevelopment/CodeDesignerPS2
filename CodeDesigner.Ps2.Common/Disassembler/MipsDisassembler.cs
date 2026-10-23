@@ -3,18 +3,19 @@ using CodeDesigner.Ps2.Common.Cpu.Instructions;
 using CodeDesigner.Ps2.Common.Cpu.Instructions.EE;
 using CodeDesigner.Ps2.Common.Cpu.Instructions.COP0;
 using CodeDesigner.Ps2.Common.Cpu.Instructions.MMI;
+using CodeDesigner.Ps2.Common.CPU;
 using CodeDesigner.Ps2.Common.Instructions.CoprocessorInstructions;
 using CodeDesigner.Ps2.Common.Instructions.VectorUnitInstructions;
 using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace CodeDesigner.Ps2.Common
 {
     /// <summary>
-    /// Disassembles 32-bit MIPS instruction words into human-readable assembly text
+    /// Disassembles 32-bit R5900 (PS2 Emotion Engine) instruction words into
+    /// human-readable assembly text. Opcodes the EE doesn't implement (MIPS IV
+    /// COP1X, 64-bit multiply/divide, double-precision FPU, …) decode as
+    /// <c>.word</c>, so data words don't masquerade as code.
     /// </summary>
     public class MipsDisassembler
     {
@@ -23,12 +24,10 @@ namespace CodeDesigner.Ps2.Common
         private static readonly Dictionary<int, Instruction<Args_J>> JTypeInstructions = new();
         private static readonly Dictionary<(int opcode, int rs, int? funct), Instruction<Args_R>> CopInstructions = new();
         private static readonly Dictionary<(int opcode, int rt), Instruction<Args_I>> RegimmInstructions = new();
-        // BC1F/BC1T share opcode=0x11 with other COP1 instructions; rt distinguishes them
-        private static readonly Dictionary<int, Instruction<Args_I>> Bc1BranchInstructions = new();
+        // BCzF/BCzT(L): COPz rs=0x08, rt selects the condition and likely bit
+        private static readonly Dictionary<(int opcode, int rt), Instruction<Args_I>> CopBranchInstructions = new();
         // MMI sub-instructions (opcode=0x1C, funct=MMI group, shamt=sub-opcode)
         private static readonly Dictionary<(int funct, int shamt), Instruction<Args_R>> MmiSubInstructions = new();
-        // COP1X instructions (opcode=0x13): funct alone selects the instruction; rs/rt are variable registers
-        private static readonly Dictionary<int, Instruction<Args_R>> Cop1XInstructions = new();
 
         static MipsDisassembler()
         {
@@ -48,12 +47,8 @@ namespace CodeDesigner.Ps2.Common
             RegisterR(new DSUBU());
             RegisterR(new MULT());
             RegisterR(new MULTU());
-            RegisterR(new DMULT());
-            RegisterR(new DMULTU());
             RegisterR(new DIV());
             RegisterR(new DIVU());
-            RegisterR(new DDIV());
-            RegisterR(new DDIVU());
             RegisterR(new MFHI());
             RegisterR(new MFLO());
             RegisterR(new MTHI());
@@ -93,10 +88,11 @@ namespace CodeDesigner.Ps2.Common
             // R-type special instructions
             RegisterR(new MOVZ());
             RegisterR(new MOVN());
-            RegisterR(new MOVCI());  // MOVF/MOVT (funct=0x01)
-            // Note: NOP is not registered as it conflicts with SLL (both have opcode=0, funct=0)
-            // NOP is just SLL $zero, $zero, 0 which will disassemble as "sll zero, zero, 0"
+            // Note: NOP is not registered as it conflicts with SLL (both have opcode=0, funct=0);
+            // the all-zero word is special-cased as "nop".
             RegisterR(new SYNC());
+            RegisterR(new MFSA());  // funct=0x28
+            RegisterR(new MTSA());  // funct=0x29
 
             // R-type trap instructions
             RegisterR(new SYSCALL());
@@ -108,20 +104,17 @@ namespace CodeDesigner.Ps2.Common
             RegisterR(new TEQ());
             RegisterR(new TNE());
 
-            // I-type arithmetic instructions
+            // I-type arithmetic / logical / compare
             RegisterI(new ADDI());
             RegisterI(new ADDIU());
             RegisterI(new DADDI());
             RegisterI(new DADDIU());
-
-            // I-type logical instructions
             RegisterI(new ANDI());
             RegisterI(new ORI());
             RegisterI(new XORI());
-
-            // I-type compare instructions
             RegisterI(new SLTI());
             RegisterI(new SLTIU());
+            RegisterI(new LUI());
 
             // I-type branch instructions
             RegisterI(new BEQ());
@@ -130,14 +123,26 @@ namespace CodeDesigner.Ps2.Common
             RegisterI(new BGTZ());
             RegisterI(new BEQL());
             RegisterI(new BNEL());
+            RegisterI(new BLEZL());
+            RegisterI(new BGTZL());
 
-            // REGIMM branch instructions (opcode 0x01, differentiated by rt field)
-            RegisterRegimm(new BLTZ(), 0x00);    // rt = 0x00
-            RegisterRegimm(new BGEZ(), 0x01);    // rt = 0x01
-            RegisterRegimm(new BLTZAL(), 0x10);  // rt = 0x10
-            RegisterRegimm(new BGEZAL(), 0x11);  // rt = 0x11
-            RegisterRegimm(new BLTZALL(), 0x12); // rt = 0x12
-            RegisterRegimm(new BGEZALL(), 0x13); // rt = 0x13
+            // REGIMM (opcode 0x01, differentiated by rt field)
+            RegisterRegimm(new BLTZ(),    0x00);
+            RegisterRegimm(new BGEZ(),    0x01);
+            RegisterRegimm(new BLTZL(),   0x02);
+            RegisterRegimm(new BGEZL(),   0x03);
+            RegisterRegimm(new TGEI(),    0x08);
+            RegisterRegimm(new TGEIU(),   0x09);
+            RegisterRegimm(new TLTI(),    0x0A);
+            RegisterRegimm(new TLTIU(),   0x0B);
+            RegisterRegimm(new TEQI(),    0x0C);
+            RegisterRegimm(new TNEI(),    0x0E);
+            RegisterRegimm(new BLTZAL(),  0x10);
+            RegisterRegimm(new BGEZAL(),  0x11);
+            RegisterRegimm(new BLTZALL(), 0x12);
+            RegisterRegimm(new BGEZALL(), 0x13);
+            RegisterRegimm(new MTSAB(),   0x18);
+            RegisterRegimm(new MTSAH(),   0x19);
 
             // I-type load instructions
             RegisterI(new LB());
@@ -164,109 +169,78 @@ namespace CodeDesigner.Ps2.Common
             RegisterI(new SDR());
             RegisterI(new SQ());
 
-            // I-type special instructions
-            RegisterI(new LUI());
+            // I-type coprocessor load/store, cache and prefetch
+            RegisterI(new LWC1());   // opcode 0x31
+            RegisterI(new SWC1());   // opcode 0x39
+            RegisterI(new VLQ());    // lqc2, opcode 0x36
+            RegisterI(new VSQ());    // sqc2, opcode 0x3E
+            RegisterI(new CACHE());  // opcode 0x2F
+            RegisterI(new PREF());   // opcode 0x33
 
             // J-type instructions
             RegisterJ(new J());
             RegisterJ(new JAL());
 
             // COP0 instructions (opcode 0x10)
-            RegisterCop(new MFC0(), 0x00);  // rs = 0x00
-            RegisterCop(new DMFC0(), 0x01); // rs = 0x01
-            RegisterCop(new CFC0(), 0x02);  // rs = 0x02
-            RegisterCop(new MTC0(), 0x04);  // rs = 0x04
-            RegisterCop(new DMTC0(), 0x05); // rs = 0x05
-            RegisterCop(new CTC0(), 0x06);  // rs = 0x06
-            // COP0 CO instructions (rs = 0x10)
-            RegisterCop(new TLBR(), 0x10);   // rs = 0x10, funct = 0x01
-            RegisterCop(new TLBWI(), 0x10);  // rs = 0x10, funct = 0x02
-            RegisterCop(new TLBWR(), 0x10);  // rs = 0x10, funct = 0x06
-            RegisterCop(new TLBP(), 0x10);   // rs = 0x10, funct = 0x08
-            RegisterCop(new RFE(),  0x10);   // rs = 0x10, funct = 0x10 (R3000A/IOP)
-            RegisterCop(new ERET(), 0x10);   // rs = 0x10, funct = 0x18
+            RegisterCop(new MFC0(), 0x00);
+            RegisterCop(new MTC0(), 0x04);
+            RegisterCop(new TLBR(),  0x10);  // funct = 0x01
+            RegisterCop(new TLBWI(), 0x10);  // funct = 0x02
+            RegisterCop(new TLBWR(), 0x10);  // funct = 0x06
+            RegisterCop(new TLBP(),  0x10);  // funct = 0x08
+            RegisterCop(new RFE(),   0x10);  // funct = 0x10 (R3000A — IOP code)
+            RegisterCop(new ERET(),  0x10);  // funct = 0x18
+            RegisterCop(new EI(),    0x10);  // funct = 0x38
+            RegisterCop(new DI(),    0x10);  // funct = 0x39
 
             // COP1 instructions (opcode 0x11)
-            RegisterCop(new MFC1(), 0x00);   // rs = 0x00
-            RegisterCop(new DMFC1(), 0x01);  // rs = 0x01
-            RegisterCop(new CFC1(), 0x02);   // rs = 0x02
-            RegisterCop(new MTC1(), 0x04);   // rs = 0x04
-            RegisterCop(new DMTC1(), 0x05);  // rs = 0x05
-            RegisterCop(new CTC1(), 0x06);   // rs = 0x06
-            // COP1 compute instructions (rs = 0x10 for single-precision)
-            RegisterCop(new ADD_S(), 0x10);  // rs = 0x10, funct = 0x00
-            RegisterCop(new SUB_S(), 0x10);  // rs = 0x10, funct = 0x01
-            RegisterCop(new MUL_S(), 0x10);  // rs = 0x10, funct = 0x02
-            RegisterCop(new DIV_S(), 0x10);  // rs = 0x10, funct = 0x03
-            RegisterCop(new SQRT_S(), 0x10); // rs = 0x10, funct = 0x04
-            RegisterCop(new ABS_S(), 0x10);  // rs = 0x10, funct = 0x05
-            RegisterCop(new MOV_S(), 0x10);  // rs = 0x10, funct = 0x06
-            RegisterCop(new NEG_S(), 0x10);  // rs = 0x10, funct = 0x07
-            RegisterCop(new CVT_S_W(), 0x14); // rs = 0x14, funct = 0x20
-            RegisterCop(new CVT_W_S(), 0x10); // rs = 0x10, funct = 0x24
-            RegisterCop(new C_EQ_S(), 0x10);  // rs = 0x10, funct = 0x32
-            RegisterCop(new C_LT_S(), 0x10);  // rs = 0x10, funct = 0x3C
-            RegisterCop(new C_LE_S(), 0x10);  // rs = 0x10, funct = 0x3E
+            RegisterCop(new MFC1(), 0x00);
+            RegisterCop(new CFC1(), 0x02);
+            RegisterCop(new MTC1(), 0x04);
+            RegisterCop(new CTC1(), 0x06);
+            // COP1.S (rs = 0x10)
+            RegisterCop(new ADD_S(),   0x10);  // funct = 0x00
+            RegisterCop(new SUB_S(),   0x10);  // funct = 0x01
+            RegisterCop(new MUL_S(),   0x10);  // funct = 0x02
+            RegisterCop(new DIV_S(),   0x10);  // funct = 0x03
+            RegisterCop(new SQRT_S(),  0x10);  // funct = 0x04
+            RegisterCop(new ABS_S(),   0x10);  // funct = 0x05
+            RegisterCop(new MOV_S(),   0x10);  // funct = 0x06
+            RegisterCop(new NEG_S(),   0x10);  // funct = 0x07
+            RegisterCop(new RSQRT_S(), 0x10);  // funct = 0x16
+            RegisterCop(new ADDA_S(),  0x10);  // funct = 0x18
+            RegisterCop(new SUBA_S(),  0x10);  // funct = 0x19
+            RegisterCop(new MULA_S(),  0x10);  // funct = 0x1A
+            RegisterCop(new MADD_S(),  0x10);  // funct = 0x1C
+            RegisterCop(new MSUB_S(),  0x10);  // funct = 0x1D
+            RegisterCop(new MADDA_S(), 0x10);  // funct = 0x1E
+            RegisterCop(new MSUBA_S(), 0x10);  // funct = 0x1F
+            RegisterCop(new CVT_W_S(), 0x10);  // funct = 0x24
+            RegisterCop(new MAX_S(),   0x10);  // funct = 0x28
+            RegisterCop(new MIN_S(),   0x10);  // funct = 0x29
+            RegisterCop(new C_F(),     0x10);  // funct = 0x30
+            RegisterCop(new C_EQ_S(),  0x10);  // funct = 0x32
+            RegisterCop(new C_LT_S(),  0x10);  // funct = 0x34
+            RegisterCop(new C_LE_S(),  0x10);  // funct = 0x36
+            // COP1.W (rs = 0x14)
+            RegisterCop(new CVT_S_W(), 0x14);  // funct = 0x20
 
-            // COP2/VU0 instructions (opcode 0x12)
-            RegisterCop(new VADD(), 0x10);   // rs varies, funct = 0x28
-            RegisterCop(new VSUB(), 0x10);   // rs varies, funct = 0x29
-            RegisterCop(new VMUL(), 0x10);   // rs varies, funct = 0x2A
-            RegisterCop(new VMAX(), 0x10);   // rs varies, funct = 0x2B
-            RegisterCop(new VMIN(), 0x10);   // rs varies, funct = 0x2C
-            RegisterCop(new VMSUB(), 0x10);  // rs varies, funct = 0x2D
-            RegisterCop(new VADDA(), 0x10);  // rs varies, funct = 0x2E
-            RegisterCop(new VABS(), 0x10);   // rs varies, funct = 0x2F
-            RegisterCop(new VMADD(), 0x10);  // rs varies, funct = 0x30
-            RegisterCop(new VMULA(), 0x10);  // rs varies, funct = 0x31
-            RegisterCop(new VFTOI0(), 0x10); // rs varies, funct = 0x3C
-            RegisterCop(new VITOF0(), 0x10); // rs varies, funct = 0x3D
-            // Additional VU0 instructions
-            RegisterCop(new VSUBA(), 0x10);   // funct = 0x32
-            RegisterCop(new VOPMULA(), 0x10); // funct = 0x33
-            RegisterCop(new VOPMSUB(), 0x10); // funct = 0x34
-            RegisterCop(new VDIV(), 0x10);    // funct = 0x35
-            RegisterCop(new VSQRT(), 0x10);   // funct = 0x36
-            RegisterCop(new VRSQRT(), 0x10);  // funct = 0x37
-            RegisterCop(new VMOVE(), 0x10);   // funct = 0x38
-            RegisterCop(new VMR32(), 0x10);   // funct = 0x39
-            RegisterCop(new VNOP(), 0x10);    // funct = 0x3A
-            RegisterCop(new VCLIPW(), 0x10);  // funct = 0x3B
+            // COP2 register moves (opcode 0x12); macro-mode ops dispatch through Vu0Macro
+            RegisterCop(new QMFC2(), 0x01);
+            RegisterCop(new CFC2(),  0x02);
+            RegisterCop(new QMTC2(), 0x05);
+            RegisterCop(new CTC2(),  0x06);
 
-            // I-type COP1 load/store and branch instructions
-            RegisterI(new LWC1());
-            RegisterI(new SWC1());
-            RegisterI(new LDC1());  // opcode = 0x35
-            RegisterI(new SDC1());  // opcode = 0x3D
-            // BC1F (rt=0) and BC1T (rt=1) share opcode=0x11 with other COP1 instructions;
-            // register them in the dedicated rt-keyed dictionary so they can be distinguished
-            Bc1BranchInstructions[0] = new BC1F();
-            Bc1BranchInstructions[1] = new BC1T();
-            Bc1BranchInstructions[2] = new BC1FL();
-            Bc1BranchInstructions[3] = new BC1TL();
-
-            // I-type COP2 load/store
-            RegisterI(new VLQ());  // opcode = 0x36
-            RegisterI(new VSQ());  // opcode = 0x3E
-
-            // I-type COP0 CACHE instruction
-            RegisterI(new CACHE());
-
-            // Additional COP1 single-precision instructions (rs = 0x10)
-            RegisterCop(new RSQRT_S(), 0x10);   // funct = 0x16
-            RegisterCop(new ROUND_W_S(), 0x10); // funct = 0x0C
-            RegisterCop(new TRUNC_W_S(), 0x10); // funct = 0x0D
-            RegisterCop(new CEIL_W_S(), 0x10);  // funct = 0x0E
-            RegisterCop(new FLOOR_W_S(), 0x10); // funct = 0x0F
-            RegisterCop(new ADDA_S(), 0x10);    // funct = 0x18
-            RegisterCop(new SUBA_S(), 0x10);    // funct = 0x19
-            RegisterCop(new MULA_S(), 0x10);    // funct = 0x1A
-            RegisterCop(new MADD_S(), 0x10);    // funct = 0x1C
-            RegisterCop(new MSUB_S(), 0x10);    // funct = 0x1D
-            RegisterCop(new MADDA_S(), 0x10);   // funct = 0x1E
-            RegisterCop(new MSUBA_S(), 0x10);   // funct = 0x1F
-            RegisterCop(new MAX_S(), 0x10);     // funct = 0x28
-            RegisterCop(new MIN_S(), 0x10);     // funct = 0x29
+            // BCzF / BCzT / BCzFL / BCzTL
+            CopBranchInstructions[(0x11, 0)] = new BC1F();
+            CopBranchInstructions[(0x11, 1)] = new BC1T();
+            CopBranchInstructions[(0x11, 2)] = new BC1FL();
+            CopBranchInstructions[(0x11, 3)] = new BC1TL();
+            for (int rt = 0; rt < 4; rt++)
+            {
+                CopBranchInstructions[(0x10, rt)] = new CopBranch(0, rt);
+                CopBranchInstructions[(0x12, rt)] = new CopBranch(2, rt);
+            }
 
             // MMI (EE Multimedia) direct instructions (opcode = 0x1C)
             RegisterR(new MADD());    // funct = 0x00
@@ -282,6 +256,14 @@ namespace CodeDesigner.Ps2.Common
             RegisterR(new DIVU1());   // funct = 0x1B
             RegisterR(new MADD1());   // funct = 0x20
             RegisterR(new MADDU1());  // funct = 0x21
+            RegisterR(new PMFHL());   // funct = 0x30
+            RegisterR(new PMTHL());   // funct = 0x31
+            RegisterR(new PSLLH());   // funct = 0x34
+            RegisterR(new PSRLH());   // funct = 0x36
+            RegisterR(new PSRAH());   // funct = 0x37
+            RegisterR(new PSLLW());   // funct = 0x3C
+            RegisterR(new PSRLW());   // funct = 0x3E
+            RegisterR(new PSRAW());   // funct = 0x3F
 
             // MMI0 sub-group (funct=0x08, shamt=sub-opcode)
             RegisterMmiSub(new PADDW(),  0x08, 0x00);
@@ -290,153 +272,60 @@ namespace CodeDesigner.Ps2.Common
             RegisterMmiSub(new PMAXW(),  0x08, 0x03);
             RegisterMmiSub(new PADDH(),  0x08, 0x04);
             RegisterMmiSub(new PSUBH(),  0x08, 0x05);
+            RegisterMmiSub(new PCGTH(),  0x08, 0x06);
             RegisterMmiSub(new PMAXH(),  0x08, 0x07);
             RegisterMmiSub(new PADDB(),  0x08, 0x08);
             RegisterMmiSub(new PSUBB(),  0x08, 0x09);
+            RegisterMmiSub(new PCGTB(),  0x08, 0x0A);
+            RegisterMmiSub(new PADDSW(), 0x08, 0x10);
+            RegisterMmiSub(new PSUBSW(), 0x08, 0x11);
             RegisterMmiSub(new PEXTLW(), 0x08, 0x12);
             RegisterMmiSub(new PPACW(),  0x08, 0x13);
+            RegisterMmiSub(new PADDSH(), 0x08, 0x14);
+            RegisterMmiSub(new PSUBSH(), 0x08, 0x15);
             RegisterMmiSub(new PEXTLH(), 0x08, 0x16);
             RegisterMmiSub(new PPACH(),  0x08, 0x17);
+            RegisterMmiSub(new PADDSB(), 0x08, 0x18);
+            RegisterMmiSub(new PSUBSB(), 0x08, 0x19);
             RegisterMmiSub(new PEXTLB(), 0x08, 0x1A);
             RegisterMmiSub(new PPACB(),  0x08, 0x1B);
+            RegisterMmiSub(new PEXT5(),  0x08, 0x1E);
+            RegisterMmiSub(new PPAC5(),  0x08, 0x1F);
 
-            // MMI1 sub-group (funct=0x28, shamt=sub-opcode)
+            // MMI1 sub-group (funct=0x28)
             RegisterMmiSub(new PABSW(),  0x28, 0x01);
             RegisterMmiSub(new PCEQW(),  0x28, 0x02);
             RegisterMmiSub(new PMINW(),  0x28, 0x03);
+            RegisterMmiSub(new PADSBH(), 0x28, 0x04);
             RegisterMmiSub(new PABSH(),  0x28, 0x05);
             RegisterMmiSub(new PCEQH(),  0x28, 0x06);
             RegisterMmiSub(new PMINH(),  0x28, 0x07);
             RegisterMmiSub(new PCEQB(),  0x28, 0x0A);
             RegisterMmiSub(new PADDUW(), 0x28, 0x10);
             RegisterMmiSub(new PSUBUW(), 0x28, 0x11);
+            RegisterMmiSub(new PEXTUW(), 0x28, 0x12);
             RegisterMmiSub(new PADDUH(), 0x28, 0x14);
             RegisterMmiSub(new PSUBUH(), 0x28, 0x15);
+            RegisterMmiSub(new PEXTUH(), 0x28, 0x16);
             RegisterMmiSub(new PADDUB(), 0x28, 0x18);
             RegisterMmiSub(new PSUBUB(), 0x28, 0x19);
-
-            // MMI2 sub-group (funct=0x09, shamt=sub-opcode)
-            RegisterMmiSub(new PMFHI(),  0x09, 0x08);
-            RegisterMmiSub(new PMFLO(),  0x09, 0x09);
-            RegisterMmiSub(new PCPYLD(), 0x09, 0x0E);
-
-            // MMI3 sub-group (funct=0x29, shamt=sub-opcode)
-            RegisterMmiSub(new PMTHI(),  0x29, 0x08);
-            RegisterMmiSub(new PMTLO(),  0x29, 0x09);
-            RegisterMmiSub(new PCPYUD(), 0x29, 0x0E);
-            RegisterMmiSub(new PAND(),   0x09, 0x12);
-            RegisterMmiSub(new POR(),    0x29, 0x12);
-            RegisterMmiSub(new PCPYH(),  0x29, 0x1B);
-
-            // New branch likely instructions (REGIMM)
-            RegisterRegimm(new BLTZL(), 0x02);
-            RegisterRegimm(new BGEZL(), 0x03);
-
-            // Trap-on-immediate (REGIMM)
-            RegisterRegimm(new TGEI(),  0x08);
-            RegisterRegimm(new TGEIU(), 0x09);
-            RegisterRegimm(new TLTI(),  0x0A);
-            RegisterRegimm(new TLTIU(), 0x0B);
-            RegisterRegimm(new TEQI(),  0x0C);
-            RegisterRegimm(new TNEI(),  0x0E);
-
-            // SA register move REGIMM
-            RegisterRegimm(new MTSAB(), 0x18);
-            RegisterRegimm(new MTSAH(), 0x19);
-
-            // Branch likely I-type
-            RegisterI(new BLEZL());  // opcode=0x16
-            RegisterI(new BGTZL());  // opcode=0x17
-
-            // SPECIAL SA instructions
-            RegisterR(new MFSA());  // funct=0x28
-            RegisterR(new MTSA());  // funct=0x29
-
-            // COP0: EI, DI
-            RegisterCop(new EI(), 0x10);  // funct=0x38
-            RegisterCop(new DI(), 0x10);  // funct=0x39
-
-            // COP1: Add C_F
-            RegisterCop(new C_F(), 0x10);  // funct=0x30
-
-            // COP2 register moves
-            RegisterCop(new QMFC2(), 0x01);  // rs=0x01
-            RegisterCop(new CFC2(),  0x02);  // rs=0x02
-            RegisterCop(new QMTC2(), 0x05);  // rs=0x05
-            RegisterCop(new CTC2(),  0x06);  // rs=0x06
-
-            // VU0 additional float conversion
-            RegisterCop(new VFTOI4(), 0x10);  // funct=0x3E
-            RegisterCop(new VITOF4(), 0x10);  // funct=0x3F
-
-            // COP2 component-broadcast variants: SPECIAL1 functs 0x00-0x27
-            // Each operation has 4 variants (x=0, y=1, z=2, w=3)
-            for (int bc = 0; bc < 4; bc++)
-            {
-                RegisterCop(new VADDBc(bc),  0x10); // VADDx/y/z/w  funct=0x00-0x03
-                RegisterCop(new VSUBBc(bc),  0x10); // VSUBx/y/z/w  funct=0x04-0x07
-                RegisterCop(new VMULBc(bc),  0x10); // VMULx/y/z/w  funct=0x08-0x0B
-                RegisterCop(new VMADDBc(bc), 0x10); // VMADDx/y/z/w funct=0x0C-0x0F
-                RegisterCop(new VMSUBBc(bc), 0x10); // VMSUBx/y/z/w funct=0x10-0x13
-                RegisterCop(new VMAXBc(bc),  0x10); // VMAXx/y/z/w  funct=0x14-0x17
-                RegisterCop(new VMINBc(bc),  0x10); // VMINx/y/z/w  funct=0x18-0x1B
-                RegisterCop(new VMULABc(bc), 0x10); // VMULAx/y/z/w funct=0x1C-0x1F
-                RegisterCop(new VADDABc(bc), 0x10); // VADDAx/y/z/w funct=0x20-0x23
-                RegisterCop(new VSUBABc(bc), 0x10); // VSUBAx/y/z/w funct=0x24-0x27
-            }
-
-            // VCALLMS (rs=0x18) and VCALLMSR (rs=0x19): trigger VU0 micro-mode
-            RegisterCop(new VCALLMS(),  0x18);
-            RegisterCop(new VCALLMSR(), 0x19);
-
-            // COP2 SPECIAL2 (rs=0x1E): LFSR pseudo-random instructions
-            RegisterCop(new VRNEXT(), 0x1E); // funct=0x1C
-            RegisterCop(new VRGET(),  0x1E); // funct=0x1D
-            RegisterCop(new VRINIT(), 0x1E); // funct=0x1E
-            RegisterCop(new VRXOR(),  0x1E); // funct=0x1F
-
-            // VWAITQ (rs=0x1F): wait for Q register to be ready after VDIV/VSQRT/VRSQRT
-            RegisterCop(new VWAITQ(), 0x1F);
-
-            // MMI direct instructions: shift and move
-            RegisterR(new PMFHL());   // funct=0x30
-            RegisterR(new PMTHL());   // funct=0x31
-            RegisterR(new PSLLH());   // funct=0x34
-            RegisterR(new PSRLH());   // funct=0x36
-            RegisterR(new PSRAH());   // funct=0x37
-            RegisterR(new PSLLW());   // funct=0x3C
-            RegisterR(new PSRLW());   // funct=0x3E
-            RegisterR(new PSRAW());   // funct=0x3F
-
-            // MMI0 new sub-instructions (funct=0x08)
-            RegisterMmiSub(new PCGTH(),  0x08, 0x06);
-            RegisterMmiSub(new PCGTB(),  0x08, 0x0A);
-            RegisterMmiSub(new PADDSW(), 0x08, 0x10);
-            RegisterMmiSub(new PSUBSW(), 0x08, 0x11);
-            RegisterMmiSub(new PADDSH(), 0x08, 0x14);
-            RegisterMmiSub(new PSUBSH(), 0x08, 0x15);
-            RegisterMmiSub(new PADDSB(), 0x08, 0x18);
-            RegisterMmiSub(new PSUBSB(), 0x08, 0x19);
-            RegisterMmiSub(new PEXT5(),  0x08, 0x1E);
-            RegisterMmiSub(new PPAC5(),  0x08, 0x1F);
-
-            // MMI1 new sub-instructions (funct=0x28)
-            RegisterMmiSub(new PADSBH(), 0x28, 0x04);
-            RegisterMmiSub(new PEXTUW(), 0x28, 0x12);
-            RegisterMmiSub(new PEXTUH(), 0x28, 0x16);
             RegisterMmiSub(new PEXTUB(), 0x28, 0x1A);
             RegisterMmiSub(new QFSRV(),  0x28, 0x1B);
 
-            // MMI2 new sub-instructions (funct=0x09)
+            // MMI2 sub-group (funct=0x09)
             RegisterMmiSub(new PMADDW(), 0x09, 0x00);
             RegisterMmiSub(new PSLLVW(), 0x09, 0x02);
             RegisterMmiSub(new PSRLVW(), 0x09, 0x03);
             RegisterMmiSub(new PMSUBW(), 0x09, 0x04);
+            RegisterMmiSub(new PMFHI(),  0x09, 0x08);
+            RegisterMmiSub(new PMFLO(),  0x09, 0x09);
             RegisterMmiSub(new PINTH(),  0x09, 0x0A);
             RegisterMmiSub(new PMULTW(), 0x09, 0x0C);
             RegisterMmiSub(new PDIVW(),  0x09, 0x0D);
+            RegisterMmiSub(new PCPYLD(), 0x09, 0x0E);
             RegisterMmiSub(new PMADDH(), 0x09, 0x10);
             RegisterMmiSub(new PHMADH(), 0x09, 0x11);
+            RegisterMmiSub(new PAND(),   0x09, 0x12);
             RegisterMmiSub(new PXOR(),   0x09, 0x13);
             RegisterMmiSub(new PMSUBH(), 0x09, 0x14);
             RegisterMmiSub(new PHMSBH(), 0x09, 0x15);
@@ -447,32 +336,20 @@ namespace CodeDesigner.Ps2.Common
             RegisterMmiSub(new PEXEW(),  0x09, 0x1E);
             RegisterMmiSub(new PROT3W(), 0x09, 0x1F);
 
-            // MMI3 new sub-instructions (funct=0x29)
+            // MMI3 sub-group (funct=0x29)
             RegisterMmiSub(new PMADDUW(), 0x29, 0x00);
             RegisterMmiSub(new PSRAVW(),  0x29, 0x03);
+            RegisterMmiSub(new PMTHI(),   0x29, 0x08);
+            RegisterMmiSub(new PMTLO(),   0x29, 0x09);
             RegisterMmiSub(new PINTEH(),  0x29, 0x0A);
             RegisterMmiSub(new PMULTUW(), 0x29, 0x0C);
             RegisterMmiSub(new PDIVUW(),  0x29, 0x0D);
+            RegisterMmiSub(new PCPYUD(),  0x29, 0x0E);
+            RegisterMmiSub(new POR(),     0x29, 0x12);
             RegisterMmiSub(new PNOR(),    0x29, 0x13);
             RegisterMmiSub(new PEXCH(),   0x29, 0x1A);
+            RegisterMmiSub(new PCPYH(),   0x29, 0x1B);
             RegisterMmiSub(new PEXCW(),   0x29, 0x1E);
-
-            // COP1X instructions (opcode = 0x13): indexed FPR load/store and fused multiply ops
-            RegisterCop1X(new LWXC1());          // funct=0x00: Load Word Indexed to FPR
-            RegisterCop1X(new LDXC1());          // funct=0x01: Load Doubleword Indexed to FPR
-            RegisterCop1X(new LUXC1());          // funct=0x05: Load Unaligned Word Indexed to FPR
-            RegisterCop1X(new SWXC1());          // funct=0x08: Store Word Indexed from FPR
-            RegisterCop1X(new SDXC1());          // funct=0x09: Store Doubleword Indexed from FPR
-            RegisterCop1X(new SUXC1());          // funct=0x0D: Store Unaligned Word Indexed from FPR
-            RegisterCop1X(new PREFX());          // funct=0x0F: Prefetch Indexed (hint/NOP)
-            RegisterCop1X(new COP1X_MADD_S());   // funct=0x20: Fused Multiply-Add Single
-            RegisterCop1X(new COP1X_MADD_D());   // funct=0x21: Fused Multiply-Add Double
-            RegisterCop1X(new COP1X_MSUB_S());   // funct=0x28: Fused Multiply-Subtract Single
-            RegisterCop1X(new COP1X_MSUB_D());   // funct=0x29: Fused Multiply-Subtract Double
-            RegisterCop1X(new COP1X_NMADD_S());  // funct=0x30: Negative Fused Multiply-Add Single
-            RegisterCop1X(new COP1X_NMADD_D());  // funct=0x31: Negative Fused Multiply-Add Double
-            RegisterCop1X(new COP1X_NMSUB_S());  // funct=0x38: Negative Fused Multiply-Subtract Single
-            RegisterCop1X(new COP1X_NMSUB_D());  // funct=0x39: Negative Fused Multiply-Subtract Double
         }
 
         private static void RegisterR(Instruction<Args_R> instr)
@@ -505,9 +382,69 @@ namespace CodeDesigner.Ps2.Common
             MmiSubInstructions[(funct, shamt)] = instr;
         }
 
-        private static void RegisterCop1X(Instruction<Args_R> instr)
+        /// <summary>
+        /// The one decode path behind <see cref="Disassemble"/> and
+        /// <see cref="GetInstructionObject"/>. Returns the instruction and its decoded
+        /// args, or (null, null, reason) for an unassigned encoding.
+        /// </summary>
+        private static (IInstruction? instr, object? args, string unknown) Resolve(uint instruction)
         {
-            Cop1XInstructions[instr.Funct ?? 0] = instr;
+            int opcode = MipsDecoder.GetOpcode(instruction);
+            int funct  = MipsDecoder.GetFunct(instruction);
+            int rs     = MipsDecoder.GetRs(instruction);
+            int rt     = MipsDecoder.GetRt(instruction);
+
+            switch (opcode)
+            {
+                case 0x00:
+                    return RTypeInstructions.TryGetValue((opcode, funct), out var r)
+                        ? (r, MipsDecoder.DecodeR(instruction), "")
+                        : (null, null, $"Unknown R-type (funct=0x{funct:X2})");
+
+                case 0x01:
+                    return RegimmInstructions.TryGetValue((opcode, rt), out var regimm)
+                        ? (regimm, MipsDecoder.DecodeI(instruction), "")
+                        : (null, null, $"Unknown REGIMM (rt=0x{rt:X2})");
+
+                case 0x1C:
+                {
+                    if (RTypeInstructions.TryGetValue((opcode, funct), out var mmi))
+                        return (mmi, MipsDecoder.DecodeR(instruction), "");
+                    if (funct is 0x08 or 0x09 or 0x28 or 0x29 &&
+                        MmiSubInstructions.TryGetValue((funct, MipsDecoder.GetShamt(instruction)), out var sub))
+                        return (sub, MipsDecoder.DecodeR(instruction), "");
+                    return (null, null, $"Unknown MMI (funct=0x{funct:X2})");
+                }
+
+                case 0x10:
+                case 0x11:
+                case 0x12:
+                {
+                    if (opcode == 0x12 && (rs & 0x10) != 0)
+                    {
+                        var vu = Vu0Macro.Lookup(instruction);
+                        return vu != null
+                            ? (vu, MipsDecoder.DecodeR(instruction), "")
+                            : (null, null, $"Unknown COP2 macro (funct=0x{funct:X2})");
+                    }
+                    if (rs == 0x08)
+                    {
+                        return CopBranchInstructions.TryGetValue((opcode, rt), out var bc)
+                            ? (bc, MipsDecoder.DecodeI(instruction), "")
+                            : (null, null, $"Unknown COP{opcode - 0x10} branch (rt=0x{rt:X2})");
+                    }
+                    if (CopInstructions.TryGetValue((opcode, rs, funct), out var cop) ||
+                        CopInstructions.TryGetValue((opcode, rs, null), out cop))
+                        return (cop, MipsDecoder.DecodeR(instruction), "");
+                    return (null, null, $"Unknown COP{opcode - 0x10} (rs=0x{rs:X2}, funct=0x{funct:X2})");
+                }
+            }
+
+            if (JTypeInstructions.TryGetValue(opcode, out var j))
+                return (j, MipsDecoder.DecodeJ(instruction), "");
+            if (ITypeInstructions.TryGetValue(opcode, out var i))
+                return (i, MipsDecoder.DecodeI(instruction), "");
+            return (null, null, $"Unknown (opcode=0x{opcode:X2})");
         }
 
         /// <summary>
@@ -518,117 +455,85 @@ namespace CodeDesigner.Ps2.Common
         /// <returns>Assembly text representation of the instruction</returns>
         public static string Disassemble(uint instruction, uint? pc = null)
         {
-            // Check for NOP (0x00000000) explicitly
             if (instruction == 0x00000000)
             {
                 return "nop";
             }
 
-            int opcode = MipsDecoder.GetOpcode(instruction);
-
-            // Check for R-type instructions (opcode = 0x00)
-            if (opcode == 0x00)
+            var (instr, args, unknown) = Resolve(instruction);
+            if (instr == null || args == null)
             {
-                int funct = MipsDecoder.GetFunct(instruction);
-                if (RTypeInstructions.TryGetValue((opcode, funct), out var rInstr))
-                {
-                    var args = MipsDecoder.DecodeR(instruction);
-                    return rInstr.Disasm(args, pc);
-                }
-                return $".word 0x{instruction:X8}  # Unknown R-type (funct=0x{funct:X2})";
+                return $".word 0x{instruction:X8}  # {unknown}";
             }
 
-            // Check for REGIMM instructions (opcode = 0x01)
-            if (opcode == 0x01)
-            {
-                int rt = MipsDecoder.GetRt(instruction);
-                if (RegimmInstructions.TryGetValue((opcode, rt), out var regimmInstr))
-                {
-                    var args = MipsDecoder.DecodeI(instruction);
-                    return regimmInstr.Disasm(args, pc);
-                }
-                return $".word 0x{instruction:X8}  # Unknown REGIMM (rt=0x{rt:X2})";
-            }
+            string text = instr.DisasmGeneric(args, pc);
+            return PseudoOp(instruction, text) ?? text;
+        }
 
-            // Check for MMI (EE Multimedia) instructions (opcode = 0x1C)
-            if (opcode == 0x1C)
+        /// <summary>
+        /// Common assembler pseudo-instructions shown in place of the real encoding:
+        /// move, li, not, neg/negu, b, bal, beqz/bnez(l), sync.p. Returns null when
+        /// <paramref name="word"/> isn't one. Every form is accepted by
+        /// <see cref="MipsAssembler"/>.
+        /// </summary>
+        private static string? PseudoOp(uint word, string text)
+        {
+            int op    = (int)(word >> 26);
+            int rs    = (int)((word >> 21) & 0x1F);
+            int rt    = (int)((word >> 16) & 0x1F);
+            int rd    = (int)((word >> 11) & 0x1F);
+            int sa    = (int)((word >> 6) & 0x1F);
+            int funct = (int)(word & 0x3F);
+            static string R(int r) => CpuHelpers.RegName(r);
+
+            switch (op)
             {
-                int funct = MipsDecoder.GetFunct(instruction);
-                // Try direct MMI instruction (unique funct)
-                if (RTypeInstructions.TryGetValue((opcode, funct), out var mmiInstr))
-                {
-                    var args = MipsDecoder.DecodeR(instruction);
-                    return mmiInstr.Disasm(args, pc);
-                }
-                // MMI sub-groups use shamt as sub-opcode
-                if (funct == 0x08 || funct == 0x09 || funct == 0x28 || funct == 0x29)
-                {
-                    int shamt = MipsDecoder.GetShamt(instruction);
-                    if (MmiSubInstructions.TryGetValue((funct, shamt), out var mmiSubInstr))
+                case 0x00:
+                    switch (funct)
                     {
-                        var args = MipsDecoder.DecodeR(instruction);
-                        return mmiSubInstr.Disasm(args, pc);
+                        case 0x21:                         // addu rd, rs, $zero (what `move` assembles to)
+                            // or/daddu moves stay as written: daddu keeps all 64 bits, so
+                            // folding them into `move` would change the re-assembled word.
+                            return rt == 0 ? $"move {R(rd)}, {R(rs)}" : null;
+                        case 0x27:                         // nor rd, rs, $zero
+                            return rt == 0 ? $"not {R(rd)}, {R(rs)}" : null;
+                        case 0x22:                         // sub rd, $zero, rt
+                            return rs == 0 ? $"neg {R(rd)}, {R(rt)}" : null;
+                        case 0x23:                         // subu rd, $zero, rt
+                            return rs == 0 ? $"negu {R(rd)}, {R(rt)}" : null;
+                        case 0x0F:                         // sync stype
+                            return sa == 0x10 ? "sync.p" : null;
                     }
-                }
-                return $".word 0x{instruction:X8}  # Unknown MMI (funct=0x{funct:X2})";
-            }
+                    return null;
 
-            // Check for coprocessor instructions (opcode = 0x10, 0x11, 0x12, 0x13)
-            if (opcode >= 0x10 && opcode <= 0x13)            {
-                int rs = MipsDecoder.GetRs(instruction);
-                int funct = MipsDecoder.GetFunct(instruction);
-                
-                // Try with funct first (for CO instructions and FPU ops)
-                if (CopInstructions.TryGetValue((opcode, rs, funct), out var copInstr))
+                case 0x09:                                 // addiu rt, $zero, imm
+                    return rs == 0 ? $"li {R(rt)}, {CpuHelpers.FormatSignedImmediate((int)(word & 0xFFFF))}" : null;
+                case 0x0D:                                 // ori rt, $zero, imm
+                    return rs == 0 ? $"li {R(rt)}, ${word & 0xFFFF:X4}" : null;
+
+                case 0x04:                                 // beq
+                case 0x05:                                 // bne
+                case 0x14:                                 // beql
+                case 0x15:                                 // bnel
                 {
-                    var args = MipsDecoder.DecodeR(instruction);
-                    return copInstr.Disasm(args, pc);
+                    string real = $"{text.Split(' ')[0]} {R(rs)}, {R(rt)}, ";
+                    if (!text.StartsWith(real, StringComparison.Ordinal)) return null;
+                    string target = text[real.Length..];
+                    if (op == 0x04 && rs == 0 && rt == 0) return $"b {target}";
+                    if (rt != 0) return null;
+                    string name = op switch { 0x04 => "beqz", 0x05 => "bnez", 0x14 => "beqzl", _ => "bnezl" };
+                    return $"{name} {R(rs)}, {target}";
                 }
-                
-                // Try without funct (for MFC/MTC type instructions)
-                if (CopInstructions.TryGetValue((opcode, rs, null), out copInstr))
+
+                case 0x01:                                 // bgezal $zero = bal
                 {
-                    var args = MipsDecoder.DecodeR(instruction);
-                    return copInstr.Disasm(args, pc);
+                    string real = "bgezal zero, ";
+                    return rt == 0x11 && rs == 0 && text.StartsWith(real, StringComparison.Ordinal)
+                        ? $"bal {text[real.Length..]}"
+                        : null;
                 }
-
-                // Check if it might be a branch instruction (BC1F/BC1T)
-                if (opcode == 0x11 && rs == 0x08)
-                {
-                    int rt = MipsDecoder.GetRt(instruction);
-                    if (Bc1BranchInstructions.TryGetValue(rt, out var bc1Instr))
-                    {
-                        var args = MipsDecoder.DecodeI(instruction);
-                        return bc1Instr.Disasm(args, pc);
-                    }
-                }
-
-                // COP1X (opcode=0x13): funct alone selects the instruction; rs/rt are variable registers
-                if (opcode == 0x13 && Cop1XInstructions.TryGetValue(funct, out var cop1xInstr))
-                {
-                    var args = MipsDecoder.DecodeR(instruction);
-                    return cop1xInstr.Disasm(args, pc);
-                }
-
-                return $".word 0x{instruction:X8}  # Unknown {(opcode == 0x13 ? "COP1X" : $"COP{opcode - 0x10}")} (rs=0x{rs:X2}, funct=0x{funct:X2})";
             }
-
-            // Check for J-type instructions
-            if (JTypeInstructions.TryGetValue(opcode, out var jInstr))
-            {
-                var args = MipsDecoder.DecodeJ(instruction);
-                return jInstr.Disasm(args, pc);
-            }
-
-            // Check for I-type instructions
-            if (ITypeInstructions.TryGetValue(opcode, out var iInstr2))
-            {
-                var args = MipsDecoder.DecodeI(instruction);
-                return iInstr2.Disasm(args, pc);
-            }
-
-            // Unknown instruction
-            return $".word 0x{instruction:X8}  # Unknown (opcode=0x{opcode:X2})";
+            return null;
         }
 
         /// <summary>
@@ -639,123 +544,8 @@ namespace CodeDesigner.Ps2.Common
         /// <returns>Tuple of instruction object and args, or (null, null) if unknown</returns>
         public static (IInstruction? instrObj, object? args) GetInstructionObject(uint instruction)
         {
-            // Check for NOP (0x00000000) - return NOP instruction
-            if (instruction == 0x00000000)
-            {
-                // NOP is registered as SLL with all zeros, but we can return SLL instruction
-                int opcode = MipsDecoder.GetOpcode(instruction);
-                int funct = MipsDecoder.GetFunct(instruction);
-                if (RTypeInstructions.TryGetValue((opcode, funct), out var nopInstr))
-                {
-                    var args = MipsDecoder.DecodeR(instruction);
-                    return (nopInstr, args);
-                }
-            }
-
-            int op = MipsDecoder.GetOpcode(instruction);
-
-            // Check for R-type instructions (opcode = 0x00)
-            if (op == 0x00)
-            {
-                int funct = MipsDecoder.GetFunct(instruction);
-                if (RTypeInstructions.TryGetValue((op, funct), out var rInstr))
-                {
-                    var args = MipsDecoder.DecodeR(instruction);
-                    return (rInstr, args);
-                }
-                return (null, null);
-            }
-
-            // Check for REGIMM instructions (opcode = 0x01)
-            if (op == 0x01)
-            {
-                int rt = MipsDecoder.GetRt(instruction);
-                if (RegimmInstructions.TryGetValue((op, rt), out var regimmInstr))
-                {
-                    var args = MipsDecoder.DecodeI(instruction);
-                    return (regimmInstr, args);
-                }
-                return (null, null);
-            }
-
-            // Check for MMI (EE Multimedia) instructions (opcode = 0x1C)
-            if (op == 0x1C)
-            {
-                int funct = MipsDecoder.GetFunct(instruction);
-                if (RTypeInstructions.TryGetValue((op, funct), out var mmiInstr))
-                {
-                    var args = MipsDecoder.DecodeR(instruction);
-                    return (mmiInstr, args);
-                }
-                if (funct == 0x08 || funct == 0x09 || funct == 0x28 || funct == 0x29)
-                {
-                    int shamt = MipsDecoder.GetShamt(instruction);
-                    if (MmiSubInstructions.TryGetValue((funct, shamt), out var mmiSubInstr))
-                    {
-                        var args = MipsDecoder.DecodeR(instruction);
-                        return (mmiSubInstr, args);
-                    }
-                }
-                return (null, null);
-            }
-
-            // Check for coprocessor instructions (opcode = 0x10, 0x11, 0x12, 0x13)
-            if (op >= 0x10 && op <= 0x13)
-            {
-                int rs = MipsDecoder.GetRs(instruction);
-                int funct = MipsDecoder.GetFunct(instruction);
-                
-                // Try with funct first (for CO instructions and FPU ops)
-                if (CopInstructions.TryGetValue((op, rs, funct), out var copInstr))
-                {
-                    var args = MipsDecoder.DecodeR(instruction);
-                    return (copInstr, args);
-                }
-                
-                // Try without funct (for MFC/MTC type instructions)
-                if (CopInstructions.TryGetValue((op, rs, null), out copInstr))
-                {
-                    var args = MipsDecoder.DecodeR(instruction);
-                    return (copInstr, args);
-                }
-
-                // Check if it might be a branch instruction (BC1F/BC1T)
-                if (op == 0x11 && rs == 0x08)
-                {
-                    int rt = MipsDecoder.GetRt(instruction);
-                    if (Bc1BranchInstructions.TryGetValue(rt, out var bc1Instr))
-                    {
-                        var args = MipsDecoder.DecodeI(instruction);
-                        return (bc1Instr, args);
-                    }
-                }
-
-                // COP1X (opcode=0x13): funct alone selects the instruction; rs/rt are variable registers
-                if (op == 0x13 && Cop1XInstructions.TryGetValue(funct, out var cop1xInstr))
-                {
-                    var args = MipsDecoder.DecodeR(instruction);
-                    return (cop1xInstr, args);
-                }
-
-                return (null, null);
-            }
-
-            // Check for J-type instructions
-            if (JTypeInstructions.TryGetValue(op, out var jInstr))
-            {
-                var args = MipsDecoder.DecodeJ(instruction);
-                return (jInstr, args);
-            }
-
-            // Check for I-type instructions
-            if (ITypeInstructions.TryGetValue(op, out var iInstr2))
-            {
-                var args = MipsDecoder.DecodeI(instruction);
-                return (iInstr2, args);
-            }
-
-            // Unknown instruction
-            return (null, null);
+            var (instr, args, _) = Resolve(instruction);
+            return (instr, args);
         }
 
         /// <summary>

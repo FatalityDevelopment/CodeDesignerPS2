@@ -37,15 +37,23 @@ namespace CodeDesigner.Ps2.Common.CPU
         }
 
         /// <summary>
-        /// Format an offset for load/store instructions in PS2 MIPS assembler style
-        /// Note: Negative offsets are displayed as 16-bit hex (e.g., -48 becomes $FFD0)
-        /// This matches PS2 MIPS assembler convention where all immediates are shown in hex
+        /// Format a load/store offset in PS2 <c>$</c>-hex style, signed:
+        /// -48 becomes <c>-$0030</c>, 16 becomes <c>$0010</c>.
         /// </summary>
-        /// <param name="offset">Offset value</param>
-        /// <returns>Formatted offset string (e.g., "$FFD0")</returns>
+        /// <param name="offset">Offset value (already sign-extended or raw 16-bit)</param>
         public static string FormatOffset(int offset)
         {
-            return $"${offset & 0xFFFF:X4}";
+            return FormatSignedImmediate(offset);
+        }
+
+        /// <summary>
+        /// Format a sign-extended 16-bit immediate (addiu, slti, offsets) in <c>$</c>-hex:
+        /// <c>-$0010</c> / <c>$0010</c>. The assembler accepts the same spelling.
+        /// </summary>
+        public static string FormatSignedImmediate(int imm16)
+        {
+            int v = SignExtend16(imm16);
+            return v < 0 ? $"-${-v:X4}" : $"${v:X4}";
         }
 
         /// <summary>

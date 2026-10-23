@@ -276,6 +276,13 @@ namespace CodeDesigner.Ps2.Common
                 CpuState? view = cpu;
                 bool readsKnown = view == null || (usage.Reads & ~view.GprKnown) == 0;
 
+                // FPU registers are never mirrored into the analysis state, so COP1
+                // arithmetic/compare/mfc1 is described symbolically (no values).
+                // mtc1 (GPR source) and branches keep the state.
+                uint cop1Rs = (word >> 21) & 0x1F;
+                if ((word >> 26) == 0x11 && cop1Rs != 0x04 && cop1Rs != 0x08)
+                    view = null;
+
                 // A value hint from an unknown input would just print garbage. The
                 // stack-frame note on `addiu sp, sp, ±N` is still useful without one.
                 bool stackAdjust = (word >> 26) == 0x09 && ((word >> 16) & 0x3FF) == (29u << 5 | 29u);

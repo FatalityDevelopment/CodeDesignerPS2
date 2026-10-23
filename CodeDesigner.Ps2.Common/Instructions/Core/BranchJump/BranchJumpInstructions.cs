@@ -63,7 +63,7 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
                 string arrow = instrCount >= 0 ? "▼" : "▲";
                 return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}, ${target:X8} ({sign}{instrCount + 1}{arrow})";
             }
-            return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}, {args.Imm:X4}";
+            return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.FormatSignedImmediate(args.Imm)}";
         }
 
         public override uint Asm(int[] args)
@@ -127,7 +127,7 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
                 string arrow = instrCount >= 0 ? "▼" : "▲";
                 return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}, ${target:X8} ({sign}{instrCount + 1}{arrow})";
             }
-            return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}, {args.Imm:X4}";
+            return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.FormatSignedImmediate(args.Imm)}";
         }
 
         public override uint Asm(int[] args)
@@ -190,7 +190,7 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
                 string arrow = instrCount >= 0 ? "▼" : "▲";
                 return $"{Name} {CpuHelpers.RegName(args.Rs)}, ${target:X8} ({sign}{instrCount + 1}{arrow})";
             }
-            return $"{Name} {CpuHelpers.RegName(args.Rs)}, {args.Imm:X4}";
+            return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.FormatSignedImmediate(args.Imm)}";
         }
 
         public override uint Asm(int[] args)
@@ -253,7 +253,7 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
                 string arrow = instrCount >= 0 ? "▼" : "▲";
                 return $"{Name} {CpuHelpers.RegName(args.Rs)}, ${target:X8} ({sign}{instrCount + 1}{arrow})";
             }
-            return $"{Name} {CpuHelpers.RegName(args.Rs)}, {args.Imm:X4}";
+            return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.FormatSignedImmediate(args.Imm)}";
         }
 
         public override uint Asm(int[] args)
@@ -316,7 +316,7 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
                 string arrow = instrCount >= 0 ? "▼" : "▲";
                 return $"{Name} {CpuHelpers.RegName(args.Rs)}, ${target:X8} ({sign}{instrCount + 1}{arrow})";
             }
-            return $"{Name} {CpuHelpers.RegName(args.Rs)}, {args.Imm:X4}";
+            return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.FormatSignedImmediate(args.Imm)}";
         }
 
         public override uint Asm(int[] args)
@@ -379,7 +379,7 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
                 string arrow = instrCount >= 0 ? "▼" : "▲";
                 return $"{Name} {CpuHelpers.RegName(args.Rs)}, ${target:X8} ({sign}{instrCount + 1}{arrow})";
             }
-            return $"{Name} {CpuHelpers.RegName(args.Rs)}, {args.Imm:X4}";
+            return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.FormatSignedImmediate(args.Imm)}";
         }
 
         public override uint Asm(int[] args)
@@ -444,7 +444,7 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
                 string arrow = instrCount >= 0 ? "▼" : "▲";
                 return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}, ${target:X8} ({sign}{instrCount + 1}{arrow})";
             }
-            return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}, {args.Imm:X4}";
+            return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.FormatSignedImmediate(args.Imm)}";
         }
 
         public override uint Asm(int[] args)
@@ -509,7 +509,7 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
                 string arrow = instrCount >= 0 ? "▼" : "▲";
                 return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}, ${target:X8} ({sign}{instrCount + 1}{arrow})";
             }
-            return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}, {args.Imm:X4}";
+            return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.FormatSignedImmediate(args.Imm)}";
         }
 
         public override uint Asm(int[] args)
@@ -756,7 +756,7 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
                 string arrow = instrCount >= 0 ? "▼" : "▲";
                 return $"{Name} {CpuHelpers.RegName(args.Rs)}, ${target:X8} ({sign}{instrCount + 1}{arrow})";
             }
-            return $"{Name} {CpuHelpers.RegName(args.Rs)}, {args.Imm:X4}";
+            return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.FormatSignedImmediate(args.Imm)}";
         }
 
         public override uint Asm(int[] args)
@@ -822,7 +822,7 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
                 string arrow = instrCount >= 0 ? "▼" : "▲";
                 return $"{Name} {CpuHelpers.RegName(args.Rs)}, ${target:X8} ({sign}{instrCount + 1}{arrow})";
             }
-            return $"{Name} {CpuHelpers.RegName(args.Rs)}, {args.Imm:X4}";
+            return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.FormatSignedImmediate(args.Imm)}";
         }
 
         public override uint Asm(int[] args)
@@ -888,7 +888,7 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
                 string arrow = instrCount >= 0 ? "▼" : "▲";
                 return $"{Name} {CpuHelpers.RegName(args.Rs)}, ${target:X8} ({sign}{instrCount + 1}{arrow})";
             }
-            return $"{Name} {CpuHelpers.RegName(args.Rs)}, {args.Imm:X4}";
+            return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.FormatSignedImmediate(args.Imm)}";
         }
 
         public override uint Asm(int[] args)
@@ -954,7 +954,7 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
                 string arrow = instrCount >= 0 ? "▼" : "▲";
                 return $"{Name} {CpuHelpers.RegName(args.Rs)}, ${target:X8} ({sign}{instrCount + 1}{arrow})";
             }
-            return $"{Name} {CpuHelpers.RegName(args.Rs)}, {args.Imm:X4}";
+            return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.FormatSignedImmediate(args.Imm)}";
         }
 
         public override uint Asm(int[] args)
@@ -1011,7 +1011,7 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
                 uint target = (uint)((int)pc.Value + 4 + offset);
                 return $"{Name} {CpuHelpers.RegName(args.Rs)}, ${target:X8}";
             }
-            return $"{Name} {CpuHelpers.RegName(args.Rs)}, {args.Imm:X4}";
+            return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.FormatSignedImmediate(args.Imm)}";
         }
 
         public override uint Asm(int[] args)
@@ -1069,7 +1069,7 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
                 uint target = (uint)((int)pc.Value + 4 + offset);
                 return $"{Name} {CpuHelpers.RegName(args.Rs)}, ${target:X8}";
             }
-            return $"{Name} {CpuHelpers.RegName(args.Rs)}, {args.Imm:X4}";
+            return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.FormatSignedImmediate(args.Imm)}";
         }
 
         public override uint Asm(int[] args)
@@ -1127,7 +1127,7 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
                 uint target = (uint)((int)pc.Value + 4 + offset);
                 return $"{Name} {CpuHelpers.RegName(args.Rs)}, ${target:X8}";
             }
-            return $"{Name} {CpuHelpers.RegName(args.Rs)}, {args.Imm:X4}";
+            return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.FormatSignedImmediate(args.Imm)}";
         }
 
         public override uint Asm(int[] args)
@@ -1185,7 +1185,7 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
                 uint target = (uint)((int)pc.Value + 4 + offset);
                 return $"{Name} {CpuHelpers.RegName(args.Rs)}, ${target:X8}";
             }
-            return $"{Name} {CpuHelpers.RegName(args.Rs)}, {args.Imm:X4}";
+            return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.FormatSignedImmediate(args.Imm)}";
         }
 
         public override uint Asm(int[] args)
