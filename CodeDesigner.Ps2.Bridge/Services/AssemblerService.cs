@@ -1123,6 +1123,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 CodeDesigner.Ps2.Common.CPU.CpuState? seedCpu = null;
                 uint? seedPc = null;
                 bool includeStateHints = false;
+                Func<uint, bool>? seedContext = null;
                 if (_ctx.AnalysisState is not null)
                 {
                     try
@@ -1131,13 +1132,20 @@ namespace CodeDesigner.Ps2.Bridge.Services
                         var snap = _ctx.AnalysisState.TryAcquire();
                         if (snap is not null)
                         {
+                            // The full snapshot applies at the PC row (when it is on
+                            // this page). Rows elsewhere still get the registers a
+                            // function keeps for its whole body — $gp everywhere, $sp
+                            // and $s0-$s7/$fp inside the PC's function (or near the PC
+                            // without a function index) — so loads through an object
+                            // pointer or $gp resolve and show their pointer chains.
                             uint pc = ToPagePhysical(snap.PcAtMirror);
-                            if (pc >= rangeStart && pc < rangeEnd)
-                            {
-                                seedCpu = snap.Cpu;
-                                seedPc = pc;
-                                includeStateHints = true;
-                            }
+                            seedCpu = snap.Cpu;
+                            seedPc = pc;
+                            includeStateHints = pc >= rangeStart && pc < rangeEnd;
+                            if (_ctx.Xrefs.TryGetFunction(pc, out uint fnStart, out uint fnEnd))
+                                seedContext = a => a >= fnStart && a <= fnEnd;
+                            else
+                                seedContext = a => a + NearPcWindow >= pc && a <= pc + NearPcWindow;
                         }
                     }
                     catch
@@ -1212,7 +1220,8 @@ namespace CodeDesigner.Ps2.Bridge.Services
                     seedPc: seedPc,
                     loadBus: loadBus,
                     functionStarts: functionStarts,
-                    hintLevel: hintLevel);
+                    hintLevel: hintLevel,
+                    seedContext: seedContext);
 
                 // Apply comments and labels to results.  Look each row up by
                 // address rather than by index because the row stride is now
@@ -1586,6 +1595,9 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 if (_ctx.Labels.TryGetValue(alias, out e) && !string.IsNullOrEmpty(e.Label)) return e.Label;
             return $"0x{address:X8}";
         }
+
+        /// <summary>Without a function index, rows this close to the paused PC count as its function.</summary>
+        private const uint NearPcWindow = 0x10000;
 
         /// <summary>Bytes before a page that the analyzer simulates (not shown) to carry register state in.</summary>
         private const int LeadInBytes = 0x80;

@@ -182,14 +182,18 @@ namespace CodeDesigner.Ps2.Common
             uint? seedPc = null,
             IPs2MemoryBus? loadBus = null,
             IReadOnlySet<uint>? functionStarts = null,
-            HintLevel hintLevel = HintLevel.Full)
+            HintLevel hintLevel = HintLevel.Full,
+            Func<uint, bool>? seedContext = null)
         {
             var comments = new Dictionary<uint, string>();
             var rows = instructions as IList<(uint instruction, uint address)> ?? instructions.ToList();
 
             // Simulated loads and stores go through a private overlay, so stores never
             // reach real memory and a reload of a spilled value sees what was stored.
-            var simBus = new AnalysisOverlayBus(loadBus ?? bus ?? seedCpu?.Bus);
+            // Loads read the cheap bus first and the hint bus for anything it can't
+            // serve, so a pointer loaded from memory outside the page still feeds the
+            // next hop of a chain.
+            var simBus = new AnalysisOverlayBus(loadBus ?? bus ?? seedCpu?.Bus, bus);
 
             CpuState? cpu = null;
             bool stateHints = false;
@@ -203,6 +207,7 @@ namespace CodeDesigner.Ps2.Common
                 else
                 {
                     cpu = NewBlankState();
+                    if (rows.Count > 0) ApplySeedContext(cpu, seedCpu, seedContext, rows[0].address);
                 }
                 cpu.Bus = simBus;
             }
@@ -226,6 +231,7 @@ namespace CodeDesigner.Ps2.Common
                     cpu = NewBlankState();
                     cpu.Bus = simBus;
                     if (gpKnown) { cpu.RegsLo[28] = gp; cpu.GprKnown |= 1u << 28; }
+                    ApplySeedContext(cpu, seedCpu, seedContext, address);
                     stateHints = false;
                 }
 
@@ -280,6 +286,30 @@ namespace CodeDesigner.Ps2.Common
         private const uint PreservedAcrossJumpMask = (1u << 28) | 1u;
 
         private static CpuState NewBlankState() => new() { GprKnown = 1u };
+
+        /// <summary>Registers that hold the same value for a whole function: s0-s7, gp, sp, fp.</summary>
+        private const uint LongLivedMask = (0xFFu << 16) | (1u << 28) | (1u << 29) | (1u << 30);
+
+        /// <summary>
+        /// Before the paused PC, the snapshot still describes the registers a function
+        /// keeps for its whole body: $gp everywhere (one value per program), and $sp,
+        /// $s0-$s7, $fp at rows <paramref name="seedContext"/> accepts (the PC's own
+        /// function). That is what resolves loads through an object pointer in $s0 or a
+        /// global through $gp, and the pointer chains behind them.
+        /// </summary>
+        private static void ApplySeedContext(CpuState cpu, CpuState? seed, Func<uint, bool>? seedContext, uint address)
+        {
+            if (seed is null) return;
+            uint mask = 1u << 28;
+            if (seedContext?.Invoke(address) == true) mask = LongLivedMask;
+            for (int r = 1; r < 32; r++)
+            {
+                if ((mask & (1u << r)) == 0 || !CpuHelpers.IsRegisterKnown(seed, r)) continue;
+                cpu.RegsLo[r] = seed.RegsLo[r];
+                cpu.RegsHi[r] = seed.RegsHi[r];
+                cpu.GprKnown |= 1u << r;
+            }
+        }
 
         /// <summary>
         /// Analyzes one row against the pre-execution <paramref name="cpu"/> state, records
