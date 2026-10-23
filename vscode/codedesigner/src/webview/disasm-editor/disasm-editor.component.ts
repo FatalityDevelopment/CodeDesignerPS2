@@ -430,6 +430,14 @@ export class DisasmEditorComponent implements AfterViewInit {
     this.contextMenuRuntime.findCodeReferences?.();
   }
 
+  protected onCtxShowXrefs(): void {
+    if (this._ctxRow) { this.openXrefs(this._ctxRow); }
+  }
+
+  protected onCtxRebuildXrefs(): void {
+    this.vscode.postMessage({ type: 'rebuildXrefIndex' });
+  }
+
   protected onCtxAddToLabelManager(): void {
     this.contextMenuRuntime.addToLabelManager?.();
   }
@@ -886,9 +894,31 @@ export class DisasmEditorComponent implements AfterViewInit {
             e.preventDefault(); e.stopPropagation();
             params.clearCursorRowFormat();
             return;
+          case 'x': {
+            // Cross-references to the cursor row (IDA-style "X").
+            e.preventDefault(); e.stopPropagation();
+            const row = this.getCursorRow(params.state);
+            if (row) { this.openXrefs(row); }
+            return;
+          }
         }
       }
     });
+
+    // The row badge ("◂ N") asks for its row's cross-references.
+    window.addEventListener('disasm-xrefs', (e: Event) => {
+      const row = (e as CustomEvent<DisasmRowType>).detail;
+      if (row) { this.openXrefs(row); }
+    });
+  }
+
+  /** Opens the edit overlay for `row` on its References tab. */
+  private openXrefs(row: DisasmRowType): void {
+    const address = parseInt(row.addr, 16);
+    if (!Number.isFinite(address)) { return; }
+    this.gridRuntime.editRow?.(row, address, row.addr);
+    // The overlay renders on the next tick; switch tabs once it exists.
+    setTimeout(() => this.editOverlayRef()?.onRefsTabClick(), 0);
   }
 
   private isCodePointerValue(addr: number): boolean {

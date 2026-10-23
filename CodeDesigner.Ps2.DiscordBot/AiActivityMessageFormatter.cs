@@ -65,6 +65,8 @@ public static class AiActivityMessageFormatter
         ("recompile_elf", "⚙️", "Code"),
         ("callgraph_", "🕸️", "Call Graph"),
         ("find_code_references", "🕸️", "Call Graph"),
+        ("get_xrefs", "🕸️", "Call Graph"),
+        ("rebuild_xrefs", "🕸️", "Call Graph"),
         ("mc_", "💾", "Memory Card"),
         ("hdd_", "💾", "HDD"),
         ("iso_", "💿", "ISO"),

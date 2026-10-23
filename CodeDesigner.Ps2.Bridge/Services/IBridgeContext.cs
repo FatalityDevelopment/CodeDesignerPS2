@@ -91,5 +91,11 @@ namespace CodeDesigner.Ps2.Bridge.Services
         /// state for accurate comment-column hints.
         /// </summary>
         AnalysisStateService AnalysisState { get; }
+
+        /// <summary>
+        /// Cross-reference index (who calls / branches to / loads from / points at
+        /// an address). Disassembly reads per-row reference counts from it.
+        /// </summary>
+        XrefIndexService Xrefs { get; }
     }
 }

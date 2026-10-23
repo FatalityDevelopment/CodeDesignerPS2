@@ -15,6 +15,10 @@ export interface DisasmRow {
   comment: string;
   formatted?: boolean;
   dataFormatKind?: DataFormatKind;
+  /** Code references to this row, from the bridge's cross-reference index. */
+  xrefs?: number;
+  /** Data words pointing at this row, from the cross-reference index. */
+  dataRefs?: number;
 }
 
 // ── Search ────────────────────────────────────────────────────────────────────

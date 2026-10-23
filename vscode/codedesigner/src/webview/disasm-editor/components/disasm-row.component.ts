@@ -53,7 +53,11 @@ import { toPhysAddr } from '../utils/address.utils';
         (mouseleave)="hideFullComment()"
       ></span>
       <span class="bytes" [innerHTML]="bytesHtml()"></span>
-      <span class="label" [innerHTML]="labelHtml()"></span>
+      <span class="label">@if (xrefBadge(); as badge) {<span
+          class="xref-badge"
+          [title]="badge.title"
+          (click)="onXrefBadgeClick($event)"
+          (dblclick)="$event.stopPropagation()">{{ badge.text }}</span>}<span [innerHTML]="labelHtml()"></span></span>
       <span class="op" [innerHTML]="opHtml()"></span>
       <span class="args" [innerHTML]="argsHtml()"></span>
       <span
@@ -214,6 +218,29 @@ export class DisasmRowComponent {
 
     return parts.join(' ');
   });
+
+  /**
+   * Incoming-reference marker from the bridge's cross-reference index:
+   * "◂3" for three code references, "◂3+2" when two data words also point here.
+   */
+  protected readonly xrefBadge = computed(() => {
+    const row = this.data();
+    const code = row.xrefs ?? 0;
+    const data = row.dataRefs ?? 0;
+    if (code === 0 && data === 0) { return null; }
+    const parts: string[] = [];
+    if (code > 0) { parts.push(`${code} code reference${code === 1 ? '' : 's'}`); }
+    if (data > 0) { parts.push(`${data} data pointer${data === 1 ? '' : 's'}`); }
+    return {
+      text: data > 0 ? `◂${code}+${data}` : `◂${code}`,
+      title: `${parts.join(', ')} — click or press X to list them`,
+    };
+  });
+
+  protected onXrefBadgeClick(event: MouseEvent): void {
+    event.stopPropagation();
+    window.dispatchEvent(new CustomEvent('disasm-xrefs', { detail: this.data() }));
+  }
 
   protected readonly opHtml = computed(() =>
     this.highlightSearch(this.escapeHtml(this.data().op), 'op')

@@ -4713,3 +4713,15 @@ app-icon,
     color: #e8a030;
     font-weight: 700;
 }
+
+/* Incoming cross-reference count in the label column ("◂3", "◂3+2"). */
+.xref-badge {
+    color: var(--vscode-descriptionForeground, #8b8b8b);
+    margin-right: 6px;
+    cursor: pointer;
+}
+
+.xref-badge:hover {
+    color: var(--vscode-textLink-foreground, #3794ff);
+    text-decoration: underline;
+}

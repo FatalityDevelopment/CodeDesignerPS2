@@ -18,6 +18,8 @@ interface CommandMessage {
     SearchMode?: string;
     TargetAddress?: number;
     ReferenceKinds?: string[];
+    XrefRebuild?: boolean;
+    XrefWait?: boolean;
     RegisterName?: string;
     RegisterIndex?: number;
     RegisterValue?: string;
@@ -950,6 +952,10 @@ interface InstructionResult {
      * Styled like an override row, but not user-editable as one.
      */
     AutoFormatted?: boolean;
+    /** Code references to this row from the bridge's cross-reference index. */
+    XrefCount?: number;
+    /** Data words pointing at this row, from the cross-reference index. */
+    DataRefCount?: number;
 }
 
 export type DataFormatKind = 'byte' | 'half' | 'word' | 'dword' | 'qword' | 'float' | 'double';
@@ -2865,6 +2871,42 @@ export class SocketClient {
         const response = await this.sendCommand(command, 120000);
         if (!response.Success) {
             throw new Error(response.Error || 'ScanReferences failed');
+        }
+        return response.References ?? [];
+    }
+
+    /**
+     * Build (or rebuild) the bridge's cross-reference index for a region
+     * ('ee', 'iop' or 'bios'). Returns once the build has started unless
+     * `wait` is set. The message describes the indexes the bridge holds.
+     */
+    public async buildXrefIndex(region: string, rebuild = false, wait = false): Promise<string> {
+        const response = await this.sendCommand({
+            Command: 'XREFINDEX',
+            Region: region,
+            XrefRebuild: rebuild,
+            XrefWait: wait,
+        }, wait ? 300000 : 10000);
+        if (!response.Success) {
+            throw new Error(response.Error || 'XREFINDEX failed');
+        }
+        return response.Message ?? '';
+    }
+
+    /**
+     * References to `targetAddress` from the cross-reference index (building it
+     * first if needed): calls, jumps, branches, built addresses, loads, stores,
+     * pointers, and ASCII/CRC32 matches when `kinds` asks for them.
+     */
+    public async xrefsTo(targetAddress: number, kinds?: string[], region?: string): Promise<ReferenceEntry[]> {
+        const response = await this.sendCommand({
+            Command: 'XREFSTO',
+            TargetAddress: targetAddress,
+            ReferenceKinds: kinds,
+            Region: region,
+        }, 300000);
+        if (!response.Success) {
+            throw new Error(response.Error || 'XREFSTO failed');
         }
         return response.References ?? [];
     }

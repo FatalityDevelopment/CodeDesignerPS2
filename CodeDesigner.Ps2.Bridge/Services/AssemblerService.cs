@@ -1157,6 +1157,13 @@ namespace CodeDesigner.Ps2.Bridge.Services
                         row.Comment = aComment;
                     }
 
+                    if (_ctx.Xrefs.HasIndex)
+                    {
+                        var (code, data) = _ctx.Xrefs.CountTo(addr);
+                        if (code > 0) row.XrefCount = code;
+                        if (data > 0) row.DataRefCount = data;
+                    }
+
                     if (_ctx.Labels.TryGetValue(addr, out var labelEntry))
                     {
                         row.Label = labelEntry.Label;

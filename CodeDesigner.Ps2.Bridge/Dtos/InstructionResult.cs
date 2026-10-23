@@ -49,6 +49,16 @@ namespace CodeDesigner.Ps2.Bridge
         /// since there is nothing to clear in the database.
         /// </summary>
         public bool? AutoFormatted { get; set; }
+
+        /// <summary>
+        /// Code references to this row (calls, jumps, branches, built addresses,
+        /// loads, stores) from the cross-reference index. Null when no index
+        /// has been built or nothing references the row.
+        /// </summary>
+        public int? XrefCount { get; set; }
+
+        /// <summary>Data words that point at this row, from the cross-reference index.</summary>
+        public int? DataRefCount { get; set; }
     }
 }
 

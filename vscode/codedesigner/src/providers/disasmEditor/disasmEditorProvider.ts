@@ -41,6 +41,10 @@ interface DisassembledRow {
   comment: string;
   formatted?: boolean;
   dataFormatKind?: DataFormatKind;
+  /** Code references to this row (calls, branches, loads, …) from the xref index. */
+  xrefs?: number;
+  /** Data words pointing at this row, from the xref index. */
+  dataRefs?: number;
 }
 
 /** Metadata for one open live memory panel: label, address range, bootstrap state. */
@@ -292,6 +296,55 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     );
   }
 
+  /** Cross-reference index regions already requested on this connection. */
+  private _xrefRegionsRequested = new Set<string>();
+
+  private static _xrefRegionName(region: MemoryRegion): string | undefined {
+    switch (region) {
+      case MemoryRegion.EeRam:     return 'ee';
+      case MemoryRegion.IopRam:    return 'iop';
+      case MemoryRegion.EeBiosRom: return 'bios';
+      default:                     return undefined;
+    }
+  }
+
+  /**
+   * Ask the bridge to index cross-references for a panel's region (once per
+   * connection, or again when `rebuild`). The build runs in the bridge's
+   * background; when it finishes, panels re-request their page so the row
+   * reference counts appear without waiting for the next refresh.
+   */
+  private _ensureXrefIndex(region: MemoryRegion, rebuild = false): void {
+    const name = DisasmEditorProvider._xrefRegionName(region);
+    const client = this.socketClient;
+    if (!name || !client?.isConnected()) { return; }
+    if (!rebuild && this._xrefRegionsRequested.has(name)) { return; }
+    this._xrefRegionsRequested.add(name);
+
+    void (async () => {
+      try {
+        await client.buildXrefIndex(name, rebuild);
+        // Poll the status instead of blocking the socket for the whole build.
+        for (let i = 0; i < 120; i++) {
+          await new Promise(r => setTimeout(r, 2000));
+          const status = await client.buildXrefIndex(name);
+          if (!/building/i.test(status)) { break; }
+        }
+        getOutputChannel().appendLine(`[XREF] Cross-reference index ready (${name}).`);
+        for (const p of this._livePanels) { p.webview.postMessage({ type: 'xrefIndexReady' }); }
+      } catch (err: any) {
+        this._xrefRegionsRequested.delete(name);
+        getOutputChannel().appendLine(`[XREF] Index build failed (${name}): ${err?.message ?? err}`);
+      }
+    })();
+  }
+
+  /** Rebuild the cross-reference index for every open live region (after the game loads new code). */
+  public rebuildXrefIndexes(): void {
+    const regions = new Set(this._livePanelInfo.map(i => i.memoryRegion));
+    for (const region of regions) { this._ensureXrefIndex(region, true); }
+  }
+
   private _recordNav(address: unknown, source: 'user' | 'mcp' = 'user'): void {
     if (typeof address !== 'number' || !Number.isFinite(address)) { return; }
     this.socketClient?.recordNav(address >>> 0, source).catch(() => { /* non-fatal */ });
@@ -305,6 +358,10 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         if (this._followAiEnabled) {
           socketClient.subscribeActivity();
         }
+        // A new connection may be a new game or a restarted bridge: index the
+        // regions of every open panel again.
+        this._xrefRegionsRequested.clear();
+        for (const info of this._livePanelInfo) { this._ensureXrefIndex(info.memoryRegion); }
       });
       // Navigate the disassembly view when the AI works at a known address.
       socketClient.onActivityNotification((event: AiActivityEvent) => {
@@ -922,6 +979,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             comment: result.Comment || "",  // Use comment from backend analyzer
             formatted: !!result.DataFormatKind || !!result.AutoFormatted,
             dataFormatKind: result.DataFormatKind,
+            xrefs: result.XrefCount,
+            dataRefs: result.DataRefCount,
           });
         } else if (result.Error) {
           // Handle error case
@@ -1505,6 +1564,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 // Sync the Follow AI toggle state so the toolbar button reflects
                 // the current setting even when the panel was just opened.
                 panel.webview.postMessage({ type: 'followAiState', enabled: this._followAiEnabled });
+                this._ensureXrefIndex(info.memoryRegion);
                 // Deliver a goto that arrived while this panel was still opening.
                 info.ready = true;
                 if (info.pendingGoto !== undefined) {
@@ -1955,6 +2015,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 await this.handleGetAddressRefs(panel, message.address as number,
                     baseAddress, totalBytes, region, undefined,
                     message.kinds as string[] | undefined);
+            } else if (message.type === 'rebuildXrefIndex') {
+                this.rebuildXrefIndexes();
             } else if (message.type === 'convertCheat') {
                 try {
                     const result = await this.socketClient!.convertCheat(
@@ -2577,11 +2639,18 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
           }
         }
       } else if (this.socketClient?.isConnected()) {
+        // Live memory: answer from the bridge's cross-reference index (built
+        // once) instead of re-reading the whole region for every lookup. The
+        // bridge picks the region that holds the target's referrers.
         try {
-          refs = await this.socketClient.scanReferences(
-            baseAddress, length, targetAddress, selectedKinds, region);
+          refs = await this.socketClient.xrefsTo(targetAddress, selectedKinds);
         } catch {
-          refs = [];
+          try {
+            refs = await this.socketClient.scanReferences(
+              baseAddress, length, targetAddress, selectedKinds, region);
+          } catch {
+            refs = [];
+          }
         }
       }
 

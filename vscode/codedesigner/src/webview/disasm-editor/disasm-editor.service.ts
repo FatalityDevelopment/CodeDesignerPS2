@@ -167,6 +167,13 @@ export class DisasmEditorService implements OnDestroy {
       this._bridge.on<Record<string, unknown>>('init').subscribe(msg => this._onInit(msg)),
       this._bridge.on<Record<string, unknown>>('disasmPage').subscribe(msg => this._onDisasmPage(msg)),
       this._bridge.on<Record<string, unknown>>('disasmRefreshSkipped').subscribe(msg => this._onDisasmRefreshSkipped(msg)),
+      // The cross-reference index finished building: reload the visible page so
+      // its rows pick up their reference counts.
+      this._bridge.on<Record<string, unknown>>('xrefIndexReady').subscribe(() => {
+        if (this.state.isLive) {
+          this._bridge.postMessage({ type: 'requestPage', startIndex: this.getPageStart(this.state.cursor) });
+        }
+      }),
       this._bridge.on<Record<string, unknown>>('hexview').subscribe(msg => this._onHexView(msg)),
       this._bridge.on<Record<string, unknown>>('searchResults').subscribe(msg => this._onSearchResults(msg)),
       this._bridge.on<Record<string, unknown>>('status').subscribe(msg => this._onStatus(msg)),

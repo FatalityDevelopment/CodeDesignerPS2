@@ -22,6 +22,11 @@ namespace CodeDesigner.Ps2.Bridge
         public string? SearchMode { get; set; }
         public uint? TargetAddress { get; set; }
         public List<string>? ReferenceKinds { get; set; }
+        // XREFINDEX / XREFSTO fields
+        /// <summary>Rebuild the cross-reference index even when one exists.</summary>
+        public bool? XrefRebuild { get; set; }
+        /// <summary>Block until the index is built instead of building it in the background.</summary>
+        public bool? XrefWait { get; set; }
         // SETREG fields
         public string? RegisterName { get; set; }
         public int? RegisterIndex { get; set; }
