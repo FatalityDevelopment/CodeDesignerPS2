@@ -370,6 +370,24 @@ namespace CodeDesigner.Ps2.Bridge
         public byte? MediusClass { get; set; }
         /// <summary>Medius message type byte for MEDIUSDECODE.</summary>
         public byte? MediusType { get; set; }
+        /// <summary>NETINJECT / NETINJECTTX / NETBUILDFRAME: new TCP/UDP payload (base64) for the NetFrameData template.</summary>
+        public string? NetPayloadData { get; set; }
+        /// <summary>NETINJECT / NETINJECTTX / NETBUILDFRAME: recompute IPv4/TCP/UDP lengths and checksums.</summary>
+        public bool? NetFixFrame { get; set; }
+        /// <summary>NETINJECT / NETINJECTTX / NETBUILDFRAME: move a TCP segment onto its live flow's next seq/ack (from drained captures).</summary>
+        public bool? NetTcpContinue { get; set; }
+        /// <summary>NETDISSECTMANY: frames to dissect in one call.</summary>
+        public List<NetFrameInput>? NetFrames { get; set; }
+        /// <summary>NETBUILDMESSAGE: catalog protocol (SCERT, Lobby, LobbyExt, MGCL, DME, Game).</summary>
+        public string? NetMessageProtocol { get; set; }
+        /// <summary>NETBUILDMESSAGE: message id within <see cref="NetMessageProtocol"/>.</summary>
+        public byte? NetMessageId { get; set; }
+        /// <summary>NETBUILDMESSAGE: field values by catalog field name ("Payload" = extra hex bytes).</summary>
+        public Dictionary<string, string>? NetMessageValues { get; set; }
+        /// <summary>NETBUILDMESSAGE: RT_MSG type of the SCERT record wrapping an app message.</summary>
+        public byte? NetRtType { get; set; }
+        /// <summary>NETBUILDMESSAGE: APP_SINGLE / APP_LIST target (or source, server → client) DME index.</summary>
+        public int? NetAppTarget { get; set; }
         // CDS Cheat Engine fields (INJECTCHEATENGINE / UPDATECHEATENGINE / REMOVECHEATENGINE)
         /// <summary>Hook address — the instruction to replace with a jump to the cheat engine.</summary>
         public uint? HookAddress { get; set; }

@@ -1041,6 +1041,29 @@ public enum MediusFileXferStatus : int
 }
 
 /// <summary>
+/// DME application messages (MessageClassDME) on a game connection: what the DME server and the
+/// game's DME library exchange inside RT_MSG_*_APP_* records. These are not the MGCL ids in
+/// <see cref="MediusDmeMessageIds"/>, which reuse class 0 on lobby connections. Object
+/// update/create/destroy layouts come from the game's class table (Mods/SOCOM2/packets/objects.json,
+/// dme_objects.py); application messages (class 2) are listed in Mods/SOCOM2/packets/packets.json.
+/// </summary>
+public enum DmeAppMessageId : byte
+{
+    /// <summary>Server → client after connect: [Version:16] ("1.22.0140" on retail).</summary>
+    ServerVersion = 0x00,
+    /// <summary>TimeOfSend:u32 | PingInstance:u8 | RequestEcho:u8 | pad2.</summary>
+    Ping          = 0x01,
+    /// <summary>[type:1][n:1][objid:u16] then n × [field index:1][value].</summary>
+    ObjectUpdate  = 0x03,
+    /// <summary>[owner:1][type:1][00 00][u32 2][objid:u32][stamp:u32][u32 0][class name:16][all fields].</summary>
+    ObjectCreate  = 0x04,
+    /// <summary>Ends a packed batch of object messages.</summary>
+    EndOfBatch    = 0x05,
+    /// <summary>[objid:u16].</summary>
+    ObjectDestroy = 0x0A,
+}
+
+/// <summary>
 /// DME server-to-server MGCL message type IDs (MessageClassDME).
 /// </summary>
 public enum MediusDmeMessageIds : byte

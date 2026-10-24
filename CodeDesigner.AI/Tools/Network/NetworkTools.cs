@@ -106,25 +106,73 @@ public sealed class NetRecvCaptureTool(IEmulatorBridge bridge)
 }
 
 [CdTool("net_inject", ToolDomain.Network, ToolRisk.NetworkInjection,
-    "Inject a raw Ethernet frame into the PS2 RX path (as if from network). Risk: network injection.")]
+    "Inject a raw Ethernet frame into the PS2 RX path (as if from network). Optionally swap its TCP/UDP payload (e.g. a SCERT record from net_build_message), fix lengths/checksums and continue a live TCP flow's seq/ack. Risk: network injection.")]
 public sealed class NetInjectTool(IEmulatorBridge bridge)
 {
     [ToolEntryPoint]
     public async Task<string> InvokeAsync(
-        [Description("Raw Ethernet frame bytes as a base64 string.")] string frameBase64,
+        [Description("Raw Ethernet frame bytes as a base64 string (the template when payloadBase64 is given).")] string frameBase64,
+        [Description("Optional new TCP/UDP payload as base64; lengths and checksums are then recomputed.")] string? payloadBase64 = null,
+        [Description("Recompute IPv4/TCP/UDP lengths and checksums after hand edits.")] bool fixFrame = false,
+        [Description("Rewrite TCP seq/ack to continue the live connection (learned from drained captures).")] bool tcpContinue = false,
         CancellationToken ct = default)
-        => CdText.Message(await bridge.SendAsync(new { Command = "NETINJECT", NetFrameData = frameBase64 }, ct));
+        => CdText.Message(await bridge.SendAsync(new
+        {
+            Command = "NETINJECT", NetFrameData = frameBase64, NetPayloadData = payloadBase64,
+            NetFixFrame = fixFrame, NetTcpContinue = tcpContinue,
+        }, ct));
 }
 
 [CdTool("net_inject_tx", ToolDomain.Network, ToolRisk.NetworkInjection,
-    "Inject a raw Ethernet frame out the TX adapter (as if PS2 sent it). Risk: network injection.")]
+    "Inject a raw Ethernet frame out the TX adapter (as if PS2 sent it). Same payload/fix/TCP options as net_inject. Risk: network injection.")]
 public sealed class NetInjectTxTool(IEmulatorBridge bridge)
 {
     [ToolEntryPoint]
     public async Task<string> InvokeAsync(
-        [Description("Raw Ethernet frame bytes as a base64 string.")] string frameBase64,
+        [Description("Raw Ethernet frame bytes as a base64 string (the template when payloadBase64 is given).")] string frameBase64,
+        [Description("Optional new TCP/UDP payload as base64; lengths and checksums are then recomputed.")] string? payloadBase64 = null,
+        [Description("Recompute IPv4/TCP/UDP lengths and checksums after hand edits.")] bool fixFrame = false,
+        [Description("Rewrite TCP seq/ack to continue the live connection (learned from drained captures).")] bool tcpContinue = false,
         CancellationToken ct = default)
-        => CdText.Message(await bridge.SendAsync(new { Command = "NETINJECTTX", NetFrameData = frameBase64 }, ct));
+        => CdText.Message(await bridge.SendAsync(new
+        {
+            Command = "NETINJECTTX", NetFrameData = frameBase64, NetPayloadData = payloadBase64,
+            NetFixFrame = fixFrame, NetTcpContinue = tcpContinue,
+        }, ct));
+}
+
+[CdTool("net_build_message", ToolDomain.Network, ToolRisk.ReadOnly,
+    "Encode one multiplayer-server message (SCERT, Lobby, LobbyExt, MGCL, DME or SOCOM II Game, see NETCATALOG) from field values into a plaintext SCERT record, returned as base64 for net_inject's payloadBase64. Risk: read-only.")]
+public sealed class NetBuildMessageTool(IEmulatorBridge bridge)
+{
+    [ToolEntryPoint]
+    public async Task<string> InvokeAsync(
+        [Description("Catalog protocol: SCERT, Lobby, LobbyExt, MGCL, DME or Game.")] string protocol,
+        [Description("Message id within the protocol (e.g. 0x09 = Game chat, 0x07 = Lobby AccountLogin).")] int id,
+        [Description("Field values as a JSON object of field name → string (\"Payload\" = extra hex bytes appended).")] string? valuesJson = null,
+        [Description("RT_MSG type byte of the wrapping SCERT record (default CLIENT_APP_TOSERVER for lobby, CLIENT_APP_BROADCAST for DME/Game).")] int? rtType = null,
+        [Description("APP_SINGLE / APP_LIST target (or source, server → client) DME index.")] int? target = null,
+        CancellationToken ct = default)
+    {
+        var values = string.IsNullOrWhiteSpace(valuesJson)
+            ? new Dictionary<string, string>()
+            : JsonSerializer.Deserialize<Dictionary<string, string>>(valuesJson) ?? new();
+        var json = await bridge.SendAsync(new
+        {
+            Command = "NETBUILDMESSAGE", NetMessageProtocol = protocol, NetMessageId = (byte)id,
+            NetMessageValues = values, NetRtType = rtType is int t ? (byte?)t : null, NetAppTarget = target,
+        }, ct);
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("Error", out var err) && err.ValueKind == JsonValueKind.String) return $"Error: {err.GetString()}";
+            string msg = root.TryGetProperty("Message", out var m) ? m.GetString() ?? "" : "";
+            string data = root.TryGetProperty("NetMessageData", out var d) ? d.GetString() ?? "" : "";
+            return $"{msg}\npayloadBase64: {data}";
+        }
+        catch { return json; }
+    }
 }
 
 [CdTool("net_disassemble", ToolDomain.Network, ToolRisk.ReadOnly,

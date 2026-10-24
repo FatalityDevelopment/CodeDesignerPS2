@@ -112,6 +112,46 @@ public sealed class ParsedMediusMessage
 }
 
 /// <summary>
+/// One message from a DME app payload on a game connection: a <see cref="DmeAppMessageId"/>
+/// (class 0) or a SOCOM II application message from <see cref="GameMessageCatalog"/> (class 2).
+/// A single APP record usually packs several of these.
+/// </summary>
+public sealed class ParsedDmeMessage
+{
+    public byte MsgClass { get; set; }
+    public byte MsgId { get; set; }
+    /// <summary>Catalog name: the <see cref="DmeAppMessageId"/> member or the game message name.</summary>
+    public string Name { get; set; } = string.Empty;
+    /// <summary>Name plus detail for display, e.g. "ObjectUpdate SealState #3".</summary>
+    public string Display { get; set; } = string.Empty;
+    /// <summary>True for class-2 game messages, false for DME library messages.</summary>
+    public bool IsGame { get; set; }
+    /// <summary>Absolute offset of the class byte within the frame.</summary>
+    public int FrameOffset { get; set; }
+    /// <summary>Length including the 2-byte [class][id] header.</summary>
+    public int Length { get; set; }
+    public IList<DissectedField> Fields { get; set; } = new List<DissectedField>();
+}
+
+/// <summary>
+/// One-line summary of a frame for the packet table, built by <see cref="PacketDissector.Summarize"/>
+/// from the same decode as the layer tree so the row and the tree always agree.
+/// </summary>
+public sealed class PacketSummary
+{
+    /// <summary>Multiplayer server the frame talks to (MUIS, MAS, MLS, DME, NAT, DNAS, DNS) or empty.</summary>
+    public string Server { get; set; } = string.Empty;
+    /// <summary>Innermost protocol: Game, DME, Medius, SCERT, TCP, UDP, DNS, ICMP, ARP, …</summary>
+    public string Protocol { get; set; } = string.Empty;
+    public string Source { get; set; } = string.Empty;
+    public string Destination { get; set; } = string.Empty;
+    /// <summary>Message names (or a transport description when there is no application message).</summary>
+    public string Info { get; set; } = string.Empty;
+    /// <summary>Every application message name in the frame, in order.</summary>
+    public IList<string> Messages { get; } = new List<string>();
+}
+
+/// <summary>
 /// One parsed SCERT message extracted from a TCP segment.
 /// </summary>
 public sealed class ParsedScertMessage
@@ -129,6 +169,8 @@ public sealed class ParsedScertMessage
     public ParsedMediusMessage? Medius { get; set; }
     /// <summary>Decoded fields for non-APP SCERT messages with a known schema (CONNECT_TCP, CRYPTKEY_PUBLIC, etc.).</summary>
     public IList<DissectedField>? ScertPayloadFields { get; set; }
+    /// <summary>DME app messages packed in an APP record on a DME connection (object updates, game messages, …).</summary>
+    public IList<ParsedDmeMessage>? Dme { get; set; }
     /// <summary>Absolute byte offset of the SCERT header within the full Ethernet frame.</summary>
     public int FrameOffset { get; set; }
     /// <summary>Total length of this SCERT record (header + optional hash + payload).</summary>

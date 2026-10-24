@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { getOutputChannel } from '../../extension';
-import { SocketClient } from '../../socketClient';
+import { CapturedPacketInfo, NetFrameOptions, ParsedPacketRow, SocketClient } from '../../socketClient';
 import { getNonce, getWebviewErrorHandlerScript } from '../../utils/nonce';
 import { applyCodeDesignerPanelIcon } from '../../utils/webviewPanel';
 
@@ -338,6 +338,15 @@ function buildPcap(packets: PcapPacketEntry[]): Buffer {
     return Buffer.concat(parts);
 }
 
+/** Frame edit options carried by the webview's inject / buildFrame actions. */
+function frameOptions(action: Record<string, unknown>): NetFrameOptions {
+    return {
+        payload:     (action['payload'] as string | undefined) || undefined,
+        fix:         action['fix'] === true,
+        tcpContinue: action['tcpContinue'] === true,
+    };
+}
+
 /**
  * Provider for the Packet Viewer standalone webview tab.
  * Manages the panel lifecycle, routes messages between the webview
@@ -405,11 +414,11 @@ export class PacketViewerProvider {
         const type = msg['type'] as string | undefined;
 
         if (type === 'ready') {
-            // Try to send initial adapter status. Port-map config no longer
-            // needs to be pushed to the webview — protocol dissection now
-            // lives on the bridge (CodeDesigner.Ps2.Multiplayer.PacketDissector),
-            // which loads its own config from Multiplayer/config.json.
+            // Initial adapter status + the server's message catalog (for the composer's message
+            // picker). Port-map config isn't pushed: dissection lives on the bridge
+            // (CodeDesigner.Ps2.Multiplayer.PacketDissector), which reads Multiplayer/config.json.
             await this._sendStatus(webview);
+            await this._sendCatalog(webview);
             return;
         }
 
@@ -474,10 +483,34 @@ export class PacketViewerProvider {
                     await this._sendStats(webview);
                     break;
 
-                case 'disassemble': {
-                    const data = action['data'] as string;
-                    const { text } = await this.socketClient.netDisassemble(data);
-                    webview.postMessage({ type: 'packetViewerMessage', message: text });
+                case 'getCatalog':
+                    await this._sendCatalog(webview);
+                    break;
+
+                case 'inject': {
+                    // NETINJECT puts the frame on the PS2's RX path; NETINJECTTX sends it out
+                    // through the DEV9 adapter as if the PS2 had sent it.
+                    const tx = action['tx'] === true;
+                    const result = await this.socketClient.netInject(action['frame'] as string, tx, frameOptions(action));
+                    webview.postMessage({ type: 'packetViewerInjectResult', ok: result.ok, message: result.message, frame: result.frame, tx });
+                    break;
+                }
+
+                case 'buildFrame': {
+                    const result = await this.socketClient.netBuildFrame(action['frame'] as string, frameOptions(action));
+                    webview.postMessage({ type: 'packetViewerFramePreview', requestId: action['requestId'], ...result });
+                    break;
+                }
+
+                case 'buildMessage': {
+                    const result = await this.socketClient.netBuildMessage(
+                        action['protocol'] as string,
+                        action['id'] as number,
+                        (action['values'] as Record<string, string>) ?? {},
+                        action['rtType'] as number | undefined,
+                        action['target'] as number | undefined,
+                    );
+                    webview.postMessage({ type: 'packetViewerMessageBuilt', data: result.data, message: result.message });
                     break;
                 }
 
@@ -503,28 +536,28 @@ export class PacketViewerProvider {
                         });
                         break;
                     }
-                    // Shape packets to match CapturedPacket expected by addCapturedPackets,
-                    // dissecting each frame through the bridge so the table + tree view
-                    // get the same canonical decoding that live-captured packets get.
-                    // The webview no longer has its own dissector — all proto / Medius
-                    // logic lives in CodeDesigner.Ps2.Multiplayer.Protocol.PacketDissector.
-                    const dissected = await Promise.all(rawPackets.map(p =>
-                        this.socketClient.netDisassemble(p.data)
-                            .then(r => ({ layers: r.layers, row: r.row }))
-                            .catch(err => {
-                                getOutputChannel().warn(`[PacketViewer] dissect failed: ${err}`);
-                                return { layers: undefined, row: undefined };
-                            })
-                    ));
-                    const packets = rawPackets.map((p, i) => ({
-                        direction:     p.direction,
-                        directionName: p.direction === 0 ? 'TX' : 'RX',
-                        timestampUs:   p.timestampUs,
-                        length:        Math.floor(Buffer.from(p.data, 'base64').length),
-                        data:          p.data,
-                        layers:        dissected[i].layers,
-                    }));
-                    const parsedRows = dissected.map((d, i) => d.row ?? { no: i + 1, time: '', dir: '', server: '', src: '', dst: '', proto: '', len: packets[i].length, info: '' });
+                    // Dissect through the bridge in batches so the table + tree get the same
+                    // canonical decoding as live captures (all protocol logic lives in
+                    // CodeDesigner.Ps2.Multiplayer.Protocol.PacketDissector).
+                    const packets: CapturedPacketInfo[] = [];
+                    const parsedRows: ParsedPacketRow[] = [];
+                    const batch = 500;
+                    for (let i = 0; i < rawPackets.length; i += batch) {
+                        const chunk = rawPackets.slice(i, i + batch);
+                        try {
+                            const r = await this.socketClient.netDissectMany(chunk);
+                            packets.push(...r.packets);
+                            parsedRows.push(...r.parsedRows);
+                        } catch (err) {
+                            // Bridge offline: still show the frames, undecoded.
+                            getOutputChannel().warn(`[PacketViewer] dissect failed: ${err}`);
+                            for (const p of chunk) {
+                                const len = Buffer.from(p.data, 'base64').length;
+                                packets.push({ ...p, directionName: p.direction === 0 ? 'TX' : 'RX', length: len });
+                                parsedRows.push({ no: packets.length, time: '', dir: '', server: '', src: '', dst: '', proto: '', len, info: '' });
+                            }
+                        }
+                    }
                     webview.postMessage({
                         type: 'packetViewerPcapLoaded',
                         packets,
@@ -557,6 +590,10 @@ export class PacketViewerProvider {
             if (actionType === 'startCapture') {
                 this._capturing = false;
                 webview.postMessage({ type: 'packetViewerCaptureFailed', message: msg });
+            } else if (actionType === 'inject') {
+                webview.postMessage({ type: 'packetViewerInjectResult', ok: false, message: msg, tx: action['tx'] === true });
+            } else if (actionType === 'buildFrame') {
+                webview.postMessage({ type: 'packetViewerFramePreviewError', requestId: action['requestId'], message: msg });
             } else {
                 webview.postMessage({ type: 'packetViewerError', message: msg });
             }
@@ -571,6 +608,15 @@ export class PacketViewerProvider {
             webview.postMessage({ type: 'packetViewerStatus', status });
         } catch {
             // Silently ignore — adapter may not be available.
+        }
+    }
+
+    private async _sendCatalog(webview: vscode.Webview): Promise<void> {
+        try {
+            const catalog = await this.socketClient.netCatalog();
+            webview.postMessage({ type: 'packetViewerCatalog', catalog });
+        } catch {
+            // Bridge not running yet — the composer asks again when it opens.
         }
     }
 

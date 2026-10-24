@@ -255,8 +255,12 @@ All Structure-Visualizer commands take their parameters as a JSON object in the
 | `NETGETSTATUS` | Get the network capture status |
 | `NETCAPTURE` | Start/stop network packet capture |
 | `NETRECVCAPTURE` | Retrieve captured packets |
-| `NETINJECT` | Inject a packet into the network stream |
-| `NETINJECTTX` | Inject a transmit-direction packet |
+| `NETINJECT` | Inject a frame into the PS2 RX path (optional `NetPayloadData` / `NetFixFrame` / `NetTcpContinue`) |
+| `NETINJECTTX` | Send a frame out through the DEV9 adapter, as if the PS2 sent it (same options) |
+| `NETBUILDFRAME` | Apply the injection edits to a frame without sending it; returns the frame and its dissection |
+| `NETBUILDMESSAGE` | Encode a multiplayer-server message from field values into a plaintext SCERT record |
+| `NETCATALOG` | List every message the multiplayer server defines (SCERT, Medius, MGCL, DME, SOCOM II game, object classes) |
+| `NETDISSECTMANY` | Dissect a batch of frames (e.g. a loaded pcap) in one call |
 | `NETSETFILTER` | Set a packet capture filter |
 | `NETGETSTATS` | Get network capture statistics |
 
