@@ -129,11 +129,6 @@
 <app-converter-overlay #converterOverlayComp
     (close$)="onConverterOverlayClose()"
     (convert$)="onConvertCheat($event)" />
-<app-porter-overlay #porterOverlayComp
-    (close$)="onPorterOverlayClose()"
-    (port$)="onPortCheats($event)"
-    (browseSource)="onBrowseSourceDump()"
-    (browseTarget)="onBrowseTargetDump()" />
 <app-memory-card-overlay #mcOverlayComp
     (browseMc)="onMcBrowse()"
     (newMc)="onMcNew()"

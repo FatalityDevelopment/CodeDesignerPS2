@@ -26,7 +26,6 @@ import { DebugPanelComponent } from './components/debug-panel.component';
 import { BottomPanelComponent, BottomTab } from './components/bottom-panel.component';
 import { EditOverlayComponent, EditOverlayOpenData, EditOverlaySaveEvent, EditOverlayRefsRequest } from './components/edit-overlay.component';
 import { ConverterOverlayComponent, ConvertRequest, ConvertResult } from './components/converter-overlay.component';
-import { PorterOverlayComponent, PortRequest, PortResultPayload } from './components/porter-overlay.component';
 import { MemoryCardOverlayComponent, McListResult, McActionResult } from './components/memory-card-overlay.component';
 import { HddOverlayComponent, HddListResult, HddActionResult } from './components/hdd-overlay.component';
 import { ScannerOverlayComponent, ScanRequest, ScanResult } from './components/scanner-overlay.component';
@@ -38,7 +37,7 @@ import './disasm-editor.css';
 @Component({
   selector: 'app-disasm-editor',
   standalone: true,
-  imports: [HexViewComponent, SearchPanelComponent, AddressInputPanelComponent, VirtualGridComponent, ContextMenuComponent, DebugPanelComponent, BottomPanelComponent, EditOverlayComponent, ConverterOverlayComponent, PorterOverlayComponent, MemoryCardOverlayComponent, HddOverlayComponent, ScannerOverlayComponent, StructOffsetOverlayComponent, IconComponent],
+  imports: [HexViewComponent, SearchPanelComponent, AddressInputPanelComponent, VirtualGridComponent, ContextMenuComponent, DebugPanelComponent, BottomPanelComponent, EditOverlayComponent, ConverterOverlayComponent, MemoryCardOverlayComponent, HddOverlayComponent, ScannerOverlayComponent, StructOffsetOverlayComponent, IconComponent],
   providers: [DisasmEditorService],
   encapsulation: ViewEncapsulation.None,
   templateUrl: './disasm-editor.component.html'
@@ -204,13 +203,6 @@ export class DisasmEditorComponent implements AfterViewInit {
 
   /** Reference to converter overlay component */
   private readonly converterOverlayRef = viewChild<ConverterOverlayComponent>('converterOverlayComp');
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // Porter Overlay State (Phase 10)
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  /** Reference to porter overlay component */
-  private readonly porterOverlayRef = viewChild<PorterOverlayComponent>('porterOverlayComp');
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Memory Card Overlay State
@@ -583,26 +575,6 @@ export class DisasmEditorComponent implements AfterViewInit {
 
   protected onConvertCheat(event: ConvertRequest): void {
     this.vscode.postMessage({ type: 'convertCheat', codes: event.codes, direction: event.direction, format: event.format });
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // Porter Overlay Event Handlers (Phase 10)
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  protected onPorterOverlayClose(): void {
-    this.signals.panels.porterOverlay.set(false);
-  }
-
-  protected onPortCheats(event: PortRequest): void {
-    this.vscode.postMessage({ type: 'portCheats', codes: event.codes, sourcePath: event.sourcePath, targetPath: event.targetPath });
-  }
-
-  protected onBrowseSourceDump(): void {
-    this.vscode.postMessage({ type: 'browseSourceDump' });
-  }
-
-  protected onBrowseTargetDump(): void {
-    this.vscode.postMessage({ type: 'browseTargetDump' });
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -1812,38 +1784,6 @@ export class DisasmEditorComponent implements AfterViewInit {
     });
   }
 
-  private openPorterOverlay(): void {
-    this.zone.run(() => {
-      this.porterOverlayRef()?.open();
-      this.signals.panels.porterOverlay.set(true);
-    });
-  }
-
-  private handlePorterOverlayMessage(data: Record<string, unknown>): void {
-    if (data['type'] === 'browseSourceDumpResult') {
-      if (data['filePath']) {
-        this.zone.run(() => this.porterOverlayRef()?.setSourcePath(data['filePath'] as string));
-      }
-      return;
-    }
-
-    if (data['type'] === 'browseTargetDumpResult') {
-      if (data['filePath']) {
-        this.zone.run(() => this.porterOverlayRef()?.setTargetPath(data['filePath'] as string));
-      }
-      return;
-    }
-
-    if (data['type'] === 'portCheatsResult') {
-      this.zone.run(() => {
-        this.porterOverlayRef()?.setResult({
-          results: data['results'] as import('./components/porter-overlay.component').PorterResult[] | undefined,
-          error: data['error'] as string | undefined,
-        });
-      });
-    }
-  }
-
   private openMemoryCardOverlay(): void {
     this.zone.run(() => {
       this.mcOverlayRef()?.open();
@@ -1936,10 +1876,6 @@ export class DisasmEditorComponent implements AfterViewInit {
       this.zone.run(() => this.openConverterOverlay());
       return;
     }
-    if (data['type'] === 'openPorterOverlay') {
-      this.zone.run(() => this.openPorterOverlay());
-      return;
-    }
     if (data['type'] === 'openMemoryCardOverlay') {
       this.zone.run(() => this.openMemoryCardOverlay());
       return;
@@ -1958,7 +1894,6 @@ export class DisasmEditorComponent implements AfterViewInit {
     }
     this.handleEditOverlayMessage(data);
     this.handleConverterOverlayMessage(data);
-    this.handlePorterOverlayMessage(data);
     this.handleMemoryCardMessage(data);
     this.handleHddMessage(data);
     this.handleScannerMessage(data);

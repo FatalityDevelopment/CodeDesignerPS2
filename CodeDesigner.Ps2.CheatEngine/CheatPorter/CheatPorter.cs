@@ -52,13 +52,20 @@ namespace CodeDesigner.Ps2.CheatEngine
 
             var allResults = new List<PortCheatResult>();
 
-            // ── Phase 0: collect all unique physical addresses across every block ──
-            // Many cheat lists include both an ON and an OFF code for the same address.
-            // Consolidating duplicates here means each address is searched only once.
+            // ── Phase 0: decode every line and collect the unique addresses ───────
+            // Each line is classified by its code type so multi-line codes (serial
+            // writes, copies, pointer writes, multi-line conditionals) only port the
+            // words that really hold an address. Many cheat lists include both an ON
+            // and an OFF code for the same address; consolidating duplicates here
+            // means each address is searched only once.
+            var plans = blocks.Select(b => PlanBlock(b.Cheats)).ToList();
             var uniqueAddrs = new HashSet<int>();
-            foreach (var b in blocks)
-                foreach (var c in b.Cheats)
-                    uniqueAddrs.Add(c.Address);
+            foreach (var plan in plans)
+                foreach (var line in plan)
+                {
+                    if (line.Addr1) uniqueAddrs.Add(AddrOf(line.Word1));
+                    if (line.Addr2) uniqueAddrs.Add(AddrOf(line.Word2));
+                }
 
             int totalCheats = blocks.Sum(b => b.Cheats.Count);
             logLines.Add($"[PORTCHEATS] {totalCheats} cheat entr{(totalCheats == 1 ? "y" : "ies")} across {blocks.Count} block{(blocks.Count == 1 ? "" : "s")}, {uniqueAddrs.Count} unique address{(uniqueAddrs.Count == 1 ? "" : "es")} to resolve.");
@@ -80,43 +87,61 @@ namespace CodeDesigner.Ps2.CheatEngine
                 string blockName = block.Label ?? string.Empty;
                 logLines.Add($"--- {(string.IsNullOrWhiteSpace(blockName) ? "(unnamed block)" : blockName)} ---");
 
-                foreach (var cheat in block.Cheats)
+                foreach (var line in plans[blockIdx])
                 {
-                    int    physAddr = cheat.Address;
-                    string typeHex  = ((int)cheat.CheatType).ToString("X2");
-                    // Reconstruct the value hex (big-endian as written in the cheat file).
-                    byte[] valBytes = (byte[])cheat.Data.Clone();
-                    Array.Reverse(valBytes);
-                    string valueHex = BitConverter.ToString(valBytes).Replace("-", "");
-                    string origCode = $"{typeHex}{physAddr:X6} {valueHex}";
-
-                    var cached = addressCache[physAddr];
-
                     var result = new PortCheatResult
                     {
                         BlockIndex   = blockIdx,
+                        LineIndex    = line.LineIndex,
                         BlockName    = blockName,
                         BlockText    = block.BlockText,
-                        OriginalCode = origCode,
-                        Found        = cached.Found,
-                        Method       = cached.Method,
-                        Confidence   = cached.Confidence,
-                        Ambiguous    = cached.Ambiguous,
+                        OriginalCode = FormatCode(line.Word1, line.Word2),
+                        Note         = line.Note,
                     };
 
-                    if (cached.Found)
+                    if (!line.Addr1 && !line.Addr2)
                     {
-                        result.NewCode = $"{typeHex}{cached.NewPhysAddr:X6} {valueHex}";
-                        if (cached.Ambiguous && cached.CandidateAddrs != null)
-                            result.Candidates = cached.CandidateAddrs
+                        // Nothing address-like on this line (values, offsets, timers).
+                        result.Found      = true;
+                        result.NewCode    = result.OriginalCode;
+                        result.Method     = "Unchanged";
+                        result.Confidence = 100;
+                        logLines.Add($"  {result.OriginalCode} → unchanged ({line.Note})");
+                        allResults.Add(result);
+                        continue;
+                    }
+
+                    var first  = line.Addr1 ? addressCache[AddrOf(line.Word1)] : null;
+                    var second = line.Addr2 ? addressCache[AddrOf(line.Word2)] : null;
+                    var primary = first ?? second!;
+
+                    result.SourceAddress = AddrOf(line.Addr1 ? line.Word1 : line.Word2);
+                    result.Found         = (first?.Found ?? true) && (second?.Found ?? true);
+                    result.Method        = first != null && second != null
+                        ? $"{first.Method} + {second.Method}"
+                        : primary.Method;
+                    result.Confidence    = Math.Min(first?.Confidence ?? 100, second?.Confidence ?? 100);
+                    result.Ambiguous     = (first?.Ambiguous ?? false) || (second?.Ambiguous ?? false);
+
+                    if (result.Found)
+                    {
+                        uint w1 = first  != null ? WithAddr(line.Word1, first.NewPhysAddr)  : line.Word1;
+                        uint w2 = second != null ? WithAddr(line.Word2, second.NewPhysAddr) : line.Word2;
+                        result.NewCode    = FormatCode(w1, w2);
+                        result.NewAddress = primary.NewPhysAddr;
+                        // Alternatives vary the primary address; a second address keeps its best match.
+                        if (primary.Ambiguous && primary.CandidateAddrs != null)
+                            result.Candidates = primary.CandidateAddrs
                                 .Take(8)
-                                .Select(a => $"{typeHex}{a:X6} {valueHex}")
+                                .Select(a => first != null
+                                    ? FormatCode(WithAddr(line.Word1, a), w2)
+                                    : FormatCode(w1, WithAddr(line.Word2, a)))
                                 .ToList();
-                        logLines.Add($"  {origCode} → {result.NewCode}  (confidence {cached.Confidence}%, method: {cached.Method})");
+                        logLines.Add($"  {result.OriginalCode} → {result.NewCode}  (confidence {result.Confidence}%, method: {result.Method})");
                     }
                     else
                     {
-                        logLines.Add($"  {origCode} → NOT FOUND");
+                        logLines.Add($"  {result.OriginalCode} → NOT FOUND");
                     }
 
                     allResults.Add(result);
@@ -154,6 +179,118 @@ namespace CodeDesigner.Ps2.CheatEngine
             public List<int>? CandidateAddrs { get; set; }
         }
 
+        /// <summary>One raw code line plus which of its two words hold a portable address.</summary>
+        private sealed class CodeLine
+        {
+            public int     LineIndex { get; init; }
+            public uint    Word1     { get; init; }
+            public uint    Word2     { get; init; }
+            public bool    Addr1     { get; set; }
+            public bool    Addr2     { get; set; }
+            /// <summary>Why a line keeps some/all words unchanged; null for a plain single-line code.</summary>
+            public string? Note      { get; set; }
+        }
+
+        // ════════════════════════════════════════════════════════════════════════
+        // Code-line decoding
+        // ════════════════════════════════════════════════════════════════════════
+
+        /// <summary>Address bits of a code word: everything below the type/condition nibble.</summary>
+        private static int AddrOf(uint word) => (int)(word & 0x0FFFFFFF);
+
+        /// <summary>Replace the address bits of <paramref name="word"/>, keeping its top nibble.</summary>
+        private static uint WithAddr(uint word, int addr) => (word & 0xF0000000) | ((uint)addr & 0x0FFFFFFF);
+
+        private static string FormatCode(uint w1, uint w2) => $"{w1:X8} {w2:X8}";
+
+        /// <summary>
+        /// Classify the lines of one block by raw (CodeBreaker/GameShark) code type so only
+        /// address words are ported. Multi-line codes consume their continuation lines:
+        /// <list type="bullet">
+        ///   <item><description>3 — increment/decrement: address in word 2; 32-bit forms (sub-type 5/6) take a value line.</description></item>
+        ///   <item><description>4 — serial write: address in word 1; the next line (step/value increments) is kept.</description></item>
+        ///   <item><description>5 — copy bytes: source in word 1, destination in word 1 of the next line.</description></item>
+        ///   <item><description>6 — pointer write: base in word 1; offset lines (1 + (n-1)/2 rounded up) are kept.</description></item>
+        ///   <item><description>B — timer: nothing to port.  E — multi-line conditional: address in word 2.</description></item>
+        ///   <item><description>F — master code: both words are code addresses.  Everything else: address in word 1.</description></item>
+        /// </list>
+        /// </summary>
+        private static List<CodeLine> PlanBlock(IReadOnlyList<Cheat> cheats)
+        {
+            var lines = cheats.Select((c, i) => new CodeLine
+            {
+                LineIndex = i,
+                // CheatType holds the first two hex digits; the second digit is address
+                // bit 24 (EE RAM is 32 MB), so rebuild the full first word.
+                Word1 = ((uint)(int)c.CheatType << 24) | (uint)(c.Address & 0xFFFFFF),
+                Word2 = c.Data.Length >= 4 ? BitConverter.ToUInt32(c.Data, 0) : 0,
+            }).ToList();
+
+            void Keep(int from, int count, string note)
+            {
+                for (int k = from; k < from + count && k < lines.Count; k++)
+                    lines[k].Note = note;
+            }
+
+            for (int i = 0; i < lines.Count; i++)
+            {
+                var line = lines[i];
+                switch (line.Word1 >> 28)
+                {
+                    case 0x3:
+                        line.Addr2 = true;
+                        line.Note  = "Increment/decrement — address in the second word";
+                        if (((line.Word1 >> 20) & 0xF) >= 5)
+                        {
+                            Keep(i + 1, 1, "Increment/decrement amount");
+                            i += 1;
+                        }
+                        break;
+                    case 0x4:
+                        line.Addr1 = true;
+                        Keep(i + 1, 1, "Serial write step/increment — copied unchanged");
+                        i += 1;
+                        break;
+                    case 0x5:
+                        line.Addr1 = true;
+                        if (i + 1 < lines.Count)
+                        {
+                            lines[i + 1].Addr1 = true;
+                            lines[i + 1].Note  = "Copy destination";
+                        }
+                        i += 1;
+                        break;
+                    case 0x6:
+                    {
+                        line.Addr1 = true;
+                        if (i + 1 >= lines.Count) break;
+                        int levels = (int)(lines[i + 1].Word1 & 0xFFFF);
+                        // Offset 1 sits in word 2 of the next line; the rest pack two per line.
+                        int extra  = 1 + Math.Max(0, levels / 2);
+                        Keep(i + 1, extra, "Pointer offsets — copied unchanged");
+                        i += extra;
+                        break;
+                    }
+                    case 0xB:
+                        line.Note = "Timer";
+                        break;
+                    case 0xE:
+                        line.Addr2 = true;
+                        line.Note  = "Multi-line conditional — address in the second word";
+                        break;
+                    case 0xF:
+                        line.Addr1 = true;
+                        line.Addr2 = true;
+                        line.Note  = "Master code — both words are code addresses";
+                        break;
+                    default:
+                        line.Addr1 = true;
+                        break;
+                }
+            }
+            return lines;
+        }
+
         private sealed class MipsCodeRef
         {
             /// <summary>Byte position of the LUI instruction in the source dump.</summary>
@@ -173,11 +310,18 @@ namespace CodeDesigner.Ps2.CheatEngine
             var result   = new AddressSearchResult();
             bool foundAny = false;
 
+            if (physAddr >= sourceData.Length)
+            {
+                logLines.Add($"    Address is outside the {sourceData.Length / 1024 / 1024} MB source dump");
+                result.Method = "Address outside source dump";
+                return result;
+            }
+
             // ── Strategy 1: simple before-window ────────────────────────────────
             foreach (int windowSize in windowSizes)
             {
                 int patternStart = physAddr - windowSize;
-                if (patternStart < 0 || physAddr >= sourceData.Length)
+                if (patternStart < 0)
                 {
                     logLines.Add($"    [S1 {windowSize}B window] Address out of range — skipping");
                     continue;
@@ -205,12 +349,22 @@ namespace CodeDesigner.Ps2.CheatEngine
                     continue;
                 }
 
-                var dynamicMatches = matches
-                    .Where(m => m + actualWindow <= sourceData.Length &&
-                                !sourceData.AsSpan(m, actualWindow).SequenceEqual(pattern))
+                // Drop matches that are other copies of the pattern: the source holds the
+                // same bytes there too, so that copy existed before and is not where this
+                // address went. The match at the original position is kept — an address
+                // that did not move is the most common case.
+                var usefulMatches = matches
+                    .Where(m => m == patternStart ||
+                                !(m + actualWindow <= sourceData.Length &&
+                                  sourceData.AsSpan(m, actualWindow).SequenceEqual(pattern)))
                     .ToList();
 
-                var usefulMatches = dynamicMatches.Count > 0 ? dynamicMatches : matches;
+                if (usefulMatches.Count == 0)
+                {
+                    logLines.Add($"    [S1] HexPattern-{actualWindow}: only copies present in both dumps — skipping");
+                    continue;
+                }
+                SortByDistance(usefulMatches, patternStart);
 
                 foundAny = true;
                 bool ambiguous = usefulMatches.Count > 1;
@@ -218,7 +372,7 @@ namespace CodeDesigner.Ps2.CheatEngine
 
                 result.Found       = true;
                 result.NewPhysAddr = bestMatch;
-                result.Method      = $"HexPattern-{actualWindow}" + (dynamicMatches.Count > 0 ? "-filtered" : "");
+                result.Method      = $"HexPattern-{actualWindow}" + (usefulMatches.Count < matches.Count ? "-filtered" : "");
                 result.Confidence  = ambiguous ? Math.Max(20, 100 - (usefulMatches.Count - 1) * 25) : 100;
                 result.Ambiguous   = ambiguous;
 
@@ -289,12 +443,14 @@ namespace CodeDesigner.Ps2.CheatEngine
                             if (matchLuiPos + 4 > targetData.Length) continue;
                             int newLuiImm = targetData[matchLuiPos] | (targetData[matchLuiPos + 1] << 8);
 
-                            int newAddr = (newLuiImm << 16) + (short)newLow16;
-                            if (newAddr > 0 && newAddr < targetData.Length)
+                            // KSEG0/KSEG1 references map to physical RAM through the low 29 bits.
+                            int newAddr = (int)((uint)((newLuiImm << 16) + (short)newLow16) & 0x1FFFFFFF);
+                            if (newAddr > 0 && newAddr < targetData.Length && !candidates.Contains(newAddr))
                                 candidates.Add(newAddr);
                         }
 
                         if (candidates.Count == 0) continue;
+                        SortByDistance(candidates, physAddr);
 
                         bool ambig = candidates.Count > 1;
                         int  best  = candidates[0];
@@ -515,22 +671,20 @@ namespace CodeDesigner.Ps2.CheatEngine
                 var rawMatches = FindPattern(targetData, pattern);
                 if (rawMatches.Count == 0) continue;
 
-                // Filter static matches: positions where the source also has the same bytes.
+                // Filter other copies: positions where the source also has the same bytes
+                // (shared static data). The original position itself is kept so an
+                // address that did not move still resolves.
                 var dynamicMatches = rawMatches
-                    .Where(m => m + scanBack <= sourceData.Length &&
-                                !sourceData.AsSpan(m, scanBack).SequenceEqual(pattern.AsSpan()))
+                    .Where(m => m == anchorStart ||
+                                !(m + scanBack <= sourceData.Length &&
+                                  sourceData.AsSpan(m, scanBack).SequenceEqual(pattern.AsSpan())))
                     .ToList();
 
-                // If all matches are static skip this window; the non-zero bytes are shared
-                // verbatim between versions (e.g. static library data) and not useful for
-                // locating the relocated address.
+                // Only copies matched: this window is not distinctive enough.
                 if (dynamicMatches.Count == 0) continue;
 
-                // Sort dynamic candidates by distance from the source address so that
-                // the closest relocation is ranked first.  Use CompareTo on the absolute
-                // distances to avoid integer-overflow when the dump is large.
-                dynamicMatches.Sort((a, b) =>
-                    Math.Abs((a + scanBack) - physAddr).CompareTo(Math.Abs((b + scanBack) - physAddr)));
+                // Closest relocation first.
+                SortByDistance(dynamicMatches, anchorStart);
 
                 int conf = dynamicMatches.Count == 1
                     ? 100
@@ -654,6 +808,14 @@ namespace CodeDesigner.Ps2.CheatEngine
         // ════════════════════════════════════════════════════════════════════════
         // Low-level pattern search helpers
         // ════════════════════════════════════════════════════════════════════════
+
+        /// <summary>Order positions by distance from <paramref name="origin"/>, nearest first (stable for ties).</summary>
+        private static void SortByDistance(List<int> positions, int origin)
+        {
+            var sorted = positions.OrderBy(p => Math.Abs((long)p - origin)).ToList();
+            positions.Clear();
+            positions.AddRange(sorted);
+        }
 
         /// <summary>
         /// Searches <paramref name="haystack"/> for every occurrence of

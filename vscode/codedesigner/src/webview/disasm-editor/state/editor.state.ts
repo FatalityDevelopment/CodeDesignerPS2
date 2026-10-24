@@ -189,7 +189,6 @@ export class EditorState {
     bottom: signal(false),
     editOverlay: signal(false),
     converterOverlay: signal(false),
-    porterOverlay: signal(false),
     scannerOverlay: signal(false),
     structOverlay: signal(false),
     labelManager: signal(false),

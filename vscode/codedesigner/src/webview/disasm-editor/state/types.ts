@@ -216,12 +216,6 @@ export interface ConverterOverlayState {
   visible: boolean;
 }
 
-export interface PorterOverlayState {
-  visible: boolean;
-  sourcePath: string;
-  targetPath: string;
-}
-
 // ── PINE Watchpoints ──────────────────────────────────────────────────────────
 
 export interface PineWatchInfo {

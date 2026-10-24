@@ -1085,6 +1085,8 @@ export interface DiscElfEntry {
 export interface PortCheatResult {
     /** Zero-based index of the cheat block; use this to distinguish blocks that share the same label. */
     blockIndex: number;
+    /** Zero-based position of this line within its block. */
+    lineIndex: number;
     /** The #Name label of the cheat block this line belongs to. */
     blockName: string;
     /** Any non-label, non-code description text found in the cheat block. Null when absent. */
@@ -1103,6 +1105,12 @@ export interface PortCheatResult {
     ambiguous: boolean;
     /** All candidate new code lines when ambiguous. */
     candidates: string[] | null;
+    /** Source address the line was ported from; null for lines without one (values, offsets). */
+    sourceAddress: number | null;
+    /** Target address chosen for sourceAddress; null when not found or not applicable. */
+    newAddress: number | null;
+    /** How the line's code type was handled, e.g. "Pointer offsets — copied unchanged". */
+    note: string | null;
 }
 
 /**
@@ -3120,6 +3128,7 @@ export class SocketClient {
         const raw = response.PortCheatResults as Array<Record<string, unknown>> ?? [];
         const results: PortCheatResult[] = raw.map(r => ({
             blockIndex:   (r['BlockIndex']   as number)  ?? 0,
+            lineIndex:    (r['LineIndex']    as number)  ?? 0,
             blockName:    (r['BlockName']    as string)  ?? '',
             blockText:    (r['BlockText']    as string | null) ?? null,
             originalCode: (r['OriginalCode'] as string)  ?? '',
@@ -3129,6 +3138,9 @@ export class SocketClient {
             confidence:   (r['Confidence']   as number)  ?? 0,
             ambiguous:    (r['Ambiguous']    as boolean) ?? false,
             candidates:   (r['Candidates']   as string[] | null) ?? null,
+            sourceAddress: (r['SourceAddress'] as number | null) ?? null,
+            newAddress:    (r['NewAddress']    as number | null) ?? null,
+            note:          (r['Note']          as string | null) ?? null,
         }));
         return { results, log: response.Data ?? '' };
     }

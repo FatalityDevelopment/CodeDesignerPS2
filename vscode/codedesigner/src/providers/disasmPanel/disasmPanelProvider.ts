@@ -304,7 +304,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         };
         this._snapshotManagerProvider = new SnapshotManagerProvider(_extensionUri, delegate);
         this._diffViewerProvider      = new DiffViewerProvider(_extensionUri, delegate, socketClient);
-        this._cheatPorterProvider     = new CheatPorterProvider(_extensionUri, socketClient);
+        this._cheatPorterProvider     = new CheatPorterProvider(
+            _extensionUri, delegate, socketClient, () => this.getGameCheatsForPorter());
     }
 
     private readonly _mcpProgressReportEditorProvider: McpProgressReportEditorProvider;
@@ -730,7 +731,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                     break;
                 // ── Cheat Code Porter ─────────────────────────────────────
                 case 'openPorter':
-                    this.editorProvider.openPorterOverlay();
+                    this._cheatPorterProvider.open();
                     break;
                 // ── Memory Scanner ────────────────────────────────────────
                 case 'openScanner':
@@ -3499,6 +3500,18 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         }
 
         return labels;
+    }
+
+    /**
+     * The current game's archive cheats for the Cheat Porter, fetched on demand
+     * when the Cheats tab has not loaded them yet.
+     */
+    private async getGameCheatsForPorter(): Promise<Array<{ name: string; codes: string[] }>> {
+        if (this._archiveCheats.length === 0) {
+            if (!this._bridgeMode) { throw new Error('Game cheats need the PCSX2 bridge.'); }
+            await this.handleFetchArchiveCheats();
+        }
+        return this._archiveCheats.map(c => ({ name: c.name, codes: c.codes }));
     }
 
     /**

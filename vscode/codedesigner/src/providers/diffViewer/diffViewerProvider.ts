@@ -7,12 +7,8 @@ import { SnapshotEntry } from '../../webview/disasm-panel/types';
 import { SnapshotDataDelegate } from '../snapshotManager/snapshotManagerProvider';
 import { SocketClient } from '../../socketClient';
 import { applyCodeDesignerPanelIcon } from '../../utils/webviewPanel';
+import { EE_RAM_BASE, EE_RAM_SIZE, EeRamSource, readLiveEeRam, resolveEeDumpFile } from '../../utils/eeRamSource';
 
-/** 32 MB — full EE RAM */
-const EE_RAM_SIZE      = 32 * 1024 * 1024;
-const EE_RAM_BASE      = 0x00000000;
-/** READMEMREGION returns hex; 4 MB slices keep each response ~8 MB and let us report progress. */
-const LIVE_READ_CHUNK  = 4 * 1024 * 1024;
 /** Diff granularity — one GitHub-style "line" of hex is 16 bytes. */
 const ROW_BYTES        = 16;
 /** Coarse block size for the fast equality pre-pass. */
@@ -23,9 +19,7 @@ const MAX_RUNS         = 100_000;
 const MAX_COPY_CODES   = 20_000;
 
 /** One side of a comparison: a dump on disk or the emulator's live EE RAM. */
-export type DiffSource =
-    | { kind: 'live' }
-    | { kind: 'dump'; path: string; label: string };
+export type DiffSource = EeRamSource;
 
 interface LoadedSide {
     buf:   Buffer;
@@ -225,56 +219,12 @@ export class DiffViewerProvider {
 
     private async _loadSide(src: DiffSource, progress: (m: string) => void): Promise<LoadedSide> {
         if (src.kind === 'live') {
-            return { buf: await this._readLiveEeRam(progress), label: 'Live EE RAM' };
+            return { buf: await readLiveEeRam(this.socketClient, progress), label: 'Live EE RAM' };
         }
         progress(`Loading ${src.label}…`);
-        const file = await this._resolveDumpFile(src.path);
+        const file = await resolveEeDumpFile(this.socketClient, src.path);
         const buf  = await fs.promises.readFile(file);
         return { buf, label: src.label || path.basename(src.path), file };
-    }
-
-    /** Read all of EE RAM from the emulator in READMEMREGION slices. */
-    private async _readLiveEeRam(progress: (m: string) => void): Promise<Buffer> {
-        if (!this.socketClient.isConnected()) {
-            throw new Error('Not connected to the emulator — live EE RAM is unavailable.');
-        }
-        const out = Buffer.alloc(EE_RAM_SIZE);
-        for (let off = 0; off < EE_RAM_SIZE; off += LIVE_READ_CHUNK) {
-            progress(`Reading live EE RAM… ${off / (1024 * 1024)} / ${EE_RAM_SIZE / (1024 * 1024)} MB`);
-            const { bytes } = await this.socketClient.readMemoryRegion(
-                EE_RAM_BASE + off, EE_RAM_BASE + off + LIVE_READ_CHUNK);
-            Buffer.from(bytes, 'hex').copy(out, off);
-        }
-        return out;
-    }
-
-    /**
-     * Map a snapshot path to the EE RAM .bin it holds. PCSX2 .p2s states are
-     * extracted by the bridge (EEmem.bin in a sibling .extracted folder);
-     * snapshot folders use their EE dump; anything else is read as a raw dump.
-     */
-    private async _resolveDumpFile(p: string): Promise<string> {
-        let dir: string | null = null;
-        if (p.toLowerCase().endsWith('.p2s')) {
-            if (!this.socketClient.isConnected()) {
-                throw new Error('Connect to the bridge to read .p2s save states.');
-            }
-            dir = await this.socketClient.extractP2s(p);
-        } else {
-            try {
-                if ((await fs.promises.stat(p)).isDirectory()) { dir = p; }
-            } catch {
-                throw new Error(`File not found: ${p}`);
-            }
-        }
-        if (!dir) { return p; }
-
-        const bins = (await fs.promises.readdir(dir)).filter(f => f.toLowerCase().endsWith('.bin'));
-        const ee = bins.find(f => /^(eemem|eememory)\.bin$/i.test(f))
-                ?? bins.find(f => /^ee/i.test(f))
-                ?? bins[0];
-        if (!ee) { throw new Error(`No .bin memory dump found in ${dir}`); }
-        return path.join(dir, ee);
     }
 
     /**
