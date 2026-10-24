@@ -752,6 +752,14 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.Texture
         // Builds an up-to-256-entry palette via median cut on the RGBA pixels,
         // unswizzles it to match PS2 CLUT ordering, and returns a 1024-byte
         // (256 entries, RGBA8888) palette buffer.
+        /// <summary>RGBA (top-down) to 8-bit indices in the TIF's bottom-up row order plus the 256-entry logical
+        /// RGBA8888 palette they index (median cut); <see cref="EncodeClutBuffer"/> turns the palette into a PAL buf.</summary>
+        public static byte[] Quantize8(byte[] rgbaTopDown, int width, int height, out byte[] logicalPalette)
+        {
+            logicalPalette = MedianCutQuantize(rgbaTopDown, 256, out _);
+            return QuantizeWithPalette(FlipRowsRgba(rgbaTopDown, width, height), logicalPalette);
+        }
+
         public static byte[] MedianCutQuantize(byte[] rgbaTopDown, int maxColors, out byte[] paletteOut)
         {
             int pixelCount = rgbaTopDown.Length / 4;

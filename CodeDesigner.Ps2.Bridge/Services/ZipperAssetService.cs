@@ -1,3 +1,4 @@
+using CodeDesigner.Ps2.FileFormats.Assets;
 using System.Collections.Concurrent;
 using System.Text.Json;
 using CodeDesigner.Ps2.FileFormats.Imaging;
@@ -132,22 +133,22 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 {
                     string archive = Str(a, "archive") ?? throw new ArgumentException("\"archive\" is required");
                     string model = Str(a, "model") ?? throw new ArgumentException("\"model\" is required");
-                    static List<ModelMesh.VertexEdit> Edits(JsonElement holder)
+                    static List<ZipperModelMesh.VertexEdit> Edits(JsonElement holder)
                     {
                         if (!holder.TryGetProperty("vertices", out var vs) || vs.ValueKind != JsonValueKind.Array)
                             throw new ArgumentException("\"vertices\" [{i, position?, uv?, color?, normal?}] is required");
-                        return vs.EnumerateArray().Select(v => new ModelMesh.VertexEdit(
+                        return vs.EnumerateArray().Select(v => new ZipperModelMesh.VertexEdit(
                             Int(v, "i"), Floats(v, "position"), Floats(v, "uv"),
                             Floats(v, "color")?.Select(x => (byte)Math.Clamp((int)MathF.Round(x), 0, 255)).ToArray(), Floats(v, "normal"))).ToList();
                     }
-                    var byChunk = new Dictionary<int, IReadOnlyList<ModelMesh.VertexEdit>>();
+                    var byChunk = new Dictionary<int, IReadOnlyList<ZipperModelMesh.VertexEdit>>();
                     if (a.TryGetProperty("chunks", out var cl) && cl.ValueKind == JsonValueKind.Array)
                         foreach (var c in cl.EnumerateArray()) byChunk[Int(c, "geometryOffset")] = Edits(c);
                     else
                         byChunk[Int(a, "geometryOffset")] = Edits(a);
                     int count = byChunk.Values.Sum(l => l.Count);
                     string label = Str(a, "label") ?? $"edit {count} vertex(es) of {model}";
-                    return ApplyEdit(s, label, p => ModelMesh.SetVertices(p, archive, model, byChunk));
+                    return ApplyEdit(s, label, p => ZipperModelMesh.SetVertices(p, archive, model, byChunk));
                 }
                 case "transformVertices":
                 {
@@ -159,7 +160,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
                     if (a.TryGetProperty("vertices", out var vv) && vv.ValueKind == JsonValueKind.Object)
                         verts = vv.EnumerateObject().ToDictionary(p => int.Parse(p.Name), p => p.Value.EnumerateArray().Select(x => x.GetInt32()).ToArray());
                     float[] m = Floats(a, "matrix") ?? VertexTransform(s, archive, model, a, chunks, verts);
-                    return ApplyEdit(s, Str(a, "label") ?? $"transform {model}", p => ModelMesh.TransformVertices(p, archive, model, m, chunks, verts));
+                    return ApplyEdit(s, Str(a, "label") ?? $"transform {model}", p => ZipperModelMesh.TransformVertices(p, archive, model, m, chunks, verts));
                 }
                 case "deleteFaces":
                 {
@@ -315,7 +316,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
             float[]? pivot = Floats(a, "pivot");
             if (pivot == null)
             {
-                var mesh = ModelMesh.Build(s.Package, s.Package.FindModel(archive, model) ?? throw new KeyNotFoundException($"Model {archive}:{model} not found"));
+                var mesh = ZipperModelMesh.Build(s.Package, s.Package.FindModel(archive, model) ?? throw new KeyNotFoundException($"Model {archive}:{model} not found"));
                 var min = new[] { float.MaxValue, float.MaxValue, float.MaxValue };
                 var max = new[] { float.MinValue, float.MinValue, float.MinValue };
                 foreach (var c in mesh.Chunks)
@@ -740,6 +741,8 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 string full = Path.GetFullPath(inputPath);
                 // SOCOM 3 / Combined Assault archives open as read-only CA sessions.
                 if (TryOpenCa(full) is string ca) return ca;
+                // GTA: San Andreas (the disc image or GTA3.IMG) opens as a read-only GTA session.
+                if (Assets.GtaAssetService.TryOpen(full) is string gta) return gta;
                 // One session per package path: the editor and an agent opening the same map share it.
                 AssetSession? existing = Sessions.Values.FirstOrDefault(s => s.Package.SourcePath.Equals(full, StringComparison.OrdinalIgnoreCase));
                 AssetSession session = existing ?? new AssetSession { Id = NewId(full), Package = ZipperPackage.Open(full) };
@@ -754,13 +757,13 @@ namespace CodeDesigner.Ps2.Bridge.Services
 
         private static string HandleClose(string? id)
         {
-            if (id != null && CloseCa(id)) return Ok("ASSET_CLOSE", new { session = id, discardedEdits = 0 });
+            if (id != null && (CloseCa(id) || Assets.GtaAssetService.Close(id))) return Ok("ASSET_CLOSE", new { session = id, discardedEdits = 0 });
             if (id == null || !Sessions.TryRemove(id, out var s)) return Responses.Error($"No asset session '{id}'");
             return Ok("ASSET_CLOSE", new { session = id, discardedEdits = s.Dirty.Count });
         }
 
         private static string HandleSessions() =>
-            Ok("ASSET_SESSIONS", Sessions.Values.Select(StatusObject).Concat(CaSessions.Values.Select(CaStatus)).ToList());
+            Ok("ASSET_SESSIONS", Sessions.Values.Select(StatusObject).Concat(CaSessions.Values.Select(CaStatus)).Concat(Assets.GtaAssetService.Statuses()).ToList());
 
         private static string WithSession(string? id, string command, Func<AssetSession, object> body)
         {
@@ -868,7 +871,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
             string? geoArchive = definition is { } d ? s.Package.Archive(d.Namespace, "geo")?.Leaf : null;
             string? texNs = s.Package.TextureNamespace(model.Namespace);
 
-            if (decoded.Chunks.Count == 0 && ModelMesh.TryBuild(s.Package, model) is { Skinned: true } skinned)
+            if (decoded.Chunks.Count == 0 && ZipperModelMesh.TryBuild(s.Package, model) is { Skinned: true } skinned)
                 return DescribeSkinned(s, model, skinned, geoArchive, texNs);
 
             var chunks = decoded.Chunks.Select((c, i) => new
@@ -975,7 +978,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
             if (string.IsNullOrEmpty(archive) || string.IsNullOrEmpty(name)) throw new ArgumentException("AssetArchive and AssetName (the model) are required");
             var model = s.Package.FindModel(archive, name) ?? throw new KeyNotFoundException($"Model {archive}:{name} not found");
             bool arrays = Parse<MeshArgs>(json)?.Arrays ?? true;
-            var mesh = ModelMesh.Build(s.Package, model);
+            var mesh = ZipperModelMesh.Build(s.Package, model);
             static string F(float[] a) { var bytes = new byte[a.Length * 4]; Buffer.BlockCopy(a, 0, bytes, 0, bytes.Length); return Convert.ToBase64String(bytes); }
             static string I(int[] a) { var bytes = new byte[a.Length * 4]; Buffer.BlockCopy(a, 0, bytes, 0, bytes.Length); return Convert.ToBase64String(bytes); }
             return new

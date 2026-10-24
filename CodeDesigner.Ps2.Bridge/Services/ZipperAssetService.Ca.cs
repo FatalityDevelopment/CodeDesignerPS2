@@ -1,3 +1,4 @@
+using CodeDesigner.Ps2.FileFormats.Assets;
 using System.Collections.Concurrent;
 using System.Text.Json;
 using CodeDesigner.Ps2.FileFormats.Imaging;
@@ -38,7 +39,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
         /// <summary>Answers <paramref name="command"/> when the message names a CA session; null otherwise.</summary>
         private static string? CaRoute(CommandMessage c, string command)
         {
-            if (c.AssetSession == null || !CaSessions.TryGetValue(c.AssetSession, out var s)) return null;
+            if (c.AssetSession == null || !CaSessions.TryGetValue(c.AssetSession, out var s)) return Assets.GtaAssetService.Route(c, command);
             try
             {
                 object result;
@@ -278,6 +279,14 @@ namespace CodeDesigner.Ps2.Bridge.Services
         private sealed record ExportArgs(string? Pack, string? ModelName, string? OutputDir, string[]? Clips, string? Socom2Run, int? MaxTextureSize);
 
         private static readonly ConcurrentDictionary<string, Socom2Templates> TemplateCache = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>SOCOM II's templates from its RUN folder (found from <paramref name="hint"/>, cached).</summary>
+        internal static (Socom2Templates Templates, string Run) Socom2TemplatesFor(string? hint)
+        {
+            string run = Socom2Templates.FindRunDir(hint)
+                ?? throw new InvalidOperationException("SOCOM II's RUN folder was not found (pass socom2Run, e.g. G:/RUN)");
+            return (TemplateCache.GetOrAdd(run, r => new Socom2Templates(r)), run);
+        }
 
         /// <summary>Where exported packs go unless the caller names a folder: Documents/CodeDesigner/Exports.</summary>
         internal static string DefaultExportDir() =>

@@ -257,7 +257,7 @@
         },
         {
           "command": "codedesigner.openModelEditor",
-          "when": "resourceExtname == .zdb || resourceExtname == .ZDB || resourceExtname == .cdb || resourceExtname == .CDB || resourceExtname == .zed || resourceExtname == .ZED || resourceExtname == .zar || resourceExtname == .ZAR",
+          "when": "resourceExtname == .zdb || resourceExtname == .ZDB || resourceExtname == .cdb || resourceExtname == .CDB || resourceExtname == .zed || resourceExtname == .ZED || resourceExtname == .zar || resourceExtname == .ZAR || resourceExtname == .iso || resourceExtname == .ISO || resourceExtname == .img || resourceExtname == .IMG",
           "group": "navigation"
         },
         {
@@ -267,7 +267,7 @@
         },
         {
           "command": "codedesigner.openAnimationEditor",
-          "when": "resourceExtname == .zdb || resourceExtname == .ZDB || resourceExtname == .cdb || resourceExtname == .CDB || resourceExtname == .zed || resourceExtname == .ZED || resourceExtname == .zar || resourceExtname == .ZAR",
+          "when": "resourceExtname == .zdb || resourceExtname == .ZDB || resourceExtname == .cdb || resourceExtname == .CDB || resourceExtname == .zed || resourceExtname == .ZED || resourceExtname == .zar || resourceExtname == .ZAR || resourceExtname == .iso || resourceExtname == .ISO || resourceExtname == .img || resourceExtname == .IMG",
           "group": "navigation"
         }
       ]

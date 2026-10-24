@@ -1,3 +1,4 @@
+using CodeDesigner.Ps2.FileFormats.Assets;
 using CodeDesigner.Ps2.FileFormats.Zipper.Geo;
 using CodeDesigner.Ps2.FileFormats.Zipper.Model;
 using CodeDesigner.Ps2.FileFormats.Zipper.Package;
@@ -342,7 +343,7 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.Ca
             var nodes = lib.Nodes(model.Offset);
             var skeleton = CharacterSkeleton.FromBones(nodes.Select((n, i) => new CharacterSkeleton.Bone(
                 boneName(n.Hash), i, n.Parent, i, n.Local, n.World)));
-            var groups = new List<CharacterMesh.Group>();
+            var groups = new List<SkinnedMesh.Group>();
             foreach (var node in nodes)
                 foreach (int obj in node.Objects)
                 {

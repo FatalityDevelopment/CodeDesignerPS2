@@ -31,7 +31,8 @@ app-model-editor-page { display: block; height: 100vh; }
 .me-menu-key { color: var(--me-muted); font-size: 11px; }
 .me-menu-check { color: var(--me-accent); }
 .me-menu-sep { height: 1px; margin: 4px 2px; background: var(--vscode-menu-separatorBackground, #454545); }
-.me-pkg { font-family: monospace; color: var(--me-muted); margin-right: 8px; }
+.me-pkg { font-family: monospace; color: var(--me-muted); margin-right: 8px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.me-export-btn { flex-shrink: 0; margin-right: 8px; }
 .me-badge { font-size: 11px; padding: 1px 8px; border-radius: 10px; border: 1px solid var(--me-border); color: var(--me-muted); margin-right: 8px; }
 .me-badge-dirty { color: var(--vscode-gitDecoration-modifiedResourceForeground, #e2c08d); border-color: currentColor; }
 .me-session { font-family: monospace; font-size: 11px; color: var(--me-muted); }

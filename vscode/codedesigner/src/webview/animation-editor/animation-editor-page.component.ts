@@ -109,13 +109,21 @@ const PACKAGE_SOURCE = 'MOTION_S.ZAR';
     <aside class="me-assets">
       <div class="me-panel-title">Animations <span class="lm-muted">{{ clips().length }}</span></div>
       <input class="me-search" type="text" placeholder="Filter clips…" [value]="query()" (input)="query.set($any($event.target).value)" />
-      <div class="me-kinds">
-        @for (p of prefixes(); track p) {
-          <button class="me-chip" [class.active]="prefix() === p" (click)="prefix.set(prefix() === p ? '' : p)">{{ p }}</button>
-        }
-      </div>
+      @if (sources().length > 1) {
+        <!-- Other games' clips come in many source files (GTA: 160+ IFPs): pick one from a list. -->
+        <select class="me-search" title="Source file" (change)="source.set($any($event.target).value)">
+          <option value="" [selected]="!source()">All sources ({{ sources().length }})</option>
+          @for (src of sources(); track src.name) { <option [value]="src.name" [selected]="src.name === source()">{{ src.name }} ({{ src.count }})</option> }
+        </select>
+      } @else {
+        <div class="me-kinds">
+          @for (p of prefixes(); track p) {
+            <button class="me-chip" [class.active]="prefix() === p" (click)="prefix.set(prefix() === p ? '' : p)">{{ p }}</button>
+          }
+        </div>
+      }
       <div class="me-list">
-        @if (!status()) { <div class="me-empty">File › Open package… to load a .ZDB.</div> }
+        @if (!status()) { <div class="me-empty">File › Open package… to load a .ZDB / .CDB, or a GTA: San Andreas .ISO / .IMG.</div> }
         @for (g of groups(); track g.title) {
           <div class="me-group-title">{{ g.title }} <span class="lm-muted">{{ g.clips.length }}</span></div>
           @for (c of g.clips; track c.source + ':' + c.name) {
@@ -298,6 +306,7 @@ export class AnimationEditorPageComponent implements AfterViewInit, OnDestroy {
   readonly openMenu = signal<string | null>(null);
   readonly query = signal('');
   readonly prefix = signal('');
+  readonly source = signal('');
   readonly tool = signal<AnimTool>('select');
   readonly shading = signal<Shading>('textured');
   readonly showSkeleton = signal(true);
@@ -329,9 +338,21 @@ export class AnimationEditorPageComponent implements AfterViewInit, OnDestroy {
     for (const c of this.clips()) { const p = c.name.split('_')[0] + '_'; counts.set(p, (counts.get(p) ?? 0) + 1); }
     return [...counts].filter(([, n]) => n >= 3).map(([p]) => p).sort();
   });
+  // Other games (status.game set): clips grouped by their source file.
+  readonly sources = computed(() => {
+    if (!this.status()?.game) { return []; }
+    const counts = new Map<string, number>();
+    for (const c of this.clips()) { counts.set(c.source, (counts.get(c.source) ?? 0) + 1); }
+    return [...counts].map(([name, count]) => ({ name, count }));
+  });
   readonly groups = computed(() => {
-    const q = this.query().toLowerCase(), pre = this.prefix();
-    const list = this.clips().filter(c => (!q || c.name.toLowerCase().includes(q)) && (!pre || c.name.startsWith(pre)));
+    const q = this.query().toLowerCase(), pre = this.prefix(), src = this.source();
+    const list = this.clips().filter(c => (!q || c.name.toLowerCase().includes(q)) && (!pre || c.name.startsWith(pre)) && (!src || c.source === src));
+    if (this.sources().length > 1) {
+      const bySource = new Map<string, AnimationSummary[]>();
+      for (const c of list) { bySource.set(c.source, [...(bySource.get(c.source) ?? []), c]); }
+      return [...bySource].map(([title, clips]) => ({ title, clips }));
+    }
     return [
       { title: 'Package (MOTION_S)', clips: list.filter(c => c.editable) },
       { title: 'Shared (MOTION_P, read-only)', clips: list.filter(c => !c.editable) },
@@ -589,12 +610,13 @@ export class AnimationEditorPageComponent implements AfterViewInit, OnDestroy {
       this.models.set(await this.client.listModels({ kind: 'character' }));
       await this.refreshClips();
       const chars = this.characters();
-      const seal = chars.find(c => /seal/i.test(c.name) && !/_\d+(_LO)?$/i.test(c.name)) ?? chars[0];
+      // SOCOM's SEAL; GTA's swat ped (its first ped, male01, is a placeholder blob).
+      const seal = chars.find(c => /seal/i.test(c.name) && !/_\d+(_LO)?$/i.test(c.name)) ?? chars.find(c => c.name.toLowerCase() === 'swat') ?? chars[0];
       if (seal) { await this.loadCharacter(`${seal.archive}:${seal.name}`); } else { this.hasCharacter.set(false); }
       try { this.weapons.set(await this.client.weapons()); } catch { this.weapons.set([]); }
-      const m4 = this.weapons().find(w => w.model === 'm4Acarbine' || w.model === 'm4a1') ?? this.weapons()[0];
+      const m4 = this.weapons().find(w => w.model === 'm4Acarbine' || w.model === 'm4a1' || w.model === 'm4') ?? this.weapons()[0];
       if (m4) { await this.pickWeapon(m4.model); }
-      const first = this.clips().find(c => c.name === 'seal_stand') ?? this.clips()[0];
+      const first = this.clips().find(c => c.name === 'seal_stand') ?? this.clips().find(c => c.name.toLowerCase() === 'idle_stance') ?? this.clips()[0];
       if (first) { await this.selectClip(first, true); }
       this.say(`${status.path}: ${this.clips().length} animations (${this.clips().filter(c => c.editable).length} in the package), ${chars.length} characters.`);
       if (!this.pollTimer) { this.pollTimer = setInterval(() => void this.poll(), 2000); }
