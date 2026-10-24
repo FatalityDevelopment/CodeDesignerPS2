@@ -2,6 +2,7 @@
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
 import { DisasmEditorProvider } from './providers/disasmEditor/disasmEditorProvider';
+import { XrefsViewProvider } from './providers/xrefsView/xrefsViewProvider';
 import { DisasmPanelProvider } from './providers/disasmPanel/disasmPanelProvider';
 import { GsViewerProvider } from './providers/gsViewer/gsViewerProvider';
 import { JokerMakerProvider } from './providers/jokerMaker/jokerMakerProvider';
@@ -173,6 +174,33 @@ export function activate(context: vscode.ExtensionContext) {
 	// delegate to the panel provider which manages snapshots.
 	editorProvider.onGetAddressHistory = (address: number) =>
 		disasmPanelProvider.getAddressHistory(address);
+
+	// Debugger keyboard commands. Their keybindings (package.json) are scoped
+	// to the live memory panels so Ctrl+1–9 / Ctrl+G keep their VS Code
+	// meaning everywhere else.
+	editorProvider.initStorage(context.workspaceState);
+
+	// Dockable cross-references view that follows the disassembler cursor.
+	const xrefsView = new XrefsViewProvider(context.extensionUri, {
+		getXrefs: (address, kinds) => editorProvider.getXrefs(address, kinds),
+		navigateToAddress: address => editorProvider.navigateToAddress(address),
+	});
+	xrefsView.register(context);
+	editorProvider.onCursorAddress = (address, label) => xrefsView.onCursorAddress(address, label);
+	editorProvider.onShowXrefsView = (address, label) => xrefsView.show(address, label);
+	const slotOf = (arg: unknown) => Number((arg as { slot?: number } | undefined)?.slot ?? arg);
+	context.subscriptions.push(
+		vscode.commands.registerCommand('codedesigner.debugger.jumpBookmark',
+			(arg: unknown) => editorProvider.jumpToBookmark(slotOf(arg))),
+		vscode.commands.registerCommand('codedesigner.debugger.setBookmark',
+			(arg: unknown) => editorProvider.setBookmarkAtCursor(slotOf(arg))),
+		vscode.commands.registerCommand('codedesigner.debugger.gotoAddress',
+			() => editorProvider.postToActivePanel({ type: 'toggleGoto' })),
+		vscode.commands.registerCommand('codedesigner.debugger.runToCursor',
+			() => editorProvider.postToActivePanel({ type: 'runToCursorRequest' })),
+		vscode.commands.registerCommand('codedesigner.debugger.stepOut',
+			() => editorProvider.stepOut()),
+	);
 
 	// Register socket event handlers
 	socketClient.onConnected(() => {
@@ -392,7 +420,7 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(openCompatBrowserCommand);
 
 	// Standalone PS2 memory-card browser with save metadata and 3D icon preview.
-	const memoryCardBrowserProvider = new MemoryCardBrowserProvider(context.extensionUri, socketClient);
+	const memoryCardBrowserProvider = new MemoryCardBrowserProvider(context.extensionUri, socketClient, context.globalStorageUri.fsPath);
 	const openMemoryCardBrowserCommand = vscode.commands.registerCommand(
 		'codedesigner.openMemoryCardBrowser',
 		(uri?: vscode.Uri) => memoryCardBrowserProvider.open(uri?.fsPath),
@@ -400,7 +428,7 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(openMemoryCardBrowserCommand);
 
 	// Standalone PS2 HDD browser with APA/PFS partition tables and save/app icons.
-	const hddBrowserProvider = new HddBrowserProvider(context.extensionUri, socketClient);
+	const hddBrowserProvider = new HddBrowserProvider(context.extensionUri, socketClient, context.globalStorageUri.fsPath);
 	const openHddBrowserCommand = vscode.commands.registerCommand(
 		'codedesigner.openHddBrowser',
 		(uri?: vscode.Uri) => {

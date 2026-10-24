@@ -21,6 +21,7 @@ import {
   uniqueIconFileNames,
 } from './ps2-icon-parser';
 import { Ps2IconRenderer } from './ps2-icon-renderer';
+import '../shared/styles/shared.css';
 import './memory-card-browser-page.css';
 
 interface McFileInfo {
@@ -38,6 +39,34 @@ interface McSaveInfo {
 }
 
 type IconAction = 'normal' | 'copy' | 'delete';
+
+interface SaveSnapshotInfo {
+  id: string;
+  saveName: string;
+  source: string;
+  created: string;
+  label: string;
+  fileCount: number;
+  totalBytes: number;
+}
+
+interface FileDiff {
+  name: string;
+  status: 'same' | 'changed' | 'added' | 'removed';
+  sizeBefore: number;
+  sizeAfter: number;
+  changedBytes: number;
+  runs: Array<{ offset: number; before: string; after: string }>;
+  truncated: boolean;
+}
+
+/** A file or folder dropped from the OS, read here because the host can't see its path. */
+interface DroppedItem {
+  kind: 'file' | 'folder';
+  name: string;
+  data?: string;
+  files?: Array<{ name: string; data: string }>;
+}
 
 interface IconSlot {
   action: IconAction;
@@ -74,6 +103,7 @@ interface IconSlot {
           <app-icon name="upload" [size]="14" /> Import
         </button>
       </div>
+      <div class="mcb-drop-hint">Drop save folders or .psu files on the list to import them (hold Shift while dropping). Drag a save out to export it as .psu.</div>
 
       @if (statusMsg()) {
         <div class="mcb-status" [class.mcb-status-error]="statusIsError()">
@@ -81,7 +111,11 @@ interface IconSlot {
         </div>
       }
 
-      <div class="mcb-main">
+      <div class="mcb-main"
+           [class.mcb-drop-active]="dropActive()"
+           (dragover)="onDragOver($event)"
+           (dragleave)="onDragLeave($event)"
+           (drop)="onDrop($event)">
         <aside class="mcb-sidebar">
           <div class="mcb-path" [title]="mcPath()">
             {{ mcPath() || 'No memory card selected' }}
@@ -104,7 +138,10 @@ interface IconSlot {
               <button
                 type="button"
                 class="mcb-save-row"
+                draggable="true"
                 [class.active]="selectedSaveName() === save.Name"
+                [title]="psuCache.has(save.Name) ? 'Drag out to export as ' + save.Name + '.psu' : save.Name"
+                (dragstart)="onSaveDragStart($event, save.Name)"
                 (click)="selectSave(save.Name)">
                 <span class="mcb-save-name">{{ save.Name }}</span>
                 <span class="mcb-save-meta">
@@ -172,6 +209,12 @@ interface IconSlot {
                 <button class="mcb-btn" [disabled]="!selectedSave()" (click)="exportSelected()">
                   <app-icon name="save" [size]="14" /> Export
                 </button>
+                <button class="mcb-btn" [disabled]="!selectedSave()" (click)="exportPsu()" title="Export as a single .psu file (uLaunchELF / EMS)">
+                  <app-icon name="download" [size]="14" /> .psu
+                </button>
+                <button class="mcb-btn" [disabled]="!selectedSave() || busy()" (click)="snapshotSave()" title="Store a copy of this save to diff against later">
+                  <app-icon name="camera" [size]="14" /> Snapshot
+                </button>
                 <button class="mcb-btn mcb-danger" [disabled]="!selectedSave()" (click)="deleteSelected()">
                   <app-icon name="trash2" [size]="14" /> Delete
                 </button>
@@ -179,6 +222,55 @@ interface IconSlot {
             </div>
           </div>
 
+          @if (selectedSave() && snapshots().length) {
+            <div class="mcb-snapshots">
+              <div class="mcb-section-title">Snapshots</div>
+              @for (snap of snapshots(); track snap.id) {
+                <div class="mcb-snapshot-row" [class.active]="diff()?.id === snap.id">
+                  <span class="mcb-snapshot-date">{{ formatDate(snap.created) }}</span>
+                  <span class="mcb-snapshot-label">{{ snap.label || '—' }}</span>
+                  <span class="mcb-snapshot-meta">{{ snap.fileCount }} files · {{ formatBytes(snap.totalBytes) }}</span>
+                  <button class="lm-row-btn lm-goto-btn" [disabled]="busy()" (click)="diffSnapshot(snap.id)">Diff</button>
+                  <button class="lm-row-btn lm-danger-btn" title="Delete snapshot" (click)="deleteSnapshot(snap.id)"><app-icon name="trash2" [size]="12" /></button>
+                </div>
+              }
+            </div>
+          }
+
+          @if (diff(); as d) {
+            <div class="mcb-files-panel">
+              <div class="mcb-section-title mcb-diff-title">
+                <span>Changes since {{ snapshotDate(d.id) }}</span>
+                <button class="lm-row-btn" (click)="diff.set(null)"><app-icon name="x" [size]="12" /> Close</button>
+              </div>
+              <div class="mcb-files-table">
+                <div class="mcb-file-head mcb-diff-head">
+                  <span>File</span><span>Status</span><span>Size</span><span>Changed</span>
+                </div>
+                @for (f of d.files; track f.name) {
+                  <div class="mcb-file-row mcb-diff-row" [class.mcb-diff-same]="f.status === 'same'"
+                       (click)="toggleDiffFile(f.name)">
+                    <span class="mcb-file-name">{{ f.name }}</span>
+                    <span class="mcb-diff-status" [attr.data-status]="f.status">{{ f.status }}</span>
+                    <span>{{ f.sizeBefore === f.sizeAfter ? formatBytes(f.sizeAfter) : formatBytes(f.sizeBefore) + ' → ' + formatBytes(f.sizeAfter) }}</span>
+                    <span>{{ f.status === 'same' ? '—' : f.changedBytes + ' B' }}</span>
+                  </div>
+                  @if (expandedDiff() === f.name && f.runs.length) {
+                    <div class="mcb-diff-runs">
+                      @for (r of f.runs; track r.offset) {
+                        <div class="mcb-diff-run">
+                          <span class="lm-mono">0x{{ r.offset.toString(16).toUpperCase().padStart(4, '0') }}</span>
+                          <span class="mcb-diff-before">{{ r.before }}</span>
+                          <span class="mcb-diff-after">{{ r.after }}</span>
+                        </div>
+                      }
+                      @if (f.truncated) { <div class="lm-muted">More changes not shown.</div> }
+                    </div>
+                  }
+                }
+              </div>
+            </div>
+          } @else {
           <div class="mcb-files-panel">
             <div class="mcb-section-title">Save Files</div>
             <div class="mcb-files-table">
@@ -199,6 +291,7 @@ interface IconSlot {
               }
             </div>
           </div>
+          }
         </section>
       </div>
     </div>
@@ -222,6 +315,12 @@ export class MemoryCardBrowserPageComponent implements AfterViewInit, OnDestroy 
   readonly iconSys = signal<Ps2IconSys | null>(null);
   readonly iconSlots = signal<IconSlot[]>([]);
   readonly selectedIconIndex = signal(0);
+  readonly dropActive = signal(false);
+  readonly snapshots = signal<SaveSnapshotInfo[]>([]);
+  readonly diff = signal<{ id: string; files: FileDiff[] } | null>(null);
+  readonly expandedDiff = signal('');
+  /** Selected saves pre-built as .psu (base64) so dragging them out can carry the file. */
+  readonly psuCache = new Map<string, string>();
 
   readonly selectedSave = computed(() =>
     this.saves().find(s => s.Name === this.selectedSaveName()) ?? null);
@@ -277,6 +376,20 @@ export class MemoryCardBrowserPageComponent implements AfterViewInit, OnDestroy 
           (data['fileName'] as string) ?? '',
           (data['data'] as string) ?? '',
         );
+        break;
+      case 'saveSnapshots':
+        if (data['saveName'] === this.selectedSaveName()) {
+          this.snapshots.set((data['snapshots'] as SaveSnapshotInfo[]) ?? []);
+        }
+        break;
+      case 'saveDiff':
+        if (data['saveName'] === this.selectedSaveName()) {
+          this.diff.set({ id: (data['id'] as string) ?? '', files: (data['files'] as FileDiff[]) ?? [] });
+          this.expandedDiff.set(((data['files'] as FileDiff[]) ?? []).find(f => f.status === 'changed')?.name ?? '');
+        }
+        break;
+      case 'psuReady':
+        this.psuCache.set((data['saveName'] as string) ?? '', (data['data'] as string) ?? '');
         break;
       case 'saveFileError':
         this.handleSaveFileError(
@@ -357,6 +470,113 @@ export class MemoryCardBrowserPageComponent implements AfterViewInit, OnDestroy 
     if (this.selectedSaveName() === saveName) { return; }
     this.selectedSaveName.set(saveName);
     this.loadSelectedSaveIcon();
+    this.onSaveSelected();
+  }
+
+  // ── Snapshots / diff ─────────────────────────────────────────────────────
+
+  snapshotSave(): void {
+    const save = this.selectedSave();
+    if (save) { this.vscode.postMessage({ type: 'snapshotSave', mcPath: this.mcPath(), saveName: save.Name }); }
+  }
+
+  diffSnapshot(id: string): void {
+    this.vscode.postMessage({ type: 'diffSnapshot', mcPath: this.mcPath(), saveName: this.selectedSaveName(), id });
+  }
+
+  deleteSnapshot(id: string): void {
+    if (this.diff()?.id === id) { this.diff.set(null); }
+    this.vscode.postMessage({ type: 'deleteSnapshot', saveName: this.selectedSaveName(), id });
+  }
+
+  toggleDiffFile(name: string): void {
+    this.expandedDiff.set(this.expandedDiff() === name ? '' : name);
+  }
+
+  snapshotDate(id: string): string {
+    const snap = this.snapshots().find(s => s.id === id);
+    return snap ? `${this.formatDate(snap.created)}${snap.label ? ` (${snap.label})` : ''}` : 'snapshot';
+  }
+
+  formatDate(iso: string): string {
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
+  }
+
+  exportPsu(): void {
+    const save = this.selectedSave();
+    if (save) { this.vscode.postMessage({ type: 'exportPsu', mcPath: this.mcPath(), saveName: save.Name }); }
+  }
+
+  /** Snapshot list, diff reset and drag-out .psu for the newly selected save. */
+  private onSaveSelected(): void {
+    this.diff.set(null);
+    this.snapshots.set([]);
+    const name = this.selectedSaveName();
+    if (!name) { return; }
+    this.vscode.postMessage({ type: 'listSnapshots', saveName: name });
+    if (!this.psuCache.has(name)) {
+      this.vscode.postMessage({ type: 'buildPsu', mcPath: this.mcPath(), saveName: name });
+    }
+  }
+
+  // ── Drag and drop ────────────────────────────────────────────────────────
+
+  onSaveDragStart(event: DragEvent, saveName: string): void {
+    const dt = event.dataTransfer;
+    if (!dt) { return; }
+    dt.effectAllowed = 'copy';
+    dt.setData('text/plain', saveName);
+    const psu = this.psuCache.get(saveName);
+    if (psu) {
+      // Chromium writes the file where it is dropped (desktop, Explorer).
+      dt.setData('DownloadURL', `application/octet-stream:${saveName}.psu:data:application/octet-stream;base64,${psu}`);
+    }
+  }
+
+  onDragOver(event: DragEvent): void {
+    if (!event.dataTransfer || ![...event.dataTransfer.types].some(t => t === 'Files' || t.includes('uri-list'))) { return; }
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+    this.dropActive.set(true);
+  }
+
+  onDragLeave(event: DragEvent): void {
+    const to = event.relatedTarget as Node | null;
+    if (!to || !(event.currentTarget as HTMLElement).contains(to)) { this.dropActive.set(false); }
+  }
+
+  async onDrop(event: DragEvent): Promise<void> {
+    event.preventDefault();
+    this.dropActive.set(false);
+    const dt = event.dataTransfer;
+    if (!dt) { return; }
+    // VS Code explorer drags carry URIs (the host reads the paths itself).
+    const uriText = dt.getData('application/vnd.code.uri-list') || dt.getData('text/uri-list');
+    const uris = uriText.split(/\r?\n/).map(u => u.trim()).filter(u => u && !u.startsWith('#'));
+    // Entries must be taken synchronously, before the first await.
+    const entries = uris.length ? [] : Array.from(dt.items)
+      .filter(i => i.kind === 'file')
+      .map(i => i.webkitGetAsEntry())
+      .filter((e): e is FileSystemEntry => !!e);
+    if (!uris.length && !entries.length) { return; }
+
+    this.setStatus('Reading dropped files...', false, true);
+    try {
+      const items: DroppedItem[] = [];
+      for (const entry of entries) {
+        if (entry.isDirectory) {
+          const files = await readDirectoryFiles(entry as FileSystemDirectoryEntry);
+          items.push({ kind: 'folder', name: entry.name, files });
+        } else {
+          const file = await entryFile(entry as FileSystemFileEntry);
+          items.push({ kind: 'file', name: entry.name, data: await fileToBase64(file) });
+        }
+      }
+      this.vscode.postMessage({ type: 'dropImport', mcPath: this.mcPath(), uris, items });
+    } catch (err: unknown) {
+      this.setStatus(err instanceof Error ? err.message : String(err), true, false);
+    }
   }
 
   setIconSlot(index: number): void {
@@ -382,6 +602,8 @@ export class MemoryCardBrowserPageComponent implements AfterViewInit, OnDestroy 
   }
 
   private handleCardLoaded(mcPath: string, saves: McSaveInfo[]): void {
+    // The card changed (import, delete, other card): rebuild drag-out files on demand.
+    this.psuCache.clear();
     this.mcPath.set(mcPath);
     this.saves.set(saves);
     this.busy.set(false);
@@ -392,6 +614,7 @@ export class MemoryCardBrowserPageComponent implements AfterViewInit, OnDestroy 
     const next = saves.find(s => s.Name === previous)?.Name ?? saves[0]?.Name ?? '';
     this.selectedSaveName.set(next);
     this.loadSelectedSaveIcon();
+    this.onSaveSelected();
   }
 
   private handleSaveFileData(saveName: string, fileName: string, data: string): void {
@@ -504,6 +727,37 @@ export class MemoryCardBrowserPageComponent implements AfterViewInit, OnDestroy 
     this.statusIsError.set(isError);
     this.busy.set(busy);
   }
+}
+
+function entryFile(entry: FileSystemFileEntry): Promise<File> {
+  return new Promise((resolve, reject) => entry.file(resolve, reject));
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).replace(/^data:[^,]*,/, ''));
+    reader.onerror = () => reject(reader.error ?? new Error(`Could not read ${file.name}`));
+    reader.readAsDataURL(file);
+  });
+}
+
+/** The files directly inside a dropped save folder (saves have no subfolders). */
+async function readDirectoryFiles(dir: FileSystemDirectoryEntry): Promise<Array<{ name: string; data: string }>> {
+  const reader = dir.createReader();
+  const entries: FileSystemEntry[] = [];
+  for (;;) {
+    const batch = await new Promise<FileSystemEntry[]>((resolve, reject) => reader.readEntries(resolve, reject));
+    if (!batch.length) { break; }
+    entries.push(...batch);
+  }
+  const files: Array<{ name: string; data: string }> = [];
+  for (const e of entries) {
+    if (!e.isFile) { continue; }
+    files.push({ name: e.name, data: await fileToBase64(await entryFile(e as FileSystemFileEntry)) });
+  }
+  if (!files.length) { throw new Error(`${dir.name} has no files to import`); }
+  return files;
 }
 
 function findFile(save: McSaveInfo, name: string): McFileInfo | null {

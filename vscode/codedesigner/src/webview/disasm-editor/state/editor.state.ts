@@ -112,6 +112,21 @@ export class EditorState {
   /** Set of breakpoint addresses. */
   readonly breakpoints = signal(new Set<number>());
 
+  /**
+   * Gutter style per breakpoint, keyed by physical address: disabled
+   * breakpoints draw hollow, conditional ones and log points get their own
+   * marker.
+   */
+  readonly breakpointStyles = signal(new Map<number, 'disabled' | 'conditional' | 'log'>());
+
+  /** Bookmarks: slot "1"–"9" → address (shared by every panel). */
+  readonly bookmarks = signal<Record<string, number>>({});
+
+  /** Results of the last search across all memory regions (null = none). */
+  readonly globalSearchResults = signal<import('./types').GlobalSearchResult[] | null>(null);
+  readonly globalSearchBusy = signal(false);
+  readonly globalSearchNote = signal('');
+
   /** Address of breakpoint that was just hit (for highlight). */
   readonly breakpointHitAddress = signal<number | undefined>(undefined);
 

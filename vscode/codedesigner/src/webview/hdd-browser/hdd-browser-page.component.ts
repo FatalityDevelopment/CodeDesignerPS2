@@ -21,6 +21,7 @@ import {
   uniqueIconFileNames,
 } from '../memory-card-browser/ps2-icon-parser';
 import { Ps2IconRenderer } from '../memory-card-browser/ps2-icon-renderer';
+import '../shared/styles/shared.css';
 import './hdd-browser-page.css';
 
 interface HddFileEntryInfo {
@@ -49,6 +50,24 @@ interface HddOperationResult {
 }
 
 type IconAction = 'normal' | 'copy' | 'delete';
+
+interface SnapshotInfo {
+  id: string;
+  created: string;
+  label: string;
+  fileCount: number;
+  totalBytes: number;
+}
+
+interface FileDiff {
+  name: string;
+  status: 'same' | 'changed' | 'added' | 'removed';
+  sizeBefore: number;
+  sizeAfter: number;
+  changedBytes: number;
+  runs: Array<{ offset: number; before: string; after: string }>;
+  truncated: boolean;
+}
 
 interface IconSlot {
   action: IconAction;
@@ -88,6 +107,7 @@ interface IconSlot {
           <app-icon name="trash2" [size]="14" /> Delete
         </button>
       </div>
+      <div class="hdb-drop-hint">Drop an HDD image from the VS Code explorer to open it (hold Shift). Drag a root file out to export it.</div>
 
       @if (statusMsg()) {
         <button
@@ -101,7 +121,11 @@ interface IconSlot {
         </button>
       }
 
-      <div class="hdb-main">
+      <div class="hdb-main"
+           [class.hdb-drop-active]="dropActive()"
+           (dragover)="onDragOver($event)"
+           (dragleave)="onDragLeave($event)"
+           (drop)="onDrop($event)">
         <aside class="hdb-sidebar">
           <div class="hdb-path" [title]="hddPath()">
             {{ hddPath() || 'No HDD image selected' }}
@@ -217,10 +241,59 @@ interface IconSlot {
                   <button class="hdb-btn" [disabled]="busy()" (click)="exportSelectedPartition()">
                     <app-icon name="download" [size]="14" /> Export
                   </button>
+                  <button class="hdb-btn" [disabled]="busy()" (click)="snapshotPartition()" title="Store a copy of this partition's root files to diff against later">
+                    <app-icon name="camera" [size]="14" /> Snapshot
+                  </button>
                 </div>
               </div>
             </div>
 
+            @if (snapshots().length) {
+              <div class="hdb-snapshots">
+                <div class="hdb-section-title">Snapshots</div>
+                @for (snap of snapshots(); track snap.id) {
+                  <div class="hdb-snapshot-row" [class.active]="diff()?.id === snap.id">
+                    <span>{{ formatDate(snap.created) }}</span>
+                    <span class="hdb-snapshot-label">{{ snap.label || '—' }}</span>
+                    <span class="lm-muted">{{ snap.fileCount }} files · {{ formatBytes(snap.totalBytes) }}</span>
+                    <button class="lm-row-btn lm-goto-btn" [disabled]="busy()" (click)="diffSnapshot(snap.id)">Diff</button>
+                    <button class="lm-row-btn lm-danger-btn" title="Delete snapshot" (click)="deleteSnapshot(snap.id)"><app-icon name="trash2" [size]="12" /></button>
+                  </div>
+                }
+              </div>
+            }
+
+            @if (diff(); as d) {
+              <div class="hdb-files-panel">
+                <div class="hdb-section-title hdb-diff-title">
+                  <span>Changes since {{ snapshotDate(d.id) }}</span>
+                  <button class="lm-row-btn" (click)="diff.set(null)"><app-icon name="x" [size]="12" /> Close</button>
+                </div>
+                <div class="hdb-files-table">
+                  <div class="hdb-file-head hdb-diff-grid"><span>File</span><span>Status</span><span>Size</span><span>Changed</span></div>
+                  @for (f of d.files; track f.name) {
+                    <div class="hdb-file-row hdb-diff-grid hdb-diff-row" [class.hdb-diff-same]="f.status === 'same'" (click)="toggleDiffFile(f.name)">
+                      <span class="hdb-file-name">{{ f.name }}</span>
+                      <span class="hdb-diff-status" [attr.data-status]="f.status">{{ f.status }}</span>
+                      <span>{{ f.sizeBefore === f.sizeAfter ? formatBytes(f.sizeAfter) : formatBytes(f.sizeBefore) + ' → ' + formatBytes(f.sizeAfter) }}</span>
+                      <span>{{ f.status === 'same' ? '—' : f.changedBytes + ' B' }}</span>
+                    </div>
+                    @if (expandedDiff() === f.name && f.runs.length) {
+                      <div class="hdb-diff-runs">
+                        @for (r of f.runs; track r.offset) {
+                          <div class="hdb-diff-run">
+                            <span class="lm-mono">0x{{ r.offset.toString(16).toUpperCase().padStart(4, '0') }}</span>
+                            <span class="hdb-diff-before">{{ r.before }}</span>
+                            <span class="hdb-diff-after">{{ r.after }}</span>
+                          </div>
+                        }
+                        @if (f.truncated) { <div class="lm-muted">More changes not shown.</div> }
+                      </div>
+                    }
+                  }
+                </div>
+              </div>
+            } @else {
             <div class="hdb-files-panel">
               <div class="hdb-section-title">Root Files</div>
               <div class="hdb-files-table">
@@ -235,7 +308,10 @@ interface IconSlot {
                   <div class="hdb-empty hdb-empty-wide">No root files found, or this partition is not PFS-readable.</div>
                 }
                 @for (file of selectedFiles(); track fileKey(file)) {
-                  <div class="hdb-file-row">
+                  <div class="hdb-file-row"
+                       [attr.draggable]="!file.IsDirectory"
+                       (mouseenter)="prefetchForDrag(file)"
+                       (dragstart)="onFileDragStart($event, file)">
                     <span class="hdb-file-name" [title]="file.Name">{{ file.Name }}</span>
                     <span>{{ fileKind(file) }}</span>
                     <span>{{ file.IsDirectory ? '-' : formatBytes(file.Size) }}</span>
@@ -249,6 +325,7 @@ interface IconSlot {
                 }
               </div>
             </div>
+            }
           }
         </section>
       </div>
@@ -276,6 +353,13 @@ export class HddBrowserPageComponent implements AfterViewInit, OnDestroy {
   readonly iconSlots = signal<IconSlot[]>([]);
   readonly selectedIconIndex = signal(0);
   readonly rendererVersion = signal(0);
+  readonly dropActive = signal(false);
+  readonly snapshots = signal<SnapshotInfo[]>([]);
+  readonly diff = signal<{ id: string; files: FileDiff[] } | null>(null);
+  readonly expandedDiff = signal('');
+  /** Root files read ahead (base64) so dragging them out can carry the bytes. */
+  private readonly dragCache = new Map<string, string>();
+  private readonly dragRequested = new Set<string>();
 
   readonly selectedPartition = computed(() =>
     this.partitions().find(p => p.Id === this.selectedPartitionId()) ?? null);
@@ -354,6 +438,21 @@ export class HddBrowserPageComponent implements AfterViewInit, OnDestroy {
           (data['fileName'] as string) ?? '',
           (data['message'] as string) ?? 'File read failed',
         );
+        break;
+      case 'hddSnapshots':
+        if (data['partitionId'] === this.selectedPartitionId()) {
+          this.snapshots.set((data['snapshots'] as SnapshotInfo[]) ?? []);
+        }
+        break;
+      case 'hddDiff':
+        if (data['partitionId'] === this.selectedPartitionId()) {
+          const files = (data['files'] as FileDiff[]) ?? [];
+          this.diff.set({ id: (data['id'] as string) ?? '', files });
+          this.expandedDiff.set(files.find(f => f.status === 'changed')?.name ?? '');
+        }
+        break;
+      case 'hddFileBytes':
+        this.dragCache.set(`${data['partitionId']}|${data['source'] || 'pfs'}:${data['fileName']}`, (data['data'] as string) ?? '');
         break;
       case 'hddOperation':
         this.lastOperation.set((data['result'] as HddOperationResult) ?? null);
@@ -453,6 +552,93 @@ export class HddBrowserPageComponent implements AfterViewInit, OnDestroy {
     this.selectedPartitionId.set(partitionId);
     this.scheduleRendererInit();
     this.loadSelectedPartitionIcon();
+    this.onPartitionSelected();
+  }
+
+  // ── Snapshots / diff ─────────────────────────────────────────────────────
+
+  snapshotPartition(): void {
+    const part = this.selectedPartition();
+    if (part) { this.vscode.postMessage({ type: 'snapshotPartition', hddPath: this.hddPath(), partitionId: part.Id }); }
+  }
+
+  diffSnapshot(id: string): void {
+    this.vscode.postMessage({ type: 'diffSnapshot', hddPath: this.hddPath(), partitionId: this.selectedPartitionId(), id });
+  }
+
+  deleteSnapshot(id: string): void {
+    if (this.diff()?.id === id) { this.diff.set(null); }
+    this.vscode.postMessage({ type: 'deleteSnapshot', partitionId: this.selectedPartitionId(), id });
+  }
+
+  toggleDiffFile(name: string): void {
+    this.expandedDiff.set(this.expandedDiff() === name ? '' : name);
+  }
+
+  snapshotDate(id: string): string {
+    const snap = this.snapshots().find(s => s.id === id);
+    return snap ? `${this.formatDate(snap.created)}${snap.label ? ` (${snap.label})` : ''}` : 'snapshot';
+  }
+
+  formatDate(iso: string): string {
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
+  }
+
+  private onPartitionSelected(): void {
+    this.diff.set(null);
+    this.snapshots.set([]);
+    const id = this.selectedPartitionId();
+    if (id) { this.vscode.postMessage({ type: 'listSnapshots', partitionId: id }); }
+  }
+
+  // ── Drag and drop ────────────────────────────────────────────────────────
+
+  prefetchForDrag(file: HddFileEntryInfo): void {
+    const part = this.selectedPartition();
+    if (!part || file.IsDirectory || file.Size > 8 * 1024 * 1024) { return; }
+    const key = `${part.Id}|${this.fileKey(file)}`;
+    if (this.dragRequested.has(key)) { return; }
+    this.dragRequested.add(key);
+    this.vscode.postMessage({ type: 'prefetchFile', hddPath: this.hddPath(), partitionId: part.Id, fileName: file.Name, source: file.Source });
+  }
+
+  onFileDragStart(event: DragEvent, file: HddFileEntryInfo): void {
+    const dt = event.dataTransfer;
+    const part = this.selectedPartition();
+    if (!dt || !part || file.IsDirectory) { return; }
+    dt.effectAllowed = 'copy';
+    dt.setData('text/plain', file.Name);
+    const data = this.dragCache.get(`${part.Id}|${this.fileKey(file)}`);
+    if (data) {
+      // Chromium writes the file where it is dropped (desktop, Explorer).
+      dt.setData('DownloadURL', `application/octet-stream:${file.Name}:data:application/octet-stream;base64,${data}`);
+    }
+  }
+
+  onDragOver(event: DragEvent): void {
+    if (!event.dataTransfer || ![...event.dataTransfer.types].some(t => t === 'Files' || t.includes('uri-list'))) { return; }
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+    this.dropActive.set(true);
+  }
+
+  onDragLeave(event: DragEvent): void {
+    const to = event.relatedTarget as Node | null;
+    if (!to || !(event.currentTarget as HTMLElement).contains(to)) { this.dropActive.set(false); }
+  }
+
+  onDrop(event: DragEvent): void {
+    event.preventDefault();
+    this.dropActive.set(false);
+    const dt = event.dataTransfer;
+    if (!dt) { return; }
+    const uriText = dt.getData('application/vnd.code.uri-list') || dt.getData('text/uri-list');
+    const uris = uriText.split(/\r?\n/).map(u => u.trim()).filter(u => u && !u.startsWith('#'));
+    const names = Array.from(dt.files).map(f => f.name);
+    if (uris.length || names.length) {
+      this.vscode.postMessage({ type: 'dropOpen', uris, names });
+    }
   }
 
   setIconSlot(index: number): void {
@@ -512,8 +698,11 @@ export class HddBrowserPageComponent implements AfterViewInit, OnDestroy {
     const previous = this.selectedPartitionId();
     const next = partitions.find(p => p.Id === previous)?.Id ?? partitions[0]?.Id ?? '';
     this.selectedPartitionId.set(next);
+    this.dragCache.clear();
+    this.dragRequested.clear();
     this.scheduleRendererInit();
     this.loadSelectedPartitionIcon();
+    this.onPartitionSelected();
   }
 
   private handleFilesLoaded(partitionId: string, files: HddFileEntryInfo[]): void {

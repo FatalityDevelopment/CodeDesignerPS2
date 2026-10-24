@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Debugger
+- Breakpoints have conditions (`$a0 == 0x10 && u8[$sp+8] != 0`, `f32[$a1] > 1.5`, pointer chains, label names), hit counts (`5`, `>=5`, `==5`, `%5`) and log points (`a0={$a0}` printed to the CodeDesigner output, then continue), all edited in the Breakpoints tab. Unticking a breakpoint disables it instead of deleting it; the gutter shows disabled, conditional and log breakpoints differently. Conditions are applied by the extension, which resumes past hits that don't qualify.
+- **Run to Cursor** (Ctrl+F10, context menu), **Step Out** (Shift+F11, sidebar), **Go To** on Ctrl+G, and **Forward** history (Alt+Right) alongside Back.
+- Bookmarks: Ctrl+Shift+1–9 marks the cursor row, Ctrl+1–9 jumps back to it (rows show the slot number).
+- New dockable **Cross-references** view (panel area, can be dragged anywhere) that follows the cursor or stays pinned, filtered by reference kind.
+- GPR rows get a follow arrow that opens the register's value in the memory view.
+- New **Memory** tab: a typed watch list (u8–s32, float, pointer, string) of addresses or pointer chains such as `[[playerPtr]+0x10]+4`; values refresh while the tab is open and can be edited in place.
+- Search: **All regions** searches EE RAM, scratchpad, IOP RAM, BIOS and VU data at once, and the new **#imm** mode finds instructions by immediate value, including 32-bit constants built with LUI + ADDIU/ORI.
+
+### Memory card / HDD
+- Drop save folders or `.psu` files on the memory card browser to import them, or drop a card image from the VS Code explorer to open it. Saves export as `.psu`, and dragging a save out of the list carries the `.psu`.
+- **Snapshot** stores a copy of a save (or of an HDD partition's root files); **Diff** shows which files changed since and the changed bytes.
+- The HDD browser opens images dropped from the explorer and lets root files be dragged out. Importing into HDD partitions still needs PFS write support in the bridge.
+
 ### Controller (joker maker)
 - **Build code** and **Play** modes. Build code toggles buttons into a combo without touching the game; Play sends held buttons and sticks to PCSX2 and releases them when you switch mode or close the page.
 - The joker address is found from the running game's cheats: D/E compare lines are ranked by address, the stored polarity (pressed = 0 or 1) is detected, and the combos already in use are listed and can be loaded. A custom address and a byte-swap option cover other games.
@@ -15,6 +29,8 @@
 - Every Medius, DME and SOCOM II message is labelled by name from the server's own definitions; DME app payloads, UDP server names, DNS and SCERT-over-UDP are decoded.
 - New composer: build a server message into a frame, preview the dissection, and inject it into the PS2 or send it from it, with repeat. Resend / Edit on a selected packet. MCP `net_build_message`.
 - Page redesigned; the relative time column no longer resets every drain.
+- Filter presets save the display filter, protocol, Hide noise and capture filter under a name.
+- **Struct overlay** lays a structure-visualizer struct (a Struct label and its offset members) over the selected frame, from the innermost layer or any byte offset: each field is decoded and its bytes are marked in the hex dump.
 
 ### Cheat Porter
 - Its own page, with From/To pickers for save states, live EE RAM and browsed dumps, **Load game cheats**, per-cheat results (Ported / Review / Not found), candidate pickers and a live output preview.

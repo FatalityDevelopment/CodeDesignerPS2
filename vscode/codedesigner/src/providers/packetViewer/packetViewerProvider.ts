@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { getOutputChannel } from '../../extension';
-import { CapturedPacketInfo, NetFrameOptions, ParsedPacketRow, SocketClient } from '../../socketClient';
+import { CapturedPacketInfo, LabelManagerEntry, NetFrameOptions, ParsedPacketRow, SocketClient } from '../../socketClient';
 import { getNonce, getWebviewErrorHandlerScript } from '../../utils/nonce';
 import { applyCodeDesignerPanelIcon } from '../../utils/webviewPanel';
 
@@ -347,6 +347,72 @@ function frameOptions(action: Record<string, unknown>): NetFrameOptions {
     };
 }
 
+/** A saved display + capture filter combination. */
+export interface PacketFilterPreset {
+    name: string;
+    displayFilter: string;
+    protoFilter: string;
+    hideNoise: boolean;
+    filterType: number;
+    filterProtocol: number;
+    filterPort: number;
+    filterIP: string;
+}
+
+/** One field of a struct overlay: a member label of a Struct / Pointer label. */
+export interface PacketStructField {
+    name: string;
+    offset: number;
+    type: string;
+}
+
+/** A structure-visualizer struct (label + offset members) to lay over packet bytes. */
+export interface PacketStructDef {
+    name: string;
+    address: string;
+    fields: PacketStructField[];
+}
+
+/** Value type of a member label, from its valueType or semantic type. */
+function memberType(e: LabelManagerEntry): string {
+    if (e.valueType) { return e.valueType; }
+    switch (e.type) {
+        case 'Float':   return 'float';
+        case 'String':  return 'string';
+        case 'Pointer':
+        case 'Struct':  return 'pointer';
+        default:        return '';
+    }
+}
+
+/**
+ * Struct definitions from label-manager entries: every label with offset
+ * children (Struct / Pointer labels in the structure visualizer) becomes one
+ * struct, its direct children the fields.
+ */
+export function structDefsFromLabels(entries: LabelManagerEntry[]): PacketStructDef[] {
+    const byParent = new Map<string, LabelManagerEntry[]>();
+    for (const e of entries) {
+        if (!e.parentAddress || e.offset === undefined || e.offset === null) { continue; }
+        const list = byParent.get(e.parentAddress) ?? [];
+        list.push(e);
+        byParent.set(e.parentAddress, list);
+    }
+    const defs: PacketStructDef[] = [];
+    for (const e of entries) {
+        const children = byParent.get(e.address);
+        if (!children?.length) { continue; }
+        defs.push({
+            name: e.name,
+            address: e.address,
+            fields: children
+                .map(c => ({ name: c.name, offset: c.offset ?? 0, type: memberType(c) }))
+                .sort((a, b) => a.offset - b.offset),
+        });
+    }
+    return defs.sort((a, b) => a.name.localeCompare(b.name));
+}
+
 /**
  * Provider for the Packet Viewer standalone webview tab.
  * Manages the panel lifecycle, routes messages between the webview
@@ -357,9 +423,15 @@ export class PacketViewerProvider {
     /** True while a live packet capture is running. Queried by the disasm panel. */
     private _capturing = false;
 
+    /** Global storage for filter presets (set by DisasmPanelProvider.register). */
+    public storage?: vscode.Memento;
+    private static readonly PRESETS_KEY = 'codedesigner.packetViewer.filterPresets';
+
     constructor(
         private readonly extensionUri: vscode.Uri,
         private readonly socketClient: SocketClient,
+        /** Label-manager entries of the loaded game, for struct overlays. */
+        private readonly getLabelEntries?: () => Promise<LabelManagerEntry[]>,
     ) {
         // Surface AI packet-capture activity in the viewer when it's open: the AI
         // drains its own packets off the queue, so we can't redraw them here — show
@@ -372,6 +444,14 @@ export class PacketViewerProvider {
             this._panel.webview.postMessage({ type: 'packetViewerMessage', message: `🤖 ${detail}` });
             this._panel.reveal(this._panel.viewColumn, true);
         });
+    }
+
+    private _presets(): PacketFilterPreset[] {
+        return [...(this.storage?.get<PacketFilterPreset[]>(PacketViewerProvider.PRESETS_KEY) ?? [])];
+    }
+
+    private _sendPresets(webview: vscode.Webview, selected?: string): void {
+        webview.postMessage({ type: 'packetViewerPresets', presets: this._presets(), selected });
     }
 
     /** Whether a live packet capture is currently active. */
@@ -517,6 +597,51 @@ export class PacketViewerProvider {
                 case 'clearPackets':
                     // No server action needed — packets are cleared client-side.
                     break;
+
+                case 'getPresets':
+                    this._sendPresets(webview);
+                    break;
+
+                case 'savePreset': {
+                    const preset = action['preset'] as PacketFilterPreset;
+                    const name = await vscode.window.showInputBox({
+                        title: 'Save Packet Filter Preset',
+                        prompt: 'Name for the current display and capture filters',
+                        value: (action['suggestedName'] as string | undefined) ?? '',
+                        validateInput: v => v.trim() ? undefined : 'Enter a name',
+                    });
+                    if (!name) { break; }
+                    const presets = this._presets().filter(x => x.name !== name.trim());
+                    presets.push({ ...preset, name: name.trim() });
+                    presets.sort((a, b) => a.name.localeCompare(b.name));
+                    await this.storage?.update(PacketViewerProvider.PRESETS_KEY, presets);
+                    this._sendPresets(webview, name.trim());
+                    break;
+                }
+
+                case 'deletePreset': {
+                    const name = String(action['name'] ?? '');
+                    const ok = await vscode.window.showWarningMessage(`Delete the packet filter preset "${name}"?`, { modal: true }, 'Delete');
+                    if (ok !== 'Delete') { break; }
+                    await this.storage?.update(PacketViewerProvider.PRESETS_KEY, this._presets().filter(x => x.name !== name));
+                    this._sendPresets(webview);
+                    break;
+                }
+
+                case 'getStructDefs': {
+                    let structs: PacketStructDef[] = [];
+                    let message = '';
+                    if (!this.getLabelEntries) {
+                        message = 'Struct definitions are unavailable';
+                    } else {
+                        structs = structDefsFromLabels(await this.getLabelEntries());
+                        if (!structs.length) {
+                            message = 'No structs in the active label set. Add Struct labels with members in the Structure Visualizer.';
+                        }
+                    }
+                    webview.postMessage({ type: 'packetViewerStructs', structs, message });
+                    break;
+                }
 
                 case 'openPcap': {
                     const uris = await vscode.window.showOpenDialog({

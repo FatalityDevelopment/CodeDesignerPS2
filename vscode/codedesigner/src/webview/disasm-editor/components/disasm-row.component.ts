@@ -38,6 +38,10 @@ import { toPhysAddr } from '../utils/address.utils';
       [class.breakpoint]="hasBreakpoint()"
       [class.breakpoint-active]="hasBreakpoint()"
       [class.breakpoint-hit]="isBreakpointHit()"
+      [class.breakpoint-disabled]="breakpointStyle() === 'disabled'"
+      [class.breakpoint-conditional]="breakpointStyle() === 'conditional'"
+      [class.breakpoint-log]="breakpointStyle() === 'log'"
+      [attr.data-bookmark]="bookmarkSlot()"
       [class.comment-tooltip-visible]="commentTooltipVisible()"
       [attr.data-index]="localIndex()"
       [attr.data-global-index]="globalIndex()"
@@ -152,6 +156,21 @@ export class DisasmRowComponent {
   protected readonly hasBreakpoint = computed(() => {
     const addr = parseInt(this.data().addr, 16);
     return this.state.breakpoints().has(addr);
+  });
+
+  /** Gutter variant of this row's breakpoint (undefined = plain). */
+  protected readonly breakpointStyle = computed(() => {
+    if (!this.hasBreakpoint()) { return undefined; }
+    return this.state.breakpointStyles().get(this.toPhysAddr(parseInt(this.data().addr, 16)));
+  });
+
+  /** Bookmark slot ("1"–"9") set on this row, or null. */
+  protected readonly bookmarkSlot = computed(() => {
+    const phys = this.toPhysAddr(parseInt(this.data().addr, 16));
+    for (const [slot, addr] of Object.entries(this.state.bookmarks())) {
+      if (this.toPhysAddr(addr) === phys) { return slot; }
+    }
+    return null;
   });
 
   /** Whether this row's breakpoint was just hit */

@@ -23,6 +23,13 @@
           "title": "CodeDesigner",
           "icon": "dist/resources/codedesigner-icon.png"
         }
+      ],
+      "panel": [
+        {
+          "id": "codedesignerPanel",
+          "title": "CodeDesigner",
+          "icon": "dist/resources/codedesigner-icon.png"
+        }
       ]
     },
     "views": {
@@ -32,9 +39,36 @@
           "id": "disasm.disasmPanel",
           "name": "Emulator"
         }
+      ],
+      "codedesignerPanel": [
+        {
+          "type": "webview",
+          "id": "codedesigner.xrefsView",
+          "name": "Cross-references"
+        }
       ]
     },
     "commands": [
+      {
+        "command": "codedesigner.debugger.jumpBookmark",
+        "title": "CodeDesigner: Jump to Debugger Bookmark"
+      },
+      {
+        "command": "codedesigner.debugger.setBookmark",
+        "title": "CodeDesigner: Set Debugger Bookmark at Cursor"
+      },
+      {
+        "command": "codedesigner.debugger.gotoAddress",
+        "title": "CodeDesigner: Go to Address"
+      },
+      {
+        "command": "codedesigner.debugger.runToCursor",
+        "title": "CodeDesigner: Run to Cursor"
+      },
+      {
+        "command": "codedesigner.debugger.stepOut",
+        "title": "CodeDesigner: Step Out"
+      },
       {
         "command": "codedesigner.connectServer",
         "title": "CodeDesigner: Connect to Server"
@@ -161,6 +195,29 @@
         "title": "Open Struct Offset Calculator",
         "icon": "$(symbol-class)"
       }
+    ],
+    "keybindings": [
+      { "key": "ctrl+1", "command": "codedesigner.debugger.jumpBookmark", "args": { "slot": 1 }, "when": "activeWebviewPanelId == 'disasm.liveMemory'" },
+      { "key": "ctrl+2", "command": "codedesigner.debugger.jumpBookmark", "args": { "slot": 2 }, "when": "activeWebviewPanelId == 'disasm.liveMemory'" },
+      { "key": "ctrl+3", "command": "codedesigner.debugger.jumpBookmark", "args": { "slot": 3 }, "when": "activeWebviewPanelId == 'disasm.liveMemory'" },
+      { "key": "ctrl+4", "command": "codedesigner.debugger.jumpBookmark", "args": { "slot": 4 }, "when": "activeWebviewPanelId == 'disasm.liveMemory'" },
+      { "key": "ctrl+5", "command": "codedesigner.debugger.jumpBookmark", "args": { "slot": 5 }, "when": "activeWebviewPanelId == 'disasm.liveMemory'" },
+      { "key": "ctrl+6", "command": "codedesigner.debugger.jumpBookmark", "args": { "slot": 6 }, "when": "activeWebviewPanelId == 'disasm.liveMemory'" },
+      { "key": "ctrl+7", "command": "codedesigner.debugger.jumpBookmark", "args": { "slot": 7 }, "when": "activeWebviewPanelId == 'disasm.liveMemory'" },
+      { "key": "ctrl+8", "command": "codedesigner.debugger.jumpBookmark", "args": { "slot": 8 }, "when": "activeWebviewPanelId == 'disasm.liveMemory'" },
+      { "key": "ctrl+9", "command": "codedesigner.debugger.jumpBookmark", "args": { "slot": 9 }, "when": "activeWebviewPanelId == 'disasm.liveMemory'" },
+      { "key": "ctrl+shift+1", "command": "codedesigner.debugger.setBookmark", "args": { "slot": 1 }, "when": "activeWebviewPanelId == 'disasm.liveMemory'" },
+      { "key": "ctrl+shift+2", "command": "codedesigner.debugger.setBookmark", "args": { "slot": 2 }, "when": "activeWebviewPanelId == 'disasm.liveMemory'" },
+      { "key": "ctrl+shift+3", "command": "codedesigner.debugger.setBookmark", "args": { "slot": 3 }, "when": "activeWebviewPanelId == 'disasm.liveMemory'" },
+      { "key": "ctrl+shift+4", "command": "codedesigner.debugger.setBookmark", "args": { "slot": 4 }, "when": "activeWebviewPanelId == 'disasm.liveMemory'" },
+      { "key": "ctrl+shift+5", "command": "codedesigner.debugger.setBookmark", "args": { "slot": 5 }, "when": "activeWebviewPanelId == 'disasm.liveMemory'" },
+      { "key": "ctrl+shift+6", "command": "codedesigner.debugger.setBookmark", "args": { "slot": 6 }, "when": "activeWebviewPanelId == 'disasm.liveMemory'" },
+      { "key": "ctrl+shift+7", "command": "codedesigner.debugger.setBookmark", "args": { "slot": 7 }, "when": "activeWebviewPanelId == 'disasm.liveMemory'" },
+      { "key": "ctrl+shift+8", "command": "codedesigner.debugger.setBookmark", "args": { "slot": 8 }, "when": "activeWebviewPanelId == 'disasm.liveMemory'" },
+      { "key": "ctrl+shift+9", "command": "codedesigner.debugger.setBookmark", "args": { "slot": 9 }, "when": "activeWebviewPanelId == 'disasm.liveMemory'" },
+      { "key": "ctrl+g", "command": "codedesigner.debugger.gotoAddress", "when": "activeWebviewPanelId == 'disasm.liveMemory'" },
+      { "key": "ctrl+f10", "command": "codedesigner.debugger.runToCursor", "when": "activeWebviewPanelId == 'disasm.liveMemory'" },
+      { "key": "shift+f11", "command": "codedesigner.debugger.stepOut", "when": "activeWebviewPanelId == 'disasm.liveMemory'" }
     ],
     "menus": {
       "editor/title": [

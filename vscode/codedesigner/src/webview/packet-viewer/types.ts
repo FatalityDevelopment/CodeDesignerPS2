@@ -100,6 +100,25 @@ export interface FrameEdit {
     tcpContinue: boolean;
 }
 
+/** A saved display + capture filter combination (stored by the extension host). */
+export interface FilterPreset {
+    name: string;
+    displayFilter: string;
+    protoFilter: string;
+    hideNoise: boolean;
+    filterType: number;
+    filterProtocol: number;
+    filterPort: number;
+    filterIP: string;
+}
+
+/** A struct from the structure visualizer's labels, laid over packet bytes. */
+export interface StructDef {
+    name: string;
+    address: string;
+    fields: Array<{ name: string; offset: number; type: string }>;
+}
+
 /** Actions posted to the extension host. */
 export type PacketViewerAction =
     | { type: 'startCapture'; direction: number; maxQueue: number }
@@ -114,7 +133,11 @@ export type PacketViewerAction =
     | { type: 'savePcap'; packets: PcapPacketEntry[] }
     | ({ type: 'inject'; frame: string; tx: boolean } & FrameEdit)
     | ({ type: 'buildFrame'; frame: string; requestId: number } & FrameEdit)
-    | { type: 'buildMessage'; protocol: string; id: number; values: Record<string, string>; rtType?: number; target?: number };
+    | { type: 'buildMessage'; protocol: string; id: number; values: Record<string, string>; rtType?: number; target?: number }
+    | { type: 'getPresets' }
+    | { type: 'savePreset'; preset: FilterPreset; suggestedName?: string }
+    | { type: 'deletePreset'; name: string }
+    | { type: 'getStructDefs' };
 
 /** SCERT record types that carry an app message (the wrapper choices in the composer). */
 export const APP_RT_TYPES: Array<{ id: number; name: string }> = [

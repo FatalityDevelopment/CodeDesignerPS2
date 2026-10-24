@@ -82,6 +82,11 @@ import { IconComponent } from '../../shared/icon.component';
                   title="Step Over — skip calls (PCSX2 PINE)">
             <span class="dbg-glyph">↷</span><span class="dbg-btn-label">Over</span>
           </button>
+          <button class="dbg-btn" id="emu-step-out-btn"
+                  (click)="stepOut.emit()" [disabled]="!isPaused()"
+                  title="Step Out — run until the current function returns (Shift+F11)">
+            <span class="dbg-glyph">↑</span><span class="dbg-btn-label">Out</span>
+          </button>
         </div>
       }
     </div>
@@ -99,6 +104,7 @@ export class PanelStatusBarComponent {
   readonly step = output<void>();
   readonly stepInto = output<void>();
   readonly stepOver = output<void>();
+  readonly stepOut = output<void>();
   /** Emitted when the user clicks Live or AI mode buttons. */
   readonly controlModeChange = output<'live' | 'ai-control'>();
 

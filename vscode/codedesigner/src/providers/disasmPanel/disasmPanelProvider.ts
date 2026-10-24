@@ -296,7 +296,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             () => this.handleRunMcpServer(),
         );
         this._compatBrowserProvider   = new CompatBrowserProvider(_extensionUri, socketClient);
-        this._packetViewerProvider    = new PacketViewerProvider(_extensionUri, socketClient);
+        this._packetViewerProvider    = new PacketViewerProvider(_extensionUri, socketClient,
+            () => this.editorProvider.getActiveLabelEntries());
         this._debugCommandsProvider   = new DebugCommandsProvider(_extensionUri);
 
         const delegate: SnapshotDataDelegate = {
@@ -324,6 +325,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     public register(context: vscode.ExtensionContext) {
         this.extensionPath = context.extensionPath;
         this._globalStoragePath = context.globalStorageUri.fsPath;
+        this._packetViewerProvider.storage = context.globalState;
 
         // Initialise workspaceRoot early so that any feature relying on it
         // (label manager, snapshots, settings persistence) works even before
@@ -516,6 +518,13 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                     break;
                 case 'stepOver':
                     await this.handleStepOver();
+                    break;
+                case 'stepOut':
+                    if (!this.socketClient.isConnected()) {
+                        vscode.window.showWarningMessage('Not connected to emulator.');
+                        break;
+                    }
+                    await this.editorProvider.stepOut();
                     break;
                 case 'togglePause':
                     await this.handleTogglePause();

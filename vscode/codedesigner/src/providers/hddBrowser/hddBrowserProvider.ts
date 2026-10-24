@@ -6,6 +6,15 @@ import { SocketClient, HddFileEntryInfo } from '../../socketClient';
 import { getOutputChannel } from '../../extension';
 import { getNonce, getWebviewErrorHandlerScript } from '../../utils/nonce';
 import { applyCodeDesignerPanelIcon } from '../../utils/webviewPanel';
+import { SaveFile, diffSaveFiles } from '../../utils/ps2SaveFiles';
+import { SaveSnapshotStore } from '../../utils/saveSnapshotStore';
+
+/** HDD image extensions opened when one is dropped on the browser. */
+const HDD_EXTENSIONS = ['.raw', '.img', '.hdd'];
+/** Root files are copied whole into a snapshot; game partitions can hold GBs. */
+const MAX_SNAPSHOT_BYTES = 64 * 1024 * 1024;
+/** Largest file read ahead so it can be dragged out of the list. */
+const MAX_DRAG_BYTES = 8 * 1024 * 1024;
 
 export class HddBrowserProvider {
     public static readonly viewType = 'codedesigner.hddBrowser';
@@ -13,10 +22,15 @@ export class HddBrowserProvider {
     private _panel: vscode.WebviewPanel | undefined;
     private _pendingInitialPath = '';
 
+    private readonly _snapshots: SaveSnapshotStore;
+
     constructor(
         private readonly _extensionUri: vscode.Uri,
         private readonly _socketClient: SocketClient,
-    ) {}
+        storageDir: string,
+    ) {
+        this._snapshots = new SaveSnapshotStore(storageDir, 'hdd');
+    }
 
     public open(initialPath?: string): void {
         if (this._panel) {
@@ -107,6 +121,31 @@ export class HddBrowserProvider {
                 break;
             case 'revealPath':
                 await this._revealPath(msg['path'] as string | undefined);
+                break;
+            case 'dropOpen':
+                await this._dropOpen(webview, (msg['uris'] as string[] | undefined) ?? [], (msg['names'] as string[] | undefined) ?? []);
+                break;
+            case 'prefetchFile':
+                await this._prefetchFile(
+                    webview,
+                    msg['hddPath'] as string | undefined,
+                    msg['partitionId'] as string | undefined,
+                    msg['fileName'] as string | undefined,
+                    msg['source'] as string | undefined,
+                );
+                break;
+            case 'listSnapshots':
+                this._postSnapshots(webview, String(msg['partitionId'] ?? ''));
+                break;
+            case 'snapshotPartition':
+                await this._snapshotPartition(webview, msg['hddPath'] as string | undefined, String(msg['partitionId'] ?? ''));
+                break;
+            case 'deleteSnapshot':
+                this._snapshots.remove(String(msg['partitionId'] ?? ''), String(msg['id'] ?? ''));
+                this._postSnapshots(webview, String(msg['partitionId'] ?? ''));
+                break;
+            case 'diffSnapshot':
+                await this._diffSnapshot(webview, msg['hddPath'] as string | undefined, String(msg['partitionId'] ?? ''), String(msg['id'] ?? ''));
                 break;
             case 'bootstrapError':
                 getOutputChannel().error('[HddBrowser] Bootstrap error: ' + msg['error']);
@@ -301,6 +340,96 @@ export class HddBrowserProvider {
             this._postStatus(webview, 'Deleting partition...', true);
             await this._socketClient.hddDelete(hddPath, partitionId);
             await this._loadHdd(webview, hddPath);
+        } catch (err) {
+            this._postError(webview, err);
+        }
+    }
+
+    // ── Drag and drop ──────────────────────────────────────────────────────
+
+    /** Opens an HDD image dropped from the VS Code explorer. */
+    private async _dropOpen(webview: vscode.Webview, uris: string[], names: string[]): Promise<void> {
+        for (const raw of uris) {
+            let fsPath: string;
+            try { fsPath = vscode.Uri.parse(raw.trim()).fsPath; } catch { continue; }
+            if (HDD_EXTENSIONS.includes(path.extname(fsPath).toLowerCase()) && fs.existsSync(fsPath)) {
+                await this._loadHdd(webview, fsPath);
+                return;
+            }
+        }
+        const dropped = names[0] ?? (uris[0] ? path.basename(vscode.Uri.parse(uris[0]).fsPath) : 'that');
+        const isImage = HDD_EXTENSIONS.includes(path.extname(dropped).toLowerCase());
+        this._postError(webview, new Error(isImage
+            ? `To open ${dropped}, drag it from the VS Code explorer or use Open.`
+            // HDD_IMPORT needs PFS write support in the bridge (see HddService.cs).
+            : `Can't import ${dropped}: writing files into HDD partitions isn't supported yet. Drop an HDD image to open it.`));
+    }
+
+    /** Reads a root file ahead of a drag so the drag can carry its bytes. */
+    private async _prefetchFile(
+        webview: vscode.Webview,
+        hddPath: string | undefined,
+        partitionId: string | undefined,
+        fileName: string | undefined,
+        source: string | undefined,
+    ): Promise<void> {
+        if (!hddPath || !partitionId || !fileName || !this._socketClient.isConnected()) { return; }
+        try {
+            const data = await this._socketClient.hddReadFile(hddPath, partitionId, fileName, source);
+            if (data.length * 0.75 > MAX_DRAG_BYTES) { return; }
+            webview.postMessage({ type: 'hddFileBytes', partitionId, fileName, source: source ?? '', data });
+        } catch { /* the row just won't drag a file out */ }
+    }
+
+    // ── Snapshots and diffs ────────────────────────────────────────────────
+
+    private _postSnapshots(webview: vscode.Webview, partitionId: string): void {
+        webview.postMessage({ type: 'hddSnapshots', partitionId, snapshots: partitionId ? this._snapshots.list(partitionId) : [] });
+    }
+
+    /** Every root file of a partition (header files prefixed "_header/"). */
+    private async _readPartition(hddPath: string, partitionId: string): Promise<SaveFile[]> {
+        const list = (await this._socketClient.hddListFiles(hddPath, partitionId)).filter(f => !f.IsDirectory);
+        const total = list.reduce((n, f) => n + (f.Size || 0), 0);
+        if (total > MAX_SNAPSHOT_BYTES) {
+            throw new Error(`${partitionId} has ${(total / 1048576).toFixed(0)} MB of root files; snapshots are limited to ${MAX_SNAPSHOT_BYTES / 1048576} MB (use them for save partitions).`);
+        }
+        const files: SaveFile[] = [];
+        for (const f of list) {
+            const b64 = await this._socketClient.hddReadFile(hddPath, partitionId, f.Name, f.Source);
+            files.push({ name: f.Source === 'header' ? `_header/${f.Name}` : f.Name, data: Buffer.from(b64, 'base64') });
+        }
+        return files;
+    }
+
+    private async _snapshotPartition(webview: vscode.Webview, hddPath: string | undefined, partitionId: string): Promise<void> {
+        if (!hddPath || !partitionId) { return; }
+        if (!this._ensureConnected(webview)) { return; }
+        const label = await vscode.window.showInputBox({
+            title: `Snapshot ${partitionId}`,
+            prompt: 'Optional note, e.g. "after chapter 2"',
+            placeHolder: 'Note',
+        });
+        if (label === undefined) { return; }
+        try {
+            this._postStatus(webview, `Copying ${partitionId}...`, true);
+            this._snapshots.add(partitionId, hddPath, await this._readPartition(hddPath, partitionId), label.trim());
+            this._postStatus(webview, `Snapshot of ${partitionId} stored`, false);
+            this._postSnapshots(webview, partitionId);
+        } catch (err) {
+            this._postError(webview, err);
+        }
+    }
+
+    private async _diffSnapshot(webview: vscode.Webview, hddPath: string | undefined, partitionId: string, id: string): Promise<void> {
+        if (!hddPath || !partitionId || !id) { return; }
+        if (!this._ensureConnected(webview)) { return; }
+        try {
+            this._postStatus(webview, `Comparing ${partitionId}...`, true);
+            const files = diffSaveFiles(this._snapshots.read(partitionId, id), await this._readPartition(hddPath, partitionId));
+            webview.postMessage({ type: 'hddDiff', partitionId, id, files });
+            const changed = files.filter(f => f.status !== 'same').length;
+            this._postStatus(webview, changed ? `${changed} file(s) differ from the snapshot` : 'Partition matches the snapshot', false);
         } catch (err) {
             this._postError(webview, err);
         }

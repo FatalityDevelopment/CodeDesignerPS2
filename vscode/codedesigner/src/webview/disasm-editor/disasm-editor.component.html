@@ -3,9 +3,10 @@
     <button class="header-tool-btn" id="registers-toggle-btn" title="Toggle Registers Panel (Ctrl+Alt+R)"><app-icon name="database" [size]="13" /><span>Regs</span></button>
     <button class="header-tool-btn" id="bottom-panel-toggle-btn" title="Toggle Bottom Panel (Ctrl+Alt+T)"><app-icon name="wrench" [size]="13" /><span>Debug Tools</span></button>
     <button class="header-tool-btn" id="search-toggle-btn" title="Search (Ctrl+F)"><app-icon name="search" [size]="13" /><span>Search</span></button>
-    <button class="header-tool-btn" id="goto-toggle-btn" title="Go to Address (Ctrl+Alt+A)"><app-icon name="arrowright" [size]="13" /><span>Go To</span></button>
+    <button class="header-tool-btn" id="goto-toggle-btn" title="Go to Address (Ctrl+G / Ctrl+Alt+A)"><app-icon name="arrowright" [size]="13" /><span>Go To</span></button>
     <button class="header-tool-btn live-only" id="setpc-toggle-btn" title="Set PC to Address (Ctrl+Alt+P)"><app-icon name="play" [size]="13" /><span>Set PC</span></button>
     <button class="header-tool-btn" id="nav-back-btn" title="Navigate Back (Alt+Left)" disabled><app-icon name="arrowleft" [size]="13" /><span>Back</span></button>
+    <button class="header-tool-btn" id="nav-forward-btn" title="Navigate Forward (Alt+Right)" disabled><app-icon name="arrowright" [size]="13" /><span>Forward</span></button>
     <select class="header-tool-btn live-only hint-level-select"
             title="Comment hints: everything, only addresses/calls/loads, or none"
             [value]="hintLevel()"
@@ -40,6 +41,8 @@
 </app-address-input-panel>
 <app-search-panel
     (search)="onSearch($event)"
+    (searchAll)="onGlobalSearch($event)"
+    (globalNavigate)="onGlobalSearchNavigate($event)"
     (clear)="onSearchClear()"
     (close)="onSearchClose()"
     (prevMatch)="onPrevMatch()"
@@ -72,12 +75,17 @@
     #contextMenu
     (setBreakpoint)="onCtxSetBreakpoint()"
     (removeBreakpoint)="onCtxRemoveBreakpoint()"
+    (editCondition)="onCtxEditCondition()"
+    (addLogPoint)="onCtxAddLogPoint()"
+    (toggleBreakpointEnabled)="onCtxToggleBreakpointEnabled()"
+    (runToCursor)="onCtxRunToCursor()"
     (addWatch)="onCtxAddWatch()"
     (removeWatch)="onCtxRemoveWatch()"
     (gotoTarget)="onCtxGotoTarget()"
     (findReferences)="onCtxFindReferences()"
     (findCodeReferences)="onCtxFindCodeReferences()"
     (showXrefs)="onCtxShowXrefs()"
+    (showXrefsView)="onCtxShowXrefsView()"
     (rebuildXrefs)="onCtxRebuildXrefs()"
     (addToLabelManager)="onCtxAddToLabelManager()"
     (formatAs)="onCtxFormatAs($event)"
@@ -95,19 +103,31 @@
     (removeWatch)="onDebugPanelRemoveWatch($event)"
     (clearAllWatches)="onDebugPanelClearAllWatches()"
     (navigateToWatchAddress)="onDebugPanelNavigateWatch($event)"
+    (followAddress)="onDebugFollowAddress($event)"
   />
 </div>
 <!-- Angular BottomPanel (Phase 8) -->
 <app-bottom-panel
+    #bottomPanel
     [visible]="bottomPanelVisible()"
     [callStack]="bottomPanelCallStack()"
     [threads]="bottomPanelThreads()"
     [modules]="bottomPanelModules()"
-    [breakpoints]="bottomPanelBreakpoints()"
+    [breakpoints]="breakpointList()"
+    [runToAddress]="runToAddress()"
+    [memWatches]="memWatches()"
     [watches]="debugPanelWatches()"
     (navigateToAddress)="onBottomPanelNavigate($event)"
     (removeBreakpoint)="onBottomPanelRemoveBreakpoint($event)"
     (clearAllBreakpoints)="onBottomPanelClearAllBreakpoints()"
+    (updateBreakpoint)="onBottomPanelUpdateBreakpoint($event)"
+    (setAllBreakpointsEnabled)="onBottomPanelSetAllBreakpointsEnabled($event)"
+    (resetBreakpointHits)="onBottomPanelResetHits($event)"
+    (memWatchAdd)="onMemWatchAdd($event)"
+    (memWatchUpdate)="onMemWatchUpdate($event)"
+    (memWatchRemove)="onMemWatchRemove($event)"
+    (memWatchClear)="onMemWatchClear()"
+    (memWatchWrite)="onMemWatchWrite($event)"
     (removeWatch)="onDebugPanelRemoveWatch($event)"
     (clearAllWatches)="onDebugPanelClearAllWatches()"
     (navigateToWatchAddress)="onBottomPanelNavigate($event)"

@@ -6,6 +6,17 @@ import { getOutputChannel } from "../../extension";
 import { getNonce, getWebviewErrorHandlerScript } from "../../utils/nonce";
 import { classifyAddress, MemoryRegion } from "../../shared/memoryRegions";
 import { applyCodeDesignerPanelIcon, getMemoryRegionPanelIcon } from '../../utils/webviewPanel';
+import { BreakpointManager, BreakpointPatch } from './breakpointManager';
+import { DebugExpression, DebugExprContext, MemoryReadType, formatNumber, readTypedValue } from '../../shared/debugExpression';
+
+/** One row of the typed memory watch list (persisted per workspace). */
+export interface MemoryWatchEntry {
+    id: string;
+    /** Address expression, e.g. "0x00123456", "[[playerPtr]+0x10]+4". */
+    expression: string;
+    type: MemoryReadType | 'ptr' | 'string';
+    label?: string;
+}
 
 /**
  * Maps {@link MemoryRegion} to the sidebar-menu label that opens the panel.
@@ -107,7 +118,20 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
    * every connect/reconnect/restart — without depending on the Angular webview
    * being bootstrapped or having processed an 'init' message first.
    */
-  private _knownBreakpoints: Set<number> = new Set();
+  private _breakpoints = new BreakpointManager();
+  /**
+   * Decision for the pause currently reported by the emulator: whether a
+   * conditional breakpoint / log point / hit count let it continue. Shared so
+   * concurrent status polls from several panels evaluate a hit only once.
+   * Cleared whenever the emulator runs again.
+   */
+  private _hitDecision: Promise<boolean> | null = null;
+  /** True while the host polls quickly after continuing past a breakpoint. */
+  private _fastPolling = false;
+  /** Workspace storage for bookmarks and the memory watch list (set by extension.ts). */
+  public storage?: vscode.Memento;
+  private _memWatches: MemoryWatchEntry[] = [];
+  private _bookmarks: Record<string, number> = {};
   /** Game-specific labels loaded from snapshots/<isoName>/labels.json. Merged with server labels. */
   private _gameLabels: LabelEntry[] = [];
   /** Labels derived from live-resolved Pointer Manager entries. Shown as an overlay in the instruction display. */
@@ -835,6 +859,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         const hitAddr = statusMsg.breakpointHitAddress ?? status.pc;
         this._revealPanelForAddress(hitAddr);
       }
+      // A step that lands on a breakpoint is not a hit to evaluate.
+      if (status.paused) { this._hitDecision = Promise.resolve(false); }
       this._broadcastFullStatus(statusMsg);
       // Always notify the sidebar so it stays in sync (step keeps emulator paused).
       this._firePauseStateChange(status.paused);
@@ -869,6 +895,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         } catch { /* ignore register fetch errors */ }
         const hitAddr = statusMsg.breakpointHitAddress ?? status.pc;
         this._revealPanelForAddress(hitAddr);
+        // A user pause is never continued by a breakpoint condition.
+        this._hitDecision = Promise.resolve(false);
       }
       this._broadcastFullStatus(statusMsg);
       this._firePauseStateChange(status.paused);
@@ -884,7 +912,538 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
    * on Angular bootstrap.
    */
   public getKnownBreakpoints(): ReadonlySet<number> {
-    return this._knownBreakpoints;
+    return this._breakpoints.armedAddresses();
+  }
+
+  // ── Breakpoints (conditions / enable / hit counts / log points) ────────────
+
+  public async addBreakpoint(address: number, patch?: BreakpointPatch): Promise<void> {
+    const bp = this._breakpoints.add(address, patch);
+    if (bp.enabled) {
+      try {
+        await this.socketClient?.setBreakpoint(bp.address);
+      } catch (err: any) {
+        console.error(`[LIVE] Failed to set breakpoint: ${err?.message ?? err}`);
+      }
+    }
+    this._broadcastBreakpoints();
+  }
+
+  public async removeBreakpoint(address: number): Promise<void> {
+    const bp = this._breakpoints.remove(address);
+    const target = bp?.address ?? address;
+    // A pending Run to Cursor at the same address still needs its break.
+    const runTo = this._breakpoints.runToAddress;
+    if (runTo === undefined || DisasmEditorProvider._toPhysAddr(runTo) !== DisasmEditorProvider._toPhysAddr(target)) {
+      try {
+        await this.socketClient?.clearBreakpoint(target);
+      } catch (err: any) {
+        console.error(`[LIVE] Failed to clear breakpoint: ${err?.message ?? err}`);
+      }
+    }
+    this._broadcastBreakpoints();
+  }
+
+  public async updateBreakpoint(address: number, patch: BreakpointPatch, broadcast = true): Promise<void> {
+    const before = this._breakpoints.get(address);
+    if (!before) { return; }
+    const wasEnabled = before.enabled;
+    const bp = this._breakpoints.update(address, patch ?? {});
+    if (bp && bp.enabled !== wasEnabled) {
+      try {
+        if (bp.enabled) { await this.socketClient?.setBreakpoint(bp.address); }
+        else { await this.socketClient?.clearBreakpoint(bp.address); }
+      } catch (err: any) {
+        console.error(`[LIVE] Failed to ${bp.enabled ? 'arm' : 'disarm'} breakpoint: ${err?.message ?? err}`);
+      }
+    }
+    if (broadcast) { this._broadcastBreakpoints(); }
+  }
+
+  private _breakpointsStateMessage(): object {
+    return {
+      type: 'breakpointsState',
+      breakpoints: this._breakpoints.list(),
+      runToAddress: this._breakpoints.runToAddress ?? null,
+    };
+  }
+
+  private _broadcastBreakpoints(): void {
+    const msg = this._breakpointsStateMessage();
+    for (const p of this._livePanels) { p.webview.postMessage(msg); }
+  }
+
+  /** Expression context bound to the live emulator and the current labels. */
+  private _exprContext(registers: any): DebugExprContext {
+    return {
+      registers: registers ?? null,
+      readMemory: async (address, length) => {
+        const info = classifyAddress(address);
+        const region = info.region === MemoryRegion.IopRam ? 'iop' : 'ee';
+        return this.socketClient!.readMemory(address >>> 0, length, region);
+      },
+      resolveSymbol: name => this._symbolCache.get(name.toLowerCase()),
+    };
+  }
+
+  private _symbolCache = new Map<string, number>();
+  private _symbolCacheAt = 0;
+
+  /** Refreshes the label-name → address map used by expressions (at most every 10 s). */
+  private async _refreshSymbolCache(force = false): Promise<void> {
+    if (!force && Date.now() - this._symbolCacheAt < 10_000) { return; }
+    this._symbolCacheAt = Date.now();
+    let server: LabelEntry[] = [];
+    if (this.socketClient?.isConnected()) {
+      try { server = await this.socketClient.getLabels(); } catch { /* keep local labels */ }
+    }
+    const map = new Map<string, number>();
+    for (const list of [server, this._gameLabels, this._pointerLabels, this._structLabels]) {
+      for (const l of list) {
+        const addr = parseInt(String(l.address).replace(/^0x/i, ''), 16);
+        if (l.label && Number.isFinite(addr)) { map.set(l.label.toLowerCase(), addr >>> 0); }
+      }
+    }
+    this._symbolCache = map;
+  }
+
+  /**
+   * Applies conditions, hit counts and log points to a breakpoint pause.
+   * Returns true when the emulator was resumed (the pause must not be shown).
+   * Concurrent callers for the same pause share one decision.
+   */
+  private _decideBreakpointHit(statusMsg: any): Promise<boolean> {
+    if (!statusMsg?.paused) { this._hitDecision = null; return Promise.resolve(false); }
+    if (!this._hitDecision) { this._hitDecision = this._evaluateBreakpointHit(statusMsg); }
+    return this._hitDecision;
+  }
+
+  private async _evaluateBreakpointHit(statusMsg: any): Promise<boolean> {
+    // Any stop ends a pending Run to Cursor.
+    const runTo = this._breakpoints.runToAddress;
+    if (runTo !== undefined) {
+      const needsClear = this._breakpoints.runToNeedsClear();
+      this._breakpoints.setRunTo(undefined);
+      if (needsClear) {
+        try { await this.socketClient?.clearBreakpoint(runTo); } catch { /* best effort */ }
+      }
+      this._broadcastBreakpoints();
+      const hitPhys = DisasmEditorProvider._toPhysAddr(statusMsg.pc ?? 0);
+      if (hitPhys === DisasmEditorProvider._toPhysAddr(runTo)) { return false; }
+    }
+
+    const hit = statusMsg.breakpointHitAddress;
+    if (hit === undefined || hit === null || !this._breakpoints.get(hit)) { return false; }
+
+    if (this._breakpoints.needsEvaluation(hit)) { await this._refreshSymbolCache(); }
+    const decision = await this._breakpoints.decide(hit, this._exprContext(statusMsg.registers));
+    this._broadcastBreakpoints();
+    if (decision.action === 'stop') { return false; }
+
+    const out = getOutputChannel();
+    if (decision.log !== undefined) {
+      out.appendLine(`[LOG 0x${(hit >>> 0).toString(16).toUpperCase().padStart(8, '0')}] ${decision.log}`);
+    }
+    try {
+      await this.socketClient!.resume();
+    } catch (err: any) {
+      out.appendLine(`[BREAKPOINT] Could not continue past 0x${(hit >>> 0).toString(16).toUpperCase()}: ${err?.message ?? err}`);
+      return false;
+    }
+    this._hitDecision = null;
+    return true;
+  }
+
+  /** Reads PC, registers and stack — the full status the webviews render. */
+  private async _fetchFullStatus(): Promise<any> {
+    const status = await this.socketClient!.getPC();
+    const statusMsg: any = { type: 'status', ...status };
+    this._applyBreakpointHitFallback(statusMsg);
+    if (status.paused) {
+      try {
+        const regs = await this.socketClient!.getRegisters();
+        statusMsg.registers = regs;
+        const sp = regs.gprLo32?.[29] ?? regs.gpr?.[29];
+        if (sp !== undefined) {
+          try {
+            const stackBuf = await this.socketClient!.readMemory(sp, 512, 'ee');
+            statusMsg.stackBytes = Array.from(stackBuf);
+            statusMsg.stackBase = sp;
+          } catch { /* ignore stack read errors */ }
+        }
+      } catch { /* ignore register fetch errors */ }
+    }
+    return statusMsg;
+  }
+
+  /**
+   * After continuing past a conditional breakpoint, poll quickly so the next
+   * hit of a breakpoint in a loop is decided in milliseconds instead of
+   * waiting for the webviews' status timer.
+   */
+  private async _pollAfterAutoContinue(): Promise<void> {
+    if (this._fastPolling) { return; }
+    this._fastPolling = true;
+    try {
+      let deadline = Date.now() + 1500;
+      while (Date.now() < deadline && this.socketClient?.isConnected()) {
+        await new Promise(r => setTimeout(r, 20));
+        let statusMsg: any;
+        try { statusMsg = await this._fetchFullStatus(); } catch { return; }
+        if (!statusMsg.paused) { continue; }
+        if (await this._decideBreakpointHit(statusMsg)) {
+          deadline = Date.now() + 1500;
+          continue;
+        }
+        const hitAddr = statusMsg.breakpointHitAddress ?? statusMsg.pc;
+        this._revealPanelForAddress(hitAddr);
+        this._broadcastFullStatus(statusMsg);
+        this._firePauseStateChange(true);
+        return;
+      }
+    } finally {
+      this._fastPolling = false;
+    }
+  }
+
+  /** Run until `address` is reached (or another breakpoint stops first). */
+  public async runToAddress(address: number): Promise<void> {
+    if (!this.socketClient?.isConnected()) { return; }
+    const addr = address >>> 0;
+    this._breakpoints.setRunTo(addr);
+    try {
+      if (this._breakpoints.runToNeedsClear()) { await this.socketClient.setBreakpoint(addr); }
+      await this.socketClient.resume();
+      this._broadcastStatus(false);
+      this._broadcastBreakpoints();
+    } catch (err: any) {
+      this._breakpoints.setRunTo(undefined);
+      vscode.window.showWarningMessage(`Run to cursor failed: ${err?.message ?? err}`);
+    }
+  }
+
+  /** Run until the current function returns (PINE STEPOUT; one step elsewhere). */
+  public async stepOut(): Promise<void> {
+    if (!this.socketClient?.isConnected()) { return; }
+    try {
+      await this.socketClient.stepOut();
+      // The step-out runs on its own; the status polls report where it stops.
+      this._broadcastStatus(false);
+    } catch (err: any) {
+      getOutputChannel().appendLine(`[STEPOUT] Error: ${err?.message ?? err}`);
+    }
+  }
+
+  // ── Cross-references view ─────────────────────────────────────────────────
+
+  /** Called with the cursor address whenever a live panel's cursor settles. */
+  public onCursorAddress?: (address: number, label?: string) => void;
+  /** Reveals the cross-references view for `address` (context menu). */
+  public onShowXrefsView?: (address: number, label?: string) => void;
+
+  /** References to `address`, from the bridge's cross-reference index. */
+  public async getXrefs(address: number, kinds: string[]): Promise<ReferenceEntry[]> {
+    if (!this.socketClient?.isConnected()) { throw new Error('Not connected to the emulator'); }
+    const physAddr = DisasmEditorProvider._toPhysAddr(address);
+    const info = this._livePanelInfo.find(i =>
+      physAddr >= i.physBaseAddress && physAddr < i.physBaseAddress + i.totalBytes);
+    try {
+      return await this.socketClient.xrefsTo(address, kinds);
+    } catch {
+      if (!info) { return []; }
+      return this.socketClient.scanReferences(info.baseAddress, info.totalBytes, address, kinds, info.region);
+    }
+  }
+
+  // ── Bookmarks (Ctrl+1–9 jump, Ctrl+Shift+1–9 set) ─────────────────────────
+
+  private _setBookmark(slot: string, address: number | null): void {
+    if (!/^[1-9]$/.test(slot)) { return; }
+    if (address === null || address === undefined) { delete this._bookmarks[slot]; }
+    else { this._bookmarks[slot] = address >>> 0; }
+    void this.storage?.update(DisasmEditorProvider.BOOKMARKS_KEY, this._bookmarks);
+    const msg = { type: 'bookmarks', bookmarks: this._bookmarks };
+    for (const p of this._livePanels) { p.webview.postMessage(msg); }
+  }
+
+  public jumpToBookmark(slot: number): void {
+    const address = this._bookmarks[String(slot)];
+    if (address === undefined) {
+      vscode.window.setStatusBarMessage(`Bookmark ${slot} is not set (Ctrl+Shift+${slot} sets it)`, 3000);
+      return;
+    }
+    this.navigateToAddress(address);
+  }
+
+  /** Asks the focused live panel to set bookmark `slot` at its cursor. */
+  public setBookmarkAtCursor(slot: number): void {
+    this.postToActivePanel({ type: 'setBookmarkAtCursor', slot });
+  }
+
+  /** Posts a message to the live panel that has focus (or the first one). */
+  public postToActivePanel(message: object): void {
+    const info = this._livePanelInfo.find(i => i.panel.active) ?? this._livePanelInfo[0];
+    info?.panel.webview.postMessage(message);
+  }
+
+  private static readonly BOOKMARKS_KEY = 'codedesigner.debugger.bookmarks';
+  private static readonly MEM_WATCHES_KEY = 'codedesigner.debugger.memoryWatches';
+
+  /** Loads bookmarks and the memory watch list from workspace storage. */
+  public initStorage(storage: vscode.Memento): void {
+    this.storage = storage;
+    this._bookmarks = { ...(storage.get<Record<string, number>>(DisasmEditorProvider.BOOKMARKS_KEY) ?? {}) };
+    this._memWatches = [...(storage.get<MemoryWatchEntry[]>(DisasmEditorProvider.MEM_WATCHES_KEY) ?? [])];
+  }
+
+  // ── Typed memory watch list ───────────────────────────────────────────────
+
+  private _addMemWatch(expression: string, type: MemoryWatchEntry['type'], label?: string): void {
+    const expr = (expression ?? '').trim();
+    if (!expr) { return; }
+    this._memWatches.push({ id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, expression: expr, type, label });
+    this._saveMemWatches();
+    for (const p of this._livePanels) { void this._sendMemWatchValues(p); }
+  }
+
+  private _updateMemWatch(id: string, patch: Partial<MemoryWatchEntry>): void {
+    const w = this._memWatches.find(x => x.id === id);
+    if (!w) { return; }
+    if (patch.expression !== undefined) { w.expression = patch.expression.trim(); }
+    if (patch.type !== undefined) { w.type = patch.type; }
+    if (patch.label !== undefined) { w.label = patch.label; }
+    this._saveMemWatches();
+    for (const p of this._livePanels) { void this._sendMemWatchValues(p); }
+  }
+
+  private _saveMemWatches(): void {
+    void this.storage?.update(DisasmEditorProvider.MEM_WATCHES_KEY, this._memWatches);
+  }
+
+  private _lastRegisters: any = null;
+
+  /** Resolves one watch: its address (end of the pointer chain) and typed value. */
+  private async _evaluateMemWatch(w: MemoryWatchEntry, ctx: DebugExprContext): Promise<{ address?: number; value?: string; error?: string }> {
+    let address: number;
+    try {
+      address = (await DebugExpression.parse(w.expression).evaluate(ctx)) >>> 0;
+    } catch (err: any) {
+      return { error: err?.message ?? String(err) };
+    }
+    try {
+      if (w.type === 'string') {
+        const bytes = await ctx.readMemory!(address, 64);
+        const end = bytes.indexOf(0);
+        const text = Buffer.from(bytes.subarray(0, end < 0 ? bytes.length : end)).toString('latin1');
+        return { address, value: JSON.stringify(text) };
+      }
+      if (w.type === 'ptr') {
+        const v = await readTypedValue(ctx, 'u32', address);
+        const sym = [...this._symbolCache.entries()].find(([, a]) => a === v)?.[0];
+        return { address, value: formatNumber(v) + (sym ? ` → ${sym}` : '') };
+      }
+      const v = await readTypedValue(ctx, w.type, address);
+      const text = w.type === 'f32'
+        ? String(Number(v.toPrecision(7)))
+        : w.type.startsWith('s')
+          ? `${v} (0x${(v >>> 0).toString(16).toUpperCase()})`
+          : `0x${v.toString(16).toUpperCase()} (${v})`;
+      return { address, value: text };
+    } catch (err: any) {
+      return { address, error: err?.message ?? String(err) };
+    }
+  }
+
+  private async _sendMemWatchValues(panel: vscode.WebviewPanel): Promise<void> {
+    const connected = !!this.socketClient?.isConnected();
+    if (connected) {
+      await this._refreshSymbolCache();
+      try { this._lastRegisters = await this.socketClient!.getRegisters(); } catch { this._lastRegisters = null; }
+    }
+    const ctx = this._exprContext(this._lastRegisters);
+    const rows = [];
+    for (const w of this._memWatches) {
+      const result = connected ? await this._evaluateMemWatch(w, ctx) : { error: 'Not connected' };
+      rows.push({ ...w, ...result });
+    }
+    panel.webview.postMessage({ type: 'memWatches', watches: rows });
+  }
+
+  private async _writeMemWatch(panel: vscode.WebviewPanel, id: string, valueText: string): Promise<void> {
+    const w = this._memWatches.find(x => x.id === id);
+    if (!w || !this.socketClient?.isConnected()) { return; }
+    const ctx = this._exprContext(this._lastRegisters);
+    try {
+      const address = (await DebugExpression.parse(w.expression).evaluate(ctx)) >>> 0;
+      const buf = DisasmEditorProvider._encodeWatchValue(w.type, valueText);
+      const region = classifyAddress(address).region === MemoryRegion.IopRam ? 'iop' : 'ee';
+      await this.socketClient.writeMemory(address, buf.toString('hex').toUpperCase(), region);
+    } catch (err: any) {
+      vscode.window.showWarningMessage(`Could not write watch "${w.expression}": ${err?.message ?? err}`);
+    }
+    await this._sendMemWatchValues(panel);
+  }
+
+  private static _encodeWatchValue(type: MemoryWatchEntry['type'], text: string): Buffer {
+    const t = text.trim();
+    if (type === 'string') {
+      const s = t.startsWith('"') ? JSON.parse(t) as string : t;
+      return Buffer.concat([Buffer.from(s, 'latin1'), Buffer.from([0])]);
+    }
+    if (type === 'f32') {
+      const f = Number(t);
+      if (!Number.isFinite(f)) { throw new Error(`"${t}" is not a number`); }
+      const b = Buffer.alloc(4); b.writeFloatLE(f); return b;
+    }
+    const n = /^-?0x/i.test(t) ? (t.startsWith('-') ? -parseInt(t.slice(1), 16) : parseInt(t, 16)) : Number(t);
+    if (!Number.isFinite(n) || !Number.isInteger(n)) { throw new Error(`"${t}" is not an integer`); }
+    const size = type === 'u8' || type === 's8' ? 1 : type === 'u16' || type === 's16' ? 2 : 4;
+    const b = Buffer.alloc(size);
+    const masked = size === 4 ? n >>> 0 : n & ((1 << (size * 8)) - 1);
+    b.writeUIntLE(masked, 0, size);
+    return b;
+  }
+
+  // ── Search across regions (strings, byte patterns, immediates) ────────────
+
+  private static readonly SEARCHABLE_REGIONS: Array<{ label: string; region: 'ee' | 'iop'; address: number; size: number; code: boolean }> = [
+    { label: 'EE RAM',     region: 'ee',  address: 0x00000000, size: 32 * 1024 * 1024, code: true },
+    { label: 'Scratchpad', region: 'ee',  address: 0x70000000, size: 16 * 1024,        code: false },
+    { label: 'IOP RAM',    region: 'iop', address: 0x1C000000, size: 2 * 1024 * 1024,  code: true },
+    { label: 'BIOS ROM',   region: 'ee',  address: 0x1FC00000, size: 4 * 1024 * 1024,  code: true },
+    { label: 'VU0 data',   region: 'ee',  address: 0x11004000, size: 4 * 1024,         code: false },
+    { label: 'VU1 data',   region: 'ee',  address: 0x1100C000, size: 16 * 1024,        code: false },
+  ];
+
+  private static readonly MAX_GLOBAL_RESULTS = 2000;
+  private _globalSearchToken = 0;
+
+  private async _handleSearchAllRegions(panel: vscode.WebviewPanel, query: string, mode: string): Promise<void> {
+    const token = ++this._globalSearchToken;
+    const post = (results: any[], error?: string, done = true) =>
+      panel.webview.postMessage({ type: 'globalSearchResults', query, mode, results, error, done });
+    if (!this.socketClient?.isConnected()) { post([], 'Not connected to the emulator'); return; }
+    if (!query.trim()) { post([]); return; }
+
+    const results: Array<{ address: number; region: string; text: string }> = [];
+    let immediate: { value: number; wide: boolean } | undefined;
+    if (mode === 'immediate') {
+      const v = DisasmEditorProvider._parseImmediate(query);
+      if (v === undefined) { post([], `"${query}" is not a number`); return; }
+      immediate = v;
+    }
+
+    await vscode.window.withProgress({
+      location: vscode.ProgressLocation.Notification,
+      title: mode === 'immediate' ? `Searching all regions for immediate ${query}` : `Searching all regions for "${query}"`,
+      cancellable: true,
+    }, async (progress, cancel) => {
+      const regions = DisasmEditorProvider.SEARCHABLE_REGIONS.filter(r => !immediate || r.code);
+      for (const r of regions) {
+        if (cancel.isCancellationRequested || token !== this._globalSearchToken) { return; }
+        if (results.length >= DisasmEditorProvider.MAX_GLOBAL_RESULTS) { break; }
+        progress.report({ message: r.label });
+        try {
+          if (immediate) {
+            await this._scanImmediates(r, immediate, results, cancel, token);
+          } else {
+            const matches = await this.socketClient!.search(r.address, r.size, query, mode, r.region);
+            const seen = new Set<number>();
+            for (const m of matches) {
+              if (seen.has(m.address)) { continue; }
+              seen.add(m.address);
+              results.push({ address: m.address >>> 0, region: r.label, text: m.field ?? '' });
+              if (results.length >= DisasmEditorProvider.MAX_GLOBAL_RESULTS) { break; }
+            }
+          }
+        } catch (err: any) {
+          getOutputChannel().appendLine(`[SEARCH] ${r.label}: ${err?.message ?? err}`);
+        }
+        post(results, undefined, false);
+      }
+    });
+    if (token !== this._globalSearchToken) { return; }
+    post(results, results.length >= DisasmEditorProvider.MAX_GLOBAL_RESULTS ? `Stopped at ${DisasmEditorProvider.MAX_GLOBAL_RESULTS} results` : undefined);
+  }
+
+  /** Parses an immediate query: hex (0x…), decimal, or negative decimal. */
+  private static _parseImmediate(text: string): { value: number; wide: boolean } | undefined {
+    const t = text.trim().replace(/^#/, '');
+    let v: number;
+    if (/^-?0x[0-9a-f]+$/i.test(t)) { v = t.startsWith('-') ? -parseInt(t.slice(1), 16) : parseInt(t, 16); }
+    else if (/^-?\d+$/.test(t)) { v = Number(t); }
+    else { return undefined; }
+    if (v < -0x80000000 || v > 0xFFFFFFFF) { return undefined; }
+    const wide = v < -0x8000 || v > 0xFFFF;
+    return { value: v >>> 0, wide };
+  }
+
+  private static readonly IMM_OPCODES: Record<number, string> = {
+    0x08: 'addi', 0x09: 'addiu', 0x0A: 'slti', 0x0B: 'sltiu', 0x0C: 'andi', 0x0D: 'ori', 0x0E: 'xori', 0x0F: 'lui',
+    0x18: 'daddi', 0x19: 'daddiu', 0x1A: 'ldl', 0x1B: 'ldr', 0x1E: 'lq', 0x1F: 'sq',
+    0x20: 'lb', 0x21: 'lh', 0x22: 'lwl', 0x23: 'lw', 0x24: 'lbu', 0x25: 'lhu', 0x26: 'lwr', 0x27: 'lwu',
+    0x28: 'sb', 0x29: 'sh', 0x2A: 'swl', 0x2B: 'sw', 0x2C: 'sdl', 0x2D: 'sdr', 0x2E: 'swr',
+    0x31: 'lwc1', 0x37: 'ld', 0x39: 'swc1', 0x3F: 'sd',
+  };
+
+  /**
+   * Finds instructions whose immediate is `value`. 16-bit values match the
+   * immediate field of I-type instructions; 32-bit values match a LUI and a
+   * following ADDIU/ORI/load/store on the same register (within 8 slots).
+   */
+  private async _scanImmediates(
+    r: { label: string; region: 'ee' | 'iop'; address: number; size: number },
+    imm: { value: number; wide: boolean },
+    results: Array<{ address: number; region: string; text: string }>,
+    cancel: vscode.CancellationToken,
+    token: number,
+  ): Promise<void> {
+    const CHUNK = 0x10000;
+    const OVERLAP = 32; // LUI pairs may straddle a chunk edge
+    const hex = (n: number) => '0x' + (n >>> 0).toString(16).toUpperCase();
+    const lo16 = imm.value & 0xFFFF;
+    const hi16 = imm.value >>> 16;
+    for (let off = 0; off < r.size; off += CHUNK) {
+      if (cancel.isCancellationRequested || token !== this._globalSearchToken) { return; }
+      const len = Math.min(CHUNK + OVERLAP, r.size - off);
+      let buf: Buffer;
+      try { buf = await this.socketClient!.readMemory(r.address + off, len, r.region); } catch { continue; }
+      const words = Math.floor(Math.min(CHUNK, buf.length) / 4);
+      for (let i = 0; i < words; i++) {
+        const w = buf.readUInt32LE(i * 4);
+        const op = w >>> 26;
+        const name = DisasmEditorProvider.IMM_OPCODES[op];
+        if (!name) { continue; }
+        const addr = (r.address + off + i * 4) >>> 0;
+        if (!imm.wide) {
+          if ((w & 0xFFFF) === lo16) {
+            results.push({ address: addr, region: r.label, text: `${name} … ${hex(w & 0xFFFF)}` });
+          }
+        } else if (op === 0x0F && ((w & 0xFFFF) === hi16 || ((lo16 & 0x8000) !== 0 && (w & 0xFFFF) === ((hi16 + 1) & 0xFFFF)))) {
+          // ADDIU/loads sign-extend the low half, so 0x1234_8000 is LUI 0x1235 + ADDIU -0x8000.
+          const rt = (w >>> 16) & 0x1F;
+          const luiHi = w & 0xFFFF;
+          for (let j = 1; j <= 8 && (i + j) * 4 + 4 <= buf.length; j++) {
+            const w2 = buf.readUInt32LE((i + j) * 4);
+            const op2 = w2 >>> 26;
+            const name2 = DisasmEditorProvider.IMM_OPCODES[op2];
+            if (!name2 || ((w2 >>> 21) & 0x1F) !== rt || op2 === 0x0F) { continue; }
+            const lo = w2 & 0xFFFF;
+            const full = op2 === 0x0D || op2 === 0x0C || op2 === 0x0E
+              ? ((luiHi << 16) | lo) >>> 0
+              : ((luiHi << 16) + ((lo << 16) >> 16)) >>> 0;
+            if (full === imm.value) {
+              results.push({ address: addr, region: r.label, text: `lui+${name2} → ${hex(full)}` });
+              break;
+            }
+          }
+          if (lo16 === 0 && luiHi === hi16 && results[results.length - 1]?.address !== addr) {
+            results.push({ address: addr, region: r.label, text: `lui ${hex(luiHi)}` });
+          }
+        }
+        if (results.length >= DisasmEditorProvider.MAX_GLOBAL_RESULTS) { return; }
+      }
+    }
   }
 
   /**
@@ -1528,6 +2087,9 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 // Sync the Follow AI toggle state so the toolbar button reflects
                 // the current setting even when the panel was just opened.
                 panel.webview.postMessage({ type: 'followAiState', enabled: this._followAiEnabled });
+                panel.webview.postMessage(this._breakpointsStateMessage());
+                panel.webview.postMessage({ type: 'bookmarks', bookmarks: this._bookmarks });
+                void this._sendMemWatchValues(panel);
                 this._ensureXrefIndex(info.memoryRegion);
                 this.socketClient?.getSetting(DisasmEditorProvider.HINT_LEVEL_SETTING)
                     .then(level => { if (level) { panel.webview.postMessage({ type: 'hintLevel', level }); } })
@@ -1588,6 +2150,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                         } catch { /* ignore register fetch errors */ }
                         const hitAddr = statusMsg.breakpointHitAddress ?? status.pc;
                         this._revealPanelForAddress(hitAddr);
+                        this._hitDecision = Promise.resolve(false);
                     }
                     this._broadcastFullStatus(statusMsg);
                     this._firePauseStateChange(status.paused);
@@ -1608,26 +2171,60 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                     vscode.window.showWarningMessage(`Could not resume emulator: ${msg}`);
                 }
             } else if (message.type === 'setBreakpoint') {
-                this._knownBreakpoints.add(message.address);
-                try {
-                    await this.socketClient!.setBreakpoint(message.address);
-                } catch (err: any) {
-                    console.error(`[LIVE] Failed to set breakpoint: ${err?.message ?? err}`);
-                }
+                await this.addBreakpoint(message.address as number, message.patch as BreakpointPatch | undefined);
             } else if (message.type === 'clearBreakpoint') {
-                this._knownBreakpoints.delete(message.address);
-                try {
-                    await this.socketClient!.clearBreakpoint(message.address);
-                } catch (err: any) {
-                    console.error(`[LIVE] Failed to clear breakpoint: ${err?.message ?? err}`);
-                }
+                await this.removeBreakpoint(message.address as number);
             } else if (message.type === 'clearAllBreakpoints') {
-                this._knownBreakpoints.clear();
+                this._breakpoints.clear();
+                this._breakpoints.setRunTo(undefined);
                 try {
                     await this.socketClient!.clearAllBreakpoints();
                 } catch (err: any) {
                     console.error(`[LIVE] Failed to clear all breakpoints: ${err?.message ?? err}`);
                 }
+                this._broadcastBreakpoints();
+            } else if (message.type === 'updateBreakpoint') {
+                await this.updateBreakpoint(message.address as number, message.patch as BreakpointPatch);
+            } else if (message.type === 'setAllBreakpointsEnabled') {
+                for (const bp of this._breakpoints.list()) {
+                    if (bp.enabled !== !!message.enabled) {
+                        await this.updateBreakpoint(bp.address, { enabled: !!message.enabled }, false);
+                    }
+                }
+                this._broadcastBreakpoints();
+            } else if (message.type === 'resetBreakpointHits') {
+                this._breakpoints.resetHits(message.address as number | undefined);
+                this._broadcastBreakpoints();
+            } else if (message.type === 'runToCursor') {
+                await this.runToAddress(message.address as number);
+            } else if (message.type === 'stepOut') {
+                await this.stepOut();
+            } else if (message.type === 'memWatchAdd') {
+                this._addMemWatch(message.expression as string, (message.watchType as MemoryWatchEntry['type']) ?? 'u32', message.label as string | undefined);
+            } else if (message.type === 'memWatchUpdate') {
+                this._updateMemWatch(message.id as string, message.patch as Partial<MemoryWatchEntry>);
+            } else if (message.type === 'memWatchRemove') {
+                this._memWatches = this._memWatches.filter(w => w.id !== message.id);
+                this._saveMemWatches();
+                void this._sendMemWatchValues(panel);
+            } else if (message.type === 'memWatchClear') {
+                this._memWatches = [];
+                this._saveMemWatches();
+                void this._sendMemWatchValues(panel);
+            } else if (message.type === 'memWatchRefresh') {
+                await this._sendMemWatchValues(panel);
+            } else if (message.type === 'memWatchWrite') {
+                await this._writeMemWatch(panel, message.id as string, String(message.value ?? ''));
+            } else if (message.type === 'setBookmark') {
+                this._setBookmark(String(message.slot), message.address as number | null);
+            } else if (message.type === 'jumpBookmark') {
+                this.jumpToBookmark(Number(message.slot));
+            } else if (message.type === 'cursorMoved') {
+                this.onCursorAddress?.(message.address as number, (message.label as string | undefined) || undefined);
+            } else if (message.type === 'showXrefsView') {
+                this.onShowXrefsView?.(message.address as number, (message.label as string | undefined) || undefined);
+            } else if (message.type === 'searchAllRegions') {
+                await this._handleSearchAllRegions(panel, String(message.query ?? ''), message.mode as 'string' | 'immediate');
             } else if (message.type === 'addPineWatch') {
                 if (!this._canIssueLiveBackendRequest()) { return; }
                 const addr: number = typeof message.address === 'number' ? message.address : 0;
@@ -1678,13 +2275,15 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             } else if (message.type === 'step') {
                 await this.stepAndBroadcast();
             } else if (message.type === 'getStatus') {
-              if (!this._canIssueLiveBackendRequest()) { return; }
+              if (!this._canIssueLiveBackendRequest() || this._fastPolling) { return; }
                 this._liveReadInFlight = true;
+                let continued = false;
                 try {
                     const status = await this.socketClient!.getPC();
                 this._handleLiveReadSuccess();
                     const statusMsg: any = { type: 'status', ...status };
                     this._applyBreakpointHitFallback(statusMsg);
+                    if (!status.paused) { this._hitDecision = null; }
                     // When paused, also fetch registers for the debug panel
                     if (status.paused) {
                         try {
@@ -1701,13 +2300,18 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                             }
                         } catch { /* ignore register fetch errors */ }
 
-                        // When a breakpoint was hit, bring the correct panel to front
-                        // and broadcast the full status to every live window.
-                        const hitAddr = statusMsg.breakpointHitAddress ?? status.pc;
-                        this._revealPanelForAddress(hitAddr);
-                        this._broadcastFullStatus(statusMsg);
-                        // Notify the sidebar so it flips to PAUSED immediately.
-                        this._firePauseStateChange(true);
+                        // A conditional breakpoint, hit count or log point may
+                        // let this pause continue instead of stopping.
+                        continued = await this._decideBreakpointHit(statusMsg);
+                        if (!continued) {
+                            // When a breakpoint was hit, bring the correct panel to front
+                            // and broadcast the full status to every live window.
+                            const hitAddr = statusMsg.breakpointHitAddress ?? status.pc;
+                            this._revealPanelForAddress(hitAddr);
+                            this._broadcastFullStatus(statusMsg);
+                            // Notify the sidebar so it flips to PAUSED immediately.
+                            this._firePauseStateChange(true);
+                        }
                     } else {
                         panel.webview.postMessage(statusMsg);
                     }
@@ -1716,6 +2320,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 } finally {
                     this._liveReadInFlight = false;
                 }
+                if (continued) { void this._pollAfterAutoContinue(); }
             } else if (message.type === 'search') {
                 await this.handleSearch(panel, message.query, message.mode,
                     baseAddress, totalBytes, region);
@@ -2132,6 +2737,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
      * Also fires the onPauseStateChange callback so the sidebar can update its bar.
      */
     private _broadcastStatus(paused: boolean): void {
+        if (!paused) { this._hitDecision = null; }
         const msg = { type: 'status', paused };
         for (const p of this._livePanels) {
             p.webview.postMessage(msg);
@@ -2208,7 +2814,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         ];
         for (const cand of candidates) {
             const candPhys = DisasmEditorProvider._toPhysAddr(cand);
-            for (const bp of this._knownBreakpoints) {
+            for (const bp of this._breakpoints.armedAddresses()) {
                 if (DisasmEditorProvider._toPhysAddr(bp) === candPhys) {
                     statusMsg.breakpointHitAddress = cand;
                     return;

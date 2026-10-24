@@ -362,6 +362,29 @@ tr.pv-selected .pv-dir { color: inherit; }
 .pv-tree-name::after { content: ':'; }
 .pv-tree-value { color: var(--vscode-foreground, #d4d4d4); word-break: break-all; }
 
+/* ── Struct overlay (structure-visualizer struct over the frame bytes) ── */
+.pv-struct {
+  border-top: 1px solid var(--pv-border);
+  max-height: 40%;
+  overflow: auto;
+  flex-shrink: 0;
+}
+.pv-struct-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 10px;
+}
+.pv-struct-table td,
+.pv-struct-table th { font-size: 11px; }
+.pv-hex-struct-0 { box-shadow: inset 0 -2px 0 var(--vscode-charts-green, #89d185); }
+.pv-hex-struct-1 { box-shadow: inset 0 -2px 0 var(--vscode-charts-orange, #d18616); }
+.pv-hex-struct-sel {
+  background: color-mix(in srgb, var(--vscode-charts-yellow, #cca700) 35%, transparent);
+}
+.pv-preset-select { max-width: 160px; }
+
 .pv-hex {
   flex: 1 1 50%;
   min-width: 0;

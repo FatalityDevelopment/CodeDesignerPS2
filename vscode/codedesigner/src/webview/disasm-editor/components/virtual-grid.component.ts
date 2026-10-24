@@ -194,6 +194,9 @@ export class VirtualGridComponent implements AfterViewInit {
       PageUp: -50,
     };
 
+    // Alt+Left / Alt+Right are history back / forward, handled at window level.
+    if (event.altKey && (event.key === 'ArrowRight' || event.key === 'ArrowLeft')) { return; }
+
     if (event.key === 'ArrowRight') {
       event.preventDefault();
       this.navigateTarget.emit();

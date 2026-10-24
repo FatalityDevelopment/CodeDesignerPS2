@@ -12,10 +12,12 @@ import { IconComponent } from '../shared/icon.component';
 import {
     CapturedPacket,
     DissectedLayer,
+    FilterPreset,
     NetStats,
     NetStatus,
     PacketViewerAction,
     ParsedPacketRow,
+    StructDef,
     b64ToBytes,
     bytesToHex,
 } from './types';
@@ -52,13 +54,68 @@ function toHex(b: number, pad = 2): string {
     return b.toString(16).toUpperCase().padStart(pad, '0');
 }
 
+/** One decoded struct-overlay field. */
+interface OverlayField {
+    index: number;
+    name: string;
+    offset: number;
+    type: string;
+    /** Absolute byte position in the frame. */
+    start: number;
+    size: number;
+    value: string;
+}
+
+/** Byte size of a label value type (string: up to the next field). */
+function typeSize(type: string, gap: number): number {
+    const t = type.toLowerCase();
+    if (/^(u|s|i)?8$|^(u|s)?int8|^byte|^char|^bool/.test(t)) { return 1; }
+    if (/^(u|s|i)?16$|^(u|s)?int16|^short|^half/.test(t)) { return 2; }
+    if (/^(u|s|i)?64$|^(u|s)?int64|^double|^dword|^long/.test(t)) { return 8; }
+    if (/^vec3/.test(t)) { return 12; }
+    if (/^str|^cstr|^bytes|^hex/.test(t) && !/^hex(32)?$/.test(t)) { return Math.max(1, Math.min(gap, 64)); }
+    return 4;
+}
+
+/** Decodes one field as little-endian (the PS2 is LE; network headers are dissected by the bridge). */
+function decodeField(raw: Uint8Array, start: number, size: number, type: string): string {
+    if (start < 0 || start + size > raw.length) { return '(past end of frame)'; }
+    const view = new DataView(raw.buffer, raw.byteOffset + start, size);
+    const t = type.toLowerCase();
+    const hex = (n: number, w: number) => '0x' + n.toString(16).toUpperCase().padStart(w, '0');
+    if (/^(f32|float)/.test(t) && size === 4) { return String(Number(view.getFloat32(0, true).toPrecision(7))); }
+    if (/^(f64|double)/.test(t) && size === 8) { return String(view.getFloat64(0, true)); }
+    if (/^vec3/.test(t) && size === 12) {
+        return [0, 4, 8].map(o => Number(view.getFloat32(o, true).toPrecision(6))).join(', ');
+    }
+    if (/^str|^cstr/.test(t)) {
+        let s = '';
+        for (let i = 0; i < size && raw[start + i] !== 0; i++) { s += String.fromCharCode(raw[start + i]); }
+        return JSON.stringify(s);
+    }
+    if (/^bytes|^hex[^3]/.test(t)) {
+        return Array.from(raw.subarray(start, start + size), b => toHex(b)).join(' ');
+    }
+    const signed = /^(s|i)\d|^int|^short|^char|^long/.test(t);
+    if (size === 1) { const n = signed ? view.getInt8(0) : view.getUint8(0); return `${n} (${hex(view.getUint8(0), 2)})`; }
+    if (size === 2) { const n = signed ? view.getInt16(0, true) : view.getUint16(0, true); return `${n} (${hex(view.getUint16(0, true), 4)})`; }
+    if (size === 8) { return hex(Number(view.getBigUint64(0, true) >> 32n), 8) + '_' + hex(view.getUint32(0, true), 8).slice(2); }
+    const u = view.getUint32(0, true);
+    if (/^(ptr|pointer|addr)/.test(t)) { return hex(u, 8); }
+    return signed ? `${view.getInt32(0, true)} (${hex(u, 8)})` : `${u} (${hex(u, 8)})`;
+}
+
 /**
  * Hex dump with the selected layer's bytes highlighted. Every other byte takes the colour of the
  * innermost layer that covers it (the bridge emits layers outermost first).
  */
-function hexDump(raw: Uint8Array, layers: DissectedLayer[], selectedLayer: number): string {
+function hexDump(raw: Uint8Array, layers: DissectedLayer[], selectedLayer: number, overlay: OverlayField[] = [], selectedField = -1): string {
     const color = new Array<string | undefined>(raw.length);
     const sel   = new Uint8Array(raw.length);
+    const field = new Array<OverlayField | undefined>(raw.length);
+    for (const f of overlay) {
+        for (let b = f.start; b < Math.min(f.start + f.size, raw.length); b++) { field[b] = f; }
+    }
     layers.forEach((layer, li) => {
         const end = Math.min(layer.offset + layer.length, raw.length);
         for (let b = layer.offset; b < end; b++) {
@@ -81,9 +138,12 @@ function hexDump(raw: Uint8Array, layers: DissectedLayer[], selectedLayer: numbe
             if (k >= raw.length) { bytes += '<span class="pv-hex-byte"></span>'; continue; }
             const b  = raw[k];
             const ch = b >= 0x20 && b < 0x7F ? String.fromCharCode(b).replace('&', '&amp;').replace('<', '&lt;') : '.';
-            const cls = sel[k] ? ' pv-hex-hl' : '';
+            const f   = field[k];
+            const cls = (sel[k] ? ' pv-hex-hl' : '') +
+                (f ? ` pv-hex-struct pv-hex-struct-${f.index % 2}${f.index === selectedField ? ' pv-hex-struct-sel' : ''}` : '');
             const sty = !sel[k] && color[k] ? ` style="color:${color[k]}"` : '';
-            bytes += `<span class="pv-hex-byte${cls}"${sty}>${toHex(b)}</span>`;
+            const tip = f ? ` title="${f.name.replace(/"/g, '&quot;')} +0x${f.offset.toString(16).toUpperCase()}"` : '';
+            bytes += `<span class="pv-hex-byte${cls}"${sty}${tip}>${toHex(b)}</span>`;
             ascii += `<span class="pv-hex-char${cls}"${sty}>${ch}</span>`;
         }
         rows.push(`<div class="pv-hex-row"><span class="pv-hex-addr">${toHex(i, 4)}</span><span class="pv-hex-bytes">${bytes}</span><span class="pv-hex-ascii">${ascii}</span></div>`);
@@ -162,6 +222,15 @@ function hexDump(raw: Uint8Array, layers: DissectedLayer[], selectedLayer: numbe
             </div>
             <input class="pv-input pv-filter" type="search" placeholder="Filter: words match any column (e.g. MLS AccountLogin)"
                    [value]="displayFilter()" (input)="displayFilter.set(asInput($event).value); emitSettings()" />
+            <select class="pv-select pv-preset-select" title="Filter presets: display filter, protocol, Hide noise and the capture filter"
+                    [value]="selectedPreset()" (change)="applyPreset(asSelect($event).value)">
+                <option value="">Presets…</option>
+                @for (p of presets(); track p.name) { <option [value]="p.name">{{ p.name }}</option> }
+            </select>
+            <button class="lm-tool-btn" title="Save the current filters as a preset" (click)="savePreset()"><app-icon name="save" [size]="12" /></button>
+            @if (selectedPreset()) {
+                <button class="lm-tool-btn lm-danger-btn" title="Delete this preset" (click)="deletePreset()"><app-icon name="trash2" [size]="12" /></button>
+            }
             <label class="pv-check" title="Hide bare TCP ACKs, echoes and DME pings">
                 <input type="checkbox" [checked]="hideNoise()" (change)="hideNoise.set(asInput($event).checked); emitSettings()" /> Hide noise
             </label>
@@ -251,6 +320,44 @@ function hexDump(raw: Uint8Array, layers: DissectedLayer[], selectedLayer: numbe
                 </div>
                 <div class="pv-hex" [innerHTML]="hexHtml()"></div>
             </div>
+            <div class="pv-struct">
+                <div class="pv-struct-bar">
+                    <span class="pv-field-label" title="Lay a structure-visualizer struct (a Struct label and its offset members) over the frame bytes">Struct overlay</span>
+                    <select class="pv-select" [value]="overlayStruct()" (focus)="loadStructDefs()" (change)="overlayStruct.set(asSelect($event).value)">
+                        <option value="">None</option>
+                        @for (s of structDefs(); track s.address) { <option [value]="s.address">{{ s.name }} ({{ s.fields.length }})</option> }
+                    </select>
+                    @if (overlayStruct()) {
+                        <span class="pv-field-label">at byte</span>
+                        <input class="pv-input pv-narrow" type="text" spellcheck="false"
+                               [value]="overlayOffsetText()" title="Frame offset of the struct (hex with 0x, else decimal). Defaults to the innermost layer."
+                               (change)="setOverlayOffset(asInput($event).value)" />
+                        @for (layer of selectedLayers(); track $index) {
+                            <button class="lm-row-btn" [title]="'Start at ' + layer.label + ' (byte ' + layer.offset + ')'" (click)="overlayOffset.set(layer.offset)">
+                                <span class="pv-tree-dot" [style.background]="layer.color"></span>
+                            </button>
+                        }
+                    }
+                    <button class="lm-row-btn" title="Reload structs from the active label set" (click)="loadStructDefs(true)"><app-icon name="refreshcw" [size]="12" /></button>
+                    @if (structMessage()) { <span class="pv-count">{{ structMessage() }}</span> }
+                </div>
+                @if (overlayFields().length) {
+                    <table class="pv-table pv-struct-table">
+                        <thead><tr><th>Field</th><th>Offset</th><th>Type</th><th>Bytes</th><th>Value</th></tr></thead>
+                        <tbody>
+                            @for (f of overlayFields(); track f.index) {
+                                <tr [class.pv-selected]="selectedField() === f.index" (click)="selectedField.set(selectedField() === f.index ? -1 : f.index)">
+                                    <td>{{ f.name }}</td>
+                                    <td class="lm-mono">+0x{{ f.offset.toString(16).toUpperCase() }}</td>
+                                    <td class="lm-muted">{{ f.type || 'u32' }}</td>
+                                    <td class="lm-mono">{{ f.start }}–{{ f.start + f.size - 1 }}</td>
+                                    <td class="lm-mono">{{ f.value }}</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            </div>
         } @else {
             <div class="pv-empty pv-count">Select a packet to see its layers and bytes.</div>
         }
@@ -317,6 +424,16 @@ export class PacketViewerComponent {
     readonly selectedLayer    = signal(-1);
     readonly expanded         = signal<Set<number>>(new Set());
     readonly packets          = signal<PacketRow[]>([]);
+    readonly presets          = signal<FilterPreset[]>([]);
+    readonly selectedPreset   = signal('');
+    readonly structDefs       = signal<StructDef[]>([]);
+    readonly structMessage    = signal('');
+    /** Address key of the overlaid struct ('' = none). */
+    readonly overlayStruct    = signal('');
+    /** Frame offset of the overlay; null = the innermost layer of each packet. */
+    readonly overlayOffset    = signal<number | null>(null);
+    readonly selectedField    = signal(-1);
+    private _structsRequested = false;
 
     private readonly tableWrap = viewChild<ElementRef<HTMLElement>>('tableWrap');
 
@@ -350,10 +467,34 @@ export class PacketViewerComponent {
         return idx >= 0 && idx < this._raw.length ? this._raw[idx].pkt.layers ?? [] : [];
     });
 
+    /** Frame offset the overlay starts at for the selected packet. */
+    readonly overlayStart = computed(() => {
+        const fixed = this.overlayOffset();
+        if (fixed !== null) { return fixed; }
+        const layers = this.selectedLayers();
+        return layers.length ? layers[layers.length - 1].offset : 0;
+    });
+
+    readonly overlayOffsetText = computed(() => String(this.overlayStart()));
+
+    readonly overlayFields = computed<OverlayField[]>(() => {
+        const idx = this.selectedIndex();
+        const def = this.structDefs().find(s => s.address === this.overlayStruct());
+        if (!def || idx < 0 || idx >= this._raw.length) { return []; }
+        const raw = this._raw[idx].bytes;
+        const base = this.overlayStart();
+        return def.fields.map((f, i) => {
+            const next = def.fields[i + 1]?.offset ?? (raw.length - base);
+            const size = typeSize(f.type, Math.max(1, next - f.offset));
+            const start = base + f.offset;
+            return { index: i, name: f.name, offset: f.offset, type: f.type, start, size, value: decodeField(raw, start, size, f.type || 'u32') };
+        });
+    });
+
     readonly hexHtml = computed(() => {
         const idx = this.selectedIndex();
         if (idx < 0 || idx >= this._raw.length) { return ''; }
-        return hexDump(this._raw[idx].bytes, this.selectedLayers(), this.selectedLayer());
+        return hexDump(this._raw[idx].bytes, this.selectedLayers(), this.selectedLayer(), this.overlayFields(), this.selectedField());
     });
 
     // ── Public API (page component) ──────────────────────────────────────────
@@ -372,6 +513,18 @@ export class PacketViewerComponent {
         if (s.protoFilter !== undefined) { this.protoFilter.set(s.protoFilter); }
         if (s.hideNoise !== undefined) { this.hideNoise.set(s.hideNoise); }
         if (s.follow !== undefined) { this.follow.set(s.follow); }
+    }
+
+    setPresets(presets: FilterPreset[], selected?: string): void {
+        this.presets.set(presets);
+        if (selected !== undefined) { this.selectedPreset.set(selected); }
+        else if (!presets.some(p => p.name === this.selectedPreset())) { this.selectedPreset.set(''); }
+    }
+
+    setStructDefs(structs: StructDef[], message: string): void {
+        this.structDefs.set(structs);
+        this.structMessage.set(message);
+        if (this.overlayStruct() && !structs.some(s => s.address === this.overlayStruct())) { this.overlayStruct.set(''); }
     }
 
     setStatus(status: NetStatus): void { this.adapterStatus.set(status); }
@@ -500,6 +653,51 @@ export class PacketViewerComponent {
         const next = at < 0 ? 0 : Math.min(rows.length - 1, Math.max(0, at + (e.key === 'ArrowDown' ? 1 : -1)));
         this.selectPacket(rows[next].index);
         queueMicrotask(() => this.tableWrap()?.nativeElement.querySelector('tr.pv-selected')?.scrollIntoView({ block: 'nearest' }));
+    }
+
+    applyPreset(name: string): void {
+        this.selectedPreset.set(name);
+        const p = this.presets().find(x => x.name === name);
+        if (!p) { return; }
+        this.displayFilter.set(p.displayFilter);
+        this.protoFilter.set(p.protoFilter);
+        this.hideNoise.set(p.hideNoise);
+        this.filterType.set(p.filterType);
+        this.filterProtocol.set(p.filterProtocol);
+        this.filterPort.set(p.filterPort);
+        this.filterIP.set(p.filterIP);
+        this.emitSettings();
+        // The capture filter lives on the bridge; send it when the preset has one.
+        if (p.filterType !== 0) { this.onApplyFilter(); }
+    }
+
+    savePreset(): void {
+        this.emit({
+            type: 'savePreset',
+            suggestedName: this.selectedPreset(),
+            preset: {
+                name: '', displayFilter: this.displayFilter(), protoFilter: this.protoFilter(), hideNoise: this.hideNoise(),
+                filterType: this.filterType(), filterProtocol: this.filterProtocol(), filterPort: this.filterPort(), filterIP: this.filterIP(),
+            },
+        });
+    }
+
+    deletePreset(): void {
+        if (this.selectedPreset()) { this.emit({ type: 'deletePreset', name: this.selectedPreset() }); }
+    }
+
+    loadStructDefs(force = false): void {
+        if (this._structsRequested && !force) { return; }
+        this._structsRequested = true;
+        this.structMessage.set('Loading structs…');
+        this.emit({ type: 'getStructDefs' });
+    }
+
+    setOverlayOffset(text: string): void {
+        const t = text.trim();
+        if (!t) { this.overlayOffset.set(null); return; }
+        const n = /^0x/i.test(t) ? parseInt(t, 16) : parseInt(t, 10);
+        if (Number.isFinite(n) && n >= 0) { this.overlayOffset.set(n); }
     }
 
     copyHex(): void {

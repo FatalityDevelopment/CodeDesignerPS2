@@ -108,6 +108,7 @@ const webviewConfig = {
     'map-editor': './src/webview/map-editor/main.ts',
     'animation-editor': './src/webview/animation-editor/main.ts',
     'welcome':         './src/webview/welcome/main.ts',
+    'xrefs-view':      './src/webview/xrefs-view/main.ts',
   },
   output: {
     path: path.resolve(__dirname, 'dist/webview'),

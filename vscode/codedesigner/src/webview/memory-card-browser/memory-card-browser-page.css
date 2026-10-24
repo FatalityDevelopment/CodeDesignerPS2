@@ -438,3 +438,100 @@ input {
     border-top: 1px solid var(--vscode-editorGroup-border, #2d2d30);
   }
 }
+
+/* ── Drag and drop ───────────────────────────────────────────────────────── */
+.mcb-drop-hint {
+  padding: 2px 16px 6px;
+  color: var(--vscode-descriptionForeground, #858585);
+  font-size: 11px;
+}
+
+.mcb-main.mcb-drop-active {
+  outline: 2px dashed var(--vscode-focusBorder, #007acc);
+  outline-offset: -4px;
+}
+
+/* ── Save snapshots and diffs ────────────────────────────────────────────── */
+.mcb-snapshots {
+  border: 1px solid var(--vscode-panel-border, #313131);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+  overflow: hidden;
+  flex-shrink: 0;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.mcb-snapshot-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 3px 12px;
+  font-size: 12px;
+}
+
+.mcb-snapshot-row.active {
+  background: var(--vscode-list-inactiveSelectionBackground, #37373d);
+}
+
+.mcb-snapshot-date {
+  white-space: nowrap;
+}
+
+.mcb-snapshot-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--vscode-descriptionForeground, #858585);
+}
+
+.mcb-snapshot-meta {
+  color: var(--vscode-descriptionForeground, #858585);
+  white-space: nowrap;
+}
+
+.mcb-diff-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.mcb-diff-head,
+.mcb-diff-row {
+  grid-template-columns: minmax(160px, 1fr) 90px minmax(90px, 160px) 90px;
+}
+
+.mcb-diff-row {
+  cursor: pointer;
+}
+
+.mcb-diff-row.mcb-diff-same {
+  color: var(--vscode-descriptionForeground, #858585);
+}
+
+.mcb-diff-status[data-status='changed'] { color: var(--vscode-gitDecoration-modifiedResourceForeground, #e2c08d); }
+.mcb-diff-status[data-status='added']   { color: var(--vscode-gitDecoration-addedResourceForeground, #81b88b); }
+.mcb-diff-status[data-status='removed'] { color: var(--vscode-gitDecoration-deletedResourceForeground, #c74e39); }
+
+.mcb-diff-runs {
+  padding: 4px 12px 8px 24px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+}
+
+.mcb-diff-run {
+  display: grid;
+  grid-template-columns: 7ch 1fr 1fr;
+  gap: 12px;
+  padding: 1px 0;
+}
+
+.mcb-diff-before {
+  color: var(--vscode-gitDecoration-deletedResourceForeground, #c74e39);
+}
+
+.mcb-diff-after {
+  color: var(--vscode-gitDecoration-addedResourceForeground, #81b88b);
+}

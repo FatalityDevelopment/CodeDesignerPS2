@@ -23,6 +23,10 @@ export interface ContextMenuData {
   hasTarget: boolean;
   /** Existing label text for this address, if any. */
   currentLabel?: string;
+  /** Whether the breakpoint at this address is enabled (when one exists). */
+  breakpointEnabled?: boolean;
+  /** Live panel (Run to Cursor needs a running emulator). */
+  isLive?: boolean;
 }
 
 /**
@@ -69,6 +73,24 @@ export interface ContextMenuData {
       (click)="onRemoveBreakpoint()">
       <app-icon class="ctx-menu-icon" name="trash2" [size]="13" />Remove Breakpoint
     </div>
+    <div
+      class="ctx-menu-item"
+      [class.disabled]="!data()?.hasBreakpoint"
+      (click)="onToggleBreakpointEnabled()">
+      <app-icon class="ctx-menu-icon" name="ban" [size]="13" />{{ data()?.breakpointEnabled === false ? 'Enable Breakpoint' : 'Disable Breakpoint' }}
+    </div>
+    <div class="ctx-menu-item" (click)="onEditCondition()">
+      <app-icon class="ctx-menu-icon" name="filter" [size]="13" />{{ data()?.hasBreakpoint ? 'Edit Condition / Hit Count…' : 'Add Conditional Breakpoint…' }}
+    </div>
+    <div class="ctx-menu-item" (click)="onAddLogPoint()">
+      <app-icon class="ctx-menu-icon" name="terminal" [size]="13" />Add Log Point…
+    </div>
+    <div
+      class="ctx-menu-item"
+      [class.disabled]="!data()?.isLive"
+      (click)="onRunToCursor()">
+      <app-icon class="ctx-menu-icon" name="play" [size]="13" />Run to Cursor<span class="ctx-menu-shortcut">Ctrl+F10</span>
+    </div>
     <div class="ctx-menu-separator"></div>
     <div
       class="ctx-menu-item"
@@ -97,6 +119,9 @@ export interface ContextMenuData {
     </div>
     <div class="ctx-menu-item" (click)="onShowXrefs()">
       <app-icon class="ctx-menu-icon" name="search" [size]="13" />Cross-references (X)
+    </div>
+    <div class="ctx-menu-item" (click)="onShowXrefsView()">
+      <app-icon class="ctx-menu-icon" name="workflow" [size]="13" />Pin in Cross-references View
     </div>
     <div class="ctx-menu-item" (click)="onRebuildXrefs()">
       <app-icon class="ctx-menu-icon" name="search" [size]="13" />Rebuild Cross-reference Index
@@ -151,6 +176,10 @@ export class ContextMenuComponent {
   // ── Outputs ───────────────────────────────────────────────────────────────
   readonly setBreakpoint = output<void>();
   readonly removeBreakpoint = output<void>();
+  readonly toggleBreakpointEnabled = output<void>();
+  readonly editCondition = output<void>();
+  readonly addLogPoint = output<void>();
+  readonly runToCursor = output<void>();
   readonly addWatch = output<void>();
   readonly removeWatch = output<void>();
   readonly gotoTarget = output<void>();
@@ -158,6 +187,7 @@ export class ContextMenuComponent {
   readonly findCodeReferences = output<void>();
   readonly showXrefs = output<void>();
   readonly rebuildXrefs = output<void>();
+  readonly showXrefsView = output<void>();
   readonly addToLabelManager = output<void>();
   /**
    * Emits when the user picks one of the "Format as …" entries.  The payload
@@ -231,6 +261,28 @@ export class ContextMenuComponent {
     this.close();
   }
 
+  onToggleBreakpointEnabled(): void {
+    if (!this.data()?.hasBreakpoint) { return; } // Disabled
+    this.toggleBreakpointEnabled.emit();
+    this.close();
+  }
+
+  onEditCondition(): void {
+    this.editCondition.emit();
+    this.close();
+  }
+
+  onAddLogPoint(): void {
+    this.addLogPoint.emit();
+    this.close();
+  }
+
+  onRunToCursor(): void {
+    if (!this.data()?.isLive) { return; } // Disabled
+    this.runToCursor.emit();
+    this.close();
+  }
+
   onAddWatch(): void {
     if (this.data()?.hasWatch) { return; } // Disabled
     this.addWatch.emit();
@@ -256,6 +308,11 @@ export class ContextMenuComponent {
 
   onShowXrefs(): void {
     this.showXrefs.emit();
+    this.close();
+  }
+
+  onShowXrefsView(): void {
+    this.showXrefsView.emit();
     this.close();
   }
 

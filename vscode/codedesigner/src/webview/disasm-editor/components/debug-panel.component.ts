@@ -206,6 +206,9 @@ export class DebugPanelComponent implements OnDestroy {
   /** Emitted when the user clicks a watch row (navigate to address). */
   readonly navigateToWatchAddress = output<number>();
 
+  /** Emitted when the user follows a register's value into the memory view. */
+  readonly followAddress = output<number>();
+
   // ═══════════════════════════════════════════════════════════════════════════
   // State
   // ═══════════════════════════════════════════════════════════════════════════
@@ -258,7 +261,7 @@ export class DebugPanelComponent implements OnDestroy {
       (upLo[i] ?? 0) !== 0 || (upHi[i] ?? 0) !== 0;
 
     let html = '<div class="dbg-section-title">General Purpose Registers (128-bit)</div>';
-    html += `<div class="dbg-row" data-reg-type="PC" data-reg-idx="0"><span class="dbg-name">pc   </span><span class="dbg-val dbg-editable" title="Double-click to edit">${this.hex32(regs.pc ?? 0)}</span></div>`;
+    html += `<div class="dbg-row" data-reg-type="PC" data-reg-idx="0"><span class="dbg-name">pc   </span><span class="dbg-val dbg-editable" title="Double-click to edit">${this.hex32(regs.pc ?? 0)}</span>${this.followHtml(regs.pc ?? 0)}</div>`;
     html += `<div class="dbg-row" data-reg-type="HI" data-reg-idx="0"><span class="dbg-name">hi   </span><span class="dbg-val dbg-editable" title="Double-click to edit">${this.hex32(regs.hi ?? 0)}</span>`;
     html += ` <span class="dbg-name" style="margin-left:8px">lo   </span><span class="dbg-val dbg-editable" data-reg-type="LO" title="Double-click to edit">${this.hex32(regs.lo ?? 0)}</span></div>`;
     html += `<div class="dbg-row" data-reg-type="HI1" data-reg-idx="0"><span class="dbg-name">hi1  </span><span class="dbg-val dbg-editable" title="Double-click to edit">${this.hex32(regs.hi1 ?? 0)}</span>`;
@@ -274,7 +277,7 @@ export class DebugPanelComponent implements OnDestroy {
       const ro = i === 0;
       const cat = this.gprCatClass(i);
       const editAttr = ro ? '' : ` data-reg-type="GPR" data-reg-idx="${i}"`;
-      html += `<div class="dbg-row${nz ? ' dbg-nonzero' : ''}"${editAttr}><span class="dbg-name ${cat}">${name}</span><span class="dbg-val dbg-qw-val${ro ? '' : ' dbg-editable'}" title="${ro ? '' : 'Double-click to edit'}">${val}</span></div>`;
+      html += `<div class="dbg-row${nz ? ' dbg-nonzero' : ''}"${editAttr}><span class="dbg-name ${cat}">${name}</span><span class="dbg-val dbg-qw-val${ro ? '' : ' dbg-editable'}" title="${ro ? '' : 'Double-click to edit'}">${val}</span>${ro ? '' : this.followHtml(lo32[i] ?? 0)}</div>`;
     }
 
     // Inline stack trace
@@ -520,6 +523,15 @@ export class DebugPanelComponent implements OnDestroy {
   protected onHostClick(event: MouseEvent): void {
     const target = event.target as HTMLElement;
 
+    // "Follow in memory view" arrow next to a register value.
+    const follow = target.closest('[data-follow]') as HTMLElement | null;
+    if (follow) {
+      event.stopPropagation();
+      const addr = parseInt(follow.dataset['follow'] ?? '', 16);
+      if (Number.isFinite(addr)) { this.followAddress.emit(addr); }
+      return;
+    }
+
     // Handle double-click on editable register values
     if (event.detail === 2) {
       const row = target.closest('[data-reg-type]') as HTMLElement | null;
@@ -560,6 +572,16 @@ export class DebugPanelComponent implements OnDestroy {
 
   private hex32(n: number): string {
     return (n >>> 0).toString(16).toUpperCase().padStart(8, '0');
+  }
+
+  /** Follow arrow for a register whose low word looks like an address. */
+  private followHtml(value: number): string {
+    const v = value >>> 0;
+    const phys = this.toPhysAddr(v);
+    const plausible = v !== 0 && (phys < 0x02000000 || (phys >= 0x70000000 && phys < 0x70004000) ||
+      (phys >= 0x1C000000 && phys < 0x1C800000) || (phys >= 0x1FC00000 && phys < 0x20000000));
+    if (!plausible) { return ''; }
+    return `<span class="dbg-follow" data-follow="${this.hex32(v)}" title="Follow 0x${this.hex32(v)} in the memory view">↗</span>`;
   }
 
   private hex64(lo: number, hi: number): string {

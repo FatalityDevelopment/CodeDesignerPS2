@@ -9,7 +9,7 @@ import {
   ThreadEntry,
 } from './disasm-editor.service';
 import { EditorState } from './state/editor.state';
-import { SearchMode, DisasmRow as DisasmRowType, HistoryEntry, CallStackEntry, ModuleEntry, PineWatchInfo } from './state/types';
+import { SearchMode, DisasmRow as DisasmRowType, HistoryEntry, CallStackEntry, ModuleEntry, PineWatchInfo, BreakpointInfo, BreakpointField, MemWatchRow, MemWatchType, GlobalSearchResult } from './state/types';
 import {
   INSTRUCTION_BYTES,
   cursorToByteOffset,
@@ -91,6 +91,9 @@ export class DisasmEditorComponent implements AfterViewInit {
   /** Reference to context menu component */
   private readonly contextMenuRef = viewChild<ContextMenuComponent>('contextMenu');
 
+  /** Reference to the bottom panel (to switch tabs from menu actions). */
+  private readonly bottomPanelRef = viewChild<BottomPanelComponent>('bottomPanel');
+
   /** Current context menu row data (for actions) */
   private _ctxRow: DisasmRowType | null = null;
   private _ctxGlobalIndex = -1;
@@ -149,6 +152,28 @@ export class DisasmEditorComponent implements AfterViewInit {
 
   /** Breakpoints for bottom panel */
   protected readonly bottomPanelBreakpoints = signal<Set<number>>(new Set());
+
+  /** Breakpoint list with conditions / hit counts, as kept by the extension host. */
+  protected readonly breakpointList = signal<BreakpointInfo[]>([]);
+
+  /** Address of a pending Run to Cursor (null when none). */
+  protected readonly runToAddress = signal<number | null>(null);
+
+  /** Evaluated rows of the typed memory watch list. */
+  protected readonly memWatches = signal<MemWatchRow[]>([]);
+
+  /** Bottom-panel tab currently shown (drives memory-watch refreshes). */
+  private bottomTab: BottomTab = 'callstack';
+  private memWatchTimer: ReturnType<typeof setInterval> | null = null;
+
+  /** Forward history (Alt+Right): addresses popped by Back. */
+  private readonly navForward: number[] = [];
+  private navForwardBtn: HTMLButtonElement | null = null;
+
+  /** Actions reachable from extension-host messages (set by initEditorLogic). */
+  private readonly debugRuntime = {
+    toggleGoto: null as (() => void) | null,
+  };
 
   // Bottom panel actions (set by initEditorLogic)
   private readonly bottomPanelRuntime = {
@@ -384,9 +409,12 @@ export class DisasmEditorComponent implements AfterViewInit {
                           this._commentHasAddress(event.row.comment));
 
     // Open the context menu
+    const bp = this.findBreakpoint(addr);
     const menuData: ContextMenuData = {
       address: event.row.addr,
       hasBreakpoint,
+      breakpointEnabled: bp?.enabled ?? true,
+      isLive: this.svc.state.isLive,
       hasWatch,
       hasTarget,
       currentLabel: event.row.label || undefined,
@@ -424,6 +452,11 @@ export class DisasmEditorComponent implements AfterViewInit {
 
   protected onCtxShowXrefs(): void {
     if (this._ctxRow) { this.openXrefs(this._ctxRow); }
+  }
+
+  protected onCtxShowXrefsView(): void {
+    if (!this._ctxRow) { return; }
+    this.vscode.postMessage({ type: 'showXrefsView', address: parseInt(this._ctxRow.addr, 16), label: this._ctxRow.label || undefined });
   }
 
   protected onCtxRebuildXrefs(): void {
@@ -489,7 +522,97 @@ export class DisasmEditorComponent implements AfterViewInit {
     this.bottomPanelRuntime.refresh?.(tab);
   }
 
+  protected onBottomPanelUpdateBreakpoint(event: { address: number; patch: Partial<Pick<BreakpointInfo, 'enabled' | BreakpointField>> }): void {
+    this.vscode.postMessage({ type: 'updateBreakpoint', address: event.address, patch: event.patch });
+  }
+
+  protected onBottomPanelSetAllBreakpointsEnabled(enabled: boolean): void {
+    this.vscode.postMessage({ type: 'setAllBreakpointsEnabled', enabled });
+  }
+
+  protected onBottomPanelResetHits(address: number | null): void {
+    this.vscode.postMessage({ type: 'resetBreakpointHits', address: address ?? undefined });
+  }
+
+  protected onMemWatchAdd(event: { expression: string; type: MemWatchType }): void {
+    this.vscode.postMessage({ type: 'memWatchAdd', expression: event.expression, watchType: event.type });
+  }
+
+  protected onMemWatchUpdate(event: { id: string; patch: Partial<Pick<MemWatchRow, 'expression' | 'type'>> }): void {
+    this.vscode.postMessage({ type: 'memWatchUpdate', id: event.id, patch: event.patch });
+  }
+
+  protected onMemWatchRemove(id: string): void {
+    this.vscode.postMessage({ type: 'memWatchRemove', id });
+  }
+
+  protected onMemWatchClear(): void {
+    this.vscode.postMessage({ type: 'memWatchClear' });
+  }
+
+  protected onMemWatchWrite(event: { id: string; value: string }): void {
+    this.vscode.postMessage({ type: 'memWatchWrite', id: event.id, value: event.value });
+  }
+
+  /** Register value → disasm/hex view at that address (debug panel "follow"). */
+  protected onDebugFollowAddress(address: number): void {
+    this.bottomPanelRuntime.navigate?.(address);
+  }
+
+  protected onGlobalSearch(event: { query: string; mode: SearchMode }): void {
+    this.signals.globalSearchResults.set([]);
+    this.signals.globalSearchBusy.set(true);
+    this.signals.globalSearchNote.set('');
+    this.vscode.postMessage({ type: 'searchAllRegions', query: event.query, mode: event.mode });
+  }
+
+  protected onGlobalSearchNavigate(result: GlobalSearchResult): void {
+    this.gotoRuntime.navigate?.(result.address);
+  }
+
+  protected onCtxRunToCursor(): void {
+    if (!this._ctxRow) { return; }
+    this.vscode.postMessage({ type: 'runToCursor', address: parseInt(this._ctxRow.addr, 16) });
+  }
+
+  protected onCtxEditCondition(): void {
+    if (!this._ctxRow) { return; }
+    this.openBreakpointsTab(parseInt(this._ctxRow.addr, 16), {});
+  }
+
+  protected onCtxAddLogPoint(): void {
+    if (!this._ctxRow) { return; }
+    const address = parseInt(this._ctxRow.addr, 16);
+    this.openBreakpointsTab(address, { logMessage: `hit 0x${this._ctxRow.addr} a0={$a0} v0={$v0}` });
+  }
+
+  protected onCtxToggleBreakpointEnabled(): void {
+    if (!this._ctxRow) { return; }
+    const address = parseInt(this._ctxRow.addr, 16);
+    const bp = this.findBreakpoint(address);
+    if (bp) { this.vscode.postMessage({ type: 'updateBreakpoint', address: bp.address, patch: { enabled: !bp.enabled } }); }
+  }
+
+  /** Ensures a breakpoint exists at `address` and shows the Breakpoints tab to edit it. */
+  private openBreakpointsTab(address: number, patch: Partial<Pick<BreakpointInfo, BreakpointField>>): void {
+    if (!this.findBreakpoint(address)) {
+      this.vscode.postMessage({ type: 'setBreakpoint', address, patch });
+    } else if (Object.keys(patch).length) {
+      this.vscode.postMessage({ type: 'updateBreakpoint', address, patch });
+    }
+    this.signals.panels.bottom.set(true);
+    this.bottomPanelVisible.set(true);
+    this.bottomPanelRef()?.selectTab('breakpoints');
+  }
+
+  private findBreakpoint(address: number): BreakpointInfo | undefined {
+    const phys = toPhysAddr(address);
+    return this.breakpointList().find(b => toPhysAddr(b.address) === phys);
+  }
+
   protected onBottomPanelTabSelected(tab: BottomTab): void {
+    this.bottomTab = tab;
+    this.updateMemWatchTimer();
     if (tab === 'threads' && this.svc.state.isLive) {
       this.vscode.postMessage({ type: 'getThreads' });
     } else if (tab === 'modules' && this.svc.state.isLive) {
@@ -796,6 +919,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     if (nowVisible) {
       params.bottomPanelBreakpoints.set(new Set(params.state.breakpoints));
     }
+    this.updateMemWatchTimer();
   }
 
   private bindGlobalShortcuts(params: {
@@ -805,10 +929,21 @@ export class DisasmEditorComponent implements AfterViewInit {
     toggleBottomPanel: () => void;
     toggleSetPc: () => void;
     navigateBack: () => void;
+    navigateForward: () => void;
     setCursorRowFormat: (kind: DataFormatKind) => void;
     clearCursorRowFormat: () => void;
   }): void {
     window.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (e.altKey && !e.ctrlKey && !e.shiftKey && e.code === 'ArrowRight') {
+        const active = document.activeElement as HTMLElement | null;
+        const isEditing = active && (
+          active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' ||
+          active.tagName === 'SELECT' || active.isContentEditable
+        );
+        if (!isEditing) {
+          e.preventDefault(); e.stopPropagation(); params.navigateForward();
+        }
+      }
       if (e.ctrlKey && e.altKey && !e.shiftKey && e.code === 'KeyA') {
         e.preventDefault(); e.stopPropagation(); params.toggleGoto();
       }
@@ -1218,6 +1353,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     params.state.breakpointHitAddress = undefined;
     params.navHistory.length = 0;
     params.navBackBtn.disabled = true;
+    this.clearNavForward();
     params.state.pcAddress = undefined;
     const startIndex = params.getPageStart(params.state.cursor);
     const zeroRows = params.generateZeroPageRows(startIndex, params.state.pageSize, params.state.totalInstructions, params.state.baseAddress);
@@ -1535,12 +1671,27 @@ export class DisasmEditorComponent implements AfterViewInit {
     }
     const row = gridRowIndex >= 0 ? gridRows[gridRowIndex] : undefined;
     if (!row) { return; }
+    this.postCursorMoved(row, params.vscode);
     this.updateHexForRow({
       row,
       state: params.state,
       updateHexView: params.updateHexView,
       vscode: params.vscode,
     });
+  }
+
+  private lastCursorPosted = '';
+  private cursorPostTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** Tells the host where the cursor settled (drives the cross-references view). */
+  private postCursorMoved(row: DisasmRow, vscode: ReturnType<typeof getVsCodeApi>): void {
+    if (!this.svc.state.isLive || row.addr === this.lastCursorPosted) { return; }
+    this.lastCursorPosted = row.addr;
+    if (this.cursorPostTimer !== null) { clearTimeout(this.cursorPostTimer); }
+    this.cursorPostTimer = setTimeout(() => {
+      this.cursorPostTimer = null;
+      vscode.postMessage({ type: 'cursorMoved', address: parseInt(row.addr, 16), label: row.label || undefined });
+    }, 150);
   }
 
   /**
@@ -1596,6 +1747,8 @@ export class DisasmEditorComponent implements AfterViewInit {
       params.navHistory.shift();
     }
     params.navBackBtn.disabled = false;
+    // A new jump starts a new branch of history.
+    this.clearNavForward();
   }
 
   private navigateBack(params: {
@@ -1608,6 +1761,8 @@ export class DisasmEditorComponent implements AfterViewInit {
   }): void {
     const prev = params.navHistory.pop();
     if (prev === undefined) { return; }
+    this.navForward.push(params.state.cursor);
+    if (this.navForwardBtn) { this.navForwardBtn.disabled = false; }
     this.setCursorIndex(params.state, prev);
     params.navBackBtn.disabled = params.navHistory.length === 0;
     this.pendingPageScrollBlock = 'center';
@@ -1616,6 +1771,34 @@ export class DisasmEditorComponent implements AfterViewInit {
       params.updateCursor('center');
     }
     params.focusGrid();
+  }
+
+  /** Alt+Right: undo the last Back. */
+  private navigateForward(params: {
+    navHistory: number[];
+    state: DisasmEditorService['state'];
+    navBackBtn: HTMLButtonElement;
+    checkAndLoadPage: () => boolean;
+    updateCursor: (scrollBlock?: ScrollLogicalPosition | null) => void;
+    focusGrid: () => void;
+  }): void {
+    const next = this.navForward.pop();
+    if (next === undefined) { return; }
+    params.navHistory.push(params.state.cursor);
+    params.navBackBtn.disabled = false;
+    if (this.navForwardBtn) { this.navForwardBtn.disabled = this.navForward.length === 0; }
+    this.setCursorIndex(params.state, next);
+    this.pendingPageScrollBlock = 'center';
+    if (params.checkAndLoadPage()) {
+      this.pendingPageScrollBlock = null;
+      params.updateCursor('center');
+    }
+    params.focusGrid();
+  }
+
+  private clearNavForward(): void {
+    this.navForward.length = 0;
+    if (this.navForwardBtn) { this.navForwardBtn.disabled = true; }
   }
 
   private clearSearchMatches(params: {
@@ -1892,12 +2075,86 @@ export class DisasmEditorComponent implements AfterViewInit {
       this.handlePineWatchesMessage(data);
       return;
     }
+    if (this.handleDebuggerMessage(data)) { return; }
     this.handleEditOverlayMessage(data);
     this.handleConverterOverlayMessage(data);
     this.handleMemoryCardMessage(data);
     this.handleHddMessage(data);
     this.handleScannerMessage(data);
     this.handleStructMessage(data);
+  }
+
+  /** Breakpoint list, bookmarks, memory watches and other debugger messages. */
+  private handleDebuggerMessage(data: Record<string, unknown>): boolean {
+    const state = this.svc.state;
+    switch (data['type']) {
+      case 'breakpointsState': {
+        const list = (data['breakpoints'] as BreakpointInfo[] | undefined) ?? [];
+        const styles = new Map<number, 'disabled' | 'conditional' | 'log'>();
+        for (const bp of list) {
+          const style = !bp.enabled ? 'disabled' : bp.logMessage ? 'log' : (bp.condition || bp.hitCondition) ? 'conditional' : undefined;
+          if (style) { styles.set(toPhysAddr(bp.address), style); }
+        }
+        this.zone.run(() => {
+          state.breakpoints = new Set(list.map(b => b.address));
+          this._lastBreakpointsKey = null;
+          this.signals.breakpoints.set(new Set(state.breakpoints));
+          this.signals.breakpointStyles.set(styles);
+          this.bottomPanelBreakpoints.set(new Set(state.breakpoints));
+          this.breakpointList.set(list);
+          const runTo = data['runToAddress'];
+          this.runToAddress.set(typeof runTo === 'number' ? runTo : null);
+        });
+        return true;
+      }
+      case 'bookmarks':
+        this.zone.run(() => this.signals.bookmarks.set({ ...((data['bookmarks'] as Record<string, number> | undefined) ?? {}) }));
+        return true;
+      case 'memWatches':
+        this.zone.run(() => this.memWatches.set((data['watches'] as MemWatchRow[] | undefined) ?? []));
+        return true;
+      case 'globalSearchResults':
+        this.zone.run(() => {
+          this.signals.globalSearchResults.set((data['results'] as GlobalSearchResult[] | undefined) ?? []);
+          this.signals.globalSearchBusy.set(data['done'] === false);
+          this.signals.globalSearchNote.set((data['error'] as string | undefined) ?? '');
+        });
+        return true;
+      case 'toggleGoto':
+        this.zone.run(() => this.debugRuntime.toggleGoto?.());
+        return true;
+      case 'runToCursorRequest': {
+        const row = this.getCursorRow(state);
+        if (row) { this.vscode.postMessage({ type: 'runToCursor', address: parseInt(row.addr, 16) }); }
+        return true;
+      }
+      case 'setBookmarkAtCursor': {
+        const slot = String(data['slot']);
+        const row = this.getCursorRow(state);
+        if (!row) { return true; }
+        const address = parseInt(row.addr, 16);
+        const existing = this.signals.bookmarks()[slot];
+        // Setting a slot on the row it already marks clears it.
+        const clear = existing !== undefined && toPhysAddr(existing) === toPhysAddr(address);
+        this.vscode.postMessage({ type: 'setBookmark', slot, address: clear ? null : address });
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Refresh the memory watch list once a second while its tab is showing. */
+  private updateMemWatchTimer(): void {
+    const active = this.bottomTab === 'memory' && this.bottomPanelVisible() && this.svc.state.isLive;
+    if (active && this.memWatchTimer === null) {
+      this.vscode.postMessage({ type: 'memWatchRefresh' });
+      this.zone.runOutsideAngular(() => {
+        this.memWatchTimer = setInterval(() => this.vscode.postMessage({ type: 'memWatchRefresh' }), 1000);
+      });
+    } else if (!active && this.memWatchTimer !== null) {
+      clearInterval(this.memWatchTimer);
+      this.memWatchTimer = null;
+    }
   }
 
   private handlePineWatchesMessage(data: Record<string, unknown>): void {
@@ -2004,6 +2261,7 @@ export class DisasmEditorComponent implements AfterViewInit {
       this.liveRuntime.refreshPending = false;
       params.navHistory.length = 0;
       params.navBackBtn.disabled = true;
+      this.clearNavForward();
       if (regionLabel) {
         const rl = document.getElementById('sym-region-label');
         if (rl) { rl.textContent = `— ${regionLabel}`; }
@@ -2502,6 +2760,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     const searchToggleBtn      = document.getElementById('search-toggle-btn')!;
     const gotoToggleBtn        = document.getElementById('goto-toggle-btn')!;
     const navBackBtn           = document.getElementById('nav-back-btn') as HTMLButtonElement;
+    this.navForwardBtn         = document.getElementById('nav-forward-btn') as HTMLButtonElement | null;
 
     const debugPanelVisible = this.debugPanelVisible;
     const debugPanelRegisters = this.debugPanelRegisters;
@@ -2607,6 +2866,15 @@ export class DisasmEditorComponent implements AfterViewInit {
     });
 
     const navigateBack = () => this.navigateBack({
+      navHistory,
+      state,
+      navBackBtn,
+      checkAndLoadPage,
+      updateCursor,
+      focusGrid,
+    });
+
+    const navigateForward = () => this.navigateForward({
       navHistory,
       state,
       navBackBtn,
@@ -2862,6 +3130,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     // ── Goto ─────────────────────────────────────────────────────────────────
 
     navBackBtn.addEventListener('click', () => navigateBack());
+    this.navForwardBtn?.addEventListener('click', () => navigateForward());
 
     // Broadcast every keystroke to the other region panels so their goto
     // input stays in sync with this one. A guard flag prevents the echo
@@ -2972,9 +3241,11 @@ export class DisasmEditorComponent implements AfterViewInit {
       toggleBottomPanel,
       toggleSetPc,
       navigateBack,
+      navigateForward,
       setCursorRowFormat,
       clearCursorRowFormat,
     });
+    this.debugRuntime.toggleGoto = toggleGoto;
 
     registersToggleBtn.addEventListener('click', () => toggleRegistersPanel());
     bottomPanelToggleBtn.addEventListener('click', () => toggleBottomPanel());
@@ -2993,6 +3264,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     // ── Cleanup ───────────────────────────────────────────────────────────────
     window.addEventListener('unload', () => {
       stopLiveRefresh();
+      if (this.memWatchTimer !== null) { clearInterval(this.memWatchTimer); }
     });
 
   }

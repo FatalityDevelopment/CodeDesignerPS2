@@ -1,0 +1,104 @@
+body {
+  background: var(--vscode-sideBar-background, var(--vscode-panel-background, #1e1e1e));
+  color: var(--vscode-foreground, #cccccc);
+  font-size: 12px;
+}
+
+.xr-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  gap: 6px;
+}
+
+.xr-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.xr-target {
+  white-space: nowrap;
+}
+
+.xr-label {
+  color: var(--vscode-symbolIcon-functionForeground, #dcdcaa);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.xr-spacer {
+  flex: 1;
+}
+
+.xr-kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.xr-chip {
+  background: transparent;
+  color: var(--vscode-descriptionForeground, #858585);
+  border: 1px solid var(--vscode-panel-border, #313131);
+  border-radius: 10px;
+  padding: 1px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.xr-chip:hover {
+  color: var(--vscode-foreground, #cccccc);
+}
+
+.xr-chip.xr-active,
+.lm-tool-btn.xr-active {
+  color: var(--vscode-foreground, #ffffff);
+  border-color: var(--vscode-focusBorder, #007acc);
+  background: color-mix(in srgb, var(--vscode-button-background, #0e639c) 28%, transparent);
+}
+
+.xr-list {
+  flex: 1;
+  overflow-y: auto;
+  border: 1px solid var(--vscode-panel-border, #313131);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+}
+
+.xr-row {
+  display: flex;
+  gap: 10px;
+  padding: 2px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.xr-row:hover {
+  background: var(--vscode-list-hoverBackground, #2a2d2e);
+}
+
+.xr-kind {
+  min-width: 11ch;
+  color: var(--vscode-descriptionForeground, #858585);
+}
+
+.xr-instr {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.xr-empty {
+  padding: 8px 2px;
+}
+
+.xr-error {
+  color: var(--vscode-errorForeground, #f48771);
+}

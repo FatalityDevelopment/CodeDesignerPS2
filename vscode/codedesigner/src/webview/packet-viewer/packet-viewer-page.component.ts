@@ -12,7 +12,7 @@ import { getVsCodeApi } from '../shared/vscode-api';
 import { PageHeaderComponent } from '../shared/page-header.component';
 import { PacketViewerComponent, ViewerSettings } from './packet-viewer.component';
 import { ComposerSettings, PacketComposerComponent } from './packet-composer.component';
-import { CapturedPacket, CatalogEntry, DissectedLayer, NetStats, NetStatus, PacketViewerAction, ParsedPacketRow } from './types';
+import { CapturedPacket, CatalogEntry, DissectedLayer, FilterPreset, NetStats, NetStatus, PacketViewerAction, ParsedPacketRow, StructDef } from './types';
 import '../shared/styles/shared.css';
 import './packet-viewer-page.css';
 
@@ -82,6 +82,7 @@ export class PacketViewerPageComponent implements AfterViewInit, OnDestroy {
         window.addEventListener('message', this._messageHandler);
 
         this.vscode.postMessage({ type: 'ready' });
+        this.post({ type: 'getPresets' });
     }
 
     ngOnDestroy(): void {
@@ -181,6 +182,12 @@ export class PacketViewerPageComponent implements AfterViewInit, OnDestroy {
                 break;
             case 'packetViewerMessageBuilt':
                 composer?.onMessageBuilt(data['data'] as string, message);
+                break;
+            case 'packetViewerPresets':
+                pv.setPresets((data['presets'] as FilterPreset[]) ?? [], data['selected'] as string | undefined);
+                break;
+            case 'packetViewerStructs':
+                pv.setStructDefs((data['structs'] as StructDef[]) ?? [], message);
                 break;
             case 'packetViewerError':
                 pv.showStatus(message || 'Error', true);

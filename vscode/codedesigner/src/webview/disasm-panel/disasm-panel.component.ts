@@ -375,6 +375,10 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
     this.bridge.postMessage({ command: 'stepOver' });
   }
 
+  stepOut(): void {
+    this.bridge.postMessage({ command: 'stepOut' });
+  }
+
   onControlModeChange(mode: 'live' | 'ai-control'): void {
     this.bridge.postMessage({ command: 'toggleFollowAi', enabled: mode === 'ai-control' });
   }

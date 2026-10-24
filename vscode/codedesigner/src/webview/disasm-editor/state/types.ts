@@ -25,7 +25,14 @@ export interface DisasmRow {
 
 // ── Search ────────────────────────────────────────────────────────────────────
 
-export type SearchMode = 'text' | 'bytes' | 'string' | 'regex' | 'refs';
+export type SearchMode = 'text' | 'bytes' | 'string' | 'regex' | 'refs' | 'immediate';
+
+/** One hit of a search across every memory region. */
+export interface GlobalSearchResult {
+  address: number;
+  region: string;
+  text: string;
+}
 
 export interface SearchMatch {
   instructionIndex: number;
@@ -227,4 +234,38 @@ export interface PineWatchInfo {
   End:   string;
   /** Access condition: 'read', 'write', or 'read+write'. */
   Cond:  string;
+}
+
+// ── Breakpoints ───────────────────────────────────────────────────────────────
+
+/** A breakpoint as kept by the extension host (see breakpointManager.ts). */
+export interface BreakpointInfo {
+  address: number;
+  enabled: boolean;
+  /** Expression that must be non-zero to stop (empty = always). */
+  condition: string;
+  /** "N", ">=N", "==N", ">N" or "%N" (empty = always). */
+  hitCondition: string;
+  /** Non-empty for a log point: printed to the output channel, then continue. */
+  logMessage: string;
+  hits: number;
+  error?: string;
+}
+
+export type BreakpointField = 'condition' | 'hitCondition' | 'logMessage';
+
+// ── Memory watch list ─────────────────────────────────────────────────────────
+
+export type MemWatchType = 'u8' | 'u16' | 'u32' | 's8' | 's16' | 's32' | 'f32' | 'ptr' | 'string';
+
+/** One evaluated row of the typed memory watch list. */
+export interface MemWatchRow {
+  id: string;
+  expression: string;
+  type: MemWatchType;
+  label?: string;
+  /** Final address after the pointer chain. */
+  address?: number;
+  value?: string;
+  error?: string;
 }

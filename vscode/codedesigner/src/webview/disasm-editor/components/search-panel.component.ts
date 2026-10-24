@@ -10,7 +10,7 @@ import {
   computed,
 } from '@angular/core';
 import { EditorState } from '../state/editor.state';
-import { SearchMode } from '../state/types';
+import { SearchMode, GlobalSearchResult } from '../state/types';
 import { IconComponent } from '../../shared/icon.component';
 
 /**
@@ -52,6 +52,12 @@ import { IconComponent } from '../../shared/icon.component';
               >{{ mode.label }}</button>
             }
           </div>
+          <button
+            class="mode-btn"
+            [class.active]="allRegions()"
+            title="Search every memory region (EE RAM, scratchpad, IOP RAM, BIOS, VU data) instead of this panel's region"
+            (click)="toggleAllRegions()"
+          >All regions</button>
           <div class="search-nav">
             <button
               class="nav-btn"
@@ -69,6 +75,25 @@ import { IconComponent } from '../../shared/icon.component';
           <span class="search-info">{{ statusText() }}</span>
           <button class="close-search" title="Close (Escape)" (click)="close.emit()"><app-icon name="x" [size]="14" /></button>
         </div>
+        @if (globalResults(); as results) {
+          <div class="global-search-results">
+            @for (r of results; track r.address + r.region) {
+              <div class="global-search-result" (click)="globalNavigate.emit(r)">
+                <span class="gsr-addr">0x{{ hex(r.address) }}</span>
+                <span class="gsr-region">{{ r.region }}</span>
+                <span class="gsr-text">{{ r.text }}</span>
+              </div>
+            }
+            @if (state.globalSearchBusy()) {
+              <div class="global-search-note">Searching…</div>
+            } @else if (!results.length) {
+              <div class="global-search-note">No results in any region</div>
+            }
+            @if (state.globalSearchNote()) {
+              <div class="global-search-note">{{ state.globalSearchNote() }}</div>
+            }
+          </div>
+        }
       </div>
     }
   `,
@@ -100,6 +125,8 @@ export class SearchPanelComponent {
         return 'Regular expression';
       case 'refs':
         return 'Target address (hex): 0x00100000';
+      case 'immediate':
+        return 'Immediate value: 0x3F80, -1, 0x00412345 (LUI pairs)';
       default:
         return 'Search text';
     }
@@ -112,6 +139,7 @@ export class SearchPanelComponent {
     { id: 'string', label: '"ab"', title: 'String Search (ASCII/UTF-8)' },
     { id: 'regex',  label: '.*',   title: 'Regular Expression' },
     { id: 'refs',   label: 'ref',  title: 'Instruction Reference Search' },
+    { id: 'immediate', label: '#imm', title: 'Immediate Value Search (I-type immediates and LUI+ADDIU/ORI pairs, all code regions)' },
   ];
 
   /** Output events */
@@ -120,6 +148,13 @@ export class SearchPanelComponent {
   readonly close = output<void>();
   readonly prevMatch = output<void>();
   readonly nextMatch = output<void>();
+  /** Search every memory region; results show in the list under the search row. */
+  readonly searchAll = output<{ query: string; mode: SearchMode }>();
+  readonly globalNavigate = output<GlobalSearchResult>();
+
+  /** Search all regions instead of this panel's region. */
+  protected readonly allRegions = signal(false);
+  protected readonly globalResults = this.state.globalSearchResults;
 
   /** Computed status text */
   protected readonly statusText = () => {
@@ -175,6 +210,16 @@ export class SearchPanelComponent {
     }
   }
 
+  protected toggleAllRegions(): void {
+    this.allRegions.update(v => !v);
+    if (!this.allRegions()) { this.state.globalSearchResults.set(null); }
+    if (this.query()) { this.performSearch(); }
+  }
+
+  protected hex(n: number): string {
+    return (n >>> 0).toString(16).toUpperCase().padStart(8, '0');
+  }
+
   protected setMode(mode: SearchMode): void {
     this.state.searchMode.set(mode);
     this.hasError.set(false);
@@ -217,8 +262,20 @@ export class SearchPanelComponent {
       }
     }
 
+    if (mode === 'immediate' && !/^#?-?(0x[0-9a-f]+|\d+)$/i.test(query)) {
+      this.hasError.set(true);
+      return;
+    }
+
     this.hasError.set(false);
     this.state.searchQuery.set(query);
+    // Immediates are always scanned across the code regions.
+    if (this.allRegions() || mode === 'immediate') {
+      if (mode === 'refs') { this.hasError.set(true); return; }
+      this.searchAll.emit({ query, mode });
+      return;
+    }
+    this.state.globalSearchResults.set(null);
     this.search.emit({ query, mode });
   }
 

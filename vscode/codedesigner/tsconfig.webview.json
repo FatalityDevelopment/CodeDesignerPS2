@@ -35,6 +35,7 @@
     "src/webview/map-editor/main.ts",
     "src/webview/animation-editor/main.ts",
     "src/webview/welcome/main.ts",
+    "src/webview/xrefs-view/main.ts",
     "src/webview/typings.d.ts"
   ],
   "exclude": [

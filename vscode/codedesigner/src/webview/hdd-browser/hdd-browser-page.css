@@ -489,3 +489,85 @@ input {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* ── Drag and drop ───────────────────────────────────────────────────────── */
+.hdb-drop-hint {
+  padding: 2px 16px 6px;
+  color: var(--vscode-descriptionForeground, #858585);
+  font-size: 11px;
+}
+
+.hdb-main.hdb-drop-active {
+  outline: 2px dashed var(--vscode-focusBorder, #007acc);
+  outline-offset: -4px;
+}
+
+/* ── Partition snapshots and diffs ───────────────────────────────────────── */
+.hdb-snapshots {
+  border: 1px solid var(--vscode-panel-border, #313131);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+  flex-shrink: 0;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.hdb-snapshot-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 3px 12px;
+  font-size: 12px;
+}
+
+.hdb-snapshot-row.active {
+  background: var(--vscode-list-inactiveSelectionBackground, #37373d);
+}
+
+.hdb-snapshot-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--vscode-descriptionForeground, #858585);
+}
+
+.hdb-diff-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.hdb-file-row.hdb-diff-grid,
+.hdb-file-head.hdb-diff-grid {
+  grid-template-columns: minmax(190px, 1fr) 90px minmax(96px, 170px) 90px;
+}
+
+.hdb-diff-row {
+  cursor: pointer;
+}
+
+.hdb-diff-row.hdb-diff-same {
+  color: var(--vscode-descriptionForeground, #858585);
+}
+
+.hdb-diff-status[data-status='changed'] { color: var(--vscode-gitDecoration-modifiedResourceForeground, #e2c08d); }
+.hdb-diff-status[data-status='added']   { color: var(--vscode-gitDecoration-addedResourceForeground, #81b88b); }
+.hdb-diff-status[data-status='removed'] { color: var(--vscode-gitDecoration-deletedResourceForeground, #c74e39); }
+
+.hdb-diff-runs {
+  padding: 4px 12px 8px 24px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+}
+
+.hdb-diff-run {
+  display: grid;
+  grid-template-columns: 7ch 1fr 1fr;
+  gap: 12px;
+  padding: 1px 0;
+}
+
+.hdb-diff-before { color: var(--vscode-gitDecoration-deletedResourceForeground, #c74e39); }
+.hdb-diff-after  { color: var(--vscode-gitDecoration-addedResourceForeground, #81b88b); }
