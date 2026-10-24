@@ -341,7 +341,7 @@ export function activate(context: vscode.ExtensionContext) {
 	// Live PCSX2 display surfaced inside VS Code via the bridge's binary fan-out
 	// socket on port 8766. Decoupled from the JSON command channel (port 8765)
 	// so 60fps frame traffic never backs up command/response.
-	const gsViewerProvider = new GsViewerProvider(context.extensionUri);
+	const gsViewerProvider = new GsViewerProvider(context.extensionUri, socketClient);
 	const openGsFrameViewerCommand = vscode.commands.registerCommand(
 		'codedesigner.openGsFrameViewer',
 		() => gsViewerProvider.open(),
@@ -378,6 +378,8 @@ export function activate(context: vscode.ExtensionContext) {
 	jokerMakerProvider.setCheatSource(() => disasmPanelProvider.getGameCheatsForJoker());
 	socketClient.onConnected(()    => jokerMakerProvider.notifyConnectionChanged());
 	socketClient.onDisconnected(() => jokerMakerProvider.notifyConnectionChanged());
+	socketClient.onConnected(()    => gsViewerProvider.notifyConnectionChanged());
+	socketClient.onDisconnected(() => gsViewerProvider.notifyConnectionChanged());
 
 	// ── PS2 Game Compatibility browser ──────────────────────────────────────
 	// Standalone webview that mirrors PCSX2's published compatibility list into

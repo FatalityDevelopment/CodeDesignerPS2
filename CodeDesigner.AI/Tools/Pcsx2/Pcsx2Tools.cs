@@ -294,6 +294,23 @@ public sealed class Pcsx2SetLimiterModeTool(IEmulatorBridge bridge)
         => CdText.Message(await bridge.SendAsync(new { Command = "SETLIMITER", LimiterMode = mode }, ct));
 }
 
+[CdTool("pcsx2_set_audio_muted", ToolDomain.Pcsx2, ToolRisk.WritesMemory,
+    "Mute or unmute PCSX2's audio output (PINE opcode 0x45, same as the Toggle Mute hotkey). " +
+    "Replies with the resulting state; PCSX2's 'Mute All Sound' setting blocks unmuting. Risk: changes emulator audio.")]
+public sealed class Pcsx2SetAudioMutedTool(IEmulatorBridge bridge)
+{
+    [ToolEntryPoint] public async Task<string> InvokeAsync([Description("True to mute, false to unmute.")] bool muted, CancellationToken ct = default)
+        => CdText.Message(await bridge.SendAsync(new { Command = "PINESETAUDIOMUTED", AudioMuted = muted }, ct));
+}
+
+[CdTool("pcsx2_get_audio_state", ToolDomain.Pcsx2, ToolRisk.ReadOnly,
+    "Read whether PCSX2's audio output is muted (PINE opcode 0x46). Risk: read-only.")]
+public sealed class Pcsx2GetAudioStateTool(IEmulatorBridge bridge)
+{
+    [ToolEntryPoint] public async Task<string> InvokeAsync(CancellationToken ct = default)
+        => CdText.Message(await bridge.SendAsync(new { Command = "PINEGETAUDIOSTATE" }, ct));
+}
+
 [CdTool("pcsx2_frame_advance", ToolDomain.Pcsx2, ToolRisk.WritesMemory,
     "Advance a fixed number of video frames then pause. Risk: advances run state.")]
 public sealed class Pcsx2FrameAdvanceTool(IEmulatorBridge bridge)

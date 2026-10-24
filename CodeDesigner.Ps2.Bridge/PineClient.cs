@@ -118,6 +118,10 @@ namespace CodeDesigner.Ps2.Bridge
         private const byte MsgGSStreamGetStatus = 0x41;
         private const byte MsgGSStreamPing      = 0x42;
 
+        // ── Audio output opcodes ──────────────────────────────────────────────
+        private const byte MsgSetAudioMuted     = 0x45;
+        private const byte MsgGetAudioState     = 0x46;
+
         // ── PINE result codes ─────────────────────────────────────────────────
         private const byte IPC_OK   = 0x00;
         private const byte IPC_FAIL = 0xFF;
@@ -1552,6 +1556,37 @@ namespace CodeDesigner.Ps2.Bridge
             byte[] rep = SendReceive(req, expectedReplySize: 6);
             if (rep[4] != IPC_OK) throw PineFail("MsgPadGetType");
             return rep[5];
+        }
+
+        // ── Audio output ─────────────────────────────────────────────────────
+
+        /// <summary>
+        /// [Extended PINE] Mute or unmute PCSX2's audio output (opcode 0x45), the
+        /// same switch as the Toggle Mute hotkey. PCSX2's "Mute All Sound" setting
+        /// wins: unmuting while it is on leaves the output muted.
+        /// </summary>
+        /// <returns>The resulting state.</returns>
+        public (bool Muted, bool MutedInSettings) SetAudioMuted(bool muted)
+        {
+            // Request: [6][0x45][muted]
+            var req = new byte[6];
+            WriteU32LE(req, 0, 6u);
+            req[4] = MsgSetAudioMuted;
+            req[5] = muted ? (byte)1 : (byte)0;
+
+            // Reply: [size(4)][IPC_OK(1)][muted(1)][muted_in_settings(1)] = 7 bytes
+            byte[] rep = SendReceive(req, expectedReplySize: 7);
+            if (rep[4] != IPC_OK) throw PineFail("MsgSetAudioMuted");
+            return (rep[5] != 0, rep[6] != 0);
+        }
+
+        /// <summary>[Extended PINE] Query PCSX2's audio output mute state (opcode 0x46).</summary>
+        public (bool Muted, bool MutedInSettings) GetAudioState()
+        {
+            // Reply: [size(4)][IPC_OK(1)][muted(1)][muted_in_settings(1)] = 7 bytes
+            byte[] rep = SendReceive(BuildSingleRequest(MsgGetAudioState), expectedReplySize: 7);
+            if (rep[4] != IPC_OK) throw PineFail("MsgGetAudioState");
+            return (rep[5] != 0, rep[6] != 0);
         }
 
         // ── DEV9 network bridge ──────────────────────────────────────────────

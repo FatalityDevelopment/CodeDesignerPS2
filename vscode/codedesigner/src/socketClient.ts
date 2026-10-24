@@ -180,6 +180,8 @@ interface CommandMessage {
     PadButtons?: number;
     /** 16 pressure bytes for PADSETSTATE (in PadDualshock2::Inputs order). */
     PadPressures?: number[];
+    // PINESETAUDIOMUTED field
+    AudioMuted?: boolean;
     // DEV9 Network (NETCAPTURE / NETRECVCAPTURE / NETINJECT / NETINJECTTX / NETDISASSEMBLE / NETSETFILTER)
     NetCaptureEnable?: boolean;
     NetCaptureDirection?: number;
@@ -622,6 +624,9 @@ interface CommandResponse {
     PadState?: PadStateInfo;
     // PADGETTYPE result
     PadControllerType?: number;
+    // PINESETAUDIOMUTED / PINEGETAUDIOSTATE results
+    AudioMuted?: boolean;
+    AudioMutedInSettings?: boolean;
     // NETGETSTATUS / NETGETSTATS / NETRECVCAPTURE / NETDISASSEMBLE results
     NetStatus?: NetStatusInfo;
     NetStats?: NetStatsInfo;
@@ -784,6 +789,13 @@ export interface PineWatchInfo {
 export interface CallTraceEntry {
     From: string;
     To:   string;
+}
+
+/** PCSX2 audio output state returned by PINESETAUDIOMUTED / PINEGETAUDIOSTATE. */
+export interface AudioState {
+    muted: boolean;
+    /** PCSX2's "Mute All Sound" setting is on; unmuting over PINE has no effect. */
+    mutedInSettings: boolean;
 }
 
 /**
@@ -2333,6 +2345,27 @@ export class SocketClient {
         if (!response.Success) {
             throw new Error(response.Error || 'SaveScreenshot failed');
         }
+    }
+
+    /**
+     * PCSX2 PINE: mute or unmute the emulator's audio output (opcode 0x45).
+     * Returns the resulting state; PCSX2's "Mute All Sound" setting blocks unmuting.
+     */
+    public async pineSetAudioMuted(muted: boolean): Promise<AudioState> {
+        const response = await this.sendCommand({ Command: 'PINESETAUDIOMUTED', AudioMuted: muted });
+        if (!response.Success) {
+            throw new Error(response.Error || 'SetAudioMuted failed');
+        }
+        return { muted: !!response.AudioMuted, mutedInSettings: !!response.AudioMutedInSettings };
+    }
+
+    /** PCSX2 PINE: read whether the emulator's audio output is muted (opcode 0x46). */
+    public async pineGetAudioState(): Promise<AudioState> {
+        const response = await this.sendCommand({ Command: 'PINEGETAUDIOSTATE' });
+        if (!response.Success) {
+            throw new Error(response.Error || 'GetAudioState failed');
+        }
+        return { muted: !!response.AudioMuted, mutedInSettings: !!response.AudioMutedInSettings };
     }
 
     /**

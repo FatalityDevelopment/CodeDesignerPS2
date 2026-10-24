@@ -343,6 +343,10 @@ namespace CodeDesigner.Ps2.Bridge
         /// <summary>16 pressure bytes for PADSETSTATE (in PadDualshock2::Inputs order).</summary>
         public List<byte>? PadPressures { get; set; }
 
+        // Audio output field (PINESETAUDIOMUTED)
+        /// <summary>True to mute PCSX2's audio output, false to unmute.</summary>
+        public bool? AudioMuted { get; set; }
+
         // DEV9 network bridge fields (NETCAPTURE / NETRECVCAPTURE / NETINJECT / NETINJECTTX / NETDISASSEMBLE / NETSETFILTER)
         /// <summary>Enable flag for NETCAPTURE (true = enable, false = disable).</summary>
         public bool? NetCaptureEnable { get; set; }

@@ -254,6 +254,14 @@ namespace CodeDesigner.Ps2.Bridge
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public byte? PadControllerType { get; set; }
 
+        // Audio output results (PINESETAUDIOMUTED / PINEGETAUDIOSTATE)
+        /// <summary>Effective mute state of PCSX2's audio output.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public bool? AudioMuted { get; set; }
+        /// <summary>True when PCSX2's "Mute All Sound" setting is on, which blocks unmuting over PINE.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public bool? AudioMutedInSettings { get; set; }
+
         // DEV9 network bridge results (NETGETSTATUS / NETGETSTATS / NETRECVCAPTURE / NETDISASSEMBLE)
         /// <summary>Network adapter status returned by NETGETSTATUS.</summary>
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
