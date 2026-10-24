@@ -41,8 +41,8 @@ const PRESSURE_INDEX: Record<keyof typeof BUTTON_MASK, number> = {
 
 /**
  * Snapshot of the virtual controller state shipped from the webview whenever
- * the user changes the press list or moves a stick. The provider translates
- * this into a PADSETSTATE opcode for PCSX2.
+ * the user changes the press list or moves a stick (Play mode only). The
+ * provider translates this into a PADSETSTATE opcode for PCSX2.
  */
 interface VirtualPadStateMsg {
     type:    'jokerVirtualState';
@@ -54,19 +54,50 @@ interface VirtualPadStateMsg {
     rightStick: { x: number; y: number };
 }
 
+/** Running game plus its archive cheats, used to find the joker address. */
+export interface JokerGameCheats {
+    game:   string;
+    serial: string;
+    cheats: Array<{ name: string; codes: string[] }>;
+}
+
+/** Wire-format pad state sent to PADSETSTATE. */
+interface PadWriteState {
+    buttons:   number;
+    pressures: number[];
+    lx: number; ly: number; rx: number; ry: number;
+}
+
+const NEUTRAL_PAD: PadWriteState = {
+    buttons: 0xFFFF, pressures: new Array<number>(16).fill(0),
+    lx: 0x7F, ly: 0x7F, rx: 0x7F, ry: 0x7F,
+};
+
 /** Provider for the standalone Controller / virtual PS2 controller webview. */
 export class JokerMakerProvider {
     public static readonly viewType = 'codedesigner.jokerMaker';
 
     private _panel: vscode.WebviewPanel | undefined;
     private _padPollTimer: ReturnType<typeof setInterval> | undefined;
-    private _lastLivePadButtons: number | undefined;
+    private _lastLiveKey: string | undefined;
     private _liveEnabled = false;
+    private _cheatSource?: () => Promise<JokerGameCheats>;
+
+    /** Latest pad state waiting to be written; only one PADSETSTATE is in flight. */
+    private _pendingPadWrite: PadWriteState | undefined;
+    private _padWriteInFlight = false;
+    /** True once this panel has written pad input, so closing it releases the pad. */
+    private _padDirty = false;
 
     constructor(
         private readonly _extensionUri: vscode.Uri,
         private readonly _socketClient: SocketClient,
     ) {}
+
+    /** Supplies the running game's archive cheats (wired to the disasm panel). */
+    public setCheatSource(source: () => Promise<JokerGameCheats>): void {
+        this._cheatSource = source;
+    }
 
     /** Open (or reveal) the joker maker panel. */
     public open(): void {
@@ -90,8 +121,10 @@ export class JokerMakerProvider {
         this._panel = panel;
 
         panel.onDidDispose(() => {
-            this._stopLivePoll();
+            this._clearPollTimer();
+            this._liveEnabled = false;
             this._panel = undefined;
+            this._releasePad();
         });
 
         panel.webview.onDidReceiveMessage(async (msg: Record<string, unknown>) => {
@@ -105,9 +138,13 @@ export class JokerMakerProvider {
     public notifyConnectionChanged(): void {
         if (!this._panel) { return; }
         this._postConnectionStatus();
-        // If we lost the connection while polling, stop cleanly.
-        if (!this._socketClient.isConnected()) {
+        if (this._socketClient.isConnected()) {
+            void this._sendGameContext();
+        } else {
+            // Lost the connection while polling: stop cleanly.
+            this._padDirty = false;
             this._stopLivePoll();
+            this._panel.webview.postMessage({ type: 'jokerGameContext', status: 'offline' });
         }
     }
 
@@ -122,7 +159,11 @@ export class JokerMakerProvider {
                 break;
 
             case 'jokerVirtualState':
-                await this._handleVirtualState(msg as unknown as VirtualPadStateMsg);
+                this._handleVirtualState(msg as unknown as VirtualPadStateMsg);
+                break;
+
+            case 'jokerReleasePad':
+                this._releasePad();
                 break;
 
             case 'jokerLog': {
@@ -134,6 +175,10 @@ export class JokerMakerProvider {
             case 'jokerLiveToggle':
                 if (msg['enabled']) { this._startLivePoll(); }
                 else { this._stopLivePoll(); }
+                break;
+
+            case 'jokerRefreshGame':
+                await this._sendGameContext();
                 break;
 
             case 'bootstrapError':
@@ -149,7 +194,7 @@ export class JokerMakerProvider {
      * button contributes a cleared bit (active-low) and a non-zero pressure
      * byte. Sticks are mapped from [-1, 1] to [0x00, 0xFF] with 0x7F centered.
      */
-    private async _handleVirtualState(state: VirtualPadStateMsg): Promise<void> {
+    private _handleVirtualState(state: VirtualPadStateMsg): void {
         if (!this._socketClient.isConnected()) { return; }
 
         let buttons = 0xFFFF;
@@ -162,16 +207,49 @@ export class JokerMakerProvider {
             if (idx !== undefined) { pressures[idx] = 0xFF; }
         }
 
-        const lx = this._stickAxis(state.leftStick?.x);
-        const ly = this._stickAxis(state.leftStick?.y);
-        const rx = this._stickAxis(state.rightStick?.x);
-        const ry = this._stickAxis(state.rightStick?.y);
+        this._padDirty = true;
+        this._queuePadWrite({
+            buttons, pressures,
+            lx: this._stickAxis(state.leftStick?.x),
+            ly: this._stickAxis(state.leftStick?.y),
+            rx: this._stickAxis(state.rightStick?.x),
+            ry: this._stickAxis(state.rightStick?.y),
+        });
+    }
 
+    /** Hand the pad back: write a neutral state if this panel ever drove it. */
+    private _releasePad(): void {
+        if (!this._padDirty || !this._socketClient.isConnected()) { return; }
+        this._padDirty = false;
+        this._queuePadWrite(NEUTRAL_PAD);
+    }
+
+    /**
+     * Stick drags post far faster than PINE round-trips, so keep only the
+     * newest state while a write is in flight. Writes can never land out of
+     * order, and the final state (e.g. a release) always wins.
+     */
+    private _queuePadWrite(state: PadWriteState): void {
+        this._pendingPadWrite = state;
+        if (this._padWriteInFlight) { return; }
+        void this._drainPadWrites();
+    }
+
+    private async _drainPadWrites(): Promise<void> {
+        this._padWriteInFlight = true;
         try {
-            await this._socketClient.padSetState(0, lx, ly, rx, ry, pressures, buttons);
-        } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
-            getPadStateChannel().appendLine(`[error] padSetState failed: ${message}`);
+            while (this._pendingPadWrite) {
+                const s = this._pendingPadWrite;
+                this._pendingPadWrite = undefined;
+                try {
+                    await this._socketClient.padSetState(0, s.lx, s.ly, s.rx, s.ry, s.pressures, s.buttons);
+                } catch (err) {
+                    const message = err instanceof Error ? err.message : String(err);
+                    getPadStateChannel().appendLine(`[error] padSetState failed: ${message}`);
+                }
+            }
+        } finally {
+            this._padWriteInFlight = false;
         }
     }
 
@@ -185,18 +263,22 @@ export class JokerMakerProvider {
     // Live pad polling
 
     private _startLivePoll(): void {
-        this._stopLivePoll();
-        if (!this._socketClient.isConnected()) { return; }
+        this._clearPollTimer();
+        if (!this._socketClient.isConnected()) {
+            this._panel?.webview.postMessage({ type: 'jokerLivePollStopped' });
+            return;
+        }
         this._liveEnabled = true;
-        this._lastLivePadButtons = undefined;
+        this._lastLiveKey = undefined;
 
         let errorCount = 0;
         const poll = async () => {
             try {
                 const state: PadStateInfo = await this._socketClient.padGetState(0);
                 errorCount = 0;
-                if (state.buttons !== this._lastLivePadButtons) {
-                    this._lastLivePadButtons = state.buttons;
+                const key = `${state.buttons},${state.lx},${state.ly},${state.rx},${state.ry}`;
+                if (key !== this._lastLiveKey) {
+                    this._lastLiveKey = key;
                     this._panel?.webview.postMessage({
                         type:    'jokerLivePadState',
                         buttons: state.buttons,
@@ -213,17 +295,42 @@ export class JokerMakerProvider {
             }
         };
         void poll();
-        this._padPollTimer = setInterval(() => void poll(), 250);
+        this._padPollTimer = setInterval(() => void poll(), 100);
     }
 
+    /** Stop polling and tell the webview so its Live checkbox unticks. */
     private _stopLivePoll(): void {
+        this._clearPollTimer();
+        this._liveEnabled = false;
+        this._panel?.webview.postMessage({ type: 'jokerLivePollStopped' });
+    }
+
+    private _clearPollTimer(): void {
         if (this._padPollTimer !== undefined) {
             clearInterval(this._padPollTimer);
             this._padPollTimer = undefined;
         }
-        this._liveEnabled = false;
-        this._lastLivePadButtons = undefined;
-        this._panel?.webview.postMessage({ type: 'jokerLivePollStopped' });
+        this._lastLiveKey = undefined;
+    }
+
+    // Game context
+
+    /** Send the running game and its archive cheats so the page can find the joker address. */
+    private async _sendGameContext(): Promise<void> {
+        const panel = this._panel;
+        if (!panel) { return; }
+        if (!this._socketClient.isConnected() || !this._cheatSource) {
+            panel.webview.postMessage({ type: 'jokerGameContext', status: 'offline' });
+            return;
+        }
+        panel.webview.postMessage({ type: 'jokerGameContext', status: 'loading' });
+        try {
+            const ctx = await this._cheatSource();
+            this._panel?.webview.postMessage({ type: 'jokerGameContext', status: 'ok', ...ctx });
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            this._panel?.webview.postMessage({ type: 'jokerGameContext', status: 'error', error: message });
+        }
     }
 
     // Webview init / status
@@ -238,6 +345,7 @@ export class JokerMakerProvider {
             controllerImage: imageUri,
         });
         this._postConnectionStatus();
+        void this._sendGameContext();
         // Resume polling automatically if the user had it enabled previously.
         if (this._liveEnabled) { this._startLivePoll(); }
     }

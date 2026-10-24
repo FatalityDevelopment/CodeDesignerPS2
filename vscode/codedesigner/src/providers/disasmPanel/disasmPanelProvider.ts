@@ -190,6 +190,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private _archiveCheats: ArchiveCheat[] = [];
     /** Cheat type string reported by the archive YAML (e.g. "CodeBreaker"). */
     private _archiveCheatType: string = '';
+    /** Serial + title the archive cheats were fetched for. */
+    private _archiveSerial: string = '';
+    private _archiveGame: string = '';
     private _activeCdsFilePath: string = '';
     private _activeCdsContent: string = '';
     /** Sidecar commands (assert/breakpoint/watchpoint) from the most recent successful CDS compilation. */
@@ -3515,6 +3518,25 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     }
 
     /**
+     * The running game's archive cheats for the Controller page's joker
+     * detection. Re-fetches when the game in PCSX2 changed since the last load.
+     */
+    public async getGameCheatsForJoker(): Promise<{ game: string; serial: string; cheats: Array<{ name: string; codes: string[] }> }> {
+        if (!this._bridgeMode) { throw new Error('Game cheats need the PCSX2 bridge.'); }
+        const info = await this.socketClient.getPcsx2GameInfo();
+        const serial = (info.ID ?? '').replace(/\0/g, '').trim();
+        if (!serial) { throw new Error('No game serial available (is a game running?).'); }
+        if (serial !== this._archiveSerial || this._archiveCheats.length === 0) {
+            await this.handleFetchArchiveCheats();
+        }
+        return {
+            game:   this._archiveGame || (info.Title ?? '').replace(/\0/g, '').trim(),
+            serial,
+            cheats: this._archiveCheats.map(c => ({ name: c.name, codes: c.codes })),
+        };
+    }
+
+    /**
      * Fetch archive cheats from CheatCodeArchive for the currently running PCSX2
      * game, then broadcast them to the webview and update the label overlays.
      */
@@ -3545,6 +3567,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         }
 
         out.info(`Archive cheats: searching for serial "${serial}" (${gameTitle})…`);
+        this._archiveSerial = serial;
+        this._archiveGame   = gameTitle;
 
         try {
             // ── 1. Try the database first ──────────────────────────────────────
@@ -3565,6 +3589,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                     enabled: false,
                 }));
                 this._archiveCheatType = dbResult.cheatListTitle ?? '';
+                this._archiveGame      = displayTitle;
 
                 out.info(`Archive cheats: loaded ${this._archiveCheats.length} cheats from database for "${displayTitle}".`);
                 this.webview?.postMessage({
@@ -3592,6 +3617,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 
             this._archiveCheats    = result.cheats;
             this._archiveCheatType = result.cheatType;
+            this._archiveGame      = result.game || gameTitle;
 
             out.info(`Archive cheats: loaded ${result.cheats.length} cheats from YAML for "${result.game}".`);
             this.webview?.postMessage({

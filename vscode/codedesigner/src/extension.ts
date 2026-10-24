@@ -375,6 +375,7 @@ export function activate(context: vscode.ExtensionContext) {
 	);
 	context.subscriptions.push(openJokerMakerCommand);
 	disasmPanelProvider.setJokerMakerProvider(jokerMakerProvider);
+	jokerMakerProvider.setCheatSource(() => disasmPanelProvider.getGameCheatsForJoker());
 	socketClient.onConnected(()    => jokerMakerProvider.notifyConnectionChanged());
 	socketClient.onDisconnected(() => jokerMakerProvider.notifyConnectionChanged());
 

@@ -1,31 +1,26 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   Controller — joker code builder and virtual PS2 controller.
+   Chrome follows the disasm-panel conventions (rounded bordered cards,
+   VS Code theme vars).
+   ══════════════════════════════════════════════════════════════════════════ */
+
 :root {
-  --jm-bg: #181818;
-  --jm-panel: #202020;
-  --jm-panel-hi: #252526;
-  --jm-border: #313131;
-  --jm-border-strong: #4a4a4a;
-  --jm-text: #d4d4d4;
-  --jm-dim: #8f8f8f;
-  --jm-accent: #007acc;
-  --jm-blue: #569cd6;
-  --jm-light-blue: #9cdcfe;
-  --jm-green: #6a9955;
-  --jm-light-green: #b5cea8;
-  --jm-orange: #ce9178;
-  --jm-pink: #c586c0;
-  --jm-red: #f48771;
-  color-scheme: dark;
+  --jm-border: var(--vscode-panel-border, #313131);
+  --jm-muted:  var(--vscode-descriptionForeground, #8f8f8f);
+  --jm-mono:   var(--vscode-editor-font-family, Consolas, 'Courier New', monospace);
+  --jm-ok:     var(--vscode-testing-iconPassed, #73c991);
+  --jm-warn:   var(--vscode-editorWarning-foreground, #cca700);
+  --jm-err:    var(--vscode-errorForeground, #f48771);
+  --jm-link:   var(--vscode-textLink-foreground, #9cdcfe);
+  --jm-live:   #ffb454;
 }
 
 html,
 body {
-  margin: 0;
   height: 100%;
   overflow: hidden;
-  background: var(--jm-bg);
-  color: var(--jm-text);
-  font-family: var(--vscode-font-family, 'Segoe UI', sans-serif);
-  font-size: 13px;
+  background: var(--vscode-editor-background, #1e1e1e);
+  color: var(--vscode-foreground, #d4d4d4);
 }
 
 * { box-sizing: border-box; }
@@ -33,64 +28,39 @@ body {
 .jm-host {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  height: 100vh;
   width: 100%;
 }
 
 .jm-header-actions {
   display: inline-flex;
   align-items: center;
-  justify-content: flex-end;
   gap: 8px;
   min-width: 0;
 }
 
 .jm-connection {
-  margin-left: auto;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 8px;
+  padding: 3px 8px;
   border: 1px solid var(--jm-border);
   border-radius: 10px;
-  color: var(--jm-dim);
+  color: var(--jm-muted);
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: .06em;
   white-space: nowrap;
 }
-
 .jm-connection::before {
   content: '';
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--jm-red);
+  background: var(--jm-err);
 }
-
-.jm-connection-on { color: var(--jm-light-green); border-color: #365d36; }
-.jm-connection-on::before { background: #4ec94e; box-shadow: 0 0 6px rgba(78, 201, 78, .65); }
-
-.jm-panel-toggle,
-.jm-side-reopen,
-.jm-actions button {
-  background: #333;
-  color: var(--jm-text);
-  border: 1px solid var(--jm-border-strong);
-  border-radius: 3px;
-  font: inherit;
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.jm-panel-toggle {
-  padding: 4px 8px;
-  white-space: nowrap;
-}
-
-.jm-panel-toggle:hover,
-.jm-side-reopen:hover,
-.jm-actions button:hover { background: #414141; border-color: #666; }
+.jm-connection-on { color: var(--jm-ok); }
+.jm-connection-on::before { background: var(--jm-ok); box-shadow: 0 0 6px rgba(115, 201, 145, .6); }
 
 .jm-main {
   display: flex;
@@ -98,19 +68,50 @@ body {
   min-height: 0;
 }
 
+/* ── Controller stage ────────────────────────────────────────────────────── */
 .jm-stage {
   flex: 1 1 auto;
-  display: grid;
-  place-items: center;
-  padding: 18px;
-  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
   min-width: 0;
-  background-color: #111;
-  background-image:
-    linear-gradient(rgba(255,255,255,.024) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255,255,255,.024) 1px, transparent 1px),
-    radial-gradient(ellipse at 50% 45%, rgba(0,122,204,.12), transparent 60%);
-  background-size: 18px 18px, 18px 18px, 100% 100%;
+  overflow: auto;
+}
+
+.jm-stage-bar {
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 6px 8px;
+  border: 1px solid var(--jm-border);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.jm-seg {
+  display: inline-flex;
+  padding: 2px;
+  gap: 2px;
+  border: 1px solid var(--jm-border);
+  border-radius: 5px;
+}
+.jm-seg button {
+  padding: 3px 12px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--jm-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.jm-seg button:hover { background: rgba(255, 255, 255, 0.06); color: var(--vscode-foreground, #d4d4d4); }
+.jm-seg button.jm-seg-on {
+  background: var(--vscode-button-background, #0e639c);
+  color: var(--vscode-button-foreground, #fff);
 }
 
 .jm-stage canvas {
@@ -120,176 +121,213 @@ body {
   touch-action: none;
   user-select: none;
   border-radius: 8px;
-  filter: drop-shadow(0 16px 22px rgba(0,0,0,.28));
-}
-
-.jm-side-reopen {
-  position: absolute;
-  top: 14px;
-  right: 14px;
-  z-index: 2;
-  padding: 5px 9px;
 }
 
 .jm-hint {
-  position: absolute;
-  top: 14px;
-  left: 16px;
-  padding: 8px 10px;
-  border: 1px solid rgba(255,255,255,.07);
-  border-radius: 5px;
-  background: rgba(24,24,24,.76);
-  color: var(--jm-dim);
-  font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 10px;
-  line-height: 1.55;
-  pointer-events: none;
-}
-.jm-hint .c { color: var(--jm-green); }
-
-.jm-side {
-  width: 360px;
-  flex: 0 0 360px;
-  background: var(--jm-panel);
-  border-left: 1px solid var(--jm-border);
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
-  transition: flex-basis 160ms ease, width 160ms ease, opacity 120ms ease, border-color 120ms ease;
-}
-
-.jm-side-collapsed {
-  width: 0;
-  flex-basis: 0;
-  opacity: 0;
-  border-left-color: transparent;
-  pointer-events: none;
-}
-
-.jm-metrics {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  border-bottom: 1px solid var(--jm-border);
-  background: #1c1c1c;
-}
-
-.jm-metric { padding: 9px 10px; border-right: 1px solid var(--jm-border); }
-.jm-metric:last-child { border-right: 0; }
-.jm-metric-label { color: var(--jm-dim); font-size: 9px; letter-spacing: .07em; text-transform: uppercase; }
-.jm-metric-value {
-  margin-top: 4px;
-  color: var(--jm-light-blue);
-  font-family: var(--vscode-editor-font-family, monospace);
+  max-width: 1000px;
+  color: var(--jm-muted);
   font-size: 12px;
+  line-height: 1.6;
+  text-align: center;
+}
+.jm-keys { display: block; font-family: var(--jm-mono); font-size: 11px; opacity: .8; }
+.jm-warn { color: var(--jm-warn); }
+
+.jm-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
-
-.jm-toggles {
-  display: flex;
-  gap: 15px;
-  padding: 9px 12px;
-  border-bottom: 1px solid var(--jm-border);
-  flex: 0 0 auto;
-}
-
-.jm-toggle { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; color: var(--jm-text); cursor: pointer; user-select: none; }
-.jm-toggle input { cursor: pointer; }
-.jm-toggle-dim { color: var(--jm-dim); }
-.jm-live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--jm-border-strong); }
-.jm-live-dot-on { background: #4ec94e; box-shadow: 0 0 5px rgba(78,201,78,.65); animation: jm-pulse 1.5s ease-in-out infinite; }
+.jm-toggle input { margin: 0; cursor: pointer; }
+.jm-toggle-dim { color: var(--jm-muted); cursor: default; }
+.jm-live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--jm-border); }
+.jm-live-dot-on { background: var(--jm-live); box-shadow: 0 0 5px rgba(255, 180, 84, .65); animation: jm-pulse 1.5s ease-in-out infinite; }
 @keyframes jm-pulse { 50% { opacity: .45; } }
 
-.jm-section-head {
-  padding: 7px 12px;
-  background: #1d1d1d;
-  color: var(--jm-dim);
-  border-bottom: 1px solid var(--jm-border);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: .08em;
+/* ── Side panel ──────────────────────────────────────────────────────────── */
+.jm-side {
+  width: 380px;
+  flex: 0 0 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 12px 12px 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.jm-card {
+  border: 1px solid var(--jm-border);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 8px 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   flex: 0 0 auto;
 }
 
-.jm-json {
-  padding: 10px 12px;
-  font-family: var(--vscode-editor-font-family, monospace);
+.jm-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 22px;
+}
+.jm-card-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--jm-muted);
+  white-space: nowrap;
+}
+.jm-card-tools { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; }
+.jm-card-tools .lm-row-btn:disabled { opacity: .45; cursor: default; }
+.jm-capturing { color: var(--jm-live) !important; }
+
+.jm-chips { display: flex; flex-wrap: wrap; gap: 5px; min-height: 24px; align-items: center; font-size: 12px; }
+.jm-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border: 1px solid var(--vscode-button-background, #0e639c);
+  border-radius: 11px;
+  background: rgba(14, 99, 156, 0.25);
+  color: var(--vscode-foreground, #d4d4d4);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.jm-chip span { color: var(--jm-muted); }
+.jm-chip:hover span { color: var(--jm-err); }
+
+.jm-kv {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px 12px;
+  font-size: 12px;
+}
+.jm-kv > span:nth-child(odd) { color: var(--jm-muted); }
+.jm-kv .lm-mono { font-family: var(--jm-mono); }
+
+.jm-note { font-size: 11px; color: var(--jm-muted); line-height: 1.45; }
+.jm-note-warn { color: var(--jm-warn); }
+.jm-err { color: var(--jm-err); }
+
+.jm-game { display: flex; align-items: baseline; gap: 8px; font-size: 12px; min-width: 0; }
+.jm-game-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.jm-field { display: flex; flex-direction: column; gap: 6px; }
+.jm-field-row { flex-direction: row; align-items: center; gap: 8px; }
+.jm-field-row select { flex: 1; }
+.jm-field-label { font-size: 12px; color: var(--jm-muted); white-space: nowrap; }
+
+.jm-input {
+  background: var(--vscode-input-background, #3c3c3c);
+  color: var(--vscode-input-foreground, #d4d4d4);
+  border: 1px solid var(--vscode-input-border, #3c3c3c);
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+  min-width: 0;
+}
+.jm-input:focus { border-color: var(--vscode-focusBorder, #0078d4); }
+.jm-input.lm-mono { font-family: var(--jm-mono); }
+.jm-input-bad { border-color: var(--jm-err); }
+.jm-input-sm { font-size: 11px; padding: 1px 4px; }
+.jm-textarea { resize: vertical; min-height: 60px; line-height: 1.5; }
+
+.jm-output {
+  margin: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--jm-border);
+  border-radius: 4px;
+  background: var(--vscode-textCodeBlock-background, rgba(0, 0, 0, 0.25));
+  font-family: var(--jm-mono);
   font-size: 12px;
   line-height: 1.5;
-  overflow-y: auto;
-  flex: 1 1 auto;
-  display: flex;
-  gap: 12px;
+  white-space: pre;
+  overflow-x: auto;
+  max-height: 220px;
+  user-select: text;
 }
 
-.jm-gutter { color: #666; text-align: right; user-select: none; min-width: 18px; white-space: pre; }
-.jm-code { flex: 1; margin: 0; white-space: pre; font: inherit; }
-.jm-code .k { color: var(--jm-light-blue); }
-.jm-code .s { color: var(--jm-orange); }
-.jm-code .n { color: var(--jm-light-green); }
-.jm-code .b { color: var(--jm-blue); }
-.jm-code .p { color: var(--jm-text); }
+.jm-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.jm-primary-btn {
+  height: 24px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: var(--vscode-button-background, #0e639c);
+  color: var(--vscode-button-foreground, #fff);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.jm-primary-btn:hover:not(:disabled) { background: var(--vscode-button-hoverBackground, #1177bb); }
+.jm-primary-btn:disabled { opacity: .5; cursor: default; }
+
+.jm-uses { display: flex; flex-direction: column; max-height: 220px; overflow-y: auto; }
+.jm-use {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  gap: 10px;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.jm-use:hover { background: var(--vscode-list-hoverBackground, #2a2d2e); }
+.jm-use-match { background: rgba(204, 167, 0, 0.14); }
+.jm-use-combo { color: var(--jm-link); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jm-use-cheat { color: var(--jm-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .jm-log {
-  padding: 9px 12px;
-  font-family: var(--vscode-editor-font-family, monospace);
+  font-family: var(--jm-mono);
   font-size: 11px;
-  line-height: 1.45;
-  max-height: 150px;
+  line-height: 1.5;
+  max-height: 140px;
   overflow-y: auto;
-  flex: 0 0 auto;
-  border-top: 1px solid var(--jm-border);
 }
+.jm-log-row { display: flex; gap: 8px; white-space: nowrap; overflow: hidden; }
+.jm-log .t { color: var(--jm-muted); }
+.jm-log .press { color: var(--jm-ok); }
+.jm-log .release { color: #ce9178; }
+.jm-log .stick { color: #c586c0; }
+.jm-log .live, .jm-log .capture { color: var(--jm-live); }
+.jm-log .name { color: var(--jm-link); overflow: hidden; text-overflow: ellipsis; }
 
-.jm-log-empty { color: var(--jm-green); }
-.jm-log .t { color: var(--jm-dim); }
-.jm-log .press { color: var(--jm-light-green); }
-.jm-log .release { color: var(--jm-orange); }
-.jm-log .stick { color: var(--jm-pink); }
-.jm-log .name { color: var(--jm-light-blue); }
-.jm-log-row { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-
-.jm-actions {
-  padding: 9px 12px;
-  border-top: 1px solid var(--jm-border);
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-  flex: 0 0 auto;
-}
-
-.jm-actions button { padding: 5px 9px; }
-.jm-actions .primary { background: #0e639c; border-color: #1177bb; color: #fff; }
-.jm-actions .primary:hover { background: #1177bb; }
-
+/* ── Status bar ──────────────────────────────────────────────────────────── */
 .jm-statusbar {
-  height: 24px;
-  background: var(--jm-accent);
-  color: #fff;
+  height: 22px;
+  background: var(--vscode-statusBar-background, #007acc);
+  color: var(--vscode-statusBar-foreground, #fff);
   font-size: 11px;
   display: flex;
   align-items: center;
   gap: 16px;
   padding: 0 10px;
   flex: 0 0 auto;
+  white-space: nowrap;
+  overflow: hidden;
 }
-.jm-status-right { margin-left: auto; font-family: var(--vscode-editor-font-family, monospace); letter-spacing: .05em; }
+.jm-status-right { margin-left: auto; font-family: var(--jm-mono); letter-spacing: .04em; }
 
-@media (max-width: 880px) {
-  .jm-side { width: 310px; flex-basis: 310px; }
-  .jm-side-collapsed { width: 0; flex-basis: 0; }
-  .jm-hint { display: none; }
-}
-
-@media (max-width: 680px) {
-  .jm-header-actions { flex-wrap: wrap; }
-  .jm-connection { margin-left: 0; }
-  .jm-side { width: 270px; flex-basis: 270px; }
-  .jm-side-collapsed { width: 0; flex-basis: 0; }
-  .jm-metrics { grid-template-columns: 1fr; }
-  .jm-metric { padding: 5px 9px; border-right: 0; }
-  .jm-metric-value { display: inline; margin-left: 7px; }
-  .jm-metric-label { display: inline; }
+@media (max-width: 860px) {
+  .jm-main { flex-direction: column; overflow-y: auto; }
+  .jm-stage { flex: 0 0 auto; overflow: visible; }
+  .jm-side { width: auto; flex: 0 0 auto; padding: 0 12px 12px; overflow: visible; }
 }
