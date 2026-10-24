@@ -8,6 +8,17 @@ using CodeDesigner.Ps2.Common.CPU;
 
 namespace CodeDesigner.Ps2.Common
 {
+    /// <summary>How much the comment column says about each instruction.</summary>
+    public enum HintLevel
+    {
+        /// <summary>Every hint: values, addresses, call arguments, stack frames.</summary>
+        Full,
+        /// <summary>Only hints that name a place: calls/branches, loads/stores, built addresses, syscalls, strings.</summary>
+        Addresses,
+        /// <summary>No generated hints (the instructions are still simulated).</summary>
+        Off,
+    }
+
     /// <summary>
     /// Analyzes MIPS instructions using the built-in Analyze() method on each instruction class
     /// </summary>
@@ -169,14 +180,20 @@ namespace CodeDesigner.Ps2.Common
             bool includeStateHints = false,
             CpuState? seedCpu = null,
             uint? seedPc = null,
-            IPs2MemoryBus? loadBus = null)
+            IPs2MemoryBus? loadBus = null,
+            IReadOnlySet<uint>? functionStarts = null,
+            HintLevel hintLevel = HintLevel.Full,
+            Func<uint, bool>? seedContext = null)
         {
             var comments = new Dictionary<uint, string>();
             var rows = instructions as IList<(uint instruction, uint address)> ?? instructions.ToList();
 
             // Simulated loads and stores go through a private overlay, so stores never
             // reach real memory and a reload of a spilled value sees what was stored.
-            var simBus = new AnalysisOverlayBus(loadBus ?? bus ?? seedCpu?.Bus);
+            // Loads read the cheap bus first and the hint bus for anything it can't
+            // serve, so a pointer loaded from memory outside the page still feeds the
+            // next hop of a chain.
+            var simBus = new AnalysisOverlayBus(loadBus ?? bus ?? seedCpu?.Bus, bus);
 
             CpuState? cpu = null;
             bool stateHints = false;
@@ -190,6 +207,7 @@ namespace CodeDesigner.Ps2.Common
                 else
                 {
                     cpu = NewBlankState();
+                    if (rows.Count > 0) ApplySeedContext(cpu, seedCpu, seedContext, rows[0].address);
                 }
                 cpu.Bus = simBus;
             }
@@ -204,6 +222,18 @@ namespace CodeDesigner.Ps2.Common
                     cpu.Bus = simBus;
                     stateHints = includeStateHints;
                 }
+                else if (cpu != null && functionStarts != null && functionStarts.Contains(address))
+                {
+                    // A new function: nothing from the code above carries in except $gp,
+                    // which the whole program shares.
+                    bool gpKnown = CpuHelpers.IsRegisterKnown(cpu, 28);
+                    ulong gp = cpu.RegsLo[28];
+                    cpu = NewBlankState();
+                    cpu.Bus = simBus;
+                    if (gpKnown) { cpu.RegsLo[28] = gp; cpu.GprKnown |= 1u << 28; }
+                    ApplySeedContext(cpu, seedCpu, seedContext, address);
+                    stateHints = false;
+                }
 
                 var usage = GprUsage.Of(word);
                 bool hasDelaySlot = usage.Flow != FlowKind.None
@@ -214,8 +244,8 @@ namespace CodeDesigner.Ps2.Common
                     // A call's arguments are often set in its delay slot, so run the
                     // delay slot first and describe the call with the state it sees.
                     var (slotWord, slotAddress) = rows[i + 1];
-                    AnalyzeRow(slotWord, slotAddress, cpu, stateHints, bus, lookupLabel, comments);
-                    AnalyzeRow(word, address, cpu, stateHints, bus, lookupLabel, comments, execute: false);
+                    AnalyzeRow(slotWord, slotAddress, cpu, stateHints, bus, lookupLabel, comments, hintLevel: hintLevel);
+                    AnalyzeRow(word, address, cpu, stateHints, bus, lookupLabel, comments, execute: false, hintLevel: hintLevel);
                     Simulate(word, address, cpu, usage);
                     cpu.GprKnown &= ~CallerSavedMask;
                     stateHints = false;
@@ -223,14 +253,14 @@ namespace CodeDesigner.Ps2.Common
                     continue;
                 }
 
-                AnalyzeRow(word, address, cpu, stateHints, bus, lookupLabel, comments);
+                AnalyzeRow(word, address, cpu, stateHints, bus, lookupLabel, comments, hintLevel: hintLevel);
 
                 if (cpu != null && usage.Flow != FlowKind.None)
                 {
                     if (hasDelaySlot)
                     {
                         var (slotWord, slotAddress) = rows[i + 1];
-                        AnalyzeRow(slotWord, slotAddress, cpu, stateHints, bus, lookupLabel, comments);
+                        AnalyzeRow(slotWord, slotAddress, cpu, stateHints, bus, lookupLabel, comments, hintLevel: hintLevel);
                         i++;
                     }
                     // Whatever follows a jump is reached from somewhere else; whatever
@@ -257,6 +287,30 @@ namespace CodeDesigner.Ps2.Common
 
         private static CpuState NewBlankState() => new() { GprKnown = 1u };
 
+        /// <summary>Registers that hold the same value for a whole function: s0-s7, gp, sp, fp.</summary>
+        private const uint LongLivedMask = (0xFFu << 16) | (1u << 28) | (1u << 29) | (1u << 30);
+
+        /// <summary>
+        /// Before the paused PC, the snapshot still describes the registers a function
+        /// keeps for its whole body: $gp everywhere (one value per program), and $sp,
+        /// $s0-$s7, $fp at rows <paramref name="seedContext"/> accepts (the PC's own
+        /// function). That is what resolves loads through an object pointer in $s0 or a
+        /// global through $gp, and the pointer chains behind them.
+        /// </summary>
+        private static void ApplySeedContext(CpuState cpu, CpuState? seed, Func<uint, bool>? seedContext, uint address)
+        {
+            if (seed is null) return;
+            uint mask = 1u << 28;
+            if (seedContext?.Invoke(address) == true) mask = LongLivedMask;
+            for (int r = 1; r < 32; r++)
+            {
+                if ((mask & (1u << r)) == 0 || !CpuHelpers.IsRegisterKnown(seed, r)) continue;
+                cpu.RegsLo[r] = seed.RegsLo[r];
+                cpu.RegsHi[r] = seed.RegsHi[r];
+                cpu.GprKnown |= 1u << r;
+            }
+        }
+
         /// <summary>
         /// Analyzes one row against the pre-execution <paramref name="cpu"/> state, records
         /// its comment, then (unless <paramref name="execute"/> is false) simulates it.
@@ -265,7 +319,8 @@ namespace CodeDesigner.Ps2.Common
             uint word, uint address, CpuState? cpu, bool stateHints,
             IPs2MemoryBus? bus, Func<uint, string?>? lookupLabel,
             Dictionary<uint, string> comments,
-            bool execute = true)
+            bool execute = true,
+            HintLevel hintLevel = HintLevel.Full)
         {
             try
             {
@@ -276,6 +331,13 @@ namespace CodeDesigner.Ps2.Common
                 CpuState? view = cpu;
                 bool readsKnown = view == null || (usage.Reads & ~view.GprKnown) == 0;
 
+                // FPU registers are never mirrored into the analysis state, so COP1
+                // arithmetic/compare/mfc1 is described symbolically (no values).
+                // mtc1 (GPR source) and branches keep the state.
+                uint cop1Rs = (word >> 21) & 0x1F;
+                if ((word >> 26) == 0x11 && cop1Rs != 0x04 && cop1Rs != 0x08)
+                    view = null;
+
                 // A value hint from an unknown input would just print garbage. The
                 // stack-frame note on `addiu sp, sp, ±N` is still useful without one.
                 bool stackAdjust = (word >> 26) == 0x09 && ((word >> 16) & 0x3FF) == (29u << 5 | 29u);
@@ -285,6 +347,9 @@ namespace CodeDesigner.Ps2.Common
 
                 if (!stateHints || !readsKnown)
                     analysis = StripStateHints(analysis);
+
+                if (!KeepAtLevel(hintLevel, word, usage, analysis))
+                    analysis = string.Empty;
 
                 if (!string.IsNullOrWhiteSpace(analysis))
                 {
@@ -302,6 +367,29 @@ namespace CodeDesigner.Ps2.Common
             {
                 // Skip instructions that fail to analyze
             }
+        }
+
+        private static readonly Regex s_hexWordRegex = new(@"0x([0-9A-Fa-f]{8})", RegexOptions.Compiled);
+
+        /// <summary>
+        /// Whether a hint survives <paramref name="level"/>. At
+        /// <see cref="HintLevel.Addresses"/> a hint stays when it names a place:
+        /// control flow, a load/store, a syscall, or a value that is a plausible
+        /// address (a <c>lui</c>/<c>addiu</c> pair building a pointer).
+        /// </summary>
+        private static bool KeepAtLevel(HintLevel level, uint word, GprUsage usage, string analysis)
+        {
+            if (level == HintLevel.Full) return true;
+            if (level == HintLevel.Off || string.IsNullOrWhiteSpace(analysis)) return false;
+
+            uint op = word >> 26;
+            if (usage.Flow != FlowKind.None) return true;
+            if (op == 0x00 && (word & 0x3F) == 0x0C) return true;                 // syscall
+            if (usage.IsLoad || op is 0x1F or >= 0x28 and <= 0x2E or 0x31 or 0x36 or 0x39 or 0x3E or 0x3F)
+                return true;                                                       // loads / stores
+            foreach (Match m in s_hexWordRegex.Matches(analysis))
+                if (IsPlausibleAddress(Convert.ToUInt32(m.Groups[1].Value, 16))) return true;
+            return false;
         }
 
         /// <summary>

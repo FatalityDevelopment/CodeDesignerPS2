@@ -24,9 +24,9 @@ and **MCP servers** (AI agents). They all front the same engine and database.
                  │ JSON/TCP                   │ MCP (stdio)               │ MCP (stdio)
                  │                            ▼                           │
                  │            ┌───────────────────────────────┐          │
-                 │            │  MCP servers                   │◄─────────┘
-                 │            │  • CodeDesigner.Ps2.McpServer  │  (legacy, ~170 flat tools)
-                 │            │  • CodeDesigner.AI             │  (profile-driven, this effort)
+                 │            │  MCP server                    │◄─────────┘
+                 │            │  CodeDesigner.AI               │  (242 tools, profile-driven)
+                 │            │                                │
                  │            └───────┬───────────────┬───────┘
                  │                    │ socket         │ EF Core (direct)
                  ▼                    ▼                ▼
@@ -37,10 +37,25 @@ and **MCP servers** (AI agents). They all front the same engine and database.
         └───────┬───────────────────┬───────┘   │   Database)                │
                 ▼                   ▼            └───────────────────────────┘
         ┌──────────────┐    ┌──────────────┐
-        │ Built-in PS2 │    │  PCSX2        │
-        │ emulator     │    │  (PINE)       │
+        │ Built-in PS2 │    │  PCSX2 fork   │
+        │ emulator     │    │  PINE :28011  │
+        │ (own process,│    │  + GS stream  │
+        │  PINE :28012)│    │               │
         └──────────────┘    └──────────────┘
 ```
+
+Ports at a glance:
+
+| Port | What |
+|---|---|
+| `8765` | Bridge JSON command socket (extension, MCP server, scripts) |
+| `8766` | Bridge GS stream fan-out (Preview window frames) |
+| `28011` | PCSX2 PINE (default slot) |
+| `28012` | Built-in emulator's PINE-compatible socket |
+
+The VS Code extension starts the Bridge in its *CodeDesigner* terminal and launches the
+emulator (PCSX2 or `CodeDesigner.Ps2.Emulator.exe`) for you; the Bridge then attaches
+to it with `STARTPCSX2` / `STARTEMULATOR` / `STARTFILEMODE`.
 
 Two facts drive most of the design:
 
@@ -66,8 +81,8 @@ It is deliberately split so the tool surface stays decoupled from the transport:
 | Project | Role |
 |---|---|
 | **CodeDesigner.AI.Abstractions** | Dependency-free contracts + pure logic: `ToolProfile`, `ToolDomain`, `ToolRisk`, `CdText`, `ICdContextProvider`, `IAgentCoordinator`, `IOrchestrationCoordinator` + `WorkflowParser`. No MCP / EF / hosting references. |
-| **CodeDesigner.AI** | The MCP host: tool classes (`[CdTool]`), profile gating, session state, the DB-backed coordinators, MCP Resources + Prompts. References Abstractions + `CodeDesigner.Ps2.Database`, and **links** `SocketBridgeClient.cs` + `McpDatabaseService.cs` from the legacy server as the single source of truth for bridge/DB plumbing. |
-| **CodeDesigner.AI.Tests** | MSTest unit tests for the pure logic (`WorkflowParser`, `ToolProfile`, `CdText`, `SessionState`). |
+| **CodeDesigner.AI** | The MCP host: tool classes (`[CdTool]`, under `Tools/<Domain>/`), profile gating, session state, the DB-backed coordinators, MCP Resources + Prompts, and the bridge/DB plumbing (`Infra/SocketBridgeClient.cs`, `Infra/McpDatabaseService.cs`). References Abstractions, `CodeDesigner.Ps2.Database`, `CheatEngine` and `CdsLanguage`. |
+| **CodeDesigner.AI.Tests** | MSTest tests for the pure logic (`WorkflowParser`, `ToolProfile`, `CdText`, `SessionState`) and for tool behaviour (assets, packages). |
 
 ### Tool model
 
@@ -86,7 +101,7 @@ the assembly, and the active **profile** filters what is exposed:
   `--dangerous-tools false`.
 
 The point is **token economy**: a client only ever sees the tools its profile allows
-(`lite` is ~18 tools / ~6.5 KB of `tools/list`; `re` is ~116). Profiles can also be
+(`lite` is 18 tools, `core` 25, `re` 133, `all` 242; `--list-tools` prints any profile). Profiles can also be
 **widened at runtime** with `cd_enable_domain`, which mutates the live tool collection
 and fires `tools/list_changed`.
 
@@ -189,11 +204,12 @@ The AI layer's state is in **SQL Server LocalDB** (`(localdb)\MSSQLLocalDB`,
 entities: `McpMemories` (progress reports + agent/shared memory), `McpAgents`
 (personas), `McpAgentSessions`, `McpAgentMessages`, `McpOrchestrations`. Migrations
 live under `CodeDesigner.Ps2.Database/Migrations/` and are applied by
-`DatabaseInitialiser` (and by the legacy server at startup). Override the connection
-with `--connection-string` or `CODEDESIGNER_CONNECTION_STRING`.
+`DatabaseInitialiser`, which runs after every build of the Database project (skip with
+`-p:SkipDatabaseInit=true`). Override the connection with `--connection-string` or
+`CODEDESIGNER_CONNECTION_STRING`.
 
-> The legacy Bridge also keeps its own stores for live-session artifacts; the *agent
-> coordination* tables described here are the EF/LocalDB set the AI layer reads/writes.
+The Bridge uses the same database for labels, data formats, settings, snapshots, games,
+cheat lists and AI activity logs.
 
 ---
 
@@ -206,21 +222,18 @@ with `--connection-string` or `CODEDESIGNER_CONNECTION_STRING`.
 | Run tests | `dotnet test CodeDesigner.AI.Tests/` |
 | Register with VS Code | see [`.vscode/mcp.json`](../.vscode/mcp.json) variants |
 
-`.vscode/mcp.json` ships per-task variants (`CodeDesigner-AI-core`,
+`.vscode/mcp.json` ships per-task variants (`CodeDesigner` = `all`, `CodeDesigner-AI-core`,
 `-re`, `-multi-agent`, `-readonly`) so a workspace can pick the right profile without
-editing args by hand. The build deploys to `%LOCALAPPDATA%\CodeDesigner\AI\` so the AI
-server runs side-by-side with the legacy server.
+editing args by hand. The build deploys to `%LOCALAPPDATA%\CodeDesigner\AI\`, and the
+extension's MCP button runs it from there with `--profile all`.
 
 ---
 
-## 8. Relationship to the legacy server
+## 8. History
 
-`CodeDesigner.Ps2.McpServer` (the original, flat ~170-tool MCP server) and
-`CodeDesigner.AI` currently coexist. `CodeDesigner.AI` reuses the legacy server's
-`SocketBridgeClient` and `McpDatabaseService` via linked source so there is one
-implementation of the bridge/DB plumbing. The intended end state (tracked in the
-improvement plan) is to extract that shared infra into a library and retire the legacy
-server once `CodeDesigner.AI` passes a documented parity check.
+`CodeDesigner.AI` replaced the original flat MCP server (`CodeDesigner.Ps2.McpServer`,
+about 170 tools), which has been removed along with the `Ps2Dis` project and the Electron
+scaffold. Its bridge and database plumbing now lives in `CodeDesigner.AI/Infra/`.
 
 ---
 

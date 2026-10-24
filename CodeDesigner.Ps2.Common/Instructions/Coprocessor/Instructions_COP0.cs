@@ -7,10 +7,6 @@ using System;
 |-------------|-------------|
 | MFC0 | Move from COP0 register to GPR |
 | MTC0 | Move from GPR to COP0 register |
-| DMFC0 | Move from COP0 register to GPR (64-bit) |
-| DMTC0 | Move from GPR to COP0 register (64-bit) |
-| CFC0 | Move control from COP0 |
-| CTC0 | Move control to COP0 |
 | ERET | Return from exception |
 | TLBP | Probe TLB for matching entry |
 | TLBR | Read indexed TLB entry |
@@ -37,6 +33,38 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.COP0
 
         public static string Get(int reg) =>
             (uint)reg < (uint)Names.Length ? Names[reg] : $"${reg}";
+
+        /// <summary>Register operand for mfc0/mtc0 text: the name, or <c>$N</c> for reserved slots.</summary>
+        public static string Operand(int reg)
+        {
+            string name = Get(reg);
+            return name.StartsWith("Reserved", StringComparison.Ordinal) ? $"${reg}" : name;
+        }
+
+        private static readonly string[] DebugNames = ["bpc", null!, "iab", "iabm", "dab", "dabm", "dvb", "dvbm"];
+
+        /// <summary>
+        /// EE debug (COP0 reg 24, selector in bits 2:0) and performance counter (reg 25)
+        /// moves have their own mnemonics: mfbpc/mtiab/…, mfps/mtps, mfpc/mtpc.
+        /// Returns null for an ordinary mfc0/mtc0.
+        /// </summary>
+        public static string? SpecialMove(bool toCop0, int rt, int rd, int funct)
+        {
+            string dir = toCop0 ? "mt" : "mf";
+            string gpr = CpuHelpers.RegName(rt);
+            if (rd == 24)
+            {
+                int sel = funct & 0x7;
+                string? name = (funct & ~0x7) == 0 ? DebugNames[sel] : null;
+                return name is null ? null : $"{dir}{name} {gpr}";
+            }
+            if (rd == 25)
+            {
+                if (funct == 0) return $"{dir}ps {gpr}, 0";
+                if ((funct & 1) == 1 && (funct >> 1) <= 1) return $"{dir}pc {gpr}, {funct >> 1}";
+            }
+            return null;
+        }
 
         /// <summary>
         /// Resolve a COP0 register name (case-insensitive, e.g. <c>Status</c>, <c>EPC</c>)
@@ -92,7 +120,8 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.COP0
 
         public override string Disasm(Args_R args, uint? pc = null)
         {
-            return $"{Name} {CpuHelpers.RegName(args.Rt)}, ${args.Rd}";
+            return Cop0RegNames.SpecialMove(false, args.Rt, args.Rd, args.Funct)
+                ?? $"{Name} {CpuHelpers.RegName(args.Rt)}, {Cop0RegNames.Operand(args.Rd)}";
         }
 
         public override uint Asm(int[] args)
@@ -102,12 +131,8 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.COP0
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
+            // The analysis state never mirrors COP0, so its values would be invented.
             string regName = Cop0RegNames.Get(args.Rd);
-            if (cpu != null)
-            {
-                uint value = cpu.COP0.ReadRegister32(args.Rd);
-                return $"{CpuHelpers.RegName(args.Rt)} ← COP0[{args.Rd}]={regName} = 0x{value:X8}";
-            }
             return $"{CpuHelpers.RegName(args.Rt)} ← COP0[{args.Rd}]={regName}";
         }
     }
@@ -143,7 +168,8 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.COP0
 
         public override string Disasm(Args_R args, uint? pc = null)
         {
-            return $"{Name} {CpuHelpers.RegName(args.Rt)}, ${args.Rd}";
+            return Cop0RegNames.SpecialMove(true, args.Rt, args.Rd, args.Funct)
+                ?? $"{Name} {CpuHelpers.RegName(args.Rt)}, {Cop0RegNames.Operand(args.Rd)}";
         }
 
         public override uint Asm(int[] args)
@@ -154,195 +180,12 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.COP0
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string regName = Cop0RegNames.Get(args.Rd);
-            if (cpu != null)
+            if (cpu != null && CpuHelpers.IsRegisterKnown(cpu, args.Rt))
             {
                 uint value = (uint)(cpu.RegsLo[args.Rt] & 0xFFFFFFFF);
                 return $"COP0[{args.Rd}]={regName} ← {CpuHelpers.RegName(args.Rt)} = 0x{value:X8}";
             }
             return $"COP0[{args.Rd}]={regName} ← {CpuHelpers.RegName(args.Rt)}";
-        }
-    }
-
-    // DMFC0 - Move from COP0 register to GPR (64-bit)
-    public sealed class DMFC0 : Instruction<Args_R>
-    {
-        public DMFC0()
-        {
-            Opcode = 0x10;
-            Funct = null; // sel field (bits [2:0]) varies; matched via wildcard
-            Name = "dmfc0";
-            ArgType = InstrArgType.R;
-            ArgNames = ["rt", "rd"];
-            Equation = "rt = COP0[rd] (64-bit)";
-            Description = "Move from COP0 register to GPR (64-bit) - reads full 64-bit COP0 register";
-        }
-
-        public override void Exec(CpuState cpu, Args_R args)
-        {
-            // Read 64-bit value from COP0 register
-            ulong value = cpu.COP0.ReadRegister64(args.Rd);
-            cpu.RegsLo[args.Rt] = value;
-            cpu.RegsHi[args.Rt] = 0;
-        }
-
-        public override string Disasm(Args_R args, uint? pc = null)
-        {
-            return $"{Name} {CpuHelpers.RegName(args.Rt)}, ${args.Rd}";
-        }
-
-        public override uint Asm(int[] args)
-        {
-            return (uint)(Opcode << 26 | 0x01 << 21 | args[0] << 16 | args[1] << 11);
-        }
-
-        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
-        {
-            string regName = Cop0RegNames.Get(args.Rd);
-            if (cpu != null)
-            {
-                ulong value = cpu.COP0.ReadRegister64(args.Rd);
-                return $"{CpuHelpers.RegName(args.Rt)} ← COP0[{args.Rd}]={regName} = 0x{value:X16}";
-            }
-            return $"{CpuHelpers.RegName(args.Rt)} ← COP0[{args.Rd}]={regName}";
-        }
-    }
-
-    // DMTC0 - Move from GPR to COP0 register (64-bit)
-    public sealed class DMTC0 : Instruction<Args_R>
-    {
-        public DMTC0()
-        {
-            Opcode = 0x10;
-            Funct = null; // sel field (bits [2:0]) varies; matched via wildcard
-            Name = "dmtc0";
-            ArgType = InstrArgType.R;
-            ArgNames = ["rt", "rd"];
-            Equation = "COP0[rd] = rt (64-bit)";
-            Description = "Move from GPR to COP0 register (64-bit) - writes full 64-bit value";
-        }
-
-        public override void Exec(CpuState cpu, Args_R args)
-        {
-            // Write 64-bit GPR value to COP0 register
-            ulong value = cpu.RegsLo[args.Rt];
-            cpu.COP0.WriteRegister64(args.Rd, value);
-        }
-
-        public override string Disasm(Args_R args, uint? pc = null)
-        {
-            return $"{Name} {CpuHelpers.RegName(args.Rt)}, ${args.Rd}";
-        }
-
-        public override uint Asm(int[] args)
-        {
-            return (uint)(Opcode << 26 | 0x05 << 21 | args[0] << 16 | args[1] << 11);
-        }
-
-        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
-        {
-            string regName = Cop0RegNames.Get(args.Rd);
-            if (cpu != null)
-            {
-                ulong value = cpu.RegsLo[args.Rt];
-                return $"COP0[{args.Rd}]={regName} ← {CpuHelpers.RegName(args.Rt)} = 0x{value:X16}";
-            }
-            return $"COP0[{args.Rd}]={regName} ← {CpuHelpers.RegName(args.Rt)}";
-        }
-    }
-
-    // CFC0 - Move control from COP0
-    public sealed class CFC0 : Instruction<Args_R>
-    {
-        public CFC0()
-        {
-            Opcode = 0x10;
-            Funct = 0x00;
-            Name = "cfc0";
-            ArgType = InstrArgType.R;
-            ArgNames = ["rt", "rd"];
-            Equation = "rt = COP0_Control[rd]";
-            Description = "Move control from COP0 - reads COP0 control register";
-        }
-
-        public override void Exec(CpuState cpu, Args_R args)
-        {
-            // Read from COP0 control register
-            uint value = cpu.COP0.ReadControlRegister(args.Rd);
-            
-            // Sign-extend to 64-bit
-            long signExtended = (int)value;
-            cpu.RegsLo[args.Rt] = (ulong)signExtended;
-            cpu.RegsHi[args.Rt] = signExtended < 0 ? 0xFFFFFFFFFFFFFFFFUL : 0UL;
-        }
-
-        public override string Disasm(Args_R args, uint? pc = null)
-        {
-            return $"{Name} {CpuHelpers.RegName(args.Rt)}, ${args.Rd}";
-        }
-
-        public override uint Asm(int[] args)
-        {
-            return (uint)(Opcode << 26 | 0x02 << 21 | args[0] << 16 | args[1] << 11);
-        }
-
-        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
-        {
-            string eq = Equation
-                .Replace("rt", CpuHelpers.RegName(args.Rt))
-                .Replace("rd", $"${args.Rd}");
-            
-            if (cpu != null)
-            {
-                uint value = cpu.COP0.ReadControlRegister(args.Rd);
-                return $"{eq} => COP0_Control[{args.Rd}] = 0x{value:X8}";
-            }
-            return eq;
-        }
-    }
-
-    // CTC0 - Move control to COP0
-    public sealed class CTC0 : Instruction<Args_R>
-    {
-        public CTC0()
-        {
-            Opcode = 0x10;
-            Funct = 0x00;
-            Name = "ctc0";
-            ArgType = InstrArgType.R;
-            ArgNames = ["rt", "rd"];
-            Equation = "COP0_Control[rd] = rt[31:0]";
-            Description = "Move control to COP0 - writes to COP0 control register";
-        }
-
-        public override void Exec(CpuState cpu, Args_R args)
-        {
-            // Write to COP0 control register
-            uint value = (uint)(cpu.RegsLo[args.Rt] & 0xFFFFFFFF);
-            cpu.COP0.WriteControlRegister(args.Rd, value);
-        }
-
-        public override string Disasm(Args_R args, uint? pc = null)
-        {
-            return $"{Name} {CpuHelpers.RegName(args.Rt)}, ${args.Rd}";
-        }
-
-        public override uint Asm(int[] args)
-        {
-            return (uint)(Opcode << 26 | 0x06 << 21 | args[0] << 16 | args[1] << 11);
-        }
-
-        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
-        {
-            string eq = Equation
-                .Replace("rt", CpuHelpers.RegName(args.Rt))
-                .Replace("rd", $"${args.Rd}");
-            
-            if (cpu != null)
-            {
-                uint value = (uint)(cpu.RegsLo[args.Rt] & 0xFFFFFFFF);
-                return $"{eq} => write 0x{value:X8} to COP0_Control[{args.Rd}]";
-            }
-            return eq;
         }
     }
 
@@ -682,6 +525,40 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.COP0
     }
 
     // EI - Enable Interrupts (COP0 rs=0x10, funct=0x38)
+    // PREF - Prefetch (opcode 0x33). A hint only; the EE treats it as a no-op.
+    public sealed class PREF : Instruction<Args_I>
+    {
+        public PREF()
+        {
+            Opcode = 0x33;
+            Funct = null;
+            Name = "pref";
+            ArgType = InstrArgType.I;
+            ArgNames = ["op", "offset", "base"];
+            Equation = "prefetch(hint, base + offset)";
+            Description = "Prefetch - cache hint, executes as a no-op";
+        }
+
+        public override void Exec(CpuState cpu, Args_I args) { }
+
+        public override string Disasm(Args_I args, uint? pc = null)
+        {
+            int offset = CpuHelpers.SignExtend16(args.Imm);
+            return $"{Name} {args.Rt}, {CpuHelpers.FormatOffset(offset)}({CpuHelpers.RegName(args.Rs)})";
+        }
+
+        public override uint Asm(int[] args)
+        {
+            return (uint)(Opcode << 26 | args[2] << 21 | args[0] << 16 | args[1] & 0xFFFF);
+        }
+
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
+        {
+            int offset = CpuHelpers.SignExtend16(args.Imm);
+            return $"prefetch [{CpuHelpers.FormatMemoryReference(cpu, args.Rs, offset)}]";
+        }
+    }
+
     public sealed class EI : Instruction<Args_R>
     {
         public EI()

@@ -11,6 +11,7 @@ import {
 import { EditorState } from '../state/editor.state';
 import { DisasmRow } from '../state/types';
 import { rowContainsByteOffset } from '../state/row-locator';
+import { toPhysAddr } from '../utils/address.utils';
 
 /**
  * DisasmRowComponent - Renders a single disassembly instruction row.
@@ -31,6 +32,7 @@ import { rowContainsByteOffset } from '../state/row-locator';
       [class.branch-highlight]="isBranchHighlight()"
       [class.branch-path]="isBranchPath()"
       [class.data-formatted]="isDataFormatted()"
+      [class.fn-start]="!!data().functionStart"
       [class.search-match]="isSearchMatch()"
       [class.search-current]="isCurrentMatch()"
       [class.breakpoint]="hasBreakpoint()"
@@ -52,7 +54,11 @@ import { rowContainsByteOffset } from '../state/row-locator';
         (mouseleave)="hideFullComment()"
       ></span>
       <span class="bytes" [innerHTML]="bytesHtml()"></span>
-      <span class="label" [innerHTML]="labelHtml()"></span>
+      <span class="label">@if (xrefBadge(); as badge) {<span
+          class="xref-badge"
+          [title]="badge.title"
+          (click)="onXrefBadgeClick($event)"
+          (dblclick)="$event.stopPropagation()">{{ badge.text }}</span>}<span [innerHTML]="labelHtml()"></span></span>
       <span class="op" [innerHTML]="opHtml()"></span>
       <span class="args" [innerHTML]="argsHtml()"></span>
       <span
@@ -207,6 +213,10 @@ export class DisasmRowComponent {
     const parts: string[] = [];
 
     if (rawLabel) { parts.push(this.renderLabelText(rawLabel)); }
+    else if (row.functionStart) {
+      // Unnamed detected function: show a placeholder name (not a saved label).
+      parts.push(`<span class="lm-label-fnc fn-auto-label" title="Detected function entry (not a saved label)">FNC_${this.escapeHtml(row.addr)}</span>`);
+    }
     if (cheat) {
       parts.push(`<span class="cheat-label-annotation" title="Transient cheat-list overlay">⚡ ${this.escapeHtml(cheat)}</span>`);
     }
@@ -214,13 +224,37 @@ export class DisasmRowComponent {
     return parts.join(' ');
   });
 
+  /**
+   * Incoming-reference marker from the bridge's cross-reference index:
+   * "◂3" for three code references, "◂3+2" when two data words also point here.
+   */
+  protected readonly xrefBadge = computed(() => {
+    const row = this.data();
+    const code = row.xrefs ?? 0;
+    const data = row.dataRefs ?? 0;
+    if (code === 0 && data === 0) { return null; }
+    const parts: string[] = [];
+    if (code > 0) { parts.push(`${code} code reference${code === 1 ? '' : 's'}`); }
+    if (data > 0) { parts.push(`${data} data pointer${data === 1 ? '' : 's'}`); }
+    return {
+      text: data > 0 ? `◂${code}+${data}` : `◂${code}`,
+      title: `${parts.join(', ')} — click or press X to list them`,
+    };
+  });
+
+  protected onXrefBadgeClick(event: MouseEvent): void {
+    event.stopPropagation();
+    window.dispatchEvent(new CustomEvent('disasm-xrefs', { detail: this.data() }));
+  }
+
   protected readonly opHtml = computed(() =>
-    this.highlightSearch(this.data().op, 'op')
+    this.highlightSearch(this.escapeHtml(this.data().op), 'op')
   );
 
   protected readonly argsHtml = computed(() => {
     const row = this.data();
-    let args = row.args;
+    // .ascii / label operands can hold < or &; escape before adding markup.
+    let args = this.escapeHtml(row.args);
 
     // Format branch offset annotations
     const branchMatch = args.match(/^(.*\$[0-9A-F]{8})\s*(\([+-]\d+[▼▲]\))(.*)$/);
@@ -293,7 +327,14 @@ export class DisasmRowComponent {
 
   private combinedCommentHtml(): string {
     const comment = this.data().comment || '';
-    return comment.trim().length > 0 ? this.colorizeComment(comment) : '';
+    const parts: string[] = [];
+    if (comment.trim().length > 0) { parts.push(this.colorizeComment(comment)); }
+    // The tooltip opens for cheat-only rows too, so it needs the cheat text.
+    const cheat = this.cheatText();
+    if (cheat && !comment.includes(cheat)) {
+      parts.push(`<span class="cheat-label-annotation">⚡ ${this.escapeHtml(cheat)}</span>`);
+    }
+    return parts.join(' ');
   }
 
   private renderLabelText(rawLabel: string): string {
@@ -321,7 +362,7 @@ export class DisasmRowComponent {
       return `<span class="lm-label-str" title="${full}">${labelPart}: &quot;${this.escapeHtml(display)}&quot;</span>`;
     }
 
-    return this.highlightSearch(rawLabel, 'label');
+    return this.highlightSearch(this.escapeHtml(rawLabel), 'label');
   }
 
   private cheatText(): string {
@@ -346,24 +387,20 @@ export class DisasmRowComponent {
     }
   }
 
-  /** Convert virtual address to physical address for EE memory */
+  /** Virtual → physical, the same mapping as the rest of the editor (KSEG0/1 and the uncached mirrors). */
   private toPhysAddr(v: number): number {
-    if (v >= 0x80000000 && v < 0xC0000000) return v - 0x80000000;
-    if (v >= 0xA0000000 && v < 0xC0000000) return v - 0xA0000000;
-    return v;
+    return toPhysAddr(v);
   }
 
-  private readonly CONTROL_FLOW_OPS = new Set([
-    'b', 'beq', 'beql', 'bne', 'bnel', 'blez', 'blezl', 'bgtz', 'bgtzl',
+  private readonly BRANCH_PATH_OPS = new Set([
+    'b', 'beq', 'beql', 'bne', 'bnel', 'beqz', 'bnez', 'beqzl', 'bnezl',
+    'blez', 'blezl', 'bgtz', 'bgtzl',
     'bltz', 'bltzl', 'bgez', 'bgezl', 'bltzal', 'bltzall', 'bgezal', 'bgezall',
-    'bc1f', 'bc1fl', 'bc1t', 'bc1tl', 'bal', 'j', 'jal',
+    'bc0f', 'bc0fl', 'bc0t', 'bc0tl', 'bc1f', 'bc1fl', 'bc1t', 'bc1tl',
+    'bc2f', 'bc2fl', 'bc2t', 'bc2tl', 'bal',
   ]);
 
-  private readonly BRANCH_PATH_OPS = new Set([
-    'b', 'beq', 'beql', 'bne', 'bnel', 'blez', 'blezl', 'bgtz', 'bgtzl',
-    'bltz', 'bltzl', 'bgez', 'bgezl', 'bltzal', 'bltzall', 'bgezal', 'bgezall',
-    'bc1f', 'bc1fl', 'bc1t', 'bc1tl', 'bal',
-  ]);
+  private readonly CONTROL_FLOW_OPS = new Set([...this.BRANCH_PATH_OPS, 'j', 'jal']);
 
   private branchTarget(row: DisasmRow | undefined): number | undefined {
     if (!row) { return undefined; }
@@ -399,7 +436,10 @@ export class DisasmRowComponent {
     const pc = parseInt(row.addr, 16) >>> 0;
 
     if (opcode === 0x02 || opcode === 0x03) {
-      return (((pc + 4) & 0xf0000000) | ((word & 0x03ffffff) << 2)) >>> 0;
+      const low = ((word & 0x03ffffff) << 2) >>> 0;
+      // IOP code shown through the EE mirror really runs at 0x00000000.
+      if (pc >= 0x1c000000 && pc < 0x1c800000) { return (0x1c000000 | (low & 0x007fffff)) >>> 0; }
+      return (((pc + 4) & 0xf0000000) | low) >>> 0;
     }
 
     const imm = word & 0xffff;
@@ -417,10 +457,9 @@ export class DisasmRowComponent {
         : undefined;
     }
 
-    if (opcode === 0x11) {
+    if (opcode === 0x10 || opcode === 0x11 || opcode === 0x12) {
       const rs = (word >>> 21) & 0x1f;
-      const rt = (word >>> 16) & 0x03;
-      return rs === 0x08 && rt <= 0x03 ? relativeTarget : undefined;
+      return rs === 0x08 ? relativeTarget : undefined;  // bc0x / bc1x / bc2x
     }
 
     return undefined;
@@ -441,7 +480,7 @@ export class DisasmRowComponent {
   };
 
   /** Regex for matching GPR names */
-  private readonly GPR_REGEX = /\$?(zero|at|v[01]|a[0-3]|t[0-9]|s[0-7]|k[01]|gp|sp|fp|ra)(?![A-Za-z0-9_])/g;
+  private readonly GPR_REGEX = /(?<![A-Za-z0-9_])\$?(zero|at|v[01]|a[0-3]|t[0-9]|s[0-7]|k[01]|gp|sp|fp|ra)(?![A-Za-z0-9_])/g;
 
   /** Wrap GPR register tokens with color class spans */
   private colorizeRegisters(text: string): string {
@@ -536,7 +575,14 @@ export class DisasmRowComponent {
     return html;
   }
 
+  /** Label names for comment colouring, rebuilt only when one of its sources changes. */
+  private readonly commentLabelNamesCache = computed(() => this.buildCommentLabelNames());
+
   private commentLabelNames(): string[] {
+    return this.commentLabelNamesCache();
+  }
+
+  private buildCommentLabelNames(): string[] {
     const labels = new Set<string>();
     const add = (value: unknown) => {
       if (typeof value !== 'string') { return; }

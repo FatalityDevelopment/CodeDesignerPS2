@@ -98,6 +98,7 @@ const webviewConfig = {
     'debug-commands':     './src/webview/debug-commands/main.ts',
     'snapshot-manager':   './src/webview/snapshot-manager/main.ts',
     'diff-viewer':        './src/webview/diff-viewer/main.ts',
+    'cheat-porter':       './src/webview/cheat-porter/main.ts',
     'joker-maker':        './src/webview/joker-maker/main.ts',
     'structure-visualizer': './src/webview/structure-visualizer/main.ts',
     'memory-card-browser': './src/webview/memory-card-browser/main.ts',

@@ -15,7 +15,43 @@ namespace CodeDesigner.Ps2.Common
         private readonly IPs2MemoryBus? _backing;
         private readonly Dictionary<uint, byte> _overlay = new();
 
-        public AnalysisOverlayBus(IPs2MemoryBus? backing) => _backing = backing;
+        /// <param name="primary">Memory read first (page bytes / local mirror).</param>
+        /// <param name="fallback">Read when <paramref name="primary"/> can't serve an address (e.g. the live client).</param>
+        public AnalysisOverlayBus(IPs2MemoryBus? primary, IPs2MemoryBus? fallback = null)
+        {
+            _backing = primary == null ? fallback
+                : fallback == null || ReferenceEquals(primary, fallback) ? primary
+                : new FallbackBus(primary, fallback);
+        }
+
+        /// <summary>Reads <c>primary</c>, and <c>fallback</c> for any address <c>primary</c> throws on.</summary>
+        private sealed class FallbackBus(IPs2MemoryBus primary, IPs2MemoryBus fallback) : IPs2MemoryBus
+        {
+            public byte[] Ram => primary.Ram;
+            public byte[] Bios => primary.Bios;
+            public byte[] Scratchpad => primary.Scratchpad;
+
+            private static T Try<T>(Func<T> first, Func<T> second)
+            {
+                try { return first(); }
+                catch { return second(); }
+            }
+
+            public byte ReadByte(uint a)         => Try(() => primary.ReadByte(a), () => fallback.ReadByte(a));
+            public ushort ReadHalf(uint a)       => Try(() => primary.ReadHalf(a), () => fallback.ReadHalf(a));
+            public uint ReadWord(uint a)         => Try(() => primary.ReadWord(a), () => fallback.ReadWord(a));
+            public ulong ReadDoubleWord(uint a)  => Try(() => primary.ReadDoubleWord(a), () => fallback.ReadDoubleWord(a));
+            public void ReadQuadWord(uint a, out ulong lo, out ulong hi)
+            {
+                try { primary.ReadQuadWord(a, out lo, out hi); }
+                catch { fallback.ReadQuadWord(a, out lo, out hi); }
+            }
+            public void WriteByte(uint a, byte v) => throw new NotSupportedException();
+            public void WriteHalf(uint a, ushort v) => throw new NotSupportedException();
+            public void WriteWord(uint a, uint v) => throw new NotSupportedException();
+            public void WriteDoubleWord(uint a, ulong v) => throw new NotSupportedException();
+            public void WriteQuadWord(uint a, ulong lo, ulong hi) => throw new NotSupportedException();
+        }
 
         public byte[] Ram        => _backing?.Ram        ?? Array.Empty<byte>();
         public byte[] Bios       => _backing?.Bios       ?? Array.Empty<byte>();

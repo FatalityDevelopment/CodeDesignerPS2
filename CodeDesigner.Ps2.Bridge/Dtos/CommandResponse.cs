@@ -254,6 +254,14 @@ namespace CodeDesigner.Ps2.Bridge
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public byte? PadControllerType { get; set; }
 
+        // Audio output results (PINESETAUDIOMUTED / PINEGETAUDIOSTATE)
+        /// <summary>Effective mute state of PCSX2's audio output.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public bool? AudioMuted { get; set; }
+        /// <summary>True when PCSX2's "Mute All Sound" setting is on, which blocks unmuting over PINE.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public bool? AudioMutedInSettings { get; set; }
+
         // DEV9 network bridge results (NETGETSTATUS / NETGETSTATS / NETRECVCAPTURE / NETDISASSEMBLE)
         /// <summary>Network adapter status returned by NETGETSTATUS.</summary>
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
@@ -282,6 +290,15 @@ namespace CodeDesigner.Ps2.Bridge
         /// <summary>Injection success flag returned by NETINJECT / NETINJECTTX.</summary>
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public bool? InjectionSuccess { get; set; }
+        /// <summary>The frame (base64) NETINJECT / NETINJECTTX sent or NETBUILDFRAME built, after payload swap and fixes.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? NetFrame { get; set; }
+        /// <summary>The SCERT record (base64) NETBUILDMESSAGE encoded.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? NetMessageData { get; set; }
+        /// <summary>Every message the multiplayer server defines, returned by NETCATALOG.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public List<CodeDesigner.Ps2.Multiplayer.Protocol.CatalogEntry>? NetCatalog { get; set; }
 
         // ── Data-format overrides (GETDATAFORMATS) ─────────────────────────────
         /// <summary>
@@ -501,6 +518,19 @@ namespace CodeDesigner.Ps2.Bridge
         public int Len { get; set; }
         [System.Text.Json.Serialization.JsonPropertyName("info")]
         public string Info { get; set; } = string.Empty;
+    }
+
+    /// <summary>One frame sent to NETDISSECTMANY (e.g. a pcap record).</summary>
+    public class NetFrameInput
+    {
+        /// <summary>Raw Ethernet frame bytes as base64.</summary>
+        [System.Text.Json.Serialization.JsonPropertyName("data")]
+        public string Data { get; set; } = string.Empty;
+        /// <summary>0 = TX (PS2→Host), 1 = RX (Host→PS2).</summary>
+        [System.Text.Json.Serialization.JsonPropertyName("direction")]
+        public byte Direction { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("timestampUs")]
+        public ulong TimestampUs { get; set; }
     }
 
     /// <summary>Wire payload for a single captured packet returned by NETRECVCAPTURE.</summary>

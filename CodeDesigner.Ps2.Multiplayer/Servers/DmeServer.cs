@@ -127,8 +127,8 @@ public class DmeServer : BaseMediusTcpServer
 
     // ── Message dispatch ──────────────────────────────────────────────────────
 
-    private const byte DmeMessageClass = 0x00;
-    private const byte DmePing         = 0x01;
+    private const byte DmeMessageClass = (byte)NetMessageClass.MessageClassDME;
+    private const byte DmePing         = (byte)DmeAppMessageId.Ping;
 
     protected override async Task HandleMediusMessageAsync(
         MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)

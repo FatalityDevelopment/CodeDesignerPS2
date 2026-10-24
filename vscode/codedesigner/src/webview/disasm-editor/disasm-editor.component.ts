@@ -26,19 +26,18 @@ import { DebugPanelComponent } from './components/debug-panel.component';
 import { BottomPanelComponent, BottomTab } from './components/bottom-panel.component';
 import { EditOverlayComponent, EditOverlayOpenData, EditOverlaySaveEvent, EditOverlayRefsRequest } from './components/edit-overlay.component';
 import { ConverterOverlayComponent, ConvertRequest, ConvertResult } from './components/converter-overlay.component';
-import { PorterOverlayComponent, PortRequest, PortResultPayload } from './components/porter-overlay.component';
 import { MemoryCardOverlayComponent, McListResult, McActionResult } from './components/memory-card-overlay.component';
 import { HddOverlayComponent, HddListResult, HddActionResult } from './components/hdd-overlay.component';
 import { ScannerOverlayComponent, ScanRequest, ScanResult } from './components/scanner-overlay.component';
 import { StructOffsetOverlayComponent, StructEntryData, AddStructEvent, AddStructMemberEvent } from './components/struct-offset-overlay.component';
-import { MemoryRegionSelectorComponent, MemoryRegion } from './components/memory-region-selector.component';
 import { IconComponent } from '../shared/icon.component';
+import { toPhysAddr } from './utils/address.utils';
 import './disasm-editor.css';
 
 @Component({
   selector: 'app-disasm-editor',
   standalone: true,
-  imports: [HexViewComponent, SearchPanelComponent, AddressInputPanelComponent, VirtualGridComponent, ContextMenuComponent, DebugPanelComponent, BottomPanelComponent, EditOverlayComponent, ConverterOverlayComponent, PorterOverlayComponent, MemoryCardOverlayComponent, HddOverlayComponent, ScannerOverlayComponent, StructOffsetOverlayComponent, MemoryRegionSelectorComponent, IconComponent],
+  imports: [HexViewComponent, SearchPanelComponent, AddressInputPanelComponent, VirtualGridComponent, ContextMenuComponent, DebugPanelComponent, BottomPanelComponent, EditOverlayComponent, ConverterOverlayComponent, MemoryCardOverlayComponent, HddOverlayComponent, ScannerOverlayComponent, StructOffsetOverlayComponent, IconComponent],
   providers: [DisasmEditorService],
   encapsulation: ViewEncapsulation.None,
   templateUrl: './disasm-editor.component.html'
@@ -177,8 +176,8 @@ export class DisasmEditorComponent implements AfterViewInit {
    */
   private readonly pendingPageRequests = new Map<number, number>();
   private static readonly PAGE_REQUEST_RETRY_MS = 1500;
-  /** Last synced breakpoints size — avoids creating a new Set on every live-refresh tick. */
-  private _lastBreakpointsSize = -1;
+  /** Last synced breakpoint addresses — avoids creating a new Set on every live-refresh tick. */
+  private _lastBreakpointsKey: string | null = null;
   /** Last synced search-matches array identity — avoids creating a new Array on every tick. */
   private _lastSearchMatchesRef: SearchMatch[] | null = null;
 
@@ -204,13 +203,6 @@ export class DisasmEditorComponent implements AfterViewInit {
 
   /** Reference to converter overlay component */
   private readonly converterOverlayRef = viewChild<ConverterOverlayComponent>('converterOverlayComp');
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // Porter Overlay State (Phase 10)
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  /** Reference to porter overlay component */
-  private readonly porterOverlayRef = viewChild<PorterOverlayComponent>('porterOverlayComp');
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Memory Card Overlay State
@@ -309,10 +301,6 @@ export class DisasmEditorComponent implements AfterViewInit {
 
   protected onGotoAddress(addr: number): void {
     this.gotoRuntime.navigate?.(addr);
-  }
-
-  protected onRegionSelected(region: MemoryRegion): void {
-    this.vscode.postMessage({ type: 'openMemoryView', label: region.label });
   }
 
   protected onGotoValueChange(value: string): void {
@@ -434,6 +422,14 @@ export class DisasmEditorComponent implements AfterViewInit {
     this.contextMenuRuntime.findCodeReferences?.();
   }
 
+  protected onCtxShowXrefs(): void {
+    if (this._ctxRow) { this.openXrefs(this._ctxRow); }
+  }
+
+  protected onCtxRebuildXrefs(): void {
+    this.vscode.postMessage({ type: 'rebuildXrefIndex' });
+  }
+
   protected onCtxAddToLabelManager(): void {
     this.contextMenuRuntime.addToLabelManager?.();
   }
@@ -507,12 +503,42 @@ export class DisasmEditorComponent implements AfterViewInit {
   // Edit Overlay Event Handlers (Phase 10)
   // ═══════════════════════════════════════════════════════════════════════════
 
+  /** Comment-column hint level, shared by every memory panel (stored by the bridge). */
+  protected readonly hintLevel = signal<'full' | 'addresses' | 'off'>('full');
+
+  protected onHintLevelChange(event: Event): void {
+    const level = (event.target as HTMLSelectElement).value as 'full' | 'addresses' | 'off';
+    this.hintLevel.set(level);
+    this.vscode.postMessage({ type: 'setHintLevel', level });
+  }
+
+  /** Label and user comment the edit overlay opened with, to save only real changes. */
+  private editOverlayOriginal: { label: string; comment: string } | null = null;
+
+  /** The user's own comment at `address` from the label set (not generated hints). */
+  private userCommentAt(address: number): string {
+    const phys = toPhysAddr(address);
+    const entry = (this.svc.state.symLabels ?? []).find(l => {
+      const a = parseInt(l.address.replace(/^0x/i, ''), 16);
+      return Number.isFinite(a) && toPhysAddr(a) === phys;
+    });
+    return entry?.comment ?? '';
+  }
+
   protected onEditOverlaySave(event: EditOverlaySaveEvent): void {
     const origBytes = event.originalBytes;
     if (event.newBytes && event.newBytes !== origBytes && /^[0-9A-F]+$/.test(event.newBytes) && event.newBytes.length % 2 === 0) {
       this.vscode.postMessage({ type: 'patchBytes', address: event.address, hexBytes: event.newBytes });
     }
-    this.vscode.postMessage({ type: 'saveLabel', address: event.address, addressHex: event.addressHex, newLabel: event.newLabel, newComment: event.newComment });
+    // Saving only the bytes must not create, rewrite or delete a label.
+    const original = this.editOverlayOriginal;
+    const labelChanged = !original
+      || event.newLabel !== original.label
+      || event.newComment !== original.comment;
+    if (labelChanged) {
+      this.vscode.postMessage({ type: 'saveLabel', address: event.address, addressHex: event.addressHex, newLabel: event.newLabel, newComment: event.newComment });
+    }
+    this.editOverlayOriginal = null;
   }
 
   protected onEditOverlayClose(): void {
@@ -549,26 +575,6 @@ export class DisasmEditorComponent implements AfterViewInit {
 
   protected onConvertCheat(event: ConvertRequest): void {
     this.vscode.postMessage({ type: 'convertCheat', codes: event.codes, direction: event.direction, format: event.format });
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // Porter Overlay Event Handlers (Phase 10)
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  protected onPorterOverlayClose(): void {
-    this.signals.panels.porterOverlay.set(false);
-  }
-
-  protected onPortCheats(event: PortRequest): void {
-    this.vscode.postMessage({ type: 'portCheats', codes: event.codes, sourcePath: event.sourcePath, targetPath: event.targetPath });
-  }
-
-  protected onBrowseSourceDump(): void {
-    this.vscode.postMessage({ type: 'browseSourceDump' });
-  }
-
-  protected onBrowseTargetDump(): void {
-    this.vscode.postMessage({ type: 'browseTargetDump' });
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -869,9 +875,31 @@ export class DisasmEditorComponent implements AfterViewInit {
             e.preventDefault(); e.stopPropagation();
             params.clearCursorRowFormat();
             return;
+          case 'x': {
+            // Cross-references to the cursor row (IDA-style "X").
+            e.preventDefault(); e.stopPropagation();
+            const row = this.getCursorRow(params.state);
+            if (row) { this.openXrefs(row); }
+            return;
+          }
         }
       }
     });
+
+    // The row badge ("◂ N") asks for its row's cross-references.
+    window.addEventListener('disasm-xrefs', (e: Event) => {
+      const row = (e as CustomEvent<DisasmRowType>).detail;
+      if (row) { this.openXrefs(row); }
+    });
+  }
+
+  /** Opens the edit overlay for `row` on its References tab. */
+  private openXrefs(row: DisasmRowType): void {
+    const address = parseInt(row.addr, 16);
+    if (!Number.isFinite(address)) { return; }
+    this.gridRuntime.editRow?.(row, address, row.addr);
+    // The overlay renders on the next tick; switch tabs once it exists.
+    setTimeout(() => this.editOverlayRef()?.onRefsTabClick(), 0);
   }
 
   private isCodePointerValue(addr: number): boolean {
@@ -1131,9 +1159,10 @@ export class DisasmEditorComponent implements AfterViewInit {
             });
           }
         }
-      } else {
-        params.vscode.postMessage({ type: 'gotoRegion', address: params.pc });
       }
+      // A PC outside this panel's region is not this panel's to follow: the
+      // status goes to every panel, and the host reveals (or opens) the owning
+      // one. Asking for it from here sent one gotoRegion per open panel.
     }
 
     if (!params.paused && this.liveRuntime.paused) {
@@ -1350,11 +1379,14 @@ export class DisasmEditorComponent implements AfterViewInit {
     // redundant new Map() copy here to avoid triggering downstream re-renders
     // on every live-refresh tick.
     signals.pcAddress.set(state.pcAddress);
-    // Only rebuild the breakpoints Set when the count actually changes so that
+    // Only rebuild the breakpoints Set when its contents change so that
     // DisasmRowComponent.hasBreakpoint() computed does not re-run on every
     // live-refresh tick (which would cause all visible rows to flicker).
-    if (state.breakpoints.size !== this._lastBreakpointsSize) {
-      this._lastBreakpointsSize = state.breakpoints.size;
+    // Comparing contents, not just the count: moving a breakpoint keeps the
+    // count the same but must still update the gutter.
+    const bpKey = [...state.breakpoints].sort((a, b) => a - b).join(',');
+    if (bpKey !== this._lastBreakpointsKey) {
+      this._lastBreakpointsKey = bpKey;
       signals.breakpoints.set(new Set(state.breakpoints));
     }
     signals.breakpointHitAddress.set(state.breakpointHitAddress);
@@ -1720,6 +1752,13 @@ export class DisasmEditorComponent implements AfterViewInit {
       });
     }
 
+    if (data['type'] === 'hintLevel') {
+      const level = data['level'];
+      if (level === 'full' || level === 'addresses' || level === 'off') {
+        this.zone.run(() => this.hintLevel.set(level));
+      }
+    }
+
     if (data['type'] === 'addressRefsResult') {
       const refs = data['refs'] as Array<{ address: string; instruction: string }> | undefined;
       this.zone.run(() => {
@@ -1743,38 +1782,6 @@ export class DisasmEditorComponent implements AfterViewInit {
         error: data['error'] as string | undefined,
       });
     });
-  }
-
-  private openPorterOverlay(): void {
-    this.zone.run(() => {
-      this.porterOverlayRef()?.open();
-      this.signals.panels.porterOverlay.set(true);
-    });
-  }
-
-  private handlePorterOverlayMessage(data: Record<string, unknown>): void {
-    if (data['type'] === 'browseSourceDumpResult') {
-      if (data['filePath']) {
-        this.zone.run(() => this.porterOverlayRef()?.setSourcePath(data['filePath'] as string));
-      }
-      return;
-    }
-
-    if (data['type'] === 'browseTargetDumpResult') {
-      if (data['filePath']) {
-        this.zone.run(() => this.porterOverlayRef()?.setTargetPath(data['filePath'] as string));
-      }
-      return;
-    }
-
-    if (data['type'] === 'portCheatsResult') {
-      this.zone.run(() => {
-        this.porterOverlayRef()?.setResult({
-          results: data['results'] as import('./components/porter-overlay.component').PorterResult[] | undefined,
-          error: data['error'] as string | undefined,
-        });
-      });
-    }
   }
 
   private openMemoryCardOverlay(): void {
@@ -1869,10 +1876,6 @@ export class DisasmEditorComponent implements AfterViewInit {
       this.zone.run(() => this.openConverterOverlay());
       return;
     }
-    if (data['type'] === 'openPorterOverlay') {
-      this.zone.run(() => this.openPorterOverlay());
-      return;
-    }
     if (data['type'] === 'openMemoryCardOverlay') {
       this.zone.run(() => this.openMemoryCardOverlay());
       return;
@@ -1891,7 +1894,6 @@ export class DisasmEditorComponent implements AfterViewInit {
     }
     this.handleEditOverlayMessage(data);
     this.handleConverterOverlayMessage(data);
-    this.handlePorterOverlayMessage(data);
     this.handleMemoryCardMessage(data);
     this.handleHddMessage(data);
     this.handleScannerMessage(data);
@@ -2238,7 +2240,12 @@ export class DisasmEditorComponent implements AfterViewInit {
     };
 
     this.gridRuntime.editRow = (row: DisasmRow, address: number, addressHex: string) => {
-      params.openEditOverlayFn(address, addressHex, row.op || '', row.args || '', row.bytes || '', row.label || '', row.comment || '');
+      // The comment column mixes the user's comment with generated hints; only
+      // the user's own comment belongs in the editor, or saving would store the
+      // hint as a comment.
+      const userComment = this.userCommentAt(address);
+      this.editOverlayOriginal = { label: row.label || '', comment: userComment };
+      params.openEditOverlayFn(address, addressHex, row.op || '', row.args || '', row.bytes || '', row.label || '', userComment);
     };
 
     this.gridRuntime.navigateTarget = params.navigateToCurrentRowTarget;
@@ -2399,7 +2406,9 @@ export class DisasmEditorComponent implements AfterViewInit {
       const address = parseInt(this._ctxRow.addr, 16);
       if (!Number.isFinite(address)) { return; }
       const pageStart = params.getPageStart(params.state.cursor);
-      this.svc.clearDataFormat(address, 16, pageStart);
+      // Only the clicked row's span: any override that intersects it is removed
+      // whole, and a wider window also wiped untouched neighbouring formats.
+      this.svc.clearDataFormat(address, rowByteLength(this._ctxRow), pageStart);
     };
 
     this._debugEditRegisterCallback = (regType: string, regIdx: number, currentValue: string) => {
@@ -2407,6 +2416,8 @@ export class DisasmEditorComponent implements AfterViewInit {
     };
 
     this.bottomPanelRuntime.navigate = (addr: number) => {
+      // Same 4-byte alignment as the Go To box, so rows don't render shifted.
+      addr = ((addr & 0xE0000000) | (params.toPhysicalAddress(addr) & ~0x3)) >>> 0;
       const physAddr = params.toPhysicalAddress(addr);
       const physBase = params.toPhysicalAddress(params.state.baseAddress);
       const instrIndex = Math.floor((physAddr - physBase) / 4);
@@ -2949,9 +2960,9 @@ export class DisasmEditorComponent implements AfterViewInit {
       if (!row) { return; }
       const address = parseInt(row.addr, 16);
       if (!Number.isFinite(address)) { return; }
-      // Clear a window of 16 bytes to make sure overlapping dword/qword
-      // overrides are removed too.
-      svc.clearDataFormat(address, 16, pageStart);
+      // The host removes every override intersecting the row, so the row's own
+      // span is enough; a fixed 16-byte window also cleared neighbouring rows.
+      svc.clearDataFormat(address, rowByteLength(row), pageStart);
     };
 
     this.bindGlobalShortcuts({

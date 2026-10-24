@@ -24,7 +24,7 @@ type PropTab = 'item' | 'material' | 'texture' | 'paint' | 'model';
 type BottomTab = 'uv' | 'log';
 
 interface MenuItem {
-  label: string;
+  label: string | (() => string);
   shortcut?: string;
   action?: () => void;
   disabled?: () => boolean;
@@ -34,9 +34,9 @@ interface MenuItem {
 
 interface Menu { id: string; label: string; items: MenuItem[] }
 
-const KIND_ORDER = ['prop', 'weapon', 'character', 'world', 'sky', 'library'];
+const KIND_ORDER = ['prop', 'weapon', 'character', 'vehicle', 'world', 'sky', 'library', 'model'];
 const KIND_LABEL: Record<string, string> = {
-  prop: 'Props', weapon: 'Weapons', character: 'Characters', world: 'World', sky: 'Sky', library: 'Libraries',
+  prop: 'Props', weapon: 'Weapons', character: 'Characters', vehicle: 'Vehicles', world: 'World', sky: 'Sky', library: 'Libraries', model: 'Other',
 };
 
 // Model Editor. Every edit is a bridge asset-session command (AssetClient), the
@@ -62,7 +62,7 @@ const KIND_LABEL: Record<string, string> = {
               @else {
                 <button class="me-menu-item" [disabled]="item.disabled?.()" (click)="runMenu(item)">
                   <span class="me-menu-check">{{ item.checked?.() ? '✓' : '' }}</span>
-                  <span class="me-menu-label">{{ item.label }}</span>
+                  <span class="me-menu-label">{{ labelOf(item) }}</span>
                   <span class="me-menu-key">{{ item.shortcut ?? '' }}</span>
                 </button>
               }
@@ -76,7 +76,7 @@ const KIND_LABEL: Record<string, string> = {
       <span class="me-pkg" [title]="s.path">{{ fileName(s.path) }}</span>
       @if (s.game) { <span class="me-badge" title="Edits and saves are not available for this game yet">{{ s.game }} · read-only</span> }
       @if (exportTarget(); as target) {
-        <button class="lm-tool-btn" [disabled]="busy()" (click)="openExport()" [title]="'Convert ' + (current()?.name ?? '') + ' into a ' + target + ' package and open it'">Export to {{ target }}…</button>
+        <button class="lm-tool-btn me-export-btn" [disabled]="busy()" (click)="quickExport()" [title]="'Convert ' + (current()?.name ?? '') + ' into a ' + target + ' package and open it (Ctrl+E). File › Export with options… picks animations / names.'">Export to {{ target }}…</button>
       }
       @else { <span class="me-badge" [class.me-badge-dirty]="dirtyCount() > 0">{{ dirtyCount() ? dirtyCount() + ' unsaved' : 'saved' }} · rev {{ s.revision }}</span> }
       <span class="me-session" title="Asset session: assets_* MCP tools can work on it too">{{ s.session }}</span>
@@ -166,7 +166,7 @@ const KIND_LABEL: Record<string, string> = {
           }
         </div>
         <div class="me-list">
-          @if (!status()) { <div class="me-empty">File › Open package… to load a .ZDB, a .CDB pack or a loose .ZED.</div> }
+          @if (!status()) { <div class="me-empty">File › Open package… to load a .ZDB, a .CDB pack, a loose .ZED, or a GTA: San Andreas .ISO / .IMG.</div> }
           @for (group of groups(); track group.kind) {
             <div class="me-group-title">{{ kindLabel(group.kind) }} <span class="lm-muted">{{ group.models.length }}</span></div>
             @for (m of group.models; track m.archive + ':' + m.name) {
@@ -233,7 +233,9 @@ const KIND_LABEL: Record<string, string> = {
     <!-- Outliner + properties -->
     <aside class="me-side">
       <div class="me-outliner">
-        <div class="me-panel-title">Outliner</div>
+        <div class="me-panel-title">Outliner
+          @if (exportTarget(); as target) { <button class="lm-row-btn" [disabled]="busy()" (click)="quickExport()" [title]="'Export ' + (current()?.name ?? '') + ' to ' + target">Export to {{ target }}…</button> }
+        </div>
         @if (mesh(); as m) {
           <div class="me-tree">
             <div class="me-tree-row me-tree-root" (click)="selectAllChunks()"><app-icon name="database" [size]="12" /> {{ m.name }}</div>
@@ -494,14 +496,18 @@ export class ModelEditorPageComponent implements AfterViewInit, OnDestroy {
   readonly exportTarget = computed(() => {
     const s = this.status(), m = this.current();
     if (!s || !m) { return null; }
-    if (s.game) { return ['character', 'weapon', 'prop'].includes(m.kind) ? 'SOCOM II' : null; }
+    if (s.game) {
+      if (/GTA/.test(s.game)) { return ['character', 'weapon', 'vehicle', 'prop', 'model'].includes(m.kind) ? 'SOCOM II' : null; }
+      return /Combined Assault/.test(s.game) && ['character', 'weapon', 'prop'].includes(m.kind) ? 'SOCOM II' : null;
+    }
     const skinned = m.kind === 'character' && /^MESH_/i.test(m.name);
     return skinned || ['weapon', 'prop', 'library'].includes(m.kind) ? 'SOCOM 3 / CA' : null;
   });
   readonly exportToCa = computed(() => this.exportTarget() === 'SOCOM 3 / CA');
   readonly exportModelPlaceholder = computed(() => {
     const n = this.current()?.name ?? '';
-    return this.exportToCa() ? n.replace(/^MESH_/i, '') : 'ca_' + n.replace(/^clib_/, '');
+    if (this.exportToCa()) { return n.replace(/^MESH_/i, ''); }
+    return /GTA/.test(this.status()?.game ?? '') ? 'gta_' + n.toLowerCase() : 'ca_' + n.replace(/^clib_/, '');
   });
   readonly shownExportClips = computed(() => {
     const q = this.exportClipQuery().trim().toLowerCase();
@@ -580,6 +586,9 @@ export class ModelEditorPageComponent implements AfterViewInit, OnDestroy {
         { label: 'Export memory-card pack…', action: () => void this.exportPack(), disabled: () => !this.dirtyCount() },
         { separator: true, label: '' },
         { label: 'Export model as OBJ…', action: () => void this.exportObj(), disabled: () => !this.mesh() },
+        // Converting to the other game: GTA / CA models -> SOCOM II, SOCOM II -> SOCOM 3 / CA.
+        { label: () => `Export to ${this.exportTarget() ?? 'another game'}`, shortcut: 'Ctrl+E', action: () => void this.quickExport(), disabled: () => !this.exportTarget() || this.busy() },
+        { label: 'Export with options…', action: () => void this.openExport(), disabled: () => !this.exportTarget() || this.busy() },
       ],
     },
     {
@@ -734,6 +743,7 @@ export class ModelEditorPageComponent implements AfterViewInit, OnDestroy {
     else if (ctrl && (k === 'y' || (e.shiftKey && k === 'z'))) { void this.redo(); }
     else if (ctrl && k === 's') { void this.saveZdbCopy(); }
     else if (ctrl && k === 'o') { this.pickPackage(); }
+    else if (ctrl && k === 'e') { if (this.exportTarget()) { void this.quickExport(); } }
     else if (ctrl && k === 'i') { this.viewport.invertSelection(); }
     else if (numpad && e.code === 'Numpad1') { this.view(ctrl ? 'back' : 'front'); }
     else if (numpad && e.code === 'Numpad3') { this.view(ctrl ? 'left' : 'right'); }
@@ -827,6 +837,8 @@ export class ModelEditorPageComponent implements AfterViewInit, OnDestroy {
   // ------------------------------------------------------------------ session
 
   pickPackage(): void { this.api.postMessage({ type: 'pickPackage' }); }
+
+  labelOf(item: MenuItem): string { return typeof item.label === 'function' ? item.label() : item.label; }
   kindLabel(kind: string): string { return KIND_LABEL[kind] ?? kind; }
   isCurrent(m: ModelSummary): boolean { const c = this.current(); return !!c && c.archive === m.archive && c.name === m.name; }
   fileName(p: string): string { return p.split(/[\\/]/).pop() ?? p; }
@@ -847,7 +859,9 @@ export class ModelEditorPageComponent implements AfterViewInit, OnDestroy {
       try {
         const list = await this.client.listAnimations();
         // Named clips first (clip_<hash> ones have no recovered name).
-        const names = list.clips.map(c => c.name);
+        // GTA names repeat across its IFP files: those clips go as "source/name".
+        const gta = /GTA/.test(this.status()?.game ?? '');
+        const names = list.clips.map(c => gta ? `${c.source}/${c.name}` : c.name);
         this.exportClipNames.set([...names.filter(n => !n.startsWith('clip_')), ...names.filter(n => n.startsWith('clip_'))]);
       } catch { this.exportClipNames.set([]); }
     }
@@ -864,6 +878,16 @@ export class ModelEditorPageComponent implements AfterViewInit, OnDestroy {
     for (const c of this.shownExportClips()) { if (on) { next.add(c); } else { next.delete(c); } }
     if (!on && !this.exportClipQuery().trim()) { next.clear(); }
     this.exportClips.set(next);
+  }
+
+  /** One click: the displayed model with the defaults (pack and model named after it, Documents/CodeDesigner/Exports,
+   *  no clips), then the new package opens. */
+  async quickExport(): Promise<void> {
+    this.exportPackName.set('');
+    this.exportModelName.set('');
+    this.exportDir.set('');
+    this.exportClips.set(new Set());
+    await this.runExport();
   }
 
   /** Converts the current model, then opens the new package with that model selected. */

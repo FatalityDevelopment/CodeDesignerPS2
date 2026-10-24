@@ -10,8 +10,8 @@ of truth for what you load into the database.
 
 ## How to apply
 
-The bridge's `import_agent_profile` / `import_orchestration_plan` is **lossy** — it
-reads only the YAML front-matter and stuffs the whole body into `Description`. So to
+The bridge's `MCPAGENT_IMPORT` / `MCPORCHESTRATION_IMPORT` commands (and the `import_orchestration_plan` MCP tool) are **lossy**: they
+read only the YAML front-matter and put the whole body into `Description`. So to
 get full fidelity, set each column **manually** (SQL, the AI Config webview, or the
 `create/update_*` MCP tools). Each `## Section` below maps to exactly one column.
 

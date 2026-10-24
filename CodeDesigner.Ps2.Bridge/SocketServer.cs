@@ -312,11 +312,13 @@ namespace CodeDesigner.Ps2.Bridge
             _memoryService        = new Services.MemoryService(ctx);
             _registerService      = new Services.RegisterService(ctx);
             _analysisStateService = new Services.AnalysisStateService(ctx);
+            _xrefIndexService     = new Services.XrefIndexService(ctx);
             _dispatcher = new Services.CommandDispatcher(new Services.ICommandService[]
             {
                 _memoryService,
                 _registerService,
                 _analysisStateService,
+                _xrefIndexService,
                 new Services.ExecutionService(ctx),
                 new Services.CheatsService(ctx),
                 new Services.NetworkService(ctx),
@@ -372,8 +374,10 @@ namespace CodeDesigner.Ps2.Bridge
         private readonly Services.MemoryService         _memoryService;
         private readonly Services.RegisterService       _registerService;
         private readonly Services.AnalysisStateService  _analysisStateService;
+        private readonly Services.XrefIndexService      _xrefIndexService;
         Services.MemoryService        Services.IBridgeContext.Memory        => _memoryService;
         Services.AnalysisStateService Services.IBridgeContext.AnalysisState => _analysisStateService;
+        Services.XrefIndexService     Services.IBridgeContext.Xrefs         => _xrefIndexService;
 
         /// <inheritdoc/>
         public void Dispose()
@@ -392,9 +396,24 @@ namespace CodeDesigner.Ps2.Bridge
         {
             string connectionString = DatabasePaths.GetDefaultConnectionString();
             var opts = DatabaseInitialiser.BuildDbOptions(connectionString);
-            var ctx = new CodeDesignerDbContext(opts);
-            ctx.Database.Migrate();
-            return ctx;
+            // LocalDB can fail to start for a moment ("SQL Server process failed to start", e.g. while another process
+            // is starting the same instance): retry with a back-off instead of letting the bridge die at launch.
+            const int attempts = 6;
+            for (int attempt = 1; ; attempt++)
+            {
+                var ctx = new CodeDesignerDbContext(opts);
+                try
+                {
+                    ctx.Database.Migrate();
+                    return ctx;
+                }
+                catch (Exception ex) when (attempt < attempts)
+                {
+                    ctx.Dispose();
+                    Console.WriteLine($"[DB] LocalDB not ready (attempt {attempt}/{attempts}): {ex.GetBaseException().Message.Split('\n')[0]} - retrying in {2 * attempt} s");
+                    System.Threading.Thread.Sleep(TimeSpan.FromSeconds(2 * attempt));
+                }
+            }
         }
 
         /// <summary>

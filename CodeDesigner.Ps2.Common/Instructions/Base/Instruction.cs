@@ -14,6 +14,7 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions
     {
         void ExecuteGeneric(CpuState cpu, object args);
         string AnalyzeGeneric(object args, CpuState? cpu = null, uint? pc = null);
+        string DisasmGeneric(object args, uint? pc = null);
     }
 
     // Generic base class for all instruction types
@@ -57,6 +58,11 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions
                 return Analyze(typedArgs, cpu, pc);
             }
             return string.Empty;
+        }
+
+        public virtual string DisasmGeneric(object args, uint? pc = null)
+        {
+            return args is TArgs typedArgs ? Disasm(typedArgs, pc) : string.Empty;
         }
     }
 }

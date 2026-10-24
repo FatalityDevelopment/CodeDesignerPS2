@@ -1,923 +1,511 @@
 import {
     Component,
-    signal,
-    computed,
     ChangeDetectionStrategy,
+    ElementRef,
     ViewEncapsulation,
+    computed,
+    output,
+    signal,
+    viewChild,
 } from '@angular/core';
 import { IconComponent } from '../shared/icon.component';
+import {
+    CapturedPacket,
+    DissectedLayer,
+    NetStats,
+    NetStatus,
+    PacketViewerAction,
+    ParsedPacketRow,
+    b64ToBytes,
+    bytesToHex,
+} from './types';
 
-// ── Types ────────────────────────────────────────────────────────────────────
-
-/** A captured packet received from the bridge. */
-export interface CapturedPacket {
-    /** 0=TX (PS2→Host), 1=RX (Host→PS2). */
-    direction: number;
-    directionName: string;
-    timestampUs: number;
-    length: number;
-    /** Base64-encoded raw Ethernet frame. */
-    data: string;
-    /**
-     * Pre-computed layer tree from the bridge dissector.
-     * Populated by NETRECVCAPTURE (live capture) and the pcap-load path; consumed
-     * directly by the tree view / hex highlighter — the webview no longer parses
-     * SCERT or Medius. See PacketDissector in CodeDesigner.Ps2.Multiplayer.
-     */
-    layers?: DissectedLayer[];
-}
-
-/** Pre-parsed table row returned by the Bridge alongside a captured packet. */
-export interface ParsedPacketRow {
-    no: number;
+/** One table row. */
+interface PacketRow {
+    index: number;
     time: string;
-    dir: string;
+    dir: 'TX' | 'RX';
     server: string;
     src: string;
     dst: string;
     proto: string;
-    len: number;
-    info: string;
-}
-
-/** Adapter status snapshot. */
-export interface NetStatus {
-    enabled: boolean;
-    adapterType: number;
-    ps2Mac: string;
-    ps2IP: string;
-}
-
-/** Traffic statistics snapshot. */
-export interface NetStats {
-    txPackets: number;
-    rxPackets: number;
-    txBytes: number;
-    rxBytes: number;
-    captureQueueSize: number;
-    droppedCount: number;
-}
-
-/** A parsed protocol layer for the dissection tree. */
-export interface DissectedLayer {
-    label: string;          // e.g. "Ethernet II", "IPv4", "TCP"
-    color: string;          // accent colour for the row
-    fields: DissectedField[];
-    /** Byte offset and length in the raw frame for highlighting. */
-    offset: number;
     length: number;
+    info: string;
+    /** Lower-cased text the display filter searches. */
+    search: string;
+    noise: boolean;
 }
 
-export interface DissectedField {
-    name: string;
-    value: string;
+/** Saved view settings (see PacketViewerPageComponent's webview state). */
+export interface ViewerSettings {
+    captureDirection?: number;
+    displayFilter?: string;
+    protoFilter?: string;
+    hideNoise?: boolean;
+    follow?: boolean;
 }
 
-/** A packet payload for pcap save/load operations. */
-export interface PcapPacketEntry {
-    direction: number;
-    timestampUs: number;
-    data: string; // base64-encoded raw Ethernet frame
-}
-
-/** Actions emitted to the host page component. */
-export type PacketViewerAction =
-    | { type: 'startCapture'; direction: number; maxQueue: number }
-    | { type: 'stopCapture' }
-    | { type: 'recvCapture'; maxPackets: number }
-    | { type: 'setFilter'; filterType: number; protocol?: number; port?: number; ip?: string }
-    | { type: 'getStatus' }
-    | { type: 'getStats' }
-    | { type: 'disassemble'; data: string }
-    | { type: 'clearPackets' }
-    | { type: 'openPcap' }
-    | { type: 'savePcap'; packets: PcapPacketEntry[] };
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-function b64ToBytes(b64: string): Uint8Array {
-    const bin = atob(b64);
-    const bytes = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) { bytes[i] = bin.charCodeAt(i); }
-    return bytes;
-}
+/** Keep-alives and bare TCP ACKs: hidden by "Hide noise". */
+const NOISE_INFO = /^(\d+ → \d+ \[[A-Z, ]*\] Len=0|((RT_MSG_(CLIENT|SERVER)_ECHO|Ping( \(echo\))?|EndOfBatch)(, )?)+)$/;
 
 function toHex(b: number, pad = 2): string {
     return b.toString(16).toUpperCase().padStart(pad, '0');
 }
 
 /**
- * Build a structured hex dump with per-layer field colouring.
- *
- * Each layer's bytes are coloured with that layer's accent colour (text).
- * Bytes belonging to the selected layer additionally receive the `pv-hex-hl`
- * background highlight so they stand out clearly.
- *
- * Later layers in the array override earlier ones (innermost wins), matching
- * the order the bridge dissector emits layers: Ethernet -> IP -> TCP -> SCERT -> Medius.
+ * Hex dump with the selected layer's bytes highlighted. Every other byte takes the colour of the
+ * innermost layer that covers it (the bridge emits layers outermost first).
  */
-function hexDump(raw: Uint8Array, layers: DissectedLayer[] = [], selectedLayerIdx = -1): string {
-    // Per-byte colour and selection state — innermost (later) layer wins.
-    const byteColor  = new Array<string | undefined>(raw.length);
-    const byteSel    = new Uint8Array(raw.length);
-
-    for (let li = 0; li < layers.length; li++) {
-        const layer = layers[li];
-        const end   = Math.min(layer.offset + layer.length, raw.length);
-        const isSel = li === selectedLayerIdx;
+function hexDump(raw: Uint8Array, layers: DissectedLayer[], selectedLayer: number): string {
+    const color = new Array<string | undefined>(raw.length);
+    const sel   = new Uint8Array(raw.length);
+    layers.forEach((layer, li) => {
+        const end = Math.min(layer.offset + layer.length, raw.length);
         for (let b = layer.offset; b < end; b++) {
-            byteColor[b] = layer.color;
-            byteSel[b]   = isSel ? 1 : 0;
+            color[b] = layer.color;
+            sel[b]   = li === selectedLayer ? 1 : 0;
         }
-    }
+    });
 
-    // Header row
-    let header = '<div class="pv-hex-row">';
-    header += '<span class="pv-hex-addr">Offset</span>';
-    header += '<span class="pv-hex-bytes">';
-    for (let i = 0; i < 16; i++) {
-        if (i && i % 4 === 0) { header += '<span class="pv-hex-gap"></span>'; }
-        header += `<span class="pv-hex-byte">+${i.toString(16).toUpperCase()}</span>`;
-    }
-    header += '</span>';
-    header += '<span class="pv-hex-ascii">0123456789ABCDEF</span>';
-    header += '</div>';
+    const rows: string[] = [];
+    let head = '<div class="pv-hex-row pv-hex-head"><span class="pv-hex-addr">Offset</span><span class="pv-hex-bytes">';
+    for (let i = 0; i < 16; i++) { head += `${i && i % 8 === 0 ? '<span class="pv-hex-gap"></span>' : ''}<span class="pv-hex-byte">${toHex(i, 1)}</span>`; }
+    rows.push(head + '</span><span class="pv-hex-ascii">ASCII</span></div>');
 
-    // Data rows
-    const rows: string[] = [header];
     for (let i = 0; i < raw.length; i += 16) {
-        const addr = toHex(i, 8);
-        let bytesHtml = '';
-        let asciiHtml = '';
+        let bytes = '';
+        let ascii = '';
         for (let j = 0; j < 16; j++) {
-            if (j && j % 4 === 0) { bytesHtml += '<span class="pv-hex-gap"></span>'; }
-            if (i + j < raw.length) {
-                const b   = raw[i + j];
-                const sel = byteSel[i + j];
-                const col = byteColor[i + j];
-                const ch  = (b >= 0x20 && b < 0x7F) ? String.fromCharCode(b) : '.';
-                if (sel) {
-                    // Selected layer — prominent background highlight.
-                    bytesHtml += `<span class="pv-hex-byte pv-hex-hl">${toHex(b)}</span>`;
-                    asciiHtml += `<span class="pv-hex-char pv-hex-hl">${ch}</span>`;
-                } else if (col) {
-                    // Non-selected layer — layer accent colour on text only.
-                    const sty = ` style="color:${col}"`;
-                    bytesHtml += `<span class="pv-hex-byte"${sty}>${toHex(b)}</span>`;
-                    asciiHtml += `<span class="pv-hex-char"${sty}>${ch}</span>`;
-                } else {
-                    bytesHtml += `<span class="pv-hex-byte">${toHex(b)}</span>`;
-                    asciiHtml += `<span class="pv-hex-char">${ch}</span>`;
-                }
-            } else {
-                bytesHtml += '<span class="pv-hex-byte">  </span>';
-                asciiHtml += '<span class="pv-hex-char"> </span>';
-            }
+            if (j && j % 8 === 0) { bytes += '<span class="pv-hex-gap"></span>'; }
+            const k = i + j;
+            if (k >= raw.length) { bytes += '<span class="pv-hex-byte"></span>'; continue; }
+            const b  = raw[k];
+            const ch = b >= 0x20 && b < 0x7F ? String.fromCharCode(b).replace('&', '&amp;').replace('<', '&lt;') : '.';
+            const cls = sel[k] ? ' pv-hex-hl' : '';
+            const sty = !sel[k] && color[k] ? ` style="color:${color[k]}"` : '';
+            bytes += `<span class="pv-hex-byte${cls}"${sty}>${toHex(b)}</span>`;
+            ascii += `<span class="pv-hex-char${cls}"${sty}>${ch}</span>`;
         }
-        rows.push(
-            `<div class="pv-hex-row">` +
-            `<span class="pv-hex-addr">${addr}</span>` +
-            `<span class="pv-hex-bytes">${bytesHtml}</span>` +
-            `<span class="pv-hex-ascii">${asciiHtml}</span>` +
-            `</div>`
-        );
+        rows.push(`<div class="pv-hex-row"><span class="pv-hex-addr">${toHex(i, 4)}</span><span class="pv-hex-bytes">${bytes}</span><span class="pv-hex-ascii">${ascii}</span></div>`);
     }
     return rows.join('');
 }
 
-// ── Component ────────────────────────────────────────────────────────────────
-
+/**
+ * Packet list + details: capture controls, the labelled packet table, and the selected packet's
+ * layer tree and bytes. Labels come from the bridge dissector, which names every message the
+ * multiplayer server defines (MessageCatalog.cs).
+ */
 @Component({
     selector: 'app-packet-viewer',
     standalone: true,
     changeDetection: ChangeDetectionStrategy.OnPush,
     encapsulation: ViewEncapsulation.None,
     imports: [IconComponent],
-    styles: [`
-/* ── Top-level layout ─────────────────────────────────────────── */
-.pv-root {
-    --cd-panel-bg: var(--vscode-editor-background, #1e1e1e);
-    --cd-panel-bg-raised: var(--vscode-editorWidget-background, var(--vscode-sideBar-background, #252526));
-    --cd-panel-header-bg: var(--vscode-editorGroupHeader-tabsBackground, var(--vscode-sideBar-background, #252526));
-    --cd-panel-control-bg: var(--vscode-button-secondaryBackground, rgba(255, 255, 255, 0.08));
-    --cd-panel-control-hover-bg: var(--vscode-button-secondaryHoverBackground, var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.12)));
-    --cd-panel-border: var(--vscode-panel-border, var(--vscode-editorGroup-border, #3e3e42));
-    --cd-panel-border-subtle: color-mix(in srgb, var(--cd-panel-border) 58%, transparent);
-    --cd-panel-row-hover: var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.06));
-    --cd-panel-muted: var(--vscode-descriptionForeground, #858585);
-    --cd-panel-shadow: 0 2px 8px rgba(0, 0, 0, 0.22);
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    flex: 1 1 auto;
-    min-height: 0;
-    overflow: hidden;
-    background: var(--cd-panel-bg);
-    color: var(--vscode-editor-foreground, #d4d4d4);
-}
-
-.pv-root app-icon,
-.pv-root .lic {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    line-height: 0;
-}
-
-/* ── Toolbar ──────────────────────────────────────────────────── */
-.pv-toolbar {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 10px;
-    background: var(--cd-panel-header-bg);
-    border-bottom: 1px solid var(--cd-panel-border);
-    flex-shrink: 0;
-    flex-wrap: wrap;
-}
-.pv-toolbar button {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    padding: 4px 10px;
-    border: 1px solid var(--cd-panel-border);
-    border-radius: 4px;
-    background: var(--cd-panel-control-bg);
-    color: var(--vscode-editor-foreground, #d4d4d4);
-    font-size: 12px;
-    cursor: pointer;
-    white-space: nowrap;
-}
-.pv-toolbar button:hover { background: var(--cd-panel-control-hover-bg); color: #fff; }
-.pv-toolbar button.pv-active { background: var(--vscode-button-background, #0e639c); border-color: var(--vscode-button-background, #0e639c); color: #fff; }
-.pv-toolbar button:disabled { opacity: 0.5; cursor: default; }
-.pv-toolbar select, .pv-toolbar input {
-    padding: 3px 6px;
-    border: 1px solid var(--cd-panel-border);
-    border-radius: 4px;
-    background: var(--cd-panel-control-bg);
-    color: var(--vscode-editor-foreground, #d4d4d4);
-    font-size: 12px;
-}
-.pv-toolbar input { width: 110px; }
-.pv-toolbar .pv-sep { width: 1px; height: 20px; background: var(--cd-panel-border); }
-.pv-toolbar .pv-stats {
-    margin-left: auto;
-    font-size: 11px;
-    color: var(--cd-panel-muted);
-    white-space: nowrap;
-}
-
-/* ── Three-pane body (packet list / dissection tree / hex dump) ─ */
-.pv-body {
-    display: flex;
-    flex-direction: column;
-    flex: 1;
-    overflow: hidden;
-}
-.pv-pane {
-    overflow: auto;
-    margin: 8px 10px 0;
-    border: 1px solid var(--cd-panel-border);
-    border-radius: 8px;
-    background: var(--cd-panel-bg-raised);
-    box-shadow: var(--cd-panel-shadow);
-}
-.pv-pane:last-child { margin-bottom: 8px; }
-.pv-pane-packets { flex: 2; min-height: 80px; }
-.pv-pane-dissect { flex: 1.2; min-height: 80px; }
-.pv-pane-hexdump { flex: 1; min-height: 60px; }
-
-/* ── Packet list table ────────────────────────────────────────── */
-.pv-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-family: var(--vscode-editor-font-family, 'Cascadia Code', 'Consolas', monospace);
-    font-size: 12px;
-}
-.pv-table th {
-    position: sticky;
-    top: 0;
-    background: var(--cd-panel-header-bg);
-    border-bottom: 1px solid var(--cd-panel-border);
-    text-align: left;
-    padding: 4px 8px;
-    font-weight: 600;
-    color: var(--cd-panel-muted);
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    z-index: 1;
-}
-.pv-table td {
-    padding: 2px 8px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 500px;
-}
-.pv-table tr { cursor: pointer; }
-.pv-table tr:hover { background: var(--cd-panel-row-hover); }
-.pv-table tr.pv-selected { background: var(--vscode-list-activeSelectionBackground, #094771); color: var(--vscode-list-activeSelectionForeground, #fff); }
-.pv-dir-tx { color: #e6a23c; }
-.pv-dir-rx { color: #67c23a; }
-.pv-server { color: #c792ea; font-weight: 600; }
-
-/* ── Dissection tree ──────────────────────────────────────────── */
-.pv-tree { padding: 4px 0; }
-.pv-tree-layer {
-    padding: 2px 8px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 12px;
-}
-.pv-tree-layer:hover { background: var(--cd-panel-row-hover); }
-.pv-tree-layer.pv-layer-selected { background: var(--vscode-list-activeSelectionBackground, #094771); color: var(--vscode-list-activeSelectionForeground, #fff); }
-.pv-tree-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    flex-shrink: 0;
-}
-.pv-tree-chevron {
-    width: 12px;
-    text-align: center;
-    color: #888;
-    flex-shrink: 0;
-    font-size: 10px;
-    user-select: none;
-}
-.pv-tree-field {
-    padding: 1px 8px 1px 40px;
-    font-size: 12px;
-    font-family: var(--vscode-editor-font-family, 'Cascadia Code', 'Consolas', monospace);
-    color: #aaa;
-}
-.pv-tree-field-name { color: #9cdcfe; }
-.pv-tree-field-value { color: #ce9178; }
-
-/* ── Hex dump (disassembler-style) ────────────────────────────── */
-.pv-hex {
-    font-family: var(--vscode-editor-font-family, 'Cascadia Code', 'Consolas', monospace);
-    font-size: 12px;
-    padding: 2px 4px 4px;
-    background: var(--cd-panel-bg-raised);
-}
-.pv-hex-row {
-    display: flex;
-    gap: 8px;
-    padding: 2px 6px;
-    line-height: 1.4;
-}
-.pv-hex-row:first-child {
-    background: var(--cd-panel-header-bg);
-    border-bottom: 1px solid var(--cd-panel-border);
-}
-.pv-hex-addr {
-    color: #858585;
-    width: 10ch;
-    flex-shrink: 0;
-}
-.pv-hex-bytes {
-    display: flex;
-    gap: 0;
-    flex: 1;
-}
-.pv-hex-byte {
-    color: #d4d4d4;
-    width: 2ch;
-    text-align: center;
-    margin: 0 1px;
-}
-.pv-hex-byte.pv-hex-hl {
-    background: #264f78;
-    color: #fff;
-}
-.pv-hex-gap {
-    width: 8px;
-    flex-shrink: 0;
-}
-.pv-hex-ascii {
-    color: #608b4e;
-    width: 16ch;
-    border-left: 1px solid var(--cd-panel-border);
-    padding-left: 8px;
-    display: flex;
-    flex-shrink: 0;
-}
-.pv-hex-char {
-    width: 1ch;
-    display: inline-block;
-    text-align: center;
-}
-.pv-hex-char.pv-hex-hl {
-    background: #264f78;
-    color: #fff;
-}
-
-/* ── Status bar ───────────────────────────────────────────────── */
-.pv-statusbar {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 4px 12px;
-    background: var(--cd-panel-header-bg);
-    border-top: 1px solid var(--cd-panel-border);
-    font-size: 11px;
-    color: var(--cd-panel-muted);
-    flex-shrink: 0;
-}
-.pv-statusbar .pv-status-ok { color: #67c23a; display: inline-flex; align-items: center; gap: 5px; }
-.pv-statusbar .pv-status-err { color: #f56c6c; display: inline-flex; align-items: center; gap: 5px; }
-
-/* ── Empty state ──────────────────────────────────────────────── */
-.pv-empty {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    height: 100%;
-    color: var(--cd-panel-muted);
-    gap: 8px;
-}
-.pv-empty-icon { opacity: 0.42; color: var(--cd-panel-muted); }
-
-/* ── Display filter bar ───────────────────────────────────────── */
-.pv-filterbar {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 10px;
-    background: var(--cd-panel-bg);
-    border-bottom: 1px solid var(--cd-panel-border);
-    flex-shrink: 0;
-}
-.pv-filterbar-label {
-    font-size: 11px;
-    color: var(--cd-panel-muted);
-    white-space: nowrap;
-}
-.pv-filterbar-input {
-    flex: 1;
-    padding: 3px 6px;
-    border: 1px solid var(--cd-panel-border);
-    border-radius: 4px;
-    background: var(--cd-panel-control-bg);
-    color: var(--vscode-editor-foreground, #d4d4d4);
-    font-size: 12px;
-    font-family: var(--vscode-editor-font-family, 'Cascadia Code', 'Consolas', monospace);
-    min-width: 0;
-}
-.pv-filterbar-input:focus { outline: 1px solid var(--vscode-focusBorder, #0e639c); border-color: var(--vscode-focusBorder, #0e639c); }
-.pv-filterbar-clear {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 3px 6px;
-    border: 1px solid var(--cd-panel-border);
-    border-radius: 4px;
-    background: var(--cd-panel-control-bg);
-    color: var(--vscode-editor-foreground, #d4d4d4);
-    font-size: 11px;
-    cursor: pointer;
-    flex-shrink: 0;
-}
-.pv-filterbar-clear:hover { background: var(--cd-panel-control-hover-bg); color: #fff; }
-.pv-filterbar-count {
-    font-size: 11px;
-    color: var(--cd-panel-muted);
-    white-space: nowrap;
-    flex-shrink: 0;
-}
-.pv-file-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    font-size: 12px;
-    color: var(--cd-panel-muted);
-    white-space: nowrap;
-    overflow: hidden;
-    max-width: 220px;
-    text-overflow: ellipsis;
-}
-`],
     template: `
-<div class="pv-root">
-    <!-- ── Toolbar ─────────────────────────────────────────────────── -->
-    <div class="pv-toolbar">
-        @if (!capturing()) {
-            <button (click)="onStartCapture()"><app-icon name="play" [size]="13" /><span>Start Capture</span></button>
-        } @else {
-            <button class="pv-active" (click)="onStopCapture()"><app-icon name="pause" [size]="13" /><span>Stop Capture</span></button>
+<!-- ── Capture bar ───────────────────────────────────────────────────── -->
+<div class="pv-bar">
+    @if (!capturing()) {
+        <button class="pv-primary-btn" (click)="onStartCapture()"><app-icon name="play" [size]="12" /> Start capture</button>
+    } @else {
+        <button class="pv-primary-btn pv-stop" (click)="onStopCapture()"><app-icon name="pause" [size]="12" /> Stop capture</button>
+    }
+    <div class="pv-seg" title="Which direction the bridge captures">
+        @for (d of directions; track d.value) {
+            <button [class.pv-seg-on]="captureDirection() === d.value" [disabled]="capturing()"
+                    (click)="captureDirection.set(d.value); emitSettings()">{{ d.label }}</button>
         }
-        <button (click)="onPollOnce()" [disabled]="!capturing()"><app-icon name="refreshcw" [size]="13" /><span>Poll</span></button>
-        <button (click)="onClear()"><app-icon name="trash2" [size]="13" /><span>Clear</span></button>
-        <div class="pv-sep"></div>
-        <button (click)="onOpenPcap()" title="Open a .pcap file"><app-icon name="upload" [size]="13" /><span>Open</span></button>
-        <button (click)="onSavePcap()" [disabled]="packets().length === 0" title="Save capture as .pcap"><app-icon name="save" [size]="13" /><span>Save</span></button>
-        @if (filename()) {
-            <span class="pv-file-chip" [title]="filename()"><app-icon name="filecode" [size]="13" />{{ filename() }}</span>
-        }
-        <div class="pv-sep"></div>
-        <label style="font-size:12px;color:#999">Direction</label>
-        <select [value]="captureDirection()" (change)="captureDirection.set(+$any($event).target.value)">
-            <option value="0">Both</option>
-            <option value="1">TX only</option>
-            <option value="2">RX only</option>
+    </div>
+    <span class="pv-sep"></span>
+    <button class="lm-tool-btn" (click)="emit({ type: 'openPcap' })" title="Open a .pcap file"><app-icon name="upload" [size]="12" /> Open…</button>
+    <button class="lm-tool-btn" [disabled]="!packets().length" (click)="onSavePcap()" title="Save the capture as .pcap (direction kept)"><app-icon name="save" [size]="12" /> Save…</button>
+    <button class="lm-tool-btn" [disabled]="!packets().length" (click)="onClear()"><app-icon name="trash2" [size]="12" /> Clear</button>
+    @if (filename()) {
+        <span class="pv-file-chip" [title]="filename()"><app-icon name="filecode" [size]="12" />{{ filename() }}</span>
+    }
+    <span class="pv-sep"></span>
+    <span class="pv-field-label" title="Bridge-side capture filter: only matching frames are queued">Capture filter</span>
+    <select class="pv-select" [value]="'' + filterType()" (change)="filterType.set(+asSelect($event).value)">
+        <option value="0">None</option>
+        <option value="1">Protocol</option>
+        <option value="2">Port</option>
+        <option value="3">IP</option>
+    </select>
+    @if (filterType() === 1) {
+        <select class="pv-select" [value]="'' + filterProtocol()" (change)="filterProtocol.set(+asSelect($event).value)">
+            @for (p of captureProtocols; track p.value) { <option [value]="'' + p.value">{{ p.label }}</option> }
         </select>
-        <div class="pv-sep"></div>
-        <label style="font-size:12px;color:#999">Capture Filter</label>
-        <select [value]="filterType()" (change)="filterType.set(+$any($event).target.value)">
-            <option value="0">None</option>
-            <option value="1">Protocol</option>
-            <option value="2">Port</option>
-            <option value="3">IP</option>
-        </select>
-        @if (filterType() === 1) {
-            <select [value]="filterProtocol()" (change)="filterProtocol.set(+$any($event).target.value)">
-                <option value="0">All</option>
-                <option value="1">TCP</option>
-                <option value="2">UDP</option>
-                <option value="3">ICMP</option>
-                <option value="4">ARP</option>
-                <option value="5">DNS</option>
-                <option value="6">DHCP</option>
-            </select>
-        }
-        @if (filterType() === 2) {
-            <input type="number" placeholder="Port" [value]="filterPort()" (input)="filterPort.set(+$any($event).target.value)" min="0" max="65535" />
-        }
-        @if (filterType() === 3) {
-            <input type="text" placeholder="IP address" [value]="filterIP()" (input)="filterIP.set($any($event).target.value)" />
-        }
-        @if (filterType() !== 0) {
-            <button (click)="onApplyFilter()"><app-icon name="filter" [size]="13" /><span>Apply</span></button>
-        }
-        <span class="pv-stats">
-            @if (stats()) {
-                TX: {{ stats()!.txPackets }} pkts / {{ formatBytes(stats()!.txBytes) }}
-                &nbsp;|&nbsp;
-                RX: {{ stats()!.rxPackets }} pkts / {{ formatBytes(stats()!.rxBytes) }}
-                &nbsp;|&nbsp;
-                Queue: {{ stats()!.captureQueueSize }}
-                @if (stats()!.droppedCount > 0) {
-                    &nbsp;| <span style="color:#f56c6c">Dropped: {{ stats()!.droppedCount }}</span>
+    }
+    @if (filterType() === 2) {
+        <input class="pv-input pv-narrow" type="number" placeholder="Port" min="0" max="65535" [value]="filterPort()" (input)="filterPort.set(+asInput($event).value)" />
+    }
+    @if (filterType() === 3) {
+        <input class="pv-input" type="text" placeholder="IPv4 address" [value]="filterIP()" (input)="filterIP.set(asInput($event).value)" />
+    }
+    <button class="lm-tool-btn" (click)="onApplyFilter()" title="Send the capture filter to the bridge">Apply</button>
+    <span class="pv-spacer"></span>
+    <button class="lm-tool-btn" [class.pv-toggle-on]="composerOpen()" (click)="composerToggled.emit()"
+            title="Craft, edit and inject packets"><app-icon name="zap" [size]="12" /> Composer</button>
+</div>
+
+<div class="pv-main">
+    <!-- ── Packet table ─────────────────────────────────────────────── -->
+    <section class="pv-card pv-list-card">
+        <div class="pv-card-head">
+            <span class="pv-section-title">Packets</span>
+            <span class="pv-count">{{ countLabel() }}</span>
+            <div class="pv-seg pv-proto-seg">
+                <button [class.pv-seg-on]="protoFilter() === ''" (click)="protoFilter.set(''); emitSettings()">All</button>
+                @for (p of protocolsSeen(); track p) {
+                    <button [class.pv-seg-on]="protoFilter() === p" (click)="protoFilter.set(p); emitSettings()">{{ p }}</button>
                 }
-            }
-        </span>
-    </div>
-
-    <!-- ── Display filter bar ───────────────────────────────────────── -->
-    <div class="pv-filterbar">
-        <label class="pv-filterbar-label">Display Filter:</label>
-        <input class="pv-filterbar-input" type="text" placeholder="Search packets... (src, dst, proto, info)"
-               [value]="displayFilter()"
-               (input)="displayFilter.set($any($event).target.value)" />
-        @if (displayFilter()) {
-            <button class="pv-filterbar-clear" (click)="displayFilter.set('')" title="Clear filter"><app-icon name="x" [size]="12" /></button>
-            <span class="pv-filterbar-count">{{ filteredPackets().length }} / {{ packets().length }}</span>
-        }
-    </div>
-
-    <!-- ── Body: three panes ───────────────────────────────────────── -->
-    <div class="pv-body">
-        <!-- Packet list -->
-        <div class="pv-pane pv-pane-packets">
-            @if (packets().length === 0) {
+            </div>
+            <input class="pv-input pv-filter" type="search" placeholder="Filter: words match any column (e.g. MLS AccountLogin)"
+                   [value]="displayFilter()" (input)="displayFilter.set(asInput($event).value); emitSettings()" />
+            <label class="pv-check" title="Hide bare TCP ACKs, echoes and DME pings">
+                <input type="checkbox" [checked]="hideNoise()" (change)="hideNoise.set(asInput($event).checked); emitSettings()" /> Hide noise
+            </label>
+            <label class="pv-check" title="Keep the newest packet in view while capturing">
+                <input type="checkbox" [checked]="follow()" (change)="follow.set(asInput($event).checked); emitSettings()" /> Follow
+            </label>
+        </div>
+        <div class="pv-table-wrap" #tableWrap tabindex="0" (keydown)="onTableKey($event)">
+            @if (!packets().length) {
                 <div class="pv-empty">
-                    <app-icon class="pv-empty-icon" name="radiotower" [size]="44" />
-                    <div>No packets captured</div>
-                    <div style="font-size:11px">Click <b>Start Capture</b> to begin or <b>Open</b> to load a .pcap file</div>
+                    <app-icon name="radiotower" [size]="36" />
+                    <div>No packets yet</div>
+                    <div class="pv-count">Start a capture while the game is online, or open a .pcap file.</div>
                 </div>
-            } @else if (filteredPackets().length === 0) {
-                <div class="pv-empty">
-                    <app-icon class="pv-empty-icon" name="search" [size]="44" />
-                    <div>No packets match the display filter</div>
-                </div>
+            } @else if (!visible().length) {
+                <div class="pv-empty"><app-icon name="search" [size]="36" /><div>No packets match the filter</div></div>
             } @else {
                 <table class="pv-table">
                     <thead>
                         <tr>
-                            <th style="width:50px">No.</th>
-                            <th style="width:80px">Time</th>
-                            <th style="width:40px">Dir</th>
-                            <th style="width:60px">Server</th>
-                            <th style="width:130px">Source</th>
-                            <th style="width:130px">Destination</th>
-                            <th style="width:55px">Proto</th>
-                            <th style="width:45px">Len</th>
+                            <th class="pv-c-no">No.</th>
+                            <th class="pv-c-time">Time</th>
+                            <th class="pv-c-dir">Dir</th>
+                            <th class="pv-c-server">Server</th>
+                            <th class="pv-c-addr">Source</th>
+                            <th class="pv-c-addr">Destination</th>
+                            <th class="pv-c-proto">Proto</th>
+                            <th class="pv-c-len">Len</th>
                             <th>Info</th>
                         </tr>
                     </thead>
                     <tbody>
-                        @for (pkt of filteredPackets(); track pkt.index; let i = $index) {
-                            <tr [class.pv-selected]="selectedIndex() === pkt.index"
-                                (click)="selectPacket(pkt.index)">
-                                <td>{{ pkt.index + 1 }}</td>
-                                <td>{{ pkt.timeStr }}</td>
-                                <td [class]="pkt.dirClass">{{ pkt.dirLabel }}</td>
-                                <td class="pv-server">{{ pkt.server }}</td>
-                                <td>{{ pkt.src }}</td>
-                                <td>{{ pkt.dst }}</td>
-                                <td>{{ pkt.proto }}</td>
-                                <td>{{ pkt.length }}</td>
-                                <td>{{ pkt.info }}</td>
+                        @for (p of visible(); track p.index) {
+                            <tr [class.pv-selected]="selectedIndex() === p.index" (click)="selectPacket(p.index)" (dblclick)="editRequested.emit(p.index)">
+                                <td class="pv-c-no">{{ p.index + 1 }}</td>
+                                <td class="pv-c-time">{{ p.time }}</td>
+                                <td class="pv-c-dir"><span class="pv-dir" [class.pv-dir-tx]="p.dir === 'TX'">{{ p.dir }}</span></td>
+                                <td class="pv-c-server">{{ p.server }}</td>
+                                <td class="pv-c-addr">{{ p.src }}</td>
+                                <td class="pv-c-addr">{{ p.dst }}</td>
+                                <td class="pv-c-proto"><span class="pv-proto" [attr.data-proto]="p.proto">{{ p.proto }}</span></td>
+                                <td class="pv-c-len">{{ p.length }}</td>
+                                <td class="pv-c-info" [title]="p.info">{{ p.info }}</td>
                             </tr>
                         }
                     </tbody>
                 </table>
             }
         </div>
+    </section>
 
-        <!-- Dissection tree -->
-        <div class="pv-pane pv-pane-dissect">
-            @if (selectedLayers().length > 0) {
+    <!-- ── Details ──────────────────────────────────────────────────── -->
+    <section class="pv-card pv-detail-card">
+        <div class="pv-card-head">
+            <span class="pv-section-title">Details</span>
+            @if (selectedRow(); as r) {
+                <span class="pv-count">#{{ r.index + 1 }} · {{ r.dir === 'TX' ? 'PS2 → network' : 'network → PS2' }} · {{ r.length }} bytes</span>
+                <span class="pv-head-actions">
+                    <button class="lm-tool-btn" (click)="resendRequested.emit(r.index)"
+                            [title]="r.dir === 'TX' ? 'Send this frame from the PS2 again (NETINJECTTX)' : 'Inject this frame into the PS2 again (NETINJECT)'">
+                        <app-icon name="repeat" [size]="12" /> Resend
+                    </button>
+                    <button class="lm-tool-btn" (click)="editRequested.emit(r.index)" title="Open this frame in the composer to edit it">
+                        <app-icon name="edit" [size]="12" /> Edit in composer
+                    </button>
+                    <button class="lm-tool-btn" (click)="copyHex()" title="Copy the frame as hex"><app-icon name="copy" [size]="12" /> Copy hex</button>
+                </span>
+            }
+        </div>
+        @if (selectedRow()) {
+            <div class="pv-detail-body">
                 <div class="pv-tree">
                     @for (layer of selectedLayers(); track $index; let li = $index) {
-                        <div class="pv-tree-layer" [class.pv-layer-selected]="selectedLayerIdx() === li"
-                             (click)="selectLayer(li)">
-                            <app-icon class="pv-tree-chevron" [name]="expandedLayers().has(li) ? 'chevrondown' : 'chevronright'" [size]="12" />
+                        <div class="pv-tree-layer" [class.pv-layer-selected]="selectedLayer() === li" (click)="selectLayer(li)">
+                            <app-icon [name]="expanded().has(li) ? 'chevrondown' : 'chevronright'" [size]="12" />
                             <span class="pv-tree-dot" [style.background]="layer.color"></span>
-                            <span>{{ layer.label }}</span>
+                            <span class="pv-tree-label">{{ layer.label }}</span>
                         </div>
-                        @if (expandedLayers().has(li)) {
+                        @if (expanded().has(li)) {
                             @for (f of layer.fields; track $index) {
-                                <div class="pv-tree-field">
-                                    <span class="pv-tree-field-name">{{ f.name }}: </span>
-                                    <span class="pv-tree-field-value">{{ f.value }}</span>
-                                </div>
+                                <div class="pv-tree-field"><span class="pv-tree-name">{{ f.name }}</span><span class="pv-tree-value">{{ f.value }}</span></div>
                             }
                         }
+                    } @empty {
+                        <div class="pv-empty pv-count">No dissection (the bridge was offline when this packet loaded).</div>
                     }
                 </div>
-            }
-        </div>
-
-        <!-- Hex dump -->
-        <div class="pv-pane pv-pane-hexdump">
-            @if (hexDumpHtml()) {
-                <div class="pv-hex" [innerHTML]="hexDumpHtml()"></div>
-            }
-        </div>
-    </div>
-
-    <!-- ── Status bar ──────────────────────────────────────────────── -->
-    <div class="pv-statusbar">
-        @if (adapterStatus()) {
-            <span [class]="adapterStatus()!.enabled ? 'pv-status-ok' : 'pv-status-err'">
-                <app-icon [name]="adapterStatus()!.enabled ? 'circlecheck' : 'ban'" [size]="12" />
-                <span>{{ adapterStatus()!.enabled ? 'Connected' : 'Disconnected' }}</span>
-            </span>
-            @if (adapterStatus()!.enabled) {
-                <span>MAC: {{ adapterStatus()!.ps2Mac }}</span>
-                <span>IP: {{ adapterStatus()!.ps2IP }}</span>
-            }
+                <div class="pv-hex" [innerHTML]="hexHtml()"></div>
+            </div>
         } @else {
-            <span>Adapter status unknown - click Start Capture to query</span>
+            <div class="pv-empty pv-count">Select a packet to see its layers and bytes.</div>
         }
-        <span style="margin-left:auto">
-            @if (displayFilter() && filteredPackets().length !== packets().length) {
-                {{ filteredPackets().length }} displayed / {{ packets().length }} packets
-            } @else {
-                {{ packets().length }} packets
-            }
-        </span>
-        @if (statusMessage()) {
-            <span>{{ statusMessage() }}</span>
-        }
-    </div>
+    </section>
+</div>
+
+<!-- ── Status bar ────────────────────────────────────────────────────── -->
+<div class="pv-statusbar">
+    @if (adapterStatus(); as s) {
+        <span class="pv-status" [class.pv-status-ok]="s.enabled"><span class="pv-status-dot"></span>{{ s.enabled ? 'Adapter up' : 'Adapter down' }}</span>
+        @if (s.enabled) { <span>PS2 {{ s.ps2IP }} · {{ s.ps2Mac }}</span> }
+    } @else {
+        <span class="pv-status"><span class="pv-status-dot"></span>Adapter status unknown</span>
+    }
+    @if (stats(); as st) {
+        <span>TX {{ st.txPackets }} / {{ formatBytes(st.txBytes) }}</span>
+        <span>RX {{ st.rxPackets }} / {{ formatBytes(st.rxBytes) }}</span>
+        <span>Queue {{ st.captureQueueSize }}</span>
+        @if (st.droppedCount > 0) { <span class="pv-status-warn">Dropped {{ st.droppedCount }}</span> }
+    }
+    <span class="pv-spacer"></span>
+    @if (statusMessage()) {
+        <span class="pv-status-msg" [class.pv-status-err]="statusIsError()" [title]="statusMessage()">{{ statusMessage() }}</span>
+    }
 </div>
 `,
 })
 export class PacketViewerComponent {
+    readonly action          = output<PacketViewerAction>();
+    readonly resendRequested = output<number>();
+    readonly editRequested   = output<number>();
+    readonly composerToggled = output<void>();
+    readonly selectionChanged = output<CapturedPacket | null>();
+    readonly settingsChanged = output<ViewerSettings>();
+
+    readonly directions = [
+        { value: 0, label: 'Both' },
+        { value: 1, label: 'TX' },
+        { value: 2, label: 'RX' },
+    ];
+    readonly captureProtocols = [
+        { value: 0, label: 'All' }, { value: 1, label: 'TCP' }, { value: 2, label: 'UDP' }, { value: 3, label: 'ICMP' },
+        { value: 4, label: 'ARP' }, { value: 5, label: 'DNS' }, { value: 6, label: 'DHCP' },
+    ];
+
     // ── State ────────────────────────────────────────────────────────────────
-    readonly capturing = signal(false);
+    readonly capturing        = signal(false);
+    readonly composerOpen     = signal(false);
     readonly captureDirection = signal(0);
-    readonly filterType = signal(0);
-    readonly filterProtocol = signal(0);
-    readonly filterPort = signal(0);
-    readonly filterIP = signal('');
-    /** Client-side display filter — case-insensitive substring search across visible columns. */
-    readonly displayFilter = signal('');
-    readonly adapterStatus = signal<NetStatus | null>(null);
-    readonly stats = signal<NetStats | null>(null);
-    readonly statusMessage = signal('');
-    readonly filename = signal('');
-    readonly selectedIndex = signal(-1);
-    readonly selectedLayerIdx = signal(-1);
-    readonly expandedLayers = signal<Set<number>>(new Set());
+    readonly filterType       = signal(0);
+    readonly filterProtocol   = signal(0);
+    readonly filterPort       = signal(0);
+    readonly filterIP         = signal('');
+    readonly displayFilter    = signal('');
+    readonly protoFilter      = signal('');
+    readonly hideNoise        = signal(false);
+    readonly follow           = signal(true);
+    readonly adapterStatus    = signal<NetStatus | null>(null);
+    readonly stats            = signal<NetStats | null>(null);
+    readonly statusMessage    = signal('');
+    readonly statusIsError    = signal(false);
+    readonly filename         = signal('');
+    readonly selectedIndex    = signal(-1);
+    readonly selectedLayer    = signal(-1);
+    readonly expanded         = signal<Set<number>>(new Set());
+    readonly packets          = signal<PacketRow[]>([]);
 
-    /** Internal raw packet storage. */
-    private _rawPackets: Array<{ pkt: CapturedPacket; raw: Uint8Array }> = [];
-    /** Pre-parsed table rows from the Bridge (null = use local fallback). */
-    private _parsedRowCache: Array<ParsedPacketRow | null> = [];
-    /** First timestamp for relative time display. */
-    private _baseTimestamp = 0;
-    /** Monotonic packet counter. */
-    private _packetCounter = 0;
+    private readonly tableWrap = viewChild<ElementRef<HTMLElement>>('tableWrap');
 
-    /** Polling interval handle. */
+    /** Raw packets, index-aligned with packets(). */
+    private _raw: Array<{ pkt: CapturedPacket; bytes: Uint8Array }> = [];
+    private _baseTimestamp = -1;
     private _pollTimer: ReturnType<typeof setInterval> | undefined;
-    /** Stats polling interval handle. */
     private _statsTimer: ReturnType<typeof setInterval> | undefined;
-
-    // Public callback — set by the page component to emit actions.
-    onAction: ((action: PacketViewerAction) => void) | undefined;
-
-    /** True while a recvCapture request is in-flight — prevents overlapping polls. */
     private _recvInFlight = false;
 
-    // ── Processed packet list for display ────────────────────────────────────
-    readonly packets = signal<Array<{
-        index: number;
-        timeStr: string;
-        dirLabel: string;
-        dirClass: string;
-        server: string;
-        src: string;
-        dst: string;
-        proto: string;
-        length: number;
-        info: string;
-    }>>([]);
+    readonly protocolsSeen = computed(() => [...new Set(this.packets().map(p => p.proto).filter(p => p))].sort());
 
-    /** Packets filtered by the display filter text — case-insensitive substring match. */
-    readonly filteredPackets = computed(() => {
-        const all = this.packets();
-        const f = this.displayFilter().trim().toLowerCase();
-        if (!f) { return all; }
-        return all.filter(p =>
-            p.dirLabel.toLowerCase().includes(f) ||
-            p.server.toLowerCase().includes(f) ||
-            p.src.toLowerCase().includes(f) ||
-            p.dst.toLowerCase().includes(f) ||
-            p.proto.toLowerCase().includes(f) ||
-            p.info.toLowerCase().includes(f) ||
-            String(p.length).includes(f) ||
-            p.timeStr.includes(f)
-        );
+    readonly visible = computed(() => {
+        const terms = this.displayFilter().trim().toLowerCase().split(/\s+/).filter(t => t);
+        const proto = this.protoFilter();
+        const hide  = this.hideNoise();
+        return this.packets().filter(p =>
+            (!proto || p.proto === proto) && (!hide || !p.noise) && terms.every(t => p.search.includes(t)));
     });
 
-    // ── Dissection of selected packet ────────────────────────────────────────
-    //
-    // The dissection tree comes straight from the bridge — the webview no
-    // longer parses Ethernet/SCERT/Medius. `CapturedPacket.layers` is filled
-    // in by NETRECVCAPTURE (live drain) and the pcap-load path before the
-    // packet reaches this signal, so click renders instantly.
+    readonly countLabel = computed(() => {
+        const all = this.packets().length;
+        const shown = this.visible().length;
+        return shown === all ? `${all}` : `${shown} of ${all}`;
+    });
+
+    readonly selectedRow = computed(() => this.packets()[this.selectedIndex()] ?? null);
+
     readonly selectedLayers = computed<DissectedLayer[]>(() => {
         const idx = this.selectedIndex();
-        if (idx < 0 || idx >= this._rawPackets.length) { return []; }
-        return this._rawPackets[idx].pkt.layers ?? [];
+        return idx >= 0 && idx < this._raw.length ? this._raw[idx].pkt.layers ?? [] : [];
     });
 
-    readonly hexDumpHtml = computed(() => {
+    readonly hexHtml = computed(() => {
         const idx = this.selectedIndex();
-        if (idx < 0 || idx >= this._rawPackets.length) { return ''; }
-        const raw    = this._rawPackets[idx].raw;
-        const li     = this.selectedLayerIdx();
-        const layers = this.selectedLayers();
-        return hexDump(raw, layers, li);
+        if (idx < 0 || idx >= this._raw.length) { return ''; }
+        return hexDump(this._raw[idx].bytes, this.selectedLayers(), this.selectedLayer());
     });
 
-    // ── Public API (called by page component) ────────────────────────────────
+    // ── Public API (page component) ──────────────────────────────────────────
 
-    setStatus(status: NetStatus): void {
-        this.adapterStatus.set(status);
+    packetAt(index: number): CapturedPacket | null {
+        return this._raw[index]?.pkt ?? null;
     }
 
-    setStats(s: NetStats): void {
-        this.stats.set(s);
+    selectedPacket(): CapturedPacket | null {
+        return this.packetAt(this.selectedIndex());
     }
 
-    addCapturedPackets(packets: CapturedPacket[], parsedRows?: ParsedPacketRow[]): void {
-        for (let i = 0; i < packets.length; i++) {
-            const pkt = packets[i];
-            const raw = b64ToBytes(pkt.data);
-            if (this._baseTimestamp === 0) { this._baseTimestamp = pkt.timestampUs; }
-            this._rawPackets.push({ pkt, raw });
-            this._parsedRowCache.push(parsedRows?.[i] ?? null);
-        }
-        this._rebuildPacketList();
+    applySettings(s: ViewerSettings): void {
+        if (s.captureDirection !== undefined) { this.captureDirection.set(s.captureDirection); }
+        if (s.displayFilter !== undefined) { this.displayFilter.set(s.displayFilter); }
+        if (s.protoFilter !== undefined) { this.protoFilter.set(s.protoFilter); }
+        if (s.hideNoise !== undefined) { this.hideNoise.set(s.hideNoise); }
+        if (s.follow !== undefined) { this.follow.set(s.follow); }
     }
 
-    showStatus(msg: string): void {
+    setStatus(status: NetStatus): void { this.adapterStatus.set(status); }
+    setStats(s: NetStats): void { this.stats.set(s); }
+    setFilename(name: string): void { this.filename.set(name); }
+
+    showStatus(msg: string, error = false): void {
         this.statusMessage.set(msg);
+        this.statusIsError.set(error);
     }
 
-    setFilename(name: string): void {
-        this.filename.set(name);
+    addCapturedPackets(packets: CapturedPacket[], parsedRows: ParsedPacketRow[] = []): void {
+        if (!packets.length) { return; }
+        const rows = [...this.packets()];
+        packets.forEach((pkt, i) => {
+            const bytes = b64ToBytes(pkt.data);
+            if (this._baseTimestamp < 0) { this._baseTimestamp = pkt.timestampUs; }
+            this._raw.push({ pkt, bytes });
+            rows.push(this.toRow(this._raw.length - 1, pkt, parsedRows[i]));
+        });
+        this.packets.set(rows);
+        if (this.follow() && this.capturing()) {
+            queueMicrotask(() => {
+                const el = this.tableWrap()?.nativeElement;
+                if (el) { el.scrollTop = el.scrollHeight; }
+            });
+        }
     }
 
     startPolling(): void {
         this.stopPolling();
         this._pollTimer = setInterval(() => {
-            // Skip this tick if the previous recvCapture hasn't returned yet.
-            if (this._recvInFlight) { return; }
+            if (this._recvInFlight) { return; }   // previous drain still running
             this._recvInFlight = true;
-            this.onAction?.({ type: 'recvCapture', maxPackets: 100 });
+            this.emit({ type: 'recvCapture', maxPackets: 200 });
         }, 500);
-        this._statsTimer = setInterval(() => {
-            this.onAction?.({ type: 'getStats' });
-        }, 2000);
-    }
-
-    /** Called by the page component after a recvCapture response (success or error). */
-    recvCaptureComplete(): void {
-        this._recvInFlight = false;
+        this._statsTimer = setInterval(() => this.emit({ type: 'getStats' }), 2000);
     }
 
     stopPolling(): void {
-        if (this._pollTimer) { clearInterval(this._pollTimer); this._pollTimer = undefined; }
-        if (this._statsTimer) { clearInterval(this._statsTimer); this._statsTimer = undefined; }
+        clearInterval(this._pollTimer);
+        clearInterval(this._statsTimer);
+        this._pollTimer = this._statsTimer = undefined;
     }
 
-    // ── UI event handlers ────────────────────────────────────────────────────
+    /** Called after every recvCapture response (success or error). */
+    recvCaptureComplete(): void { this._recvInFlight = false; }
 
-    onStartCapture(): void {
-        this.statusMessage.set('Starting capture...');
-        this.onAction?.({ type: 'startCapture', direction: this.captureDirection(), maxQueue: 1000 });
-    }
-
-    /** Called by the page component when the provider confirms capture started. */
     captureStarted(): void {
         this.capturing.set(true);
-        this.statusMessage.set('');
-        this.onAction?.({ type: 'getStatus' });
+        this.showStatus('Capturing');
+        this.emit({ type: 'getStatus' });
         this.startPolling();
     }
 
-    /** Called by the page component when the provider reports capture failed to start. */
     captureStartFailed(msg: string): void {
         this.capturing.set(false);
-        this.statusMessage.set(msg);
+        this.showStatus(msg, true);
+    }
+
+    // ── UI handlers ──────────────────────────────────────────────────────────
+
+    emit(a: PacketViewerAction): void { this.action.emit(a); }
+
+    emitSettings(): void {
+        this.settingsChanged.emit({
+            captureDirection: this.captureDirection(), displayFilter: this.displayFilter(),
+            protoFilter: this.protoFilter(), hideNoise: this.hideNoise(), follow: this.follow(),
+        });
+    }
+
+    onStartCapture(): void {
+        this.showStatus('Starting capture…');
+        this.emit({ type: 'startCapture', direction: this.captureDirection(), maxQueue: 1000 });
     }
 
     onStopCapture(): void {
         this.capturing.set(false);
-        this.onAction?.({ type: 'stopCapture' });
         this.stopPolling();
-    }
-
-    onPollOnce(): void {
-        this.onAction?.({ type: 'recvCapture', maxPackets: 100 });
+        this.emit({ type: 'stopCapture' });
+        this.showStatus('Capture stopped');
     }
 
     onClear(): void {
-        this._rawPackets = [];
-        this._parsedRowCache = [];
-        this._baseTimestamp = 0;
-        this._packetCounter = 0;
+        this._raw = [];
+        this._baseTimestamp = -1;
         this.selectedIndex.set(-1);
-        this.selectedLayerIdx.set(-1);
-        this.expandedLayers.set(new Set());
+        this.selectedLayer.set(-1);
+        this.expanded.set(new Set());
         this.packets.set([]);
+        this.selectionChanged.emit(null);
         this.filename.set('');
-        this.onAction?.({ type: 'clearPackets' });
+        this.emit({ type: 'clearPackets' });
     }
 
     onApplyFilter(): void {
-        this.onAction?.({
-            type: 'setFilter',
-            filterType: this.filterType(),
-            protocol: this.filterProtocol(),
-            port: this.filterPort(),
-            ip: this.filterIP(),
-        });
-    }
-
-    onOpenPcap(): void {
-        this.onAction?.({ type: 'openPcap' });
+        this.emit({ type: 'setFilter', filterType: this.filterType(), protocol: this.filterProtocol(), port: this.filterPort(), ip: this.filterIP() });
     }
 
     onSavePcap(): void {
-        if (this._rawPackets.length === 0) {
-            return;
-        }
-        const packets: PcapPacketEntry[] = this._rawPackets.map(e => ({
-            direction:   e.pkt.direction,
-            timestampUs: e.pkt.timestampUs,
-            data:        e.pkt.data,
-        }));
-        this.onAction?.({ type: 'savePcap', packets });
+        if (!this._raw.length) { return; }
+        this.emit({ type: 'savePcap', packets: this._raw.map(e => ({ direction: e.pkt.direction, timestampUs: e.pkt.timestampUs, data: e.pkt.data })) });
     }
 
     selectPacket(idx: number): void {
         this.selectedIndex.set(idx);
-        this.selectedLayerIdx.set(-1);
-        // Auto-expand all layers on selection
-        const layers = this.selectedLayers();
-        this.expandedLayers.set(new Set(layers.map((_, i) => i)));
+        this.selectedLayer.set(-1);
+        this.expanded.set(new Set(this.selectedLayers().map((_, i) => i)));
+        this.selectionChanged.emit(this.packetAt(idx));
     }
 
     selectLayer(li: number): void {
-        this.selectedLayerIdx.set(li);
-        // Toggle expansion
-        const ex = new Set(this.expandedLayers());
+        this.selectedLayer.set(li);
+        const ex = new Set(this.expanded());
         if (ex.has(li)) { ex.delete(li); } else { ex.add(li); }
-        this.expandedLayers.set(ex);
+        this.expanded.set(ex);
+    }
+
+    /** Up/Down move through the visible rows. */
+    onTableKey(e: KeyboardEvent): void {
+        if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') { return; }
+        const rows = this.visible();
+        if (!rows.length) { return; }
+        e.preventDefault();
+        const at = rows.findIndex(r => r.index === this.selectedIndex());
+        const next = at < 0 ? 0 : Math.min(rows.length - 1, Math.max(0, at + (e.key === 'ArrowDown' ? 1 : -1)));
+        this.selectPacket(rows[next].index);
+        queueMicrotask(() => this.tableWrap()?.nativeElement.querySelector('tr.pv-selected')?.scrollIntoView({ block: 'nearest' }));
+    }
+
+    copyHex(): void {
+        const p = this.selectedPacket();
+        if (!p) { return; }
+        void navigator.clipboard?.writeText(bytesToHex(b64ToBytes(p.data))).then(() => this.showStatus('Frame copied as hex'));
     }
 
     formatBytes(n: number): string {
@@ -926,47 +514,26 @@ export class PacketViewerComponent {
         return `${(n / 1048576).toFixed(1)} MB`;
     }
 
-    // ── Internal ─────────────────────────────────────────────────────────────
+    asInput(e: Event): HTMLInputElement { return e.target as HTMLInputElement; }
+    asSelect(e: Event): HTMLSelectElement { return e.target as HTMLSelectElement; }
 
-    private _rebuildPacketList(): void {
-        const list = this._rawPackets.map((entry, i) => {
-            const { pkt, raw } = entry;
-            const parsed = this._parsedRowCache[i];
-
-            if (parsed) {
-                // Use pre-parsed data from the Bridge.
-                return {
-                    index: i,
-                    timeStr: parsed.time,
-                    dirLabel: pkt.directionName,
-                    dirClass: pkt.direction === 0 ? 'pv-dir-tx' : 'pv-dir-rx',
-                    server: parsed.server,
-                    src: parsed.src,
-                    dst: parsed.dst,
-                    proto: parsed.proto,
-                    length: parsed.len,
-                    info: parsed.info,
-                };
-            }
-
-            // Fallback when no parsed row arrived (older host or partial data):
-            // produce an empty-but-valid row. The pcap-load path on the host
-            // side runs every frame through NETDISASSEMBLE before posting, so
-            // in practice `parsed` is always present.
-            const relTime = ((pkt.timestampUs - this._baseTimestamp) / 1_000_000).toFixed(6);
-            return {
-                index: i,
-                timeStr: relTime,
-                dirLabel: pkt.directionName,
-                dirClass: pkt.direction === 0 ? 'pv-dir-tx' : 'pv-dir-rx',
-                server: '',
-                src: '',
-                dst: '',
-                proto: '',
-                length: pkt.length,
-                info: '',
-            };
-        });
-        this.packets.set(list);
+    private toRow(index: number, pkt: CapturedPacket, parsed: ParsedPacketRow | undefined): PacketRow {
+        // Time is relative to the first packet in the view (the bridge's row time restarts each drain).
+        const time = ((pkt.timestampUs - this._baseTimestamp) / 1_000_000).toFixed(6);
+        const dir: 'TX' | 'RX' = pkt.direction === 0 ? 'TX' : 'RX';
+        const row = {
+            index, time, dir,
+            server: parsed?.server ?? '',
+            src:    parsed?.src ?? '',
+            dst:    parsed?.dst ?? '',
+            proto:  parsed?.proto ?? '',
+            length: pkt.length || parsed?.len || 0,
+            info:   parsed?.info ?? '',
+        };
+        return {
+            ...row,
+            search: [dir, row.server, row.src, row.dst, row.proto, row.info, String(row.length)].join(' ').toLowerCase(),
+            noise:  NOISE_INFO.test(row.info),
+        };
     }
 }

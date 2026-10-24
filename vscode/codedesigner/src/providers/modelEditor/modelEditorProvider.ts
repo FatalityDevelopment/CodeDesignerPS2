@@ -44,7 +44,8 @@ export class ModelEditorProvider {
     ) {}
 
     public open(packagePath?: string, model?: { archive: string; name: string }): void {
-        const target = packagePath && /\.(zdb|cdb|zar)$/i.test(packagePath) ? packagePath : this._packageFor(packagePath);
+        // Packages / archives open as they are (SOCOM .ZDB / .CDB / .ZAR, a GTA disc image .ISO or .IMG archive).
+        const target = packagePath && /\.(zdb|cdb|zar|iso|img)$/i.test(packagePath) ? packagePath : this._packageFor(packagePath);
         if (this._panel) {
             this._panel.reveal(vscode.ViewColumn.Active);
             if (target) { this._panel.webview.postMessage({ type: 'openPackage', path: target, model }); }
@@ -95,8 +96,13 @@ export class ModelEditorProvider {
                 const uris = await vscode.window.showOpenDialog({
                     title: 'Open map package',
                     canSelectMany: false,
-                    // A .ZDB package, a .CDB memory-card pack, or any loose .ZED of an unpacked package / pack folder.
-                    filters: { 'SOCOM package, pack or archive': ['zdb', 'ZDB', 'cdb', 'CDB', 'zed', 'ZED', 'zar', 'ZAR'] },
+                    // SOCOM: a .ZDB package, a .CDB memory-card pack, a .ZAR archive or any loose .ZED of an unpacked
+                    // package / pack folder. GTA: San Andreas: the disc image (.ISO) or an .IMG archive.
+                    filters: {
+                        'All supported': ['zdb', 'ZDB', 'cdb', 'CDB', 'zed', 'ZED', 'zar', 'ZAR', 'iso', 'ISO', 'img', 'IMG'],
+                        'SOCOM package, pack or archive': ['zdb', 'ZDB', 'cdb', 'CDB', 'zed', 'ZED', 'zar', 'ZAR'],
+                        'GTA disc image or IMG archive': ['iso', 'ISO', 'img', 'IMG'],
+                    },
                 });
                 if (uris?.[0]) { webview.postMessage({ type: 'openPackage', path: uris[0].fsPath }); }
                 break;

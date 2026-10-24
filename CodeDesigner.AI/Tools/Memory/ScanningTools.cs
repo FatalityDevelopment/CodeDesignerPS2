@@ -173,6 +173,69 @@ public sealed class FindCodeReferencesTool(IEmulatorBridge bridge)
     }
 }
 
+[CdTool("get_xrefs", ToolDomain.Memory, ToolRisk.ReadOnly,
+    "List cross-references to an address from the bridge's index: calls, jumps, branches, lui-built addresses, loads, stores and data pointers (optionally ASCII/CRC32 matches of a string there). The index is built once per region and reused; the first call may take a few seconds. Risk: read-only.")]
+public sealed class GetXrefsTool(IEmulatorBridge bridge)
+{
+    [ToolEntryPoint] public async Task<string> InvokeAsync(
+        [Description("Target address (hex/decimal). KSEG0/uncached aliases resolve to the same address.")] string targetAddress,
+        [Description("Comma-separated kinds: controlFlow, resolved, pointer, string. Default: controlFlow,resolved,pointer.")] string kinds = "controlFlow,resolved,pointer",
+        CancellationToken ct = default)
+    {
+        var t = CdText.TryParseAddress(targetAddress);
+        if (t is null) return CdText.Error($"invalid targetAddress '{targetAddress}'.");
+        var kindList = kinds.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        string json = await bridge.SendAsync(new { Command = "XREFSTO", TargetAddress = t.Value, ReferenceKinds = kindList }, ct);
+
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (!root.TryGetProperty("References", out var refs) || refs.ValueKind != System.Text.Json.JsonValueKind.Array)
+                return CdText.Message(json);
+
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine(root.TryGetProperty("Message", out var m) ? m.GetString() : $"References to 0x{t.Value:X8}");
+            foreach (var r in refs.EnumerateArray())
+            {
+                string Get(string name) => r.TryGetProperty(name, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String ? v.GetString() ?? "" : "";
+                string instruction = Get("instruction");
+                sb.Append($"0x{Get("address")}  {Get("kindLabel"),-13} {Get("summary")}");
+                if (instruction.Length > 0) sb.Append($"  | {instruction}");
+                sb.AppendLine();
+            }
+            return sb.ToString().TrimEnd();
+        }
+        catch
+        {
+            return CdText.Message(json);
+        }
+    }
+}
+
+[CdTool("get_function", ToolDomain.Memory, ToolRisk.ReadOnly,
+    "Return the detected function containing an address: entry, last instruction, size and how many places call or point to it. Functions come from the cross-reference index (call targets and stack-frame prologues after jr ra). Risk: read-only.")]
+public sealed class GetFunctionTool(IEmulatorBridge bridge)
+{
+    [ToolEntryPoint] public async Task<string> InvokeAsync(
+        [Description("Any address inside the function (hex/decimal).")] string address,
+        CancellationToken ct = default)
+    {
+        var a = CdText.TryParseAddress(address);
+        if (a is null) return CdText.Error($"invalid address '{address}'.");
+        return CdText.Message(await bridge.SendAsync(new { Command = "FUNCTIONAT", TargetAddress = a.Value }, ct));
+    }
+}
+
+[CdTool("rebuild_xrefs", ToolDomain.Memory, ToolRisk.ReadOnly,
+    "Rebuild the cross-reference index for a region after the game loads new code or data. Waits for the build. Risk: read-only (reads RAM).")]
+public sealed class RebuildXrefsTool(IEmulatorBridge bridge)
+{
+    [ToolEntryPoint] public async Task<string> InvokeAsync(
+        [Description("'ee' (default), 'iop' or 'bios'.")] string region = "ee", CancellationToken ct = default)
+        => CdText.Message(await bridge.SendAsync(new { Command = "XREFINDEX", Region = region, XrefRebuild = true, XrefWait = true }, ct));
+}
+
 [CdTool("scan_value", ToolDomain.Memory, ToolRisk.ReadOnly,
     "Scan live RAM for a specific value (u8/u16/u32/u64/f32) with a comparison operator. Risk: read-only.")]
 public sealed class ScanValueTool(IEmulatorBridge bridge)

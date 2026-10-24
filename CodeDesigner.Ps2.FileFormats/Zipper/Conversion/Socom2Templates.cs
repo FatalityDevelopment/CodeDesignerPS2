@@ -1,3 +1,4 @@
+using CodeDesigner.Ps2.FileFormats.Assets;
 using CodeDesigner.Ps2.FileFormats.Zipper.Anim;
 using CodeDesigner.Ps2.FileFormats.Zipper.Package;
 using CodeDesigner.Ps2.FileFormats.Zipper.ZED;
@@ -85,7 +86,7 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.Conversion
             var p = Package("MP52");
             var geo = p.Container("CLIB_GEO.ZED");
             var model = ZedTree.Copy(geo.Nodes, Child(geo, Top(geo, "models"), "alg_UN01"));
-            var skeleton = CharacterSkeleton.FromGeo(p.FindSkeleton("clib", "alg_UN01") ?? throw new InvalidDataException("MP52 has no alg_UN01 skeleton"));
+            var skeleton = CharacterMesh.SkeletonFromGeo(p.FindSkeleton("clib", "alg_UN01") ?? throw new InvalidDataException("MP52 has no alg_UN01 skeleton"));
             var txr = p.Container("CLIB_TXR.ZED");
             int textures = Top(txr, "textures");
             int first = ZedTree.Children(txr.Nodes, textures)[0];

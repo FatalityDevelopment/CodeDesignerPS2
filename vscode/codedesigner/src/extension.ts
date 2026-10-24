@@ -15,6 +15,7 @@ import { ZipperWorkbenchProvider } from './providers/zipperWorkbench/zipperWorkb
 import { ANIMATION_EDITOR_PAGE, MAP_EDITOR_PAGE, ModelEditorProvider } from './providers/modelEditor/modelEditorProvider';
 import { WelcomeProvider, WelcomeDataDelegate } from './providers/welcome/welcomeProvider';
 import { SocketClient } from './socketClient';
+import { registerWebviewDevReload } from './utils/devReload';
 
 let socketClient: SocketClient | null = null;
 let outputChannel: vscode.LogOutputChannel;
@@ -71,6 +72,9 @@ export function getZdbChannel(): vscode.OutputChannel {
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
+
+	// Dev host only: reload open webviews when `npm run watch` rebuilds them.
+	registerWebviewDevReload(context);
 
 	// Create output channel for logging — log: true gives colour-coded severity
 	// levels (info/warn/error) with icons rendered in the Output panel.
@@ -337,7 +341,7 @@ export function activate(context: vscode.ExtensionContext) {
 	// Live PCSX2 display surfaced inside VS Code via the bridge's binary fan-out
 	// socket on port 8766. Decoupled from the JSON command channel (port 8765)
 	// so 60fps frame traffic never backs up command/response.
-	const gsViewerProvider = new GsViewerProvider(context.extensionUri);
+	const gsViewerProvider = new GsViewerProvider(context.extensionUri, socketClient);
 	const openGsFrameViewerCommand = vscode.commands.registerCommand(
 		'codedesigner.openGsFrameViewer',
 		() => gsViewerProvider.open(),
@@ -371,8 +375,11 @@ export function activate(context: vscode.ExtensionContext) {
 	);
 	context.subscriptions.push(openJokerMakerCommand);
 	disasmPanelProvider.setJokerMakerProvider(jokerMakerProvider);
+	jokerMakerProvider.setCheatSource(() => disasmPanelProvider.getGameCheatsForJoker());
 	socketClient.onConnected(()    => jokerMakerProvider.notifyConnectionChanged());
 	socketClient.onDisconnected(() => jokerMakerProvider.notifyConnectionChanged());
+	socketClient.onConnected(()    => gsViewerProvider.notifyConnectionChanged());
+	socketClient.onDisconnected(() => gsViewerProvider.notifyConnectionChanged());
 
 	// ── PS2 Game Compatibility browser ──────────────────────────────────────
 	// Standalone webview that mirrors PCSX2's published compatibility list into

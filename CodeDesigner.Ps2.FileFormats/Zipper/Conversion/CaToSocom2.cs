@@ -1,3 +1,4 @@
+using CodeDesigner.Ps2.FileFormats.Assets;
 using System.Buffers.Binary;
 using CodeDesigner.Ps2.FileFormats.Zipper.Anim;
 using CodeDesigner.Ps2.FileFormats.Zipper.Ca;
@@ -28,8 +29,8 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.Conversion
         public sealed record Result(string CdbPath, string Pack, string Model, string Kind, string Library, int Triangles,
             int Textures, int Palettes, IReadOnlyList<string> Clips, IReadOnlyList<string> Warnings);
 
-        private const float CharacterScale = 4096f;
-        private const int MtxCount = 26;
+        internal const float CharacterScale = 4096f;
+        internal const int MtxCount = 26;
 
         /// <summary>The SOCOM II kind a CA model converts to: character, weapon, vehicle (veh_* libraries) or prop.</summary>
         public static string KindOf(CaPackage.Model model) => model.Kind switch
@@ -298,7 +299,7 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.Conversion
         }
 
         /// <summary>s2mesh.vertex_block: STCYCL 0x101, UNPACK V4-16 @4 (flg), header + verts, MSCNT, padded to 16.</summary>
-        private static byte[] VertexBlock(short flags, short tris, short bone, short[][] verts)
+        internal static byte[] VertexBlock(short flags, short tris, short bone, short[][] verts)
         {
             int n = 1 + 2 * verts.Length;
             using var ms = new MemoryStream();
@@ -313,7 +314,7 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.Conversion
 
         /// <summary>s2mesh.encode: blocks then the DMA chain (end, per section cnt -> name, per batch matrix ref + vertex
         /// ref, per group draw ref). -> (data, chain start, ref count).</summary>
-        private static (byte[] Data, int Start, int RefCount) EncodeCharacterMesh(List<(string Texture, List<(List<(int Mid, byte[] Block)> Vertex, byte[] Draw)> Groups)> sections)
+        internal static (byte[] Data, int Start, int RefCount) EncodeCharacterMesh(List<(string Texture, List<(List<(int Mid, byte[] Block)> Vertex, byte[] Draw)> Groups)> sections)
         {
             using var data = new MemoryStream();
             var chain = new List<byte[]>();
@@ -342,7 +343,7 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.Conversion
             return (data.ToArray(), start, chain.Count);
         }
 
-        private static byte[] NameField(string name)
+        internal static byte[] NameField(string name)
         {
             var raw = System.Text.Encoding.Latin1.GetBytes(name + "\0");
             var field = new byte[(raw.Length + 15) & ~15];
@@ -373,10 +374,10 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.Conversion
 
         private static readonly string[] NodeNames = { "firepoint", "firepoint_shell", "aimpoint", "Gun_box", "body", "turret", "gun", "wheel", "door",
             "seat", "driver", "gunner", "passenger", "hatch", "barrel", "rotor", "tail_rotor", "prop" };
-        private static readonly string[] HeldOrder = { "firepoint", "firepoint_shell", "aimpoint", "Gun_box" };
+        internal static readonly string[] HeldOrder = { "firepoint", "firepoint_shell", "aimpoint", "Gun_box" };
 
-        private sealed record StaticChunk(byte[] Colour, (uint, uint) ColourVif, byte[] Geometry);
-        private sealed record StaticSection(byte[] NameField, byte[] Material, (uint, uint) MaterialVif, List<StaticChunk> Chunks);
+        internal sealed record StaticChunk(byte[] Colour, (uint, uint) ColourVif, byte[] Geometry);
+        internal sealed record StaticSection(byte[] NameField, byte[] Material, (uint, uint) MaterialVif, List<StaticChunk> Chunks);
 
         private static (int Verts, int Tris) ChunkStats(byte[] g)
         {
@@ -482,7 +483,7 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.Conversion
             return (libName, triangles, texNodes.Count, palNodes.Count);
         }
 
-        private static byte[] NParams(float[] l, float[] lo, float[] hi, uint kind, uint flags)
+        internal static byte[] NParams(float[] l, float[] lo, float[] hi, uint kind, uint flags)
         {
             var b = new byte[96];
             float[] f = { l[0], l[1], l[2], 0, l[4], l[5], l[6], 0, l[8], l[9], l[10], 0, l[12], l[13], l[14], 1, lo[0], lo[1], lo[2], hi[0], hi[1], hi[2] };
@@ -492,7 +493,7 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.Conversion
             return b;
         }
 
-        private static byte[] VParams(uint flags, uint lod, int tris, int verts, float[] centre)
+        internal static byte[] VParams(uint flags, uint lod, int tris, int verts, float[] centre)
         {
             var b = new byte[24];
             BinaryPrimitives.WriteUInt32LittleEndian(b, flags);
@@ -537,7 +538,7 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.Conversion
 
         /// <summary>s2static.encode: per GEO node, each visual's geometry chunks then (material, name) per section; then
         /// each visual's colour blocks and its chain (refe, then cnt name / ref material / (ref colour, ref geometry)).</summary>
-        private static (byte[] Data, Dictionary<string, int> Offsets) EncodeStatic(List<(string Key, List<StaticSection> Sections)> visuals)
+        internal static (byte[] Data, Dictionary<string, int> Offsets) EncodeStatic(List<(string Key, List<StaticSection> Sections)> visuals)
         {
             using var data = new MemoryStream();
             var offsets = new Dictionary<string, int>();
@@ -687,7 +688,7 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.Conversion
             return hdr.Concat(pix).Concat(tail).ToArray();
         }
 
-        private static void AddLibrary(List<(string, byte[])> files, string lib, Socom2Templates.Library t,
+        internal static void AddLibrary(List<(string, byte[])> files, string lib, Socom2Templates.Library t,
             List<ZedTree.Record> textures, List<ZedTree.Record> palettes, ZedTree.Record geo, ZedTree.Record mdl)
         {
             files.Add(($"{lib}_TXR.ZED", Socom2Templates.WriteZed(t.Txr, new[] { t.RenderPhase, new ZedTree.Record("textures", new byte[0], textures) })));
@@ -709,7 +710,7 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.Conversion
             (0xBBD4FAD5, 0xF708CF93), (0x799F10C4, 0x19E5B48F), (0xCF64B6F3, 0xA1EEEA26),
         };
 
-        private static readonly Dictionary<string, string> S2Parent = new()
+        internal static readonly Dictionary<string, string> S2Parent = new()
         {
             ["hips"] = "skel_root", ["rthigh"] = "hips", ["rcalf"] = "rthigh", ["rfoot"] = "rcalf", ["rtoe"] = "rfoot", ["lthigh"] = "hips",
             ["lcalf"] = "lthigh", ["lfoot"] = "lcalf", ["ltoe"] = "lfoot", ["aimnodes"] = "hips", ["spinelo"] = "aimnodes", ["spinehi"] = "spinelo",
@@ -809,7 +810,7 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.Conversion
             return clip;
         }
 
-        private static double[] Q(short[] q) => Norm(new[] { q[0] / 32767.0, q[1] / 32767.0, q[2] / 32767.0, q[3] / 32767.0 });
+        internal static double[] Q(short[] q) => Norm(new[] { q[0] / 32767.0, q[1] / 32767.0, q[2] / 32767.0, q[3] / 32767.0 });
 
         private static double[] SampleP(short[][] keys, double t, double dur)
         {
@@ -831,7 +832,7 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.Conversion
             return Norm(new[] { a[0] + (s * b[0] - a[0]) * u, a[1] + (s * b[1] - a[1]) * u, a[2] + (s * b[2] - a[2]) * u, a[3] + (s * b[3] - a[3]) * u });
         }
 
-        private static double[] QMul(double[] a, double[] b) => new[]
+        internal static double[] QMul(double[] a, double[] b) => new[]
         {
             a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1],
             a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0],
@@ -839,15 +840,15 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.Conversion
             a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2],
         };
 
-        private static double[] Inv(double[] q) => new[] { -q[0], -q[1], -q[2], q[3] };
+        internal static double[] Inv(double[] q) => new[] { -q[0], -q[1], -q[2], q[3] };
 
-        private static double[] Norm(double[] q)
+        internal static double[] Norm(double[] q)
         {
             double n = Math.Sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
             return n > 1e-9 ? new[] { q[0] / n, q[1] / n, q[2] / n, q[3] / n } : new double[] { 0, 0, 0, 1 };
         }
 
-        private static double[] RotateQ(double[] q, double[] v)
+        internal static double[] RotateQ(double[] q, double[] v)
         {
             var p = QMul(QMul(q, new[] { v[0], v[1], v[2], 0.0 }), Inv(q));
             return new[] { p[0], p[1], p[2] };

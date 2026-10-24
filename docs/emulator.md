@@ -16,20 +16,19 @@ This emulator accurately simulates PS2 hardware to run commercial games and home
 - **MIPS64 R5900** at 294 MHz
 - 128-bit SIMD multimedia instructions (MMI)
 - Vector Units (VU0/VU1) for 3D graphics acceleration
-- FPU with PS2-specific denormal handling
-- Dual-issue pipeline simulation
+- FPU with PS2-specific denormal handling (flush to zero)
+- TLB and COP0 exception handling
 
 #### I/O Processor (IOP)
 - **MIPS32 R3000A** at 36 MHz
-- Handles I/O operations and legacy PS1 compatibility
-- Integrated SPU for audio processing
+- Handles I/O: CD/DVD, controllers, memory cards, SPU2, DEV9, USB, i.LINK
+- Loads IRX modules (`IopModuleLoader`)
 
 ### Memory System
 
 #### Main RAM
-- 32 MB RDRAM at 294 MHz
-- Dual-channel interleaved access
-- Proper latency and bandwidth simulation
+- 32 MB at physical `0x00000000`
+- KSEG0/KSEG1 mirrors handled by `PS2MemoryBus`
 
 #### BIOS ROM
 - 4 MB flash memory
@@ -68,9 +67,8 @@ This emulator accurately simulates PS2 hardware to run commercial games and home
 - Interrupt generation on compare/overflow
 
 #### Interrupt Controller (INTC)
-- 32 interrupt sources
-- Write-1-to-clear and mask registers
-- Proper priority handling
+- `INTC_STAT` (write-1-to-clear) and `INTC_MASK` (write-1-to-toggle)
+- Timer, DMAC, VBLANK and peripheral interrupt bits
 
 #### Serial I/O (SIO2)
 - Controller communication
@@ -83,14 +81,12 @@ This emulator accurately simulates PS2 hardware to run commercial games and home
 - DMAC integration for data transfer
 
 #### Memory Card
-- 8 MB per card (2 slots)
-- Save file management
-- PS1/PS2 format support
+- Card protocol over SIO2 (`MemoryCard`)
+- Card images are managed separately by [Memory Card Manager](memory-card-manager.md)
 
 #### Sound Processing Unit (SPU2)
-- 48-channel ADPCM audio
-- Reverb effects processing
-- SPU RAM simulation
+- Two cores × 24 voices (48 channels)
+- Voice and core register banks at IOP `0x1F900000`
 
 ## Execution Model
 
@@ -110,40 +106,38 @@ This emulator accurately simulates PS2 hardware to run commercial games and home
 - Loads PT_LOAD segments into memory
 - Sets entry point for execution
 
-## Integration
+## Running it
 
-### With PCSX2
-- Compatible with PINE debugger protocol
-- Can load PCSX2 save states
-- Memory layout matches PCSX2 exactly
+The emulator runs in its own process, `CodeDesigner.Ps2.Emulator.exe`, which hosts `PS2Emulator` behind `InternalPineSocket`: a server that speaks PCSX2's PINE wire format on port `28012`. The Bridge drives it with the same client code it uses for PCSX2, so the disassembler, breakpoints, stepping and memory tools work the same on both. In VS Code, pick the built-in emulator in the sidebar and click **Run**.
 
-### With VS Code Extension
-- Socket server for real-time debugging
-- Breakpoint and watchpoint support
-- Live memory inspection
+```
+CodeDesigner.Ps2.Emulator.exe --bios <bios.bin> [--disc <game.iso|zip>]
+CodeDesigner.Ps2.Emulator.exe --file <game.elf|bin> [--load-address 0xN]
+```
 
-## Performance
+See [Command-line tools](console-app.md).
 
-- Cycle-accurate where possible
-- Optimized for debugging (not speed)
-- Supports save/load state for quick iteration
+## Limits
+
+- Built for debugging, not speed, and not a replacement for PCSX2: commercial games generally need PCSX2.
+- No save states; use PCSX2 for those.
+- Step Over / Step Into and the PCSX2-only PINE extensions (symbols, GS stream, DEV9 capture, audio) are not available.
 
 ## Testing
 
-Extensive test suite covers:
-- Hardware register accuracy
-- DMA transfer correctness
-- Interrupt timing
-- Game compatibility verification
+About 600 tests in `CodeDesigner.Ps2.TestProject/Emulator/` cover the CPUs, TLB, exceptions, memory buses, timers, INTC, DMAC, GIF/GS, VIF, VU0/VU1, SIF, CDVD, SIO2, SPU2 and the loaders. See [Test Project](test-project.md).
 
 ## Usage
 
 ```csharp
+using CodeDesigner.Ps2.EmulatorCore;
+
 var emulator = new PS2Emulator();
-emulator.Reset(); // Initialize to BIOS entry point
-emulator.LoadElf("game.elf");
-while (!emulator.Halted) {
-    emulator.Step();
-}
-```</content>
-<parameter name="filePath">c:\Users\tholu\Desktop\CodeDesigner\docs\emulator.md
+emulator.Reset();                                         // PC = 0xBFC00000 (BIOS)
+
+uint entry = ElfLoader.LoadIntoEmulator(File.ReadAllBytes("game.elf"), emulator);
+emulator.SyscallRaised += (_, pc) => Console.WriteLine($"syscall at {pc:X8}");
+
+for (int i = 0; i < 1_000_000; i++)
+    emulator.Step();                                      // one EE instruction, with delay slots
+```

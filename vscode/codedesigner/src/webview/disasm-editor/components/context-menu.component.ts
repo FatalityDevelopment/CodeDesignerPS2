@@ -95,6 +95,12 @@ export interface ContextMenuData {
     <div class="ctx-menu-item" (click)="onFindCodeReferences()">
       <app-icon class="ctx-menu-icon" name="search" [size]="13" />Find Code References
     </div>
+    <div class="ctx-menu-item" (click)="onShowXrefs()">
+      <app-icon class="ctx-menu-icon" name="search" [size]="13" />Cross-references (X)
+    </div>
+    <div class="ctx-menu-item" (click)="onRebuildXrefs()">
+      <app-icon class="ctx-menu-icon" name="search" [size]="13" />Rebuild Cross-reference Index
+    </div>
     <div class="ctx-menu-separator"></div>
     <div class="ctx-menu-item" (click)="onAddToLabelManager()">
       <app-icon class="ctx-menu-icon" name="tag" [size]="13" />{{ data()?.currentLabel ? 'Edit Label…' : 'Add Label…' }}
@@ -150,6 +156,8 @@ export class ContextMenuComponent {
   readonly gotoTarget = output<void>();
   readonly findReferences = output<void>();
   readonly findCodeReferences = output<void>();
+  readonly showXrefs = output<void>();
+  readonly rebuildXrefs = output<void>();
   readonly addToLabelManager = output<void>();
   /**
    * Emits when the user picks one of the "Format as …" entries.  The payload
@@ -243,6 +251,16 @@ export class ContextMenuComponent {
 
   onFindReferences(): void {
     this.findReferences.emit();
+    this.close();
+  }
+
+  onShowXrefs(): void {
+    this.showXrefs.emit();
+    this.close();
+  }
+
+  onRebuildXrefs(): void {
+    this.rebuildXrefs.emit();
     this.close();
   }
 

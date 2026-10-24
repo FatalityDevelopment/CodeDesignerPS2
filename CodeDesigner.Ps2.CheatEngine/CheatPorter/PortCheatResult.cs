@@ -13,6 +13,9 @@ namespace CodeDesigner.Ps2.CheatEngine
         /// </summary>
         public int BlockIndex { get; set; }
 
+        /// <summary>Zero-based position of this line within its block.</summary>
+        public int LineIndex { get; set; }
+
         /// <summary>The #Name label of the cheat block this line belongs to.</summary>
         public string BlockName { get; set; } = string.Empty;
 
@@ -36,6 +39,15 @@ namespace CodeDesigner.Ps2.CheatEngine
 
         /// <summary>True when more than one candidate address was found in the target dump.</summary>
         public bool Ambiguous { get; set; }
+
+        /// <summary>Source address this line was ported from. Null for lines with no address (values, offsets, timers).</summary>
+        public int? SourceAddress { get; set; }
+
+        /// <summary>Target address chosen for <see cref="SourceAddress"/>. Null when not found or not applicable.</summary>
+        public int? NewAddress { get; set; }
+
+        /// <summary>How the line's code type was handled (e.g. "Pointer offsets — copied unchanged"). Null for plain codes.</summary>
+        public string? Note { get; set; }
 
         /// <summary>All candidate new code lines when Ambiguous is true.</summary>
         public List<string>? Candidates { get; set; }

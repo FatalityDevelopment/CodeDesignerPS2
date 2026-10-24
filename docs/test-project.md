@@ -1,237 +1,43 @@
 [← Back to Documentation Index](README.md)
 
-# CodeDesigner.Ps2.TestProject — Unit Test Suite
+# Test Project
 
-The `CodeDesigner.Ps2.TestProject` contains the comprehensive unit test suite for CodeDesigner, with over 1000 tests covering instruction accuracy, emulation correctness, and integration functionality.
+`CodeDesigner.Ps2.TestProject` is the main test suite: about 1,375 **MSTest** tests covering the instruction set, the emulator, CDS, cheats, file formats and parts of the Bridge. The MCP server has its own suite in `CodeDesigner.AI.Tests` (about 120 tests).
 
-## Overview
+---
 
-This test project ensures CodeDesigner components work correctly and maintain compatibility with PS2 hardware behavior. Tests are written using xUnit and cover all major functionality.
+## Running
 
-## Test Categories
-
-### Instruction Tests
-- **Encoding/Decoding**: Verify assembler/disassembler accuracy
-- **Execution**: Test instruction behavior against PCSX2 reference
-- **Edge Cases**: Boundary conditions and error handling
-
-### Emulation Tests
-- **CPU Execution**: Register state changes and flag updates
-- **Memory Access**: Load/store operations and address translation
-- **Exception Handling**: Interrupt and trap processing
-
-### Integration Tests
-- **ELF Loading**: Executable parsing and memory mapping
-- **Hardware Peripherals**: Timer, DMA, and I/O simulation
-- **Game Compatibility**: Real game execution verification
-
-## Running Tests
-
-### Command Line
-
-```bash
-# Run all tests
-dotnet test
-
-# Run specific test class
-dotnet test --filter "InstructionTests"
-
-# Run with coverage
-dotnet test --collect:"XPlat Code Coverage"
+```powershell
+dotnet test CodeDesigner.Ps2.TestProject/
+dotnet test CodeDesigner.Ps2.TestProject/ --filter "FullyQualifiedName~TestCheatPorter"
+dotnet test CodeDesigner.AI.Tests/
 ```
 
-### Visual Studio
-- Open Test Explorer
-- Run all or selected tests
-- View detailed results and debugging
+Building the test project builds `CodeDesigner.Ps2.Database` too, which migrates LocalDB. Add `-p:SkipDatabaseInit=true` if you don't want that. CI runs the main suite in Release on every push (`.github/workflows/build.yml`).
 
-## Test Structure
+---
 
-### Test Classes
+## Layout
 
-#### Instruction Coverage
-- `TestFullInstructionCoverage.cs`: Tests all MIPS instructions
-- `TestPS2Instructions.cs`: PS2-specific instruction verification
-- `TestFPUInstructions.cs`: Floating-point unit tests
-- `TestMMIInstructions.cs`: Multimedia instruction tests
+| Folder | Tests | Covers |
+|---|---|---|
+| `Common/` | ~385 | Encoding/decoding, every instruction's disassembly and execution, VU0 macro mode, the exhaustive disassemble → assemble round trip, comment-hint and pointer-chain analysis |
+| `Emulator/` | ~600 | EE and IOP CPUs, CPU accuracy, TLB, exceptions, memory buses, timers, INTC, DMAC (EE and IOP), GIF/GS, VIF, VU0 micro mode, VU1, SIF, CDVD, SIO2, SPU2, the dual-CPU scheduler, ELF/IRX and game loading |
+| `CdsLanguage/` | ~220 | Preprocessor, parser, compiler, diagnostics and regression fixes |
+| `Cheats/` | ~70 | Cheat file format, one-shot engine, frame-loop engine, converter ciphers, porter |
+| `Bridge/` | ~55 | Packet labelling (every Medius / DME / SOCOM II message has a name) and the value scanner |
+| `Recompiler/` | ~25 | ELF parsing and instruction translation |
+| `Compression/` | ~13 | APACHE / ZDB crypto and readers, ZED containers, Zipper round trips on real files |
+| `MemoryCardManager/`, `HddManager/` | ~10 | Memory card and HDD image handling |
 
-#### Emulation Tests
-- `TestCpuExecution.cs`: CPU state changes
-- `TestMemoryBus.cs`: Memory access patterns
-- `TestExceptionHandling.cs`: Interrupt processing
+Some `Compression/` tests read real game files (an EE dump, a retail ZDB) and report *Inconclusive* when those files aren't present.
 
-#### Integration Tests
-- `TestElfLoader.cs`: ELF file parsing
-- `TestHardwarePeripherals.cs`: Peripheral simulation
-- `TestGameCompatibility.cs`: Real game testing
+---
 
-### Test Data
-- **Reference binaries** from PCSX2
-- **Test ELF files** with known behavior
-- **Memory dumps** from real hardware
-- **Cheat code databases** for validation
+## Writing tests
 
-## Writing Tests
-
-### Basic Test Structure
-
-```csharp
-[Fact]
-public void TestAddInstruction() {
-    var cpu = new CpuState();
-    cpu.Regs[1] = 5;  // $a0 = 5
-    cpu.Regs[2] = 10; // $a1 = 10
-    
-    var add = new AddInstruction {
-        Rs = 1, Rt = 2, Rd = 3
-    };
-    add.Exec(cpu);
-    
-    Assert.Equal(15, cpu.Regs[3]); // $v1 should be 15
-}
-```
-
-### Parameterized Tests
-
-```csharp
-[Theory]
-[InlineData(0x00000000, "nop")]
-[InlineData(0x0000000D, "break")]
-public void TestDisassemble(uint opcode, string expected) {
-    var decoder = new InstructionDecoder();
-    var instr = decoder.Decode(opcode);
-    Assert.Equal(expected, instr.Disassemble());
-}
-```
-
-### Integration Tests
-
-```csharp
-[Fact]
-public void TestElfExecution() {
-    var emulator = new PS2Emulator();
-    emulator.LoadElf("test.elf");
-    
-    // Execute until completion
-    while (!emulator.Halted) {
-        emulator.Step();
-    }
-    
-    // Verify results
-    Assert.Equal(42, emulator.Cpu.Regs[2]); // $v0
-}
-```
-
-## Test Data Management
-
-### Fixtures
-- **TestElfLoader**: Loads test ELF files
-- **MemoryFixture**: Sets up memory state
-- **HardwareFixture**: Initializes peripherals
-
-### Data Sources
-- **Embedded resources** for test binaries
-- **External files** for large test data
-- **Generated data** for parametric tests
-
-## Continuous Integration
-
-### Automated Testing
-- **GitHub Actions** run tests on every commit
-- **Code coverage** reporting
-- **Performance regression** detection
-
-### Quality Gates
-- **Test pass rate** must be 100%
-- **Coverage minimum** of 90%
-- **No performance degradation**
-
-## Debugging Tests
-
-### Test Debugging
-- **Step-through execution** in debugger
-- **Memory inspection** during test runs
-- **Log output** for complex tests
-
-### Failure Analysis
-- **Detailed assertions** with context
-- **Expected vs actual** comparisons
-- **Stack traces** for exceptions
-
-## Performance Testing
-
-### Benchmark Tests
-- **Execution speed** measurements
-- **Memory usage** tracking
-- **Scalability tests** for large games
-
-### Profiling
-- **CPU profiling** of test execution
-- **Memory leak detection**
-- **Threading analysis**
-
-## Maintenance
-
-### Test Organization
-- **Clear naming** conventions
-- **Logical grouping** by functionality
-- **Documentation** for complex tests
-
-### Updating Tests
-- **Reference updates** when PCSX2 changes
-- **New test addition** for new features
-- **Test refactoring** for maintainability
-
-## Examples
-
-### Instruction Test
-
-```csharp
-[Fact]
-public void TestLoadWord() {
-    var bus = new PS2MemoryBus();
-    bus.Write32(0x1000, 0x12345678);
-    
-    var cpu = new CpuState { MemoryBus = bus };
-    var lw = new LwInstruction { Rs = 0, Rt = 2, Immediate = 0x1000 };
-    lw.Exec(cpu);
-    
-    Assert.Equal(0x12345678, cpu.Regs[2]);
-}
-```
-
-### Game Compatibility Test
-
-```csharp
-[Fact]
-public void TestGameBoot() {
-    var emulator = new PS2Emulator();
-    emulator.LoadElf("game.elf");
-    
-    // Boot sequence
-    for (int i = 0; i < 1000; i++) {
-        emulator.Step();
-    }
-    
-    // Verify game reached main menu
-    Assert.True(emulator.MemoryBus.Read32(0x00100000) != 0);
-}
-```
-
-## Best Practices
-
-### Test Design
-- **Single responsibility** per test
-- **Descriptive names** and comments
-- **Arrange-Act-Assert** pattern
-
-### Coverage Goals
-- **Statement coverage** > 90%
-- **Branch coverage** > 80%
-- **Path coverage** for critical paths
-
-### Maintenance
-- **Regular review** of test effectiveness
-- **Update tests** with code changes
-- **Remove obsolete** tests</content>
-<parameter name="filePath">c:\Users\tholu\Desktop\CodeDesigner\docs\test-project.md
+- Put new tests in the folder for the project they test, one `Test<Thing>.cs` class each.
+- For a new instruction, add both a disassembly test and an execution test, following `Common/TestFullInstructionCoverage.cs` and `Common/TestPS2Instructions.cs`. The round-trip test (`Common/TestDisasmRoundTrip.cs`) then checks that its printed form assembles back.
+- Check instruction semantics against PCSX2 (`pcsx2/pcsx2/R5900OpcodeImpl.cpp`, `VUops.cpp`, `FPU.cpp`).
+- `SYSCALL` tests expect a `SystemCallException` from a direct `Exec()` call.

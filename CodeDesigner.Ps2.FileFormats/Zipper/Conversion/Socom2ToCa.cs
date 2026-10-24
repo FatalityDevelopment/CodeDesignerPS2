@@ -1,3 +1,4 @@
+using CodeDesigner.Ps2.FileFormats.Assets;
 using System.Buffers.Binary;
 using System.Text;
 using CodeDesigner.Ps2.FileFormats.Zipper.Anim;
@@ -40,7 +41,7 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.Conversion
             var warnings = new List<string>();
             var names = new List<string> { o.ModelName };
             var lib = new CaLibraryWriter();
-            var mesh = ModelMesh.Build(pkg, model);
+            var mesh = ZipperModelMesh.Build(pkg, model);
             string kind, resource;
             int triangles;
             var textureIndex = new Dictionary<string, (int Rec, ulong Tex0)>(StringComparer.OrdinalIgnoreCase);
@@ -240,7 +241,7 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.Conversion
                         byte[] colour = r.ColorOffset is int co && r.ColorLength > 0 ? payload[co..(co + r.ColorLength)] : Grey(verts);
                         tags.Add(new CaLibraryWriter.ChainTag(3, colour, 0x01000103u, 0x6E00C006u | (uint)(verts & 0xFF) << 16));
                         tags.Add(new CaLibraryWriter.ChainTag(2, geometry));
-                        var chunk = ModelMesh.DecodeChunk(payload, r, 0, null, null, null, place?.Unit ?? (scaleUnit ? ZedModelFile.PositionUnit.Scale : ZedModelFile.PositionUnit.Sixteenth), Matrix4.Identity());
+                        var chunk = ZipperModelMesh.DecodeChunk(payload, r, 0, null, null, null, place?.Unit ?? (scaleUnit ? ZedModelFile.PositionUnit.Scale : ZedModelFile.PositionUnit.Sixteenth), Matrix4.Identity());
                         if (chunk != null)
                             for (int i = 0; i < chunk.Positions.Length; i++) { lo[i % 3] = MathF.Min(lo[i % 3], chunk.Positions[i]); hi[i % 3] = MathF.Max(hi[i % 3], chunk.Positions[i]); }
                     }

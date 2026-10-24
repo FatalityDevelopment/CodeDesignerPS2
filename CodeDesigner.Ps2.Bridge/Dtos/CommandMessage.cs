@@ -22,6 +22,11 @@ namespace CodeDesigner.Ps2.Bridge
         public string? SearchMode { get; set; }
         public uint? TargetAddress { get; set; }
         public List<string>? ReferenceKinds { get; set; }
+        // XREFINDEX / XREFSTO fields
+        /// <summary>Rebuild the cross-reference index even when one exists.</summary>
+        public bool? XrefRebuild { get; set; }
+        /// <summary>Block until the index is built instead of building it in the background.</summary>
+        public bool? XrefWait { get; set; }
         // SETREG fields
         public string? RegisterName { get; set; }
         public int? RegisterIndex { get; set; }
@@ -338,6 +343,10 @@ namespace CodeDesigner.Ps2.Bridge
         /// <summary>16 pressure bytes for PADSETSTATE (in PadDualshock2::Inputs order).</summary>
         public List<byte>? PadPressures { get; set; }
 
+        // Audio output field (PINESETAUDIOMUTED)
+        /// <summary>True to mute PCSX2's audio output, false to unmute.</summary>
+        public bool? AudioMuted { get; set; }
+
         // DEV9 network bridge fields (NETCAPTURE / NETRECVCAPTURE / NETINJECT / NETINJECTTX / NETDISASSEMBLE / NETSETFILTER)
         /// <summary>Enable flag for NETCAPTURE (true = enable, false = disable).</summary>
         public bool? NetCaptureEnable { get; set; }
@@ -365,6 +374,24 @@ namespace CodeDesigner.Ps2.Bridge
         public byte? MediusClass { get; set; }
         /// <summary>Medius message type byte for MEDIUSDECODE.</summary>
         public byte? MediusType { get; set; }
+        /// <summary>NETINJECT / NETINJECTTX / NETBUILDFRAME: new TCP/UDP payload (base64) for the NetFrameData template.</summary>
+        public string? NetPayloadData { get; set; }
+        /// <summary>NETINJECT / NETINJECTTX / NETBUILDFRAME: recompute IPv4/TCP/UDP lengths and checksums.</summary>
+        public bool? NetFixFrame { get; set; }
+        /// <summary>NETINJECT / NETINJECTTX / NETBUILDFRAME: move a TCP segment onto its live flow's next seq/ack (from drained captures).</summary>
+        public bool? NetTcpContinue { get; set; }
+        /// <summary>NETDISSECTMANY: frames to dissect in one call.</summary>
+        public List<NetFrameInput>? NetFrames { get; set; }
+        /// <summary>NETBUILDMESSAGE: catalog protocol (SCERT, Lobby, LobbyExt, MGCL, DME, Game).</summary>
+        public string? NetMessageProtocol { get; set; }
+        /// <summary>NETBUILDMESSAGE: message id within <see cref="NetMessageProtocol"/>.</summary>
+        public byte? NetMessageId { get; set; }
+        /// <summary>NETBUILDMESSAGE: field values by catalog field name ("Payload" = extra hex bytes).</summary>
+        public Dictionary<string, string>? NetMessageValues { get; set; }
+        /// <summary>NETBUILDMESSAGE: RT_MSG type of the SCERT record wrapping an app message.</summary>
+        public byte? NetRtType { get; set; }
+        /// <summary>NETBUILDMESSAGE: APP_SINGLE / APP_LIST target (or source, server → client) DME index.</summary>
+        public int? NetAppTarget { get; set; }
         // CDS Cheat Engine fields (INJECTCHEATENGINE / UPDATECHEATENGINE / REMOVECHEATENGINE)
         /// <summary>Hook address — the instruction to replace with a jump to the cheat engine.</summary>
         public uint? HookAddress { get; set; }

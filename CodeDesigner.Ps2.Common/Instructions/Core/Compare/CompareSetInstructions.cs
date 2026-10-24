@@ -123,7 +123,7 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Disasm(Args_I args, uint? pc = null)
         {
-            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}, ${args.Imm:X4}";
+            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.FormatSignedImmediate(args.Imm)}";
         }
 
         public override uint Asm(int[] args)
@@ -167,7 +167,7 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Disasm(Args_I args, uint? pc = null)
         {
-            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}, ${args.Imm:X4}";
+            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.FormatSignedImmediate(args.Imm)}";
         }
 
         public override uint Asm(int[] args)

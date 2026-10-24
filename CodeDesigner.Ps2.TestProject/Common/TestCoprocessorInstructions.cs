@@ -12,7 +12,7 @@ namespace CodeDesigner.Ps2.TestProject
             // Test COP0 move instructions
             Assert.IsTrue(MipsDisassembler.Disassemble(0x40088000).Contains("mfc0"), "MFC0 should be recognized");
             Assert.IsTrue(MipsDisassembler.Disassemble(0x40888000).Contains("mtc0"), "MTC0 should be recognized");
-            Assert.IsTrue(MipsDisassembler.Disassemble(0x40C88000).Contains("ctc0"), "CTC0 should be recognized");
+            Assert.IsTrue(MipsDisassembler.Disassemble(0x40C88000).StartsWith(".word"), "CTC0 is not an EE instruction");
             
             // Test COP0 TLB instructions
             Assert.IsTrue(MipsDisassembler.Disassemble(0x42000001).Contains("tlbr"), "TLBR should be recognized");
@@ -43,10 +43,10 @@ namespace CodeDesigner.Ps2.TestProject
         [TestMethod]
         public void Test_VU0_Instructions()
         {
-            // Test VU0 vector arithmetic
-            Assert.IsTrue(MipsDisassembler.Disassemble(0x4A000028).Contains("vadd"), "VADD should be recognized");
-            Assert.IsTrue(MipsDisassembler.Disassemble(0x4A000029).Contains("vsub"), "VSUB should be recognized");
-            Assert.IsTrue(MipsDisassembler.Disassemble(0x4A00002A).Contains("vmul"), "VMUL should be recognized");
+            // VU0 macro SPECIAL1 functs 0x28-0x2A are vadd, vmadd, vmul (PCSX2 table order)
+            Assert.AreEqual("vadd.xyzw vf0, vf0, vf0", MipsDisassembler.Disassemble(0x4BE00028), "VADD should be recognized");
+            Assert.AreEqual("vmadd.xyzw vf0, vf0, vf0", MipsDisassembler.Disassemble(0x4BE00029), "VMADD should be recognized");
+            Assert.AreEqual("vmul.xyzw vf0, vf0, vf0", MipsDisassembler.Disassemble(0x4BE0002A), "VMUL should be recognized");
         }
 
         [TestMethod]
@@ -63,7 +63,8 @@ namespace CodeDesigner.Ps2.TestProject
         {
             // Test REGIMM branch-and-link instructions
             Assert.IsTrue(MipsDisassembler.Disassemble(0x04100010).Contains("bltzal"), "BLTZAL should be recognized");
-            Assert.IsTrue(MipsDisassembler.Disassemble(0x04110010).Contains("bgezal"), "BGEZAL should be recognized");
+            Assert.IsTrue(MipsDisassembler.Disassemble(0x04110010).StartsWith("bal "), "BGEZAL $zero should show as bal");
+            Assert.IsTrue(MipsDisassembler.Disassemble(0x04910010).Contains("bgezal"), "BGEZAL should be recognized");
             Assert.IsTrue(MipsDisassembler.Disassemble(0x04120010).Contains("bltzall"), "BLTZALL should be recognized");
             Assert.IsTrue(MipsDisassembler.Disassemble(0x04130010).Contains("bgezall"), "BGEZALL should be recognized");
         }

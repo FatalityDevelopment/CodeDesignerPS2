@@ -63,8 +63,9 @@ namespace CodeDesigner.Ps2.TestProject
             AssertAsm("lwc1 $f12, $0010($sp)", 0xC7AC0010);
             AssertAsm("lwc1 f12, 0x10(sp)", 0xC7AC0010);
             AssertAsm("lwc1 $f0, -16($sp)", 0xC7A0FFF0);
-            AssertAsm("ldc1 $f0, 0($t0)", 0xD5000000);
-            AssertAsm("sdc1 $f0, 0($t0)", 0xF5000000);
+            // The EE FPU is single-precision only: no ldc1/sdc1.
+            Assert.IsFalse(MipsAssembler.TryAssemble("ldc1 $f0, 0($t0)", out _, out _));
+            Assert.IsFalse(MipsAssembler.TryAssemble("sdc1 $f0, 0($t0)", out _, out _));
         }
 
         [TestMethod]
@@ -243,7 +244,7 @@ namespace CodeDesigner.Ps2.TestProject
         {
             Assert.AreEqual("lwc1 $f12, $0010(sp)", MipsDisassembler.Disassemble(0xC7AC0010));
             Assert.AreEqual("swc1 $f12, $0010(sp)", MipsDisassembler.Disassemble(0xE7AC0010));
-            Assert.AreEqual("lwc1 $f0, $FFF0(sp)", MipsDisassembler.Disassemble(0xC7A0FFF0));
+            Assert.AreEqual("lwc1 $f0, -$0010(sp)", MipsDisassembler.Disassemble(0xC7A0FFF0));
             Assert.AreEqual("lw t0, $0010(sp)", MipsDisassembler.Disassemble(0x8FA80010));
         }
 
@@ -252,7 +253,7 @@ namespace CodeDesigner.Ps2.TestProject
         {
             uint[] words =
             {
-                0xC7AC0010, 0xE7AC0010, 0xC7A0FFF0, 0xD5000000, 0xF5000000,  // lwc1 swc1 ldc1 sdc1
+                0xC7AC0010, 0xE7AC0010, 0xC7A0FFF0,                          // lwc1 swc1 lwc1 (negative offset)
                 0x44881000, 0x44081000, 0x4448F800, 0x44C8F800,              // mtc1 mfc1 cfc1 ctc1
                 0x46020800, 0x460208C1, 0x46052102, 0x46020803, 0x46001046,  // add.s sub.s mul.s div.s mov.s
                 0x46800820, 0x46000824, 0x46010034, 0x46010032,              // cvt.s.w cvt.w.s c.lt.s c.eq.s
@@ -261,6 +262,17 @@ namespace CodeDesigner.Ps2.TestProject
                 0x0009413C, 0x71090018, 0x70004012, 0x712A4489, 0x712A44A9,  // dsll32 mult1 mflo1 pand por
                 0x7BA80010, 0x7FA80010, 0xBD140000, 0x0320F809,              // lq sq cache jalr
                 0xD9010000, 0xF9010010,                                      // lqc2 sqc2
+                0x27BDFFC0, 0x8FBF0030, 0x2908FFFF,                          // addiu sp,-$0040  lw ra  slti -1
+                0x00804021, 0x00804025, 0x0080402D,                          // move (addu) or daddu
+                0x24040005, 0x3404FFFF, 0x00804027, 0x00044023,              // li li(ori) not negu
+                0x0000040F, 0x01094018, 0x70001070,                          // sync.p mult t0,t0,t1 pmfhl.uw
+                0x4A0003BF, 0x4A0002FF, 0x4A000038, 0x4A00D839,              // vwaitq vnop vcallms vcallmsr
+                0x4BE31068, 0x4B031068, 0x4BE310C0, 0x4BE31128,              // vadd.xyzw vadd.x vaddx.xyzw vadd.xyzw vf4
+                0x4A8203BD, 0x4BE1133C, 0x4A820BBC, 0x4A20143E,              // vsqrt vmove vdiv vrinit
+                0x4BE3103C, 0x4BE1137C, 0x4A0110F0,                          // vaddax ACC vlqi viadd
+                0x48281800, 0x48281801, 0x48A81800, 0x4848D800, 0x48C88000,  // qmfc2 qmfc2.i qmtc2 cfc2 ctc2
+                0x49000004, 0x41010004, 0xCD010010,                          // bc2f bc0t pref
+                0x4008C002, 0x4008C803,                                      // mfiab mfpc t0, 1
             };
 
             foreach (uint word in words)

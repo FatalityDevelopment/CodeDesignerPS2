@@ -1,3 +1,4 @@
+using CodeDesigner.Ps2.FileFormats.Assets;
 namespace CodeDesigner.Ps2.FileFormats.Zipper.Geo
 {
     /// <summary>

@@ -2,99 +2,96 @@
 
 # Cheat Engine — User Guide
 
-The CodeDesigner cheat engine lets you apply cheat codes to a running PS2 game, either as a one-time write or as a persistent routine that re-applies the cheat every game frame.
+CodeDesigner applies cheat codes to a running game in two ways: a **one-shot** write of the codes right now, or the **frame-loop engine**, a small MIPS routine injected into the game that re-applies cheats every frame.
 
 ---
 
 ## The Cheats tab
 
-The **Cheats** tab has two main sections.
+### Archive cheats
 
-### Archive cheats (PCSX2 mode)
+When you're connected to PCSX2, the tab loads the known cheats for the running game: from the database first, then from the CheatCodeArchive YAML files. Toggle the ones you want; enabling a cheat writes its codes straight away, and **Apply All Enabled** writes every enabled cheat again.
 
-When connected to PCSX2, CodeDesigner automatically fetches known cheats for the running game from the CheatCodeArchive. Tick the cheats you want and click **Apply All Enabled**.
+Enabled cheats are also annotated in the disassembler's label column, and the first joker address (`D0` line) gets a `joker` label.
 
-### Manual cheat codes
+### Your own codes
 
-Paste raw GameShark / Action Replay codes into the text box and click **Update** to apply them immediately.
+Paste GameShark / CodeBreaker raw codes into the text box and click **Update** to write them. The CDS tab's **Add Cheat** fills this box from a compiled script.
+
+### Cheat Tools
+
+- **Converter** — detect and convert cheat formats (encrypted ↔ raw). See [Cheat Converter](cheat-converter.md).
+- **Scanner** — the memory scanner, for finding values to make cheats from.
+- **Porter** — move codes to another game version. See [Cheat Porter](cheat-porter.md).
+
+To edit full cheat lists (with sections and syntax highlighting), open the **Cheats editor** from *Emulator → Tools → Cheats*. To build a button activator for a cheat, use the [Controller](vscode-extension.md#controller) page.
 
 ---
 
-## Cheat code format
+## Code format
 
-Each block has an optional title line and one or more code lines:
+A cheat is a name line followed by code lines:
 
 ```
 #Infinite Health
-20123456 000003E8
+2034A1B0 000003E7
 
 #Max Ammo
-20654321 00000063
+1034A1C4 00000063
 ```
 
-The first byte of the address determines the operation:
+One-shot apply understands these types (first hex digit of the address word):
 
-| Prefix | Operation |
+| Type | Operation |
 |---|---|
-| `20` | Write 32-bit word |
-| `10` | Write 16-bit halfword |
-| `00` | Write 8-bit byte |
-| `D0` / `E0` | Conditional word write (compare first) |
+| `0` | 8-bit write |
+| `1` | 16-bit write |
+| `2` | 32-bit write |
+| `5` | Copy bytes |
+| `7` | Pointer write |
+| `B` | Timer |
+| `C` | 32-bit condition (gates the rest of the cheat) |
+| `D` | 16-bit condition (gates the rest of the cheat); used for jokers |
+
+Conditions are checked once, at the moment you apply. For a condition that should be checked every frame (a joker), use the frame-loop engine.
 
 ---
 
-## One-shot vs. persistent cheats
+## One-shot vs. frame-loop
 
-### One-shot (Apply / Update)
+**One-shot** (toggle, Apply All Enabled, Update) writes the values once. That's enough for unlocks and flags the game doesn't rewrite.
 
-Writes the value directly into game memory right now. Works well for values the game does not reset every frame (e.g. unlocking a level or setting a flag).
+**Frame-loop.** For values the game keeps resetting (health, ammo) or codes gated by a button combo, the engine injects a routine into unused EE RAM (default `0x000C0000`) and hooks it into a function the game calls every frame. The routine then re-applies the cheat table each frame.
 
-### Persistent (Cheat Engine injection)
+The engine is driven through the Bridge and MCP, not a sidebar button:
 
-For values the game constantly overwrites — health bars, ammo counters — you need a routine that runs every frame and keeps re-applying the write.
+| Bridge command | MCP tool | Does |
+|---|---|---|
+| `INJECTCHEATENGINE` | `inject_cheat_engine` | Assemble the routine, write the table and install the hook. Needs `HookAddress` (a per-frame call site); `EngineBase` is optional. |
+| `UPDATECHEATENGINE` | `update_cheat_engine` | Replace the cheat table without re-hooking. |
+| `REMOVECHEATENGINE` | `remove_cheat_engine` | Restore the hooked instruction and clear the routine. |
 
-Use the CDS language's `freeze`, `cond`, and `timer` blocks to describe persistent cheats, then click **Inject** in the Cheats tab. CodeDesigner assembles a small MIPS routine and injects it into EE RAM. The routine hooks into the game's VBLANK handler and re-applies all active cheats each frame.
-
-Commands:
-- **Inject** — assemble the routine and install the hook
-- **Update** — update the cheat table in place (no re-hook needed)
-- **Remove** — restore the original hook bytes and clear the routine
-
----
-
-## Writing persistent cheats in CDS
+Each takes raw codes or CDS source. In CDS, persistent cheats are written with `freeze`, `cond` and `timer` blocks (values are hex):
 
 ```cds
-# Keep health at 9999 every frame
-freeze $20123456 = 9999
+freeze $2034A1B0 = 03E7          // keep health at 999
 
-# Only freeze ammo when the weapon is active
-cond $80001234 == 1
-  freeze $20654321 = 99
+cond mem[$2034A100] == 1         // only while this word is 1
+  freeze $2034A1C4 = 63
 endcond
 
-# Run a write once every 60 frames (once per second at 60 fps)
-timer 60
-  freeze $20ABCDEF = 100
+timer 60                          // once every 60 frames
+  freeze $2034A1C8 = 64
 endtimer
 ```
 
-Compile the `.cds` file from the **CDS** tab, then click **Add Cheat** to send the result to the Cheats tab and inject it.
-
----
-
-## Format conversion
-
-The **Cheat Converter** converts between GameShark, Action Replay, and other PS2 cheat formats. Open it from the toolbar in the Cheats tab.
-
-## Porting cheats between game revisions
-
-The **Cheat Porter** maps cheat codes from one game version (e.g. NTSC-U) to another (e.g. PAL) by scanning for equivalent patterns in both ELF images. Open it from the toolbar in the Cheats tab.
+See [CDS Language → Cheat-engine blocks](cds-language.md#cheat-engine-blocks).
 
 ---
 
 ## Tips
 
-- Use one-shot codes for permanent unlocks; use `freeze` for values the game resets every frame.
-- The persistent engine is injected at `0x000C0000` by default. This address must be unused by the game — check the memory map for your title if you see crashes after injection.
-- Disabling all `freeze` blocks and clicking **Remove** cleanly restores the game to its original state without restarting.
+- Snapshot before experimenting with codes.
+- The engine's base address must be unused by the game. If the game crashes after injecting, pass a different `EngineBase`.
+- Pick a hook in code that runs once per frame (a main-loop call). The disassembler's cross-references (`X`) help find one.
+- **Remove** restores the hook, so the game keeps running without a restart. Values already written stay until the game overwrites them.
