@@ -385,8 +385,12 @@ const NET_POLL_MS = 30000;
                 <app-icon name="camera" [size]="14" /><span>Snapshots</span>
               </button>
               <button (click)="openDiffViewerClick.emit()"
-                      title="Open the Memory Diff Viewer to compare snapshots">
+                      title="Open the Memory Diff Viewer to compare memory dumps or live EE RAM">
                 <app-icon name="gitcompare" [size]="14" /><span>Diff</span>
+              </button>
+              <button (click)="openCheatPorterClick.emit()"
+                      title="Open the Cheat Porter to port codes between two EE RAM dumps">
+                <app-icon name="repeat" [size]="14" /><span>Porter</span>
               </button>
               <button (click)="openCompatBrowserClick.emit()"
                       title="Browse the PCSX2 game compatibility list">
@@ -712,6 +716,7 @@ export class SettingsTabComponent implements OnDestroy {
   readonly openLabelManagerClick = output<void>();
   readonly openSnapshotManagerClick = output<void>();
   readonly openDiffViewerClick   = output<void>();
+  readonly openCheatPorterClick  = output<void>();
   readonly openCompatBrowserClick = output<void>();
   readonly openCheatsEditorClick = output<void>();
   readonly openMemoryCardClick   = output<void>();

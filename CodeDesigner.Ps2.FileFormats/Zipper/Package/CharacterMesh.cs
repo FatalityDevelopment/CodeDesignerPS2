@@ -1,59 +1,9 @@
+using CodeDesigner.Ps2.FileFormats.Assets;
 using CodeDesigner.Ps2.FileFormats.Zipper.Geo;
 using CodeDesigner.Ps2.FileFormats.Zipper.ZED;
 
 namespace CodeDesigner.Ps2.FileFormats.Zipper.Package
 {
-    /// <summary>
-    /// A character skeleton from its GEO model (<c>CLIB_GEO.ZED</c> › <c>seal_A_woodland_LO</c>): every scene node
-    /// under the model with its local <c>nparams</c> transform, bind-pose world transform (relative to the model
-    /// node, which is included as bone 0) and the <c>matrix_id</c> its skinned vertex batches name.
-    /// </summary>
-    public sealed class CharacterSkeleton
-    {
-        public sealed record Bone(string Name, int MatrixId, int Parent, int GeoIndex, float[] Local, float[] World);
-
-        public List<Bone> Bones { get; } = new();
-        private readonly Dictionary<int, int> _byMatrixId = new();
-
-        /// <summary>The bone a vertex batch names by matrix_id, or null.</summary>
-        public Bone? ByMatrixId(int matrixId) => _byMatrixId.TryGetValue(matrixId, out int i) ? Bones[i] : null;
-
-        /// <summary>Index into <see cref="Bones"/> of the bone with <paramref name="matrixId"/>, or -1.</summary>
-        public int IndexOfMatrix(int matrixId) => _byMatrixId.TryGetValue(matrixId, out int i) ? i : -1;
-
-        /// <summary>A skeleton from bones already in order (parents first); a bone's matrix_id is its index.</summary>
-        public static CharacterSkeleton FromBones(IEnumerable<Bone> bones)
-        {
-            var s = new CharacterSkeleton();
-            foreach (var b in bones)
-            {
-                s._byMatrixId.TryAdd(b.MatrixId, s.Bones.Count);
-                s.Bones.Add(b);
-            }
-            return s;
-        }
-
-        public static CharacterSkeleton FromGeo(GeoNode model)
-        {
-            var s = new CharacterSkeleton();
-            void Visit(GeoNode node, int parent, float[] parentWorld)
-            {
-                float[] local = node.Transform;
-                float[] world = Matrix4.Multiply(parentWorld, local);
-                int matrixId = -1;
-                foreach (GeoNode vis in node.Visuals)
-                    if (vis.Child("matrix_id")?.Data is { Length: >= 4 } d) { matrixId = BitConverter.ToInt32(d, 0); break; }
-                int index = s.Bones.Count;
-                s.Bones.Add(new Bone(node.Name, matrixId, parent, node.Index, local, world));
-                if (matrixId >= 0) s._byMatrixId.TryAdd(matrixId, index);
-                foreach (GeoNode c in node.SceneChildren)
-                    if (c.IsSceneNode) Visit(c, index, world);
-            }
-            Visit(model, -1, Matrix4.Identity());
-            return s;
-        }
-    }
-
     /// <summary>
     /// Skinned character meshes (<c>MESH_&lt;model&gt;</c> in <c>CLIB_MDL.ZED</c>), the format of
     /// <c>Mods/SOCOMCA/charmesh.py</c> / <c>s2mesh.py</c> (confirmed in game by the CA ports). The payload is blocks
@@ -73,21 +23,6 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.Package
     {
         public const float PositionScale = 1f / 4096f;
 
-        /// <summary>One influence on a vertex: bone (index into the skeleton), bone-local position and normal, weight.</summary>
-        public readonly record struct Part(int Bone, float X, float Y, float Z, float Nx, float Ny, float Nz, float Weight);
-
-        public sealed class Group
-        {
-            public string Texture { get; init; } = string.Empty;
-            public int Section { get; init; }
-            /// <summary>Offset of the draw block in the payload (the group's identity).</summary>
-            public int DrawOffset { get; init; }
-            /// <summary>Per vertex (slot), its influences.</summary>
-            public List<Part>[] Vertices { get; init; } = Array.Empty<List<Part>>();
-            public float[] Uvs { get; init; } = Array.Empty<float>();
-            public int[] Triangles { get; init; } = Array.Empty<int>();
-        }
-
         /// <summary>True when the MDL record at <paramref name="nodeIndex"/> is a skinned mesh (has a <c>_START</c> child).</summary>
         public static bool IsSkinned(ZedContainer container, int nodeIndex) => StartOffset(container, nodeIndex) != null;
 
@@ -106,9 +41,31 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.Package
         public static string SkeletonName(string meshName) =>
             meshName.StartsWith("MESH_", StringComparison.OrdinalIgnoreCase) ? meshName[5..] : meshName;
 
-        public static List<Group> Decode(byte[] payload, int start, CharacterSkeleton skeleton)
+        /// <summary>A SOCOM II skeleton from its GEO model (<c>CLIB_GEO.ZED</c> › <c>seal_A_woodland_LO</c>): every scene
+        /// node under the model (the model node included as bone 0) with its nparams transform and the matrix_id its
+        /// vertex batches name.</summary>
+        public static CharacterSkeleton SkeletonFromGeo(GeoNode model)
         {
-            var groups = new List<Group>();
+            var s = new CharacterSkeleton();
+            void Visit(GeoNode node, int parent, float[] parentWorld)
+            {
+                float[] local = node.Transform;
+                float[] world = Matrix4.Multiply(parentWorld, local);
+                int matrixId = -1;
+                foreach (GeoNode vis in node.Visuals)
+                    if (vis.Child("matrix_id")?.Data is { Length: >= 4 } d) { matrixId = BitConverter.ToInt32(d, 0); break; }
+                int index = s.Bones.Count;
+                s.Add(new CharacterSkeleton.Bone(node.Name, matrixId, parent, node.Index, local, world));
+                foreach (GeoNode c in node.SceneChildren)
+                    if (c.IsSceneNode) Visit(c, index, world);
+            }
+            Visit(model, -1, Matrix4.Identity());
+            return s;
+        }
+
+        public static List<SkinnedMesh.Group> Decode(byte[] payload, int start, CharacterSkeleton skeleton)
+        {
+            var groups = new List<SkinnedMesh.Group>();
             if (start < 0 || start + 16 > payload.Length) throw new InvalidDataException($"Chain start 0x{start:X} is outside the mesh payload");
             int count = (int)(BitConverter.ToUInt32(payload, start) & 0xFFFF);
             string texture = string.Empty;
@@ -151,10 +108,10 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.Package
             return System.Text.Encoding.Latin1.GetString(b, addr, end - addr);
         }
 
-        private static Group DecodeGroup(byte[] b, string texture, int section, List<(int Bone, int Offset, int Length)> vertexBlocks,
+        private static SkinnedMesh.Group DecodeGroup(byte[] b, string texture, int section, List<(int Bone, int Offset, int Length)> vertexBlocks,
             int drawOffset, int drawLength, CharacterSkeleton skeleton)
         {
-            var slots = new SortedDictionary<int, List<Part>>();
+            var slots = new SortedDictionary<int, List<SkinnedMesh.Part>>();
             foreach (var (matrixId, offset, length) in vertexBlocks)
             {
                 // STCYCL, UNPACK V4-16 @4: header (flags, tris, bone, count), then 16 bytes per vertex.
@@ -170,11 +127,11 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.Package
                     int v = h + 8 + i * 16;
                     if (v + 16 > offset + length) break;
                     int slot = BitConverter.ToInt16(b, v + 6) / 2;
-                    var part = new Part(boneIndex,
+                    var part = new SkinnedMesh.Part(boneIndex,
                         BitConverter.ToInt16(b, v) * PositionScale, BitConverter.ToInt16(b, v + 2) * PositionScale, BitConverter.ToInt16(b, v + 4) * PositionScale,
                         BitConverter.ToInt16(b, v + 8) / 32767f, BitConverter.ToInt16(b, v + 10) / 32767f, BitConverter.ToInt16(b, v + 12) / 32767f,
                         BitConverter.ToInt16(b, v + 14) / 32767f);
-                    if (!slots.TryGetValue(slot, out var list)) slots[slot] = list = new List<Part>();
+                    if (!slots.TryGetValue(slot, out var list)) slots[slot] = list = new List<SkinnedMesh.Part>();
                     list.Add(part);
                 }
             }
@@ -202,14 +159,14 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.Package
             }
 
             int vertexCount = Math.Max(slots.Count == 0 ? 0 : slots.Keys.Max() + 1, uvs.Count / 2);
-            var vertices = new List<Part>[vertexCount];
-            for (int i = 0; i < vertexCount; i++) vertices[i] = slots.TryGetValue(i, out var l) ? l : new List<Part>();
+            var vertices = new List<SkinnedMesh.Part>[vertexCount];
+            for (int i = 0; i < vertexCount; i++) vertices[i] = slots.TryGetValue(i, out var l) ? l : new List<SkinnedMesh.Part>();
             while (uvs.Count < vertexCount * 2) uvs.Add(0);
             var tris = new List<int>(triangles.Count);
             for (int i = 0; i + 2 < triangles.Count; i += 3)
                 if (triangles[i] < vertexCount && triangles[i + 1] < vertexCount && triangles[i + 2] < vertexCount)
                     tris.AddRange(new[] { triangles[i], triangles[i + 1], triangles[i + 2] });
-            return new Group { Texture = texture, Section = section, DrawOffset = drawOffset, Vertices = vertices, Uvs = uvs.Take(vertexCount * 2).ToArray(), Triangles = tris.ToArray() };
+            return new SkinnedMesh.Group { Texture = texture, Section = section, DrawOffset = drawOffset, Vertices = vertices, Uvs = uvs.Take(vertexCount * 2).ToArray(), Triangles = tris.ToArray() };
         }
 
         /// <summary>
@@ -219,9 +176,9 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.Package
         /// block (STCYCL 0x102 ... MSCNT). A vertex batch's bone is the pre-order node index under the model root
         /// (excluded); <paramref name="boneOffset"/> maps it into the skeleton. Port of Mods/SOCOMCA/ca2s2.ca_groups.
         /// </summary>
-        public static List<Group> DecodeCa(byte[] b, int start, int end, int boneOffset, int boneCount, Func<uint, string> textureName)
+        public static List<SkinnedMesh.Group> DecodeCa(byte[] b, int start, int end, int boneOffset, int boneCount, Func<uint, string> textureName)
         {
-            var groups = new List<Group>();
+            var groups = new List<SkinnedMesh.Group>();
             end = Math.Min(end, b.Length);
             bool BatchAt(int p) => p + 8 <= end && BitConverter.ToUInt32(b, p) == 0x01000101 && ((BitConverter.ToUInt32(b, p + 4) >> 24) & 0x7F) == 0x6D;
             int section = -1, o = start;
@@ -235,7 +192,7 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.Package
                 {
                     // One group: vertex batches, then the draw block up to its MSCNT; the next group or the next
                     // section's texture field follows (never walk across the texture field: it can parse as VIF).
-                    var slots = new SortedDictionary<int, List<Part>>();
+                    var slots = new SortedDictionary<int, List<SkinnedMesh.Part>>();
                     int? drawAt = null, next = null;
                     var triangles = new List<int>();
                     var uvs = new List<float>();
@@ -258,11 +215,11 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.Package
                                 {
                                     int v = at + 16 + 16 * i;
                                     int slot = BitConverter.ToInt16(b, v + 6) / 2;
-                                    var part = new Part(boneIndex,
+                                    var part = new SkinnedMesh.Part(boneIndex,
                                         BitConverter.ToInt16(b, v) * PositionScale, BitConverter.ToInt16(b, v + 2) * PositionScale, BitConverter.ToInt16(b, v + 4) * PositionScale,
                                         BitConverter.ToInt16(b, v + 8) / 32767f, BitConverter.ToInt16(b, v + 10) / 32767f, BitConverter.ToInt16(b, v + 12) / 32767f,
                                         BitConverter.ToInt16(b, v + 14) / 32767f);
-                                    if (!slots.TryGetValue(slot, out var l)) slots[slot] = l = new List<Part>();
+                                    if (!slots.TryGetValue(slot, out var l)) slots[slot] = l = new List<SkinnedMesh.Part>();
                                     l.Add(part);
                                 }
                             }
@@ -281,38 +238,19 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.Package
                     }
                     if (next == null || drawAt == null) break;
                     int vertexCount = Math.Max(slots.Count == 0 ? 0 : slots.Keys.Max() + 1, uvs.Count / 2);
-                    var vertices = new List<Part>[vertexCount];
-                    for (int i = 0; i < vertexCount; i++) vertices[i] = slots.TryGetValue(i, out var l) ? l : new List<Part>();
+                    var vertices = new List<SkinnedMesh.Part>[vertexCount];
+                    for (int i = 0; i < vertexCount; i++) vertices[i] = slots.TryGetValue(i, out var l) ? l : new List<SkinnedMesh.Part>();
                     while (uvs.Count < vertexCount * 2) uvs.Add(0);
                     var tris = new List<int>(triangles.Count);
                     for (int i = 0; i + 2 < triangles.Count; i += 3)
                         if (triangles[i] < vertexCount && triangles[i + 1] < vertexCount && triangles[i + 2] < vertexCount)
                             tris.AddRange(new[] { triangles[i], triangles[i + 1], triangles[i + 2] });
-                    groups.Add(new Group { Texture = texture, Section = section, DrawOffset = drawAt.Value, Vertices = vertices, Uvs = uvs.Take(vertexCount * 2).ToArray(), Triangles = tris.ToArray() });
+                    groups.Add(new SkinnedMesh.Group { Texture = texture, Section = section, DrawOffset = drawAt.Value, Vertices = vertices, Uvs = uvs.Take(vertexCount * 2).ToArray(), Triangles = tris.ToArray() });
                     p = next.Value;
                 }
                 o = Math.Max(o + 16, p + 16);
             }
             return groups;
-        }
-
-        /// <summary>Bind-pose position and normal of one vertex (model space).</summary>
-        public static (float[] Position, float[] Normal) Pose(IReadOnlyList<Part> parts, CharacterSkeleton skeleton, IReadOnlyList<float[]>? boneWorld = null)
-        {
-            var p = new float[3];
-            var n = new float[3];
-            foreach (var part in parts)
-            {
-                float[] m = boneWorld?[part.Bone] ?? skeleton.Bones[part.Bone].World;
-                var (x, y, z) = Matrix4.Apply(m, part.X, part.Y, part.Z);
-                p[0] += x * part.Weight; p[1] += y * part.Weight; p[2] += z * part.Weight;
-                n[0] += (part.Nx * m[0] + part.Ny * m[4] + part.Nz * m[8]) * part.Weight;
-                n[1] += (part.Nx * m[1] + part.Ny * m[5] + part.Nz * m[9]) * part.Weight;
-                n[2] += (part.Nx * m[2] + part.Ny * m[6] + part.Nz * m[10]) * part.Weight;
-            }
-            float len = MathF.Sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
-            if (len > 1e-6f) { n[0] /= len; n[1] /= len; n[2] /= len; }
-            return (p, n);
         }
 
         /// <summary>VIF commands in [start, end): (command, num, payload offset) for UNPACKs; walks past the others.</summary>

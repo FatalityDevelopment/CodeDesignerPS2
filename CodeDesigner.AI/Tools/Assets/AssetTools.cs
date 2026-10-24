@@ -335,7 +335,9 @@ public sealed class AssetsSaveTool(IEmulatorBridge bridge)
     "Mods/SOCOMCA converters), optionally with CA clips retargeted into its MOTION_S.ZAR. Templates come from SOCOM II's " +
     "RUN folder (socom2Run, else found on any drive). Answers {path, pack, model, kind, library, triangles, textures, " +
     "palettes, clips, warnings, open:{archive, name}} - open the path with assets_open to see it. From a SOCOM II " +
-    "session: the model as a SOCOM 3 / CA package. Risk: writes disk.")]
+    "session: the model as a SOCOM 3 / CA package. From a GTA: San Andreas session: a ped (with clips as " +
+    "'<source>/<name>', e.g. ped.ifp/WALK_civi, retargeted onto alg_UN01), weapon, vehicle or object becomes a SOCOM II " +
+    "pack (geometry encoded from triangles; vehicles as static props). Risk: writes disk.")]
 public sealed class AssetsExportTool(IEmulatorBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
@@ -343,7 +345,7 @@ public sealed class AssetsExportTool(IEmulatorBridge bridge)
         [Description("Model archive (as assets_list_models answers).")] string archive,
         [Description("Model name.")] string name,
         [Description("Pack name: 'm' + up to 6 letters/digits (default derived from the model).")] string pack = "",
-        [Description("Model name in the converted package (default ca_<name>).")] string modelName = "",
+        [Description("Model name in the converted package (default ca_<name> / gta_<name>).")] string modelName = "",
         [Description("Output folder (default Documents/CodeDesigner/Exports).")] string outputDir = "",
         [Description("Comma-separated clip names to retarget into the pack (characters; see assets_list_animations).")] string clips = "",
         [Description("SOCOM II RUN folder holding MP52.ZDB / MOTION_P.ZAR (default: searched).")] string socom2Run = "",

@@ -15,6 +15,12 @@ export interface DisasmRow {
   comment: string;
   formatted?: boolean;
   dataFormatKind?: DataFormatKind;
+  /** Code references to this row, from the bridge's cross-reference index. */
+  xrefs?: number;
+  /** Data words pointing at this row, from the cross-reference index. */
+  dataRefs?: number;
+  /** A detected function begins at this row. */
+  functionStart?: boolean;
 }
 
 // ── Search ────────────────────────────────────────────────────────────────────
@@ -208,12 +214,6 @@ export interface EditOverlayState {
 
 export interface ConverterOverlayState {
   visible: boolean;
-}
-
-export interface PorterOverlayState {
-  visible: boolean;
-  sourcePath: string;
-  targetPath: string;
 }
 
 // ── PINE Watchpoints ──────────────────────────────────────────────────────────

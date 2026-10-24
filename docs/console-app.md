@@ -1,176 +1,68 @@
 [← Back to Documentation Index](README.md)
 
-# CodeDesigner.Ps2 — Console Application
+# Command-line tools
 
-The `CodeDesigner.Ps2` project is the main console application providing a command-line interface to CodeDesigner's PS2 emulation and analysis tools.
+CodeDesigner's backend is two executables: **`CodeDesigner.Ps2.Bridge`**, the control server everything talks to, and **`CodeDesigner.Ps2.Emulator`**, the built-in PS2 emulator. Building the solution deploys both to `%LOCALAPPDATA%\CodeDesigner\`.
 
-## Overview
+You rarely need to run them by hand: the VS Code extension starts the Bridge in its *CodeDesigner* terminal and launches the emulator when you click **Run**. This page is for scripting, debugging the backend, or running headless.
 
-This executable serves as the primary entry point for running PS2 games, debugging, and accessing CodeDesigner features from the command line.
+---
 
-## Command-Line Options
+## CodeDesigner.Ps2.Bridge
 
-### Basic Usage
-
-```bash
-# Run with default settings
-dotnet run
-
-# Start socket server for external connections
-dotnet run -- --server
-
-# Load and run an ELF file
-dotnet run -- --elf path/to/game.elf
-
-# Enable debugging output
-dotnet run -- --debug
+```
+CodeDesigner.Ps2.Bridge.exe [mode] [options]
 ```
 
-### Server Mode
+| Mode | Command | What it does |
+|---|---|---|
+| Control server | *(no flags)* | Listens on `8765` for JSON commands. Attach an emulator later with the `STARTPCSX2`, `STARTEMULATOR` or `STARTFILEMODE` commands. This is what the extension runs. |
+| PCSX2 bridge | `--pcsx2 [--pcsx2-host 127.0.0.1] [--pcsx2-slot 28011] [--port 8765]` | Connects to a running PCSX2 over PINE first, then serves on `8765`. Exits if PCSX2 isn't reachable. |
+| Recompiler | `--recompile --elf <game.elf> [--out recomp_out] [--single-file] [--ghidra <map>] [--patch-cop0] [--stub <fn>]… [--skip <fn>]…` | Statically recompiles an ELF to C++ and exits. See [Recompiler](recompiler.md). |
+| Help | `--help` | Prints usage. |
 
-```bash
-dotnet run -- --server --port 8765
+Besides the JSON socket on `8765`, the Bridge serves the GS stream (Preview frames) on `8766`. Stop it with `Ctrl+C`.
+
+Startup applies database migrations to LocalDB (`(localdb)\MSSQLLocalDB`, database `CodeDesigner`). If LocalDB is stopped, start it with `sqllocaldb start MSSQLLocalDB`.
+
+---
+
+## CodeDesigner.Ps2.Emulator
+
+The built-in emulator runs as its own process and exposes a PINE-compatible socket that the Bridge connects to, the same way it connects to PCSX2.
+
+```
+CodeDesigner.Ps2.Emulator.exe [--bios <bios.bin>] [--disc <game.iso|zip>] [--steps N] [--port 28012]
+CodeDesigner.Ps2.Emulator.exe --file <game.elf|bin> [--load-address 0xN] [--port 28012]
+CodeDesigner.Ps2.Emulator.exe --bare [--port 28012]
 ```
 
-Starts a TCP socket server (default port 8765) that accepts connections from:
-- VS Code extension for debugging
-- MCP bridge for AI integration
-- External tools and scripts
+| Mode | What it does |
+|---|---|
+| BIOS + disc | Boots the BIOS (and the disc, if given; `.zip` images are extracted to a temp folder and cached). Starts paused at the reset vector. `--steps` caps the number of EE steps. |
+| File | Loads an ELF or raw binary into a bare machine and pauses at its entry point (or `--load-address` for raw files). |
+| Bare | No BIOS or file; waits for the Bridge to load code over the socket. |
 
-### ELF Execution
+The default port is `28012` (PCSX2 uses `28011`).
 
-```bash
-dotnet run -- --elf game.elf --bios bios.bin
-```
+---
 
-Loads and executes a PS2 ELF executable with optional BIOS override.
+## Talking to the Bridge
 
-## Features
-
-### Interactive Console
-- Real-time command input
-- Memory inspection commands
-- Breakpoint management
-- Register display
-
-### Batch Mode
-- Script execution for automated testing
-- Cheat code application
-- Memory dumps
-
-### Integration
-- Socket server for remote control
-- Database connectivity for labels/cheats
-- PINE protocol support for PCSX2 interop
-
-## Server Protocol
-
-The socket server uses JSON messages for communication:
+Send one JSON object per line to `localhost:8765`; each gets one JSON response:
 
 ```json
-// Client → Server
-{"command": "read_memory", "address": "0x00100000", "size": 4}
-
-// Server → Client
-{"response": "read_memory", "data": [0x12, 0x34, 0x56, 0x78]}
+{"Command":"PING"}
+{"Command":"READMEM","Address":1048576,"Length":16}
+{"Command":"PINEGETAUDIOSTATE"}
 ```
 
-### Available Commands
+From PowerShell:
 
-- `read_memory`: Read bytes from PS2 memory
-- `write_memory`: Write bytes to PS2 memory
-- `read_register`: Get CPU register value
-- `write_register`: Set CPU register value
-- `step`: Execute one instruction
-- `run`: Run until breakpoint/halt
-- `set_breakpoint`: Add execution breakpoint
-- `clear_breakpoint`: Remove breakpoint
-- `get_labels`: Retrieve symbol labels
-- `apply_cheat`: Apply cheat code
-
-## Debugging Features
-
-### Breakpoints
-- Address-based execution breakpoints
-- Memory watchpoints (read/write)
-- Conditional breakpoints
-
-### Memory Inspection
-- Hex dump with ASCII
-- Disassembly view
-- Label overlay
-- Search functionality
-
-### State Management
-- Save/load emulator state
-- Register inspection
-- Call stack tracing
-
-## Configuration
-
-### Environment Variables
-
-- `CODEDESIGNER_DB`: Path to database file
-- `CODEDESIGNER_BIOS`: BIOS ROM path
-- `CODEDESIGNER_LOG`: Log level (DEBUG, INFO, WARN, ERROR)
-
-### Configuration File
-
-Settings stored in database:
-- Default BIOS path
-- Server port
-- Debug options
-- Game-specific settings
-
-## Examples
-
-### Debug a Game
-
-```bash
-# Start server
-dotnet run -- --server
-
-# In another terminal, connect and debug
-telnet localhost 8765
-> set_breakpoint 0x00100000
-> run
-> read_register pc
+```powershell
+$c = [System.Net.Sockets.TcpClient]::new('127.0.0.1', 8765)
+$s = $c.GetStream(); $w = [IO.StreamWriter]::new($s); $r = [IO.StreamReader]::new($s)
+$w.WriteLine('{"Command":"PING"}'); $w.Flush(); $r.ReadLine()
 ```
 
-### Apply Cheats
-
-```bash
-dotnet run -- --elf game.elf --cheat-codes cheats.txt
-```
-
-### Memory Analysis
-
-```bash
-dotnet run -- --elf game.elf --script analyze_memory.cs
-```
-
-## Troubleshooting
-
-### Common Issues
-
-- **Port already in use**: Change server port with `--port`
-- **BIOS not found**: Set `CODEDESIGNER_BIOS` or use `--bios`
-- **Database errors**: Ensure write access to database directory
-- **Performance**: Use `--no-gui` for headless operation
-
-### Logging
-
-Enable verbose logging:
-```bash
-dotnet run -- --debug --log-level DEBUG
-```
-
-Logs written to console and optional file.
-
-## Dependencies
-
-- .NET 6+ runtime
-- CodeDesigner.Ps2.Common
-- CodeDesigner.Ps2.EmulatorCore
-- CodeDesigner.Ps2.Database</content>
-<parameter name="filePath">c:\Users\tholu\Desktop\CodeDesigner\docs\console-app.md
+The full command list is in [Socket Communication](socket-communication.md). For AI clients, use the [MCP server](mcp-server.md) instead of raw commands.

@@ -8,15 +8,11 @@ using System;
 | Instruction | Description |
 |-------------|-------------|
 | MFC1 | Move from COP1 (FPU) register to GPR |
-| DMFC1 | Move from COP1 register to GPR (64-bit) |
 | MTC1 | Move from GPR to COP1 (FPU) register |
-| DMTC1 | Move from GPR to COP1 register (64-bit) |
 | CFC1 | Move control from COP1 |
 | CTC1 | Move control to COP1 |
 | LWC1 | Load word to COP1 (FPU) register |
-| LDC1 | Load doubleword to COP1 register |
 | SWC1 | Store word from COP1 register |
-| SDC1 | Store doubleword from COP1 register |
 | ADD.S | Add single-precision floating point |
 | SUB.S | Subtract single-precision floating point |
 | MUL.S | Multiply single-precision floating point |
@@ -87,54 +83,6 @@ namespace CodeDesigner.Ps2.Common.Instructions.CoprocessorInstructions
         }
     }
 
-    // DMFC1 - Move from COP1 register to GPR (64-bit)
-    public sealed class DMFC1 : Instruction<Args_R>
-    {
-        public DMFC1()
-        {
-            Opcode = 0x11;
-            Funct = 0x00;
-            Name = "dmfc1";
-            ArgType = InstrArgType.R;
-            ArgNames = ["rt", "fs"];
-            Equation = "rt = FPR[fs] (64-bit)";
-            Description = "Move from COP1 register to GPR (64-bit) - reads double-precision bits";
-        }
-
-        public override void Exec(CpuState cpu, Args_R args)
-        {
-            // Treat two consecutive float registers as a double (fs and fs+1)
-            // This is a simplified implementation; real FPU may handle differently
-            uint bits = BitConverter.SingleToUInt32Bits(cpu.FPR[args.Rd]);
-            cpu.RegsLo[args.Rt] = bits;
-            cpu.RegsHi[args.Rt] = 0;
-        }
-
-        public override string Disasm(Args_R args, uint? pc = null)
-        {
-            return $"{Name} {CpuHelpers.RegName(args.Rt)}, $f{args.Rd}";
-        }
-
-        public override uint Asm(int[] args)
-        {
-            return (uint)(Opcode << 26 | 0x01 << 21 | args[0] << 16 | args[1] << 11);
-        }
-
-        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
-        {
-            string eq = Equation
-                .Replace("rt", CpuHelpers.RegName(args.Rt))
-                .Replace("fs", $"$f{args.Rd}");
-            
-            if (cpu != null)
-            {
-                uint bits = BitConverter.SingleToUInt32Bits(cpu.FPR[args.Rd]);
-                return $"{eq} => FPR[{args.Rd}] bits = 0x{bits:X16}";
-            }
-            return eq;
-        }
-    }
-
     // MTC1 - Move from GPR to COP1 register (32-bit)
     public sealed class MTC1 : Instruction<Args_R>
     {
@@ -168,57 +116,12 @@ namespace CodeDesigner.Ps2.Common.Instructions.CoprocessorInstructions
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            if (cpu != null)
+            if (cpu != null && CpuHelpers.IsRegisterKnown(cpu, args.Rt))
             {
                 uint bits = (uint)(cpu.RegsLo[args.Rt] & 0xFFFFFFFF);
-                float value = BitConverter.UInt32BitsToSingle(bits);
-                return $"$f{args.Rd} ← {CpuHelpers.RegName(args.Rt)} = 0x{bits:X8} ({value})";
+                return $"$f{args.Rd} ← {CpuHelpers.RegName(args.Rt)} = {CpuHelpers.FormatFloat(bits)}";
             }
             return $"$f{args.Rd} ← {CpuHelpers.RegName(args.Rt)}";
-        }
-    }
-    public sealed class DMTC1 : Instruction<Args_R>
-    {
-        public DMTC1()
-        {
-            Opcode = 0x11;
-            Funct = 0x00;
-            Name = "dmtc1";
-            ArgType = InstrArgType.R;
-            ArgNames = ["rt", "fs"];
-            Equation = "FPR[fs] = rt (64-bit)";
-            Description = "Move from GPR to COP1 register (64-bit) - writes full 64-bit value";
-        }
-
-        public override void Exec(CpuState cpu, Args_R args)
-        {
-            // Write 64-bit GPR value to FPR (simplified as single float from lower bits)
-            uint bits = (uint)(cpu.RegsLo[args.Rt] & 0xFFFFFFFF);
-            cpu.FPR[args.Rd] = BitConverter.UInt32BitsToSingle(bits);
-        }
-
-        public override string Disasm(Args_R args, uint? pc = null)
-        {
-            return $"{Name} {CpuHelpers.RegName(args.Rt)}, $f{args.Rd}";
-        }
-
-        public override uint Asm(int[] args)
-        {
-            return (uint)(Opcode << 26 | 0x05 << 21 | args[0] << 16 | args[1] << 11);
-        }
-
-        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
-        {
-            string eq = Equation
-                .Replace("rt", CpuHelpers.RegName(args.Rt))
-                .Replace("fs", $"$f{args.Rd}");
-            
-            if (cpu != null)
-            {
-                ulong value = cpu.RegsLo[args.Rt];
-                return $"{eq} => write 0x{value:X16} to FPR[{args.Rd}]";
-            }
-            return eq;
         }
     }
 
@@ -373,9 +276,18 @@ namespace CodeDesigner.Ps2.Common.Instructions.CoprocessorInstructions
             int offset = CpuHelpers.SignExtend16(args.Imm);
             if (cpu != null)
             {
+                // Analyzed before the load runs: read the value through the bus.
                 string address = CpuHelpers.FormatMemoryReference(cpu, args.Rs, offset);
-                uint bits = BitConverter.SingleToUInt32Bits(cpu.FPR[args.Rt]);
-                return $"$f{args.Rt} ← [{address}] = 0x{bits:X8}";
+                if (cpu.Bus != null && CpuHelpers.TryGetEffectiveAddress(cpu, args.Rs, offset, out uint addr))
+                {
+                    try
+                    {
+                        uint bits = cpu.Bus.ReadWord(addr);
+                        return $"$f{args.Rt} ← [{address}] = {CpuHelpers.FormatFloat(bits)}";
+                    }
+                    catch { /* unreadable — show the reference only */ }
+                }
+                return $"$f{args.Rt} ← [{address}]";
             }
             return $"$f{args.Rt} ← [{CpuHelpers.FormatMemoryOffset(offset)}]";
         }
@@ -1156,9 +1068,9 @@ namespace CodeDesigner.Ps2.Common.Instructions.CoprocessorInstructions
             if (pc.HasValue)
             {
                 ulong target = (ulong)((long)pc.Value + 4 + offset);
-                return $"{Name} 0x{target:X}";
+                return $"{Name} ${(uint)target:X8}";
             }
-            return $"{Name} {offset}";
+            return $"{Name} {CpuHelpers.FormatSignedImmediate(args.Imm)}";
         }
 
         public override uint Asm(int[] args)
@@ -1213,9 +1125,9 @@ namespace CodeDesigner.Ps2.Common.Instructions.CoprocessorInstructions
             if (pc.HasValue)
             {
                 ulong target = (ulong)((long)pc.Value + 4 + offset);
-                return $"{Name} 0x{target:X}";
+                return $"{Name} ${(uint)target:X8}";
             }
-            return $"{Name} {offset}";
+            return $"{Name} {CpuHelpers.FormatSignedImmediate(args.Imm)}";
         }
 
         public override uint Asm(int[] args)
@@ -1255,127 +1167,22 @@ namespace CodeDesigner.Ps2.Common.Instructions.CoprocessorInstructions
         public override void Exec(CpuState cpu, Args_R args)
         {
             float ft = MathF.Abs(cpu.FPR[args.Rt]);
-            cpu.FPR[args.Rd] = ft != 0 ? cpu.FPR[args.Rs] / MathF.Sqrt(ft) : float.MaxValue;
+            cpu.FPR[args.Shamt] = ft != 0 ? cpu.FPR[args.Rd] / MathF.Sqrt(ft) : float.MaxValue;
         }
 
-        public override string Disasm(Args_R args, uint? pc = null) => $"{Name} $f{args.Rd}, $f{args.Rs}, $f{args.Rt}";
+        public override string Disasm(Args_R args, uint? pc = null) => $"{Name} $f{args.Shamt}, $f{args.Rd}, $f{args.Rt}";
 
         public override uint Asm(int[] args)
             => (uint)(Opcode << 26 | 0x10 << 21 | args[2] << 16 | args[1] << 11 | args[0] << 6 | Funct ?? 0x16);
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation.Replace("fd", $"$f{args.Rd}").Replace("fs", $"$f{args.Rs}").Replace("ft", $"$f{args.Rt}");
+            string eq = Equation.Replace("fd", $"$f{args.Shamt}").Replace("fs", $"$f{args.Rd}").Replace("ft", $"$f{args.Rt}");
             if (cpu != null)
             {
-                float fs = cpu.FPR[args.Rs]; float ft = MathF.Abs(cpu.FPR[args.Rt]);
+                float fs = cpu.FPR[args.Rd]; float ft = MathF.Abs(cpu.FPR[args.Rt]);
                 return $"{eq} => {fs} / sqrt({ft}) = {(ft != 0 ? fs / MathF.Sqrt(ft) : float.MaxValue)}";
             }
-            return eq;
-        }
-    }
-
-    // ROUND.W.S - Round to Word
-    public sealed class ROUND_W_S : Instruction<Args_R>
-    {
-        public ROUND_W_S()
-        {
-            Opcode = 0x11; Funct = 0x0C; Name = "round.w.s";
-            ArgType = InstrArgType.R; ArgNames = ["fd", "fs"];
-            Equation = "fd = round(fs)"; Description = "Round single-precision to nearest integer word";
-        }
-
-        public override void Exec(CpuState cpu, Args_R args)
-        {
-            // PS2 EE rounds using AwayFromZero (banker's rounding is not used on PS2)
-            int r = (int)MathF.Round(cpu.FPR[args.Rs], MidpointRounding.AwayFromZero);
-            cpu.FPR[args.Rd] = BitConverter.UInt32BitsToSingle((uint)r);
-        }
-
-        public override string Disasm(Args_R args, uint? pc = null) => $"{Name} $f{args.Rd}, $f{args.Rs}";
-        public override uint Asm(int[] args) => (uint)(Opcode << 26 | 0x10 << 21 | args[1] << 11 | args[0] << 6 | Funct ?? 0x0C);
-        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
-        {
-            string eq = Equation.Replace("fd", $"$f{args.Rd}").Replace("fs", $"$f{args.Rs}");
-            if (cpu != null) { float fs = cpu.FPR[args.Rs]; return $"{eq} => round({fs}) = {(int)MathF.Round(fs, MidpointRounding.AwayFromZero)}"; }
-            return eq;
-        }
-    }
-
-    // TRUNC.W.S - Truncate to Word
-    public sealed class TRUNC_W_S : Instruction<Args_R>
-    {
-        public TRUNC_W_S()
-        {
-            Opcode = 0x11; Funct = 0x0D; Name = "trunc.w.s";
-            ArgType = InstrArgType.R; ArgNames = ["fd", "fs"];
-            Equation = "fd = trunc(fs)"; Description = "Truncate single-precision to integer word (toward zero)";
-        }
-
-        public override void Exec(CpuState cpu, Args_R args)
-        {
-            int r = (int)MathF.Truncate(cpu.FPR[args.Rs]);
-            cpu.FPR[args.Rd] = BitConverter.UInt32BitsToSingle((uint)r);
-        }
-
-        public override string Disasm(Args_R args, uint? pc = null) => $"{Name} $f{args.Rd}, $f{args.Rs}";
-        public override uint Asm(int[] args) => (uint)(Opcode << 26 | 0x10 << 21 | args[1] << 11 | args[0] << 6 | Funct ?? 0x0D);
-        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
-        {
-            string eq = Equation.Replace("fd", $"$f{args.Rd}").Replace("fs", $"$f{args.Rs}");
-            if (cpu != null) { float fs = cpu.FPR[args.Rs]; return $"{eq} => trunc({fs}) = {(int)MathF.Truncate(fs)}"; }
-            return eq;
-        }
-    }
-
-    // CEIL.W.S - Ceiling to Word
-    public sealed class CEIL_W_S : Instruction<Args_R>
-    {
-        public CEIL_W_S()
-        {
-            Opcode = 0x11; Funct = 0x0E; Name = "ceil.w.s";
-            ArgType = InstrArgType.R; ArgNames = ["fd", "fs"];
-            Equation = "fd = ceil(fs)"; Description = "Ceiling single-precision to integer word";
-        }
-
-        public override void Exec(CpuState cpu, Args_R args)
-        {
-            int r = (int)MathF.Ceiling(cpu.FPR[args.Rs]);
-            cpu.FPR[args.Rd] = BitConverter.UInt32BitsToSingle((uint)r);
-        }
-
-        public override string Disasm(Args_R args, uint? pc = null) => $"{Name} $f{args.Rd}, $f{args.Rs}";
-        public override uint Asm(int[] args) => (uint)(Opcode << 26 | 0x10 << 21 | args[1] << 11 | args[0] << 6 | Funct ?? 0x0E);
-        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
-        {
-            string eq = Equation.Replace("fd", $"$f{args.Rd}").Replace("fs", $"$f{args.Rs}");
-            if (cpu != null) { float fs = cpu.FPR[args.Rs]; return $"{eq} => ceil({fs}) = {(int)MathF.Ceiling(fs)}"; }
-            return eq;
-        }
-    }
-
-    // FLOOR.W.S - Floor to Word
-    public sealed class FLOOR_W_S : Instruction<Args_R>
-    {
-        public FLOOR_W_S()
-        {
-            Opcode = 0x11; Funct = 0x0F; Name = "floor.w.s";
-            ArgType = InstrArgType.R; ArgNames = ["fd", "fs"];
-            Equation = "fd = floor(fs)"; Description = "Floor single-precision to integer word";
-        }
-
-        public override void Exec(CpuState cpu, Args_R args)
-        {
-            int r = (int)MathF.Floor(cpu.FPR[args.Rs]);
-            cpu.FPR[args.Rd] = BitConverter.UInt32BitsToSingle((uint)r);
-        }
-
-        public override string Disasm(Args_R args, uint? pc = null) => $"{Name} $f{args.Rd}, $f{args.Rs}";
-        public override uint Asm(int[] args) => (uint)(Opcode << 26 | 0x10 << 21 | args[1] << 11 | args[0] << 6 | Funct ?? 0x0F);
-        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
-        {
-            string eq = Equation.Replace("fd", $"$f{args.Rd}").Replace("fs", $"$f{args.Rs}");
-            if (cpu != null) { float fs = cpu.FPR[args.Rs]; return $"{eq} => floor({fs}) = {(int)MathF.Floor(fs)}"; }
             return eq;
         }
     }
@@ -1390,13 +1197,13 @@ namespace CodeDesigner.Ps2.Common.Instructions.CoprocessorInstructions
             Equation = "ACC = fs + ft"; Description = "Add single-precision to FPU accumulator (PS2 EE)";
         }
 
-        public override void Exec(CpuState cpu, Args_R args) => cpu.FACC = cpu.FPR[args.Rs] + cpu.FPR[args.Rt];
-        public override string Disasm(Args_R args, uint? pc = null) => $"{Name} $f{args.Rs}, $f{args.Rt}";
+        public override void Exec(CpuState cpu, Args_R args) => cpu.FACC = cpu.FPR[args.Rd] + cpu.FPR[args.Rt];
+        public override string Disasm(Args_R args, uint? pc = null) => $"{Name} $f{args.Rd}, $f{args.Rt}";
         public override uint Asm(int[] args) => (uint)(Opcode << 26 | 0x10 << 21 | args[1] << 16 | args[0] << 11 | Funct ?? 0x18);
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation.Replace("fs", $"$f{args.Rs}").Replace("ft", $"$f{args.Rt}");
-            if (cpu != null) { float fs = cpu.FPR[args.Rs]; float ft = cpu.FPR[args.Rt]; return $"{eq} => ACC = {fs} + {ft} = {fs + ft}"; }
+            string eq = Equation.Replace("fs", $"$f{args.Rd}").Replace("ft", $"$f{args.Rt}");
+            if (cpu != null) { float fs = cpu.FPR[args.Rd]; float ft = cpu.FPR[args.Rt]; return $"{eq} => ACC = {fs} + {ft} = {fs + ft}"; }
             return eq;
         }
     }
@@ -1411,13 +1218,13 @@ namespace CodeDesigner.Ps2.Common.Instructions.CoprocessorInstructions
             Equation = "ACC = fs - ft"; Description = "Subtract single-precision to FPU accumulator (PS2 EE)";
         }
 
-        public override void Exec(CpuState cpu, Args_R args) => cpu.FACC = cpu.FPR[args.Rs] - cpu.FPR[args.Rt];
-        public override string Disasm(Args_R args, uint? pc = null) => $"{Name} $f{args.Rs}, $f{args.Rt}";
+        public override void Exec(CpuState cpu, Args_R args) => cpu.FACC = cpu.FPR[args.Rd] - cpu.FPR[args.Rt];
+        public override string Disasm(Args_R args, uint? pc = null) => $"{Name} $f{args.Rd}, $f{args.Rt}";
         public override uint Asm(int[] args) => (uint)(Opcode << 26 | 0x10 << 21 | args[1] << 16 | args[0] << 11 | Funct ?? 0x19);
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation.Replace("fs", $"$f{args.Rs}").Replace("ft", $"$f{args.Rt}");
-            if (cpu != null) { float fs = cpu.FPR[args.Rs]; float ft = cpu.FPR[args.Rt]; return $"{eq} => ACC = {fs} - {ft} = {fs - ft}"; }
+            string eq = Equation.Replace("fs", $"$f{args.Rd}").Replace("ft", $"$f{args.Rt}");
+            if (cpu != null) { float fs = cpu.FPR[args.Rd]; float ft = cpu.FPR[args.Rt]; return $"{eq} => ACC = {fs} - {ft} = {fs - ft}"; }
             return eq;
         }
     }
@@ -1432,13 +1239,13 @@ namespace CodeDesigner.Ps2.Common.Instructions.CoprocessorInstructions
             Equation = "ACC = fs * ft"; Description = "Multiply single-precision to FPU accumulator (PS2 EE)";
         }
 
-        public override void Exec(CpuState cpu, Args_R args) => cpu.FACC = cpu.FPR[args.Rs] * cpu.FPR[args.Rt];
-        public override string Disasm(Args_R args, uint? pc = null) => $"{Name} $f{args.Rs}, $f{args.Rt}";
+        public override void Exec(CpuState cpu, Args_R args) => cpu.FACC = cpu.FPR[args.Rd] * cpu.FPR[args.Rt];
+        public override string Disasm(Args_R args, uint? pc = null) => $"{Name} $f{args.Rd}, $f{args.Rt}";
         public override uint Asm(int[] args) => (uint)(Opcode << 26 | 0x10 << 21 | args[1] << 16 | args[0] << 11 | Funct ?? 0x1A);
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation.Replace("fs", $"$f{args.Rs}").Replace("ft", $"$f{args.Rt}");
-            if (cpu != null) { float fs = cpu.FPR[args.Rs]; float ft = cpu.FPR[args.Rt]; return $"{eq} => ACC = {fs} * {ft} = {fs * ft}"; }
+            string eq = Equation.Replace("fs", $"$f{args.Rd}").Replace("ft", $"$f{args.Rt}");
+            if (cpu != null) { float fs = cpu.FPR[args.Rd]; float ft = cpu.FPR[args.Rt]; return $"{eq} => ACC = {fs} * {ft} = {fs * ft}"; }
             return eq;
         }
     }
@@ -1454,14 +1261,14 @@ namespace CodeDesigner.Ps2.Common.Instructions.CoprocessorInstructions
         }
 
         public override void Exec(CpuState cpu, Args_R args)
-            => cpu.FPR[args.Rd] = cpu.FACC + cpu.FPR[args.Rs] * cpu.FPR[args.Rt];
+            => cpu.FPR[args.Shamt] = cpu.FACC + cpu.FPR[args.Rd] * cpu.FPR[args.Rt];
 
-        public override string Disasm(Args_R args, uint? pc = null) => $"{Name} $f{args.Rd}, $f{args.Rs}, $f{args.Rt}";
+        public override string Disasm(Args_R args, uint? pc = null) => $"{Name} $f{args.Shamt}, $f{args.Rd}, $f{args.Rt}";
         public override uint Asm(int[] args) => (uint)(Opcode << 26 | 0x10 << 21 | args[2] << 16 | args[1] << 11 | args[0] << 6 | Funct ?? 0x1C);
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation.Replace("fd", $"$f{args.Rd}").Replace("fs", $"$f{args.Rs}").Replace("ft", $"$f{args.Rt}");
-            if (cpu != null) { return $"{eq} => ACC({cpu.FACC}) + {cpu.FPR[args.Rs]} * {cpu.FPR[args.Rt]} = {cpu.FACC + cpu.FPR[args.Rs] * cpu.FPR[args.Rt]}"; }
+            string eq = Equation.Replace("fd", $"$f{args.Shamt}").Replace("fs", $"$f{args.Rd}").Replace("ft", $"$f{args.Rt}");
+            if (cpu != null) { return $"{eq} => ACC({cpu.FACC}) + {cpu.FPR[args.Rd]} * {cpu.FPR[args.Rt]} = {cpu.FACC + cpu.FPR[args.Rd] * cpu.FPR[args.Rt]}"; }
             return eq;
         }
     }
@@ -1477,14 +1284,14 @@ namespace CodeDesigner.Ps2.Common.Instructions.CoprocessorInstructions
         }
 
         public override void Exec(CpuState cpu, Args_R args)
-            => cpu.FPR[args.Rd] = cpu.FACC - cpu.FPR[args.Rs] * cpu.FPR[args.Rt];
+            => cpu.FPR[args.Shamt] = cpu.FACC - cpu.FPR[args.Rd] * cpu.FPR[args.Rt];
 
-        public override string Disasm(Args_R args, uint? pc = null) => $"{Name} $f{args.Rd}, $f{args.Rs}, $f{args.Rt}";
+        public override string Disasm(Args_R args, uint? pc = null) => $"{Name} $f{args.Shamt}, $f{args.Rd}, $f{args.Rt}";
         public override uint Asm(int[] args) => (uint)(Opcode << 26 | 0x10 << 21 | args[2] << 16 | args[1] << 11 | args[0] << 6 | Funct ?? 0x1D);
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation.Replace("fd", $"$f{args.Rd}").Replace("fs", $"$f{args.Rs}").Replace("ft", $"$f{args.Rt}");
-            if (cpu != null) { return $"{eq} => ACC({cpu.FACC}) - {cpu.FPR[args.Rs]} * {cpu.FPR[args.Rt]} = {cpu.FACC - cpu.FPR[args.Rs] * cpu.FPR[args.Rt]}"; }
+            string eq = Equation.Replace("fd", $"$f{args.Shamt}").Replace("fs", $"$f{args.Rd}").Replace("ft", $"$f{args.Rt}");
+            if (cpu != null) { return $"{eq} => ACC({cpu.FACC}) - {cpu.FPR[args.Rd]} * {cpu.FPR[args.Rt]} = {cpu.FACC - cpu.FPR[args.Rd] * cpu.FPR[args.Rt]}"; }
             return eq;
         }
     }
@@ -1499,13 +1306,13 @@ namespace CodeDesigner.Ps2.Common.Instructions.CoprocessorInstructions
             Equation = "ACC = ACC + fs * ft"; Description = "Multiply-Add to Accumulator: ACC += fs*ft (PS2 EE FPU)";
         }
 
-        public override void Exec(CpuState cpu, Args_R args) => cpu.FACC += cpu.FPR[args.Rs] * cpu.FPR[args.Rt];
-        public override string Disasm(Args_R args, uint? pc = null) => $"{Name} $f{args.Rs}, $f{args.Rt}";
+        public override void Exec(CpuState cpu, Args_R args) => cpu.FACC += cpu.FPR[args.Rd] * cpu.FPR[args.Rt];
+        public override string Disasm(Args_R args, uint? pc = null) => $"{Name} $f{args.Rd}, $f{args.Rt}";
         public override uint Asm(int[] args) => (uint)(Opcode << 26 | 0x10 << 21 | args[1] << 16 | args[0] << 11 | Funct ?? 0x1E);
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation.Replace("fs", $"$f{args.Rs}").Replace("ft", $"$f{args.Rt}");
-            if (cpu != null) { return $"{eq} => ACC({cpu.FACC}) + {cpu.FPR[args.Rs]} * {cpu.FPR[args.Rt]} = {cpu.FACC + cpu.FPR[args.Rs] * cpu.FPR[args.Rt]}"; }
+            string eq = Equation.Replace("fs", $"$f{args.Rd}").Replace("ft", $"$f{args.Rt}");
+            if (cpu != null) { return $"{eq} => ACC({cpu.FACC}) + {cpu.FPR[args.Rd]} * {cpu.FPR[args.Rt]} = {cpu.FACC + cpu.FPR[args.Rd] * cpu.FPR[args.Rt]}"; }
             return eq;
         }
     }
@@ -1520,13 +1327,13 @@ namespace CodeDesigner.Ps2.Common.Instructions.CoprocessorInstructions
             Equation = "ACC = ACC - fs * ft"; Description = "Multiply-Subtract from Accumulator: ACC -= fs*ft (PS2 EE FPU)";
         }
 
-        public override void Exec(CpuState cpu, Args_R args) => cpu.FACC -= cpu.FPR[args.Rs] * cpu.FPR[args.Rt];
-        public override string Disasm(Args_R args, uint? pc = null) => $"{Name} $f{args.Rs}, $f{args.Rt}";
+        public override void Exec(CpuState cpu, Args_R args) => cpu.FACC -= cpu.FPR[args.Rd] * cpu.FPR[args.Rt];
+        public override string Disasm(Args_R args, uint? pc = null) => $"{Name} $f{args.Rd}, $f{args.Rt}";
         public override uint Asm(int[] args) => (uint)(Opcode << 26 | 0x10 << 21 | args[1] << 16 | args[0] << 11 | Funct ?? 0x1F);
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation.Replace("fs", $"$f{args.Rs}").Replace("ft", $"$f{args.Rt}");
-            if (cpu != null) { return $"{eq} => ACC({cpu.FACC}) - {cpu.FPR[args.Rs]} * {cpu.FPR[args.Rt]} = {cpu.FACC - cpu.FPR[args.Rs] * cpu.FPR[args.Rt]}"; }
+            string eq = Equation.Replace("fs", $"$f{args.Rd}").Replace("ft", $"$f{args.Rt}");
+            if (cpu != null) { return $"{eq} => ACC({cpu.FACC}) - {cpu.FPR[args.Rd]} * {cpu.FPR[args.Rt]} = {cpu.FACC - cpu.FPR[args.Rd] * cpu.FPR[args.Rt]}"; }
             return eq;
         }
     }
@@ -1541,13 +1348,13 @@ namespace CodeDesigner.Ps2.Common.Instructions.CoprocessorInstructions
             Equation = "fd = max(fs, ft)"; Description = "Maximum single-precision floating point (PS2 EE)";
         }
 
-        public override void Exec(CpuState cpu, Args_R args) => cpu.FPR[args.Rd] = MathF.Max(cpu.FPR[args.Rs], cpu.FPR[args.Rt]);
-        public override string Disasm(Args_R args, uint? pc = null) => $"{Name} $f{args.Rd}, $f{args.Rs}, $f{args.Rt}";
+        public override void Exec(CpuState cpu, Args_R args) => cpu.FPR[args.Shamt] = MathF.Max(cpu.FPR[args.Rd], cpu.FPR[args.Rt]);
+        public override string Disasm(Args_R args, uint? pc = null) => $"{Name} $f{args.Shamt}, $f{args.Rd}, $f{args.Rt}";
         public override uint Asm(int[] args) => (uint)(Opcode << 26 | 0x10 << 21 | args[2] << 16 | args[1] << 11 | args[0] << 6 | Funct ?? 0x28);
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation.Replace("fd", $"$f{args.Rd}").Replace("fs", $"$f{args.Rs}").Replace("ft", $"$f{args.Rt}");
-            if (cpu != null) { float fs = cpu.FPR[args.Rs]; float ft = cpu.FPR[args.Rt]; return $"{eq} => max({fs}, {ft}) = {MathF.Max(fs, ft)}"; }
+            string eq = Equation.Replace("fd", $"$f{args.Shamt}").Replace("fs", $"$f{args.Rd}").Replace("ft", $"$f{args.Rt}");
+            if (cpu != null) { float fs = cpu.FPR[args.Rd]; float ft = cpu.FPR[args.Rt]; return $"{eq} => max({fs}, {ft}) = {MathF.Max(fs, ft)}"; }
             return eq;
         }
     }
@@ -1562,131 +1369,14 @@ namespace CodeDesigner.Ps2.Common.Instructions.CoprocessorInstructions
             Equation = "fd = min(fs, ft)"; Description = "Minimum single-precision floating point (PS2 EE)";
         }
 
-        public override void Exec(CpuState cpu, Args_R args) => cpu.FPR[args.Rd] = MathF.Min(cpu.FPR[args.Rs], cpu.FPR[args.Rt]);
-        public override string Disasm(Args_R args, uint? pc = null) => $"{Name} $f{args.Rd}, $f{args.Rs}, $f{args.Rt}";
+        public override void Exec(CpuState cpu, Args_R args) => cpu.FPR[args.Shamt] = MathF.Min(cpu.FPR[args.Rd], cpu.FPR[args.Rt]);
+        public override string Disasm(Args_R args, uint? pc = null) => $"{Name} $f{args.Shamt}, $f{args.Rd}, $f{args.Rt}";
         public override uint Asm(int[] args) => (uint)(Opcode << 26 | 0x10 << 21 | args[2] << 16 | args[1] << 11 | args[0] << 6 | Funct ?? 0x29);
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation.Replace("fd", $"$f{args.Rd}").Replace("fs", $"$f{args.Rs}").Replace("ft", $"$f{args.Rt}");
-            if (cpu != null) { float fs = cpu.FPR[args.Rs]; float ft = cpu.FPR[args.Rt]; return $"{eq} => min({fs}, {ft}) = {MathF.Min(fs, ft)}"; }
+            string eq = Equation.Replace("fd", $"$f{args.Shamt}").Replace("fs", $"$f{args.Rd}").Replace("ft", $"$f{args.Rt}");
+            if (cpu != null) { float fs = cpu.FPR[args.Rd]; float ft = cpu.FPR[args.Rt]; return $"{eq} => min({fs}, {ft}) = {MathF.Min(fs, ft)}"; }
             return eq;
-        }
-    }
-
-    // LDC1 - Load Doubleword to COP1 register (opcode=0x35)
-    public sealed class LDC1 : Instruction<Args_I>
-    {
-        public LDC1()
-        {
-            Opcode = 0x35; Funct = null; Name = "ldc1";
-            ArgType = InstrArgType.I; ArgNames = ["ft", "offset", "base"];
-            Equation = "FPR[ft] = Memory[base + offset] (64-bit)"; Description = "Load doubleword to COP1 register pair";
-        }
-
-        public override void Exec(CpuState cpu, Args_I args)
-        {
-            int offset = CpuHelpers.SignExtend16(args.Imm);
-            ulong addr = (ulong)((long)cpu.RegsLo[args.Rs] + offset);
-            if (cpu.Bus != null)
-            {
-                uint lo = cpu.Bus.ReadWord((uint)addr);
-                uint hi = cpu.Bus.ReadWord((uint)addr + 4);
-                cpu.FPR[args.Rt] = BitConverter.UInt32BitsToSingle(lo);
-                if (args.Rt + 1 < cpu.FPR.Length) cpu.FPR[args.Rt + 1] = BitConverter.UInt32BitsToSingle(hi);
-            }
-            else if (cpu.IopBus != null)
-            {
-                uint lo = cpu.IopBus.ReadWord((uint)addr);
-                uint hi = cpu.IopBus.ReadWord((uint)addr + 4);
-                cpu.FPR[args.Rt] = BitConverter.UInt32BitsToSingle(lo);
-                if (args.Rt + 1 < cpu.FPR.Length) cpu.FPR[args.Rt + 1] = BitConverter.UInt32BitsToSingle(hi);
-            }
-            else if (addr + 7 < (ulong)cpu.Memory.Length)
-            {
-                // Load 64-bit value; store lower 32 bits in FPR[ft], upper 32 in FPR[ft+1]
-                uint lo = BitConverter.ToUInt32(cpu.Memory, (int)addr);
-                uint hi = BitConverter.ToUInt32(cpu.Memory, (int)addr + 4);
-                cpu.FPR[args.Rt] = BitConverter.UInt32BitsToSingle(lo);
-                if (args.Rt + 1 < cpu.FPR.Length) cpu.FPR[args.Rt + 1] = BitConverter.UInt32BitsToSingle(hi);
-            }
-        }
-
-        public override string Disasm(Args_I args, uint? pc = null)
-        {
-            int offset = CpuHelpers.SignExtend16(args.Imm);
-            return $"{Name} $f{args.Rt}, {CpuHelpers.FormatOffset(offset)}({CpuHelpers.RegName(args.Rs)})";
-        }
-
-        public override uint Asm(int[] args) => (uint)(Opcode << 26 | args[2] << 21 | args[0] << 16 | args[1] & 0xFFFF);
-
-        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
-        {
-            int offset = CpuHelpers.SignExtend16(args.Imm);
-            if (cpu != null)
-            {
-                string address = CpuHelpers.FormatMemoryReference(cpu, args.Rs, offset);
-                uint lo = BitConverter.SingleToUInt32Bits(cpu.FPR[args.Rt]);
-                uint hi = args.Rt + 1 < cpu.FPR.Length ? BitConverter.SingleToUInt32Bits(cpu.FPR[args.Rt + 1]) : 0;
-                return $"$f{args.Rt}:$f{args.Rt + 1} ← [{address}] = lo 0x{lo:X8} | hi 0x{hi:X8}";
-            }
-            return $"$f{args.Rt}:$f{args.Rt + 1} ← [{CpuHelpers.FormatMemoryOffset(offset)}]";
-        }
-    }
-
-    // SDC1 - Store Doubleword from COP1 register (opcode=0x3D)
-    public sealed class SDC1 : Instruction<Args_I>
-    {
-        public SDC1()
-        {
-            Opcode = 0x3D; Funct = null; Name = "sdc1";
-            ArgType = InstrArgType.I; ArgNames = ["ft", "offset", "base"];
-            Equation = "Memory[base + offset] = FPR[ft] (64-bit)"; Description = "Store doubleword from COP1 register pair";
-        }
-
-        public override void Exec(CpuState cpu, Args_I args)
-        {
-            int offset = CpuHelpers.SignExtend16(args.Imm);
-            ulong addr = (ulong)((long)cpu.RegsLo[args.Rs] + offset);
-            uint lo = BitConverter.SingleToUInt32Bits(cpu.FPR[args.Rt]);
-            uint hi = args.Rt + 1 < cpu.FPR.Length ? BitConverter.SingleToUInt32Bits(cpu.FPR[args.Rt + 1]) : 0;
-            if (cpu.Bus != null)
-            {
-                cpu.Bus.WriteWord((uint)addr, lo);
-                cpu.Bus.WriteWord((uint)addr + 4, hi);
-            }
-            else if (cpu.IopBus != null)
-            {
-                cpu.IopBus.WriteWord((uint)addr, lo);
-                cpu.IopBus.WriteWord((uint)addr + 4, hi);
-            }
-            else if (addr + 7 < (ulong)cpu.Memory.Length)
-            {
-                byte[] buf = new byte[8];
-                Buffer.BlockCopy(BitConverter.GetBytes(lo), 0, buf, 0, 4);
-                Buffer.BlockCopy(BitConverter.GetBytes(hi), 0, buf, 4, 4);
-                Buffer.BlockCopy(buf, 0, cpu.Memory, (int)addr, 8);
-            }
-        }
-
-        public override string Disasm(Args_I args, uint? pc = null)
-        {
-            int offset = CpuHelpers.SignExtend16(args.Imm);
-            return $"{Name} $f{args.Rt}, {CpuHelpers.FormatOffset(offset)}({CpuHelpers.RegName(args.Rs)})";
-        }
-
-        public override uint Asm(int[] args) => (uint)(Opcode << 26 | args[2] << 21 | args[0] << 16 | args[1] & 0xFFFF);
-
-        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
-        {
-            int offset = CpuHelpers.SignExtend16(args.Imm);
-            if (cpu != null)
-            {
-                string address = CpuHelpers.FormatMemoryReference(cpu, args.Rs, offset);
-                uint lo = BitConverter.SingleToUInt32Bits(cpu.FPR[args.Rt]);
-                uint hi = args.Rt + 1 < cpu.FPR.Length ? BitConverter.SingleToUInt32Bits(cpu.FPR[args.Rt + 1]) : 0;
-                return $"[{address}] ← $f{args.Rt}:$f{args.Rt + 1} = lo 0x{lo:X8} | hi 0x{hi:X8}";
-            }
-            return $"[{CpuHelpers.FormatMemoryOffset(offset)}] ← $f{args.Rt}:$f{args.Rt + 1}";
         }
     }
 
@@ -1713,8 +1403,8 @@ namespace CodeDesigner.Ps2.Common.Instructions.CoprocessorInstructions
         public override string Disasm(Args_I args, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
-            if (pc.HasValue) { ulong target = (ulong)((long)pc.Value + 4 + offset); return $"{Name} 0x{target:X}"; }
-            return $"{Name} {offset}";
+            if (pc.HasValue) { ulong target = (ulong)((long)pc.Value + 4 + offset); return $"{Name} ${(uint)target:X8}"; }
+            return $"{Name} {CpuHelpers.FormatSignedImmediate(args.Imm)}";
         }
 
         public override uint Asm(int[] args) => (uint)(Opcode << 26 | 0x08 << 21 | 0x02 << 16 | (args[0] >> 2) & 0xFFFF);
@@ -1754,8 +1444,8 @@ namespace CodeDesigner.Ps2.Common.Instructions.CoprocessorInstructions
         public override string Disasm(Args_I args, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
-            if (pc.HasValue) { ulong target = (ulong)((long)pc.Value + 4 + offset); return $"{Name} 0x{target:X}"; }
-            return $"{Name} {offset}";
+            if (pc.HasValue) { ulong target = (ulong)((long)pc.Value + 4 + offset); return $"{Name} ${(uint)target:X8}"; }
+            return $"{Name} {CpuHelpers.FormatSignedImmediate(args.Imm)}";
         }
 
         public override uint Asm(int[] args) => (uint)(Opcode << 26 | 0x08 << 21 | 0x03 << 16 | (args[0] >> 2) & 0xFFFF);

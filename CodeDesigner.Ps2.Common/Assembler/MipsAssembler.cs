@@ -49,8 +49,8 @@ namespace CodeDesigner.Ps2.Common
         // rs selects the sub-operation / FPU format.
         private static readonly Dictionary<string, (Instruction<Args_R> Instr, int Rs)> CopInstructionsByName = new();
 
-        // BC1F/BC1T/BC1FL/BC1TL: opcode 0x11, rs = 0x08, rt selects the condition.
-        private static readonly Dictionary<string, int> Bc1InstructionsByName = new();
+        // BCzF/BCzT/BCzFL/BCzTL: opcode 0x10-0x12, rs = 0x08, rt selects the condition.
+        private static readonly Dictionary<string, (int Opcode, int Rt)> CopBranchesByName = new();
 
         // MMI sub-group instructions: opcode 0x1C, funct selects the group, shamt the operation.
         private static readonly Dictionary<string, (Instruction<Args_R> Instr, int Funct, int Shamt)> MmiSubInstructionsByName = new();
@@ -60,8 +60,8 @@ namespace CodeDesigner.Ps2.Common
         // Mnemonic spellings accepted in addition to the instruction class names.
         private static readonly Dictionary<string, string> MnemonicAliases = new(StringComparer.OrdinalIgnoreCase)
         {
-            ["lqc2"] = "vlq",
-            ["sqc2"] = "vsq",
+            ["vlq"] = "lqc2",
+            ["vsq"] = "sqc2",
             ["sync.l"] = "sync",
             ["c.f"] = "c.f.s",
             ["c.eq"] = "c.eq.s",
@@ -106,12 +106,8 @@ namespace CodeDesigner.Ps2.Common
             RegisterR(new DSUBU());
             RegisterR(new MULT());
             RegisterR(new MULTU());
-            RegisterR(new DMULT());
-            RegisterR(new DMULTU());
             RegisterR(new DIV());
             RegisterR(new DIVU());
-            RegisterR(new DDIV());
-            RegisterR(new DDIVU());
             RegisterR(new MFHI());
             RegisterR(new MFLO());
             RegisterR(new MTHI());
@@ -195,12 +191,11 @@ namespace CodeDesigner.Ps2.Common
             RegisterI(new SQ());
             RegisterI(new LUI());
             RegisterI(new CACHE());
+            RegisterI(new PREF());
 
             // COP1 / COP2 loads and stores (ft / vft operand is a coprocessor register)
             RegisterI(new LWC1());
             RegisterI(new SWC1());
-            RegisterI(new LDC1());
-            RegisterI(new SDC1());
             RegisterI(new VLQ());   // lqc2
             RegisterI(new VSQ());   // sqc2
 
@@ -228,11 +223,7 @@ namespace CodeDesigner.Ps2.Common
 
             // ---- COP0 (opcode 0x10) ----
             RegisterCop(new MFC0(), 0x00);
-            RegisterCop(new DMFC0(), 0x01);
-            RegisterCop(new CFC0(), 0x02);
             RegisterCop(new MTC0(), 0x04);
-            RegisterCop(new DMTC0(), 0x05);
-            RegisterCop(new CTC0(), 0x06);
             RegisterCop(new TLBR(), 0x10);
             RegisterCop(new TLBWI(), 0x10);
             RegisterCop(new TLBWR(), 0x10);
@@ -244,10 +235,8 @@ namespace CodeDesigner.Ps2.Common
 
             // ---- COP1 (opcode 0x11) ----
             RegisterCop(new MFC1(), 0x00);
-            RegisterCop(new DMFC1(), 0x01);
             RegisterCop(new CFC1(), 0x02);
             RegisterCop(new MTC1(), 0x04);
-            RegisterCop(new DMTC1(), 0x05);
             RegisterCop(new CTC1(), 0x06);
             // Single-precision format (rs = 0x10)
             RegisterCop(new ADD_S(), 0x10);
@@ -258,10 +247,6 @@ namespace CodeDesigner.Ps2.Common
             RegisterCop(new ABS_S(), 0x10);
             RegisterCop(new MOV_S(), 0x10);
             RegisterCop(new NEG_S(), 0x10);
-            RegisterCop(new ROUND_W_S(), 0x10);
-            RegisterCop(new TRUNC_W_S(), 0x10);
-            RegisterCop(new CEIL_W_S(), 0x10);
-            RegisterCop(new FLOOR_W_S(), 0x10);
             RegisterCop(new RSQRT_S(), 0x10);
             RegisterCop(new ADDA_S(), 0x10);
             RegisterCop(new SUBA_S(), 0x10);
@@ -280,10 +265,13 @@ namespace CodeDesigner.Ps2.Common
             // Word format (rs = 0x14)
             RegisterCop(new CVT_S_W(), 0x14);
             // Branch on FPU condition (rs = 0x08, rt = condition)
-            Bc1InstructionsByName["bc1f"] = 0;
-            Bc1InstructionsByName["bc1t"] = 1;
-            Bc1InstructionsByName["bc1fl"] = 2;
-            Bc1InstructionsByName["bc1tl"] = 3;
+            for (int cop = 0; cop <= 2; cop++)
+            {
+                CopBranchesByName[$"bc{cop}f"]  = (0x10 + cop, 0);
+                CopBranchesByName[$"bc{cop}t"]  = (0x10 + cop, 1);
+                CopBranchesByName[$"bc{cop}fl"] = (0x10 + cop, 2);
+                CopBranchesByName[$"bc{cop}tl"] = (0x10 + cop, 3);
+            }
 
             // ---- COP2 register moves (opcode 0x12) ----
             RegisterCop(new QMFC2(), 0x01);
@@ -456,11 +444,30 @@ namespace CodeDesigner.Ps2.Common
                 || JTypeInstructionsByName.ContainsKey(m)
                 || RegimmInstructionsByName.ContainsKey(m)
                 || CopInstructionsByName.ContainsKey(m)
-                || Bc1InstructionsByName.ContainsKey(m)
+                || CopBranchesByName.ContainsKey(m)
                 || MmiSubInstructionsByName.ContainsKey(m)
+                || Vu0Macro.IsMnemonic(m)
+                || Cop2MoveSuffix.IsMatch(m)
+                || Cop0SpecialMoves.ContainsKey(m)
                 || m.StartsWith("pmfhl.") || m.StartsWith("pmthl.")
-                || m is "move" or "not" or "neg" or "negu" or "bnez" or "beqz" or "b" or "li" or "sync.p";
+                || m is "move" or "not" or "neg" or "negu" or "bnez" or "beqz" or "bnezl" or "beqzl"
+                     or "b" or "bal" or "li" or "sync.p";
         }
+
+        // qmfc2.i / cfc2.ni / …: COP2 moves with the interlock bit spelled out.
+        private static readonly Regex Cop2MoveSuffix = new(@"^(qmfc2|qmtc2|cfc2|ctc2)\.(i|ni)$", RegexOptions.Compiled);
+
+        // EE debug / performance-counter moves: mnemonic -> (mtc0?, COP0 reg, sel bits 5:0).
+        // mfps/mtps and mfpc/mtpc take a counter number as their second operand.
+        private static readonly Dictionary<string, (bool ToCop0, int Reg, int Sel)> Cop0SpecialMoves = new()
+        {
+            ["mfbpc"] = (false, 24, 0), ["mfiab"] = (false, 24, 2), ["mfiabm"] = (false, 24, 3),
+            ["mfdab"] = (false, 24, 4), ["mfdabm"] = (false, 24, 5), ["mfdvb"] = (false, 24, 6), ["mfdvbm"] = (false, 24, 7),
+            ["mtbpc"] = (true, 24, 0),  ["mtiab"] = (true, 24, 2),  ["mtiabm"] = (true, 24, 3),
+            ["mtdab"] = (true, 24, 4),  ["mtdabm"] = (true, 24, 5),  ["mtdvb"] = (true, 24, 6),  ["mtdvbm"] = (true, 24, 7),
+            ["mfps"] = (false, 25, 0), ["mtps"] = (true, 25, 0),
+            ["mfpc"] = (false, 25, 1), ["mtpc"] = (true, 25, 1),
+        };
 
         // -------------------------------------------------------------------------
         // Operand parsing
@@ -684,13 +691,25 @@ namespace CodeDesigner.Ps2.Common
             if (JTypeInstructionsByName.TryGetValue(mnemonic, out var jInstr))
                 return AssembleJ(jInstr, operands);
 
-            if (Bc1InstructionsByName.TryGetValue(mnemonic, out int bc1Rt))
+            if (CopBranchesByName.TryGetValue(mnemonic, out var copBranch))
             {
                 if (operands.Length != 1)
                     throw new ArgumentException($"Expected 1 operand (offset) for {mnemonic}");
                 int offset = ParseImm16(operands[0], "Branch offset");
-                return MipsEncoder.EncodeI(0x11, 0x08, bc1Rt, offset);
+                return MipsEncoder.EncodeI(copBranch.Opcode, 0x08, copBranch.Rt, offset);
             }
+
+            // qmfc2.i / ctc2.ni …: bit 0 is the interlock flag.
+            var cop2Move = Cop2MoveSuffix.Match(mnemonic);
+            if (cop2Move.Success)
+            {
+                var (moveInstr, moveRs) = CopInstructionsByName[cop2Move.Groups[1].Value];
+                uint word = AssembleCop(moveInstr, moveRs, operands);
+                return cop2Move.Groups[2].Value == "i" ? word | 1u : word;
+            }
+
+            if (Cop0SpecialMoves.TryGetValue(mnemonic, out var special))
+                return AssembleCop0SpecialMove(mnemonic, special.ToCop0, special.Reg, special.Sel, operands);
 
             if (CopInstructionsByName.TryGetValue(mnemonic, out var cop))
                 return AssembleCop(cop.Instr, cop.Rs, operands);
@@ -698,7 +717,27 @@ namespace CodeDesigner.Ps2.Common
             if (MmiSubInstructionsByName.TryGetValue(mnemonic, out var mmi))
                 return AssembleMmiSub(mmi.Instr, mmi.Funct, mmi.Shamt, operands);
 
+            if (Vu0Macro.IsMnemonic(mnemonic))
+                return Vu0Macro.Assemble(mnemonic, operands);
+
             throw new ArgumentException($"Unknown instruction: {mnemonic}");
+        }
+
+        /// <summary>mfbpc/mtiab/… (one GPR) and mfps/mtps/mfpc/mtpc (GPR, counter).</summary>
+        private static uint AssembleCop0SpecialMove(string mnemonic, bool toCop0, int reg, int sel, string[] operands)
+        {
+            int rt = ParseRegister(operands.Length > 0 ? operands[0] : throw new ArgumentException($"Expected a register for {mnemonic}"));
+            if (reg == 25)
+            {
+                RequireOperands(mnemonic, operands, 2);
+                int counter = ParseSmallField(operands[1], "Counter", sel == 0 ? 0 : 1);
+                sel = sel == 0 ? 0 : (counter << 1) | 1;
+            }
+            else
+            {
+                RequireOperands(mnemonic, operands, 1);
+            }
+            return MipsEncoder.EncodeR(0x10, toCop0 ? 0x04 : 0x00, rt, reg, 0, sel);
         }
 
         /// <summary>
@@ -804,11 +843,26 @@ namespace CodeDesigner.Ps2.Common
                     realOperands = new[] { operands[0], "$zero", operands[1] };
                     return true;
 
+                // bnezl / beqzl rs, offset  ->  bnel / beql rs, $zero, offset
+                case "bnezl":
+                case "beqzl":
+                    RequireOperands(mnemonic, operands, 2);
+                    realMnemonic = mnemonic == "bnezl" ? "bnel" : "beql";
+                    realOperands = new[] { operands[0], "$zero", operands[1] };
+                    return true;
+
                 // b offset  ->  beq $zero, $zero, offset
                 case "b":
                     RequireOperands(mnemonic, operands, 1);
                     realMnemonic = "beq";
                     realOperands = new[] { "$zero", "$zero", operands[0] };
+                    return true;
+
+                // bal offset  ->  bgezal $zero, offset
+                case "bal":
+                    RequireOperands(mnemonic, operands, 1);
+                    realMnemonic = "bgezal";
+                    realOperands = new[] { "$zero", operands[0] };
                     return true;
 
                 // li rt, imm16  ->  addiu rt, $zero, imm (signed) or ori rt, $zero, imm (0x8000-0xFFFF)
@@ -1128,7 +1182,7 @@ namespace CodeDesigner.Ps2.Common
             "fs"   => ParseFpuRegister(operand),
             "vfs"  => ParseVfRegister(operand),
             "vfd"  => ParseVfRegister(operand),
-            "ctrl" => ParseViRegister(operand),
+            "ctrl" => VU0Helpers.TryParseControlRegister(operand, out int ctrl) ? ctrl : ParseViRegister(operand),
             _      => opcode == 0x10 ? ParseCop0Register(operand) : ParseFpuRegister(operand)
         };
 

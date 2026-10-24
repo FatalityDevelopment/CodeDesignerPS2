@@ -18,6 +18,8 @@ interface CommandMessage {
     SearchMode?: string;
     TargetAddress?: number;
     ReferenceKinds?: string[];
+    XrefRebuild?: boolean;
+    XrefWait?: boolean;
     RegisterName?: string;
     RegisterIndex?: number;
     RegisterValue?: string;
@@ -178,6 +180,8 @@ interface CommandMessage {
     PadButtons?: number;
     /** 16 pressure bytes for PADSETSTATE (in PadDualshock2::Inputs order). */
     PadPressures?: number[];
+    // PINESETAUDIOMUTED field
+    AudioMuted?: boolean;
     // DEV9 Network (NETCAPTURE / NETRECVCAPTURE / NETINJECT / NETINJECTTX / NETDISASSEMBLE / NETSETFILTER)
     NetCaptureEnable?: boolean;
     NetCaptureDirection?: number;
@@ -188,6 +192,20 @@ interface CommandMessage {
     NetFilterProtocol?: number;
     NetFilterPort?: number;
     NetFilterIP?: string;
+    /** NETINJECT / NETINJECTTX / NETBUILDFRAME: new TCP/UDP payload (base64) for the NetFrameData template. */
+    NetPayloadData?: string;
+    /** NETINJECT / NETINJECTTX / NETBUILDFRAME: recompute IPv4/TCP/UDP lengths and checksums. */
+    NetFixFrame?: boolean;
+    /** NETINJECT / NETINJECTTX / NETBUILDFRAME: continue the live TCP flow's seq/ack. */
+    NetTcpContinue?: boolean;
+    /** NETDISSECTMANY: frames to dissect in one call. */
+    NetFrames?: Array<{ data: string; direction: number; timestampUs: number }>;
+    /** NETBUILDMESSAGE: catalog protocol, message id, field values, wrapping RT type and APP target. */
+    NetMessageProtocol?: string;
+    NetMessageId?: number;
+    NetMessageValues?: Record<string, string>;
+    NetRtType?: number;
+    NetAppTarget?: number;
     // Data-format overrides (GETDATAFORMATS / SETDATAFORMAT / CLEARDATAFORMAT)
     /** One of "byte" | "half" | "word" | "dword" | "qword" | "float" | "double" for SETDATAFORMAT. */
     DataFormatKind?: string;
@@ -606,6 +624,9 @@ interface CommandResponse {
     PadState?: PadStateInfo;
     // PADGETTYPE result
     PadControllerType?: number;
+    // PINESETAUDIOMUTED / PINEGETAUDIOSTATE results
+    AudioMuted?: boolean;
+    AudioMutedInSettings?: boolean;
     // NETGETSTATUS / NETGETSTATS / NETRECVCAPTURE / NETDISASSEMBLE results
     NetStatus?: NetStatusInfo;
     NetStats?: NetStatsInfo;
@@ -613,6 +634,10 @@ interface CommandResponse {
     ParsedPacketRows?: ParsedPacketRow[];
     DissectionText?: string;
     InjectionSuccess?: boolean;
+    // NETINJECT / NETINJECTTX / NETBUILDFRAME / NETBUILDMESSAGE / NETCATALOG results
+    NetFrame?: string;
+    NetMessageData?: string;
+    NetCatalog?: NetCatalogEntry[];
     // COMPILECDS sidecar results (assert / breakpoint / watchpoint directives)
     Sidecars?: CdsSidecarResult[];
     // Structured CDS diagnostics from VALIDATECDS / COMPILECDS.
@@ -764,6 +789,13 @@ export interface PineWatchInfo {
 export interface CallTraceEntry {
     From: string;
     To:   string;
+}
+
+/** PCSX2 audio output state returned by PINESETAUDIOMUTED / PINEGETAUDIOSTATE. */
+export interface AudioState {
+    muted: boolean;
+    /** PCSX2's "Mute All Sound" setting is on; unmuting over PINE has no effect. */
+    mutedInSettings: boolean;
 }
 
 /**
@@ -950,6 +982,12 @@ interface InstructionResult {
      * Styled like an override row, but not user-editable as one.
      */
     AutoFormatted?: boolean;
+    /** Code references to this row from the bridge's cross-reference index. */
+    XrefCount?: number;
+    /** Data words pointing at this row, from the cross-reference index. */
+    DataRefCount?: number;
+    /** True when a detected function begins at this row. */
+    FunctionStart?: boolean;
 }
 
 export type DataFormatKind = 'byte' | 'half' | 'word' | 'dword' | 'qword' | 'float' | 'double';
@@ -1077,6 +1115,8 @@ export interface DiscElfEntry {
 export interface PortCheatResult {
     /** Zero-based index of the cheat block; use this to distinguish blocks that share the same label. */
     blockIndex: number;
+    /** Zero-based position of this line within its block. */
+    lineIndex: number;
     /** The #Name label of the cheat block this line belongs to. */
     blockName: string;
     /** Any non-label, non-code description text found in the cheat block. Null when absent. */
@@ -1095,6 +1135,12 @@ export interface PortCheatResult {
     ambiguous: boolean;
     /** All candidate new code lines when ambiguous. */
     candidates: string[] | null;
+    /** Source address the line was ported from; null for lines without one (values, offsets). */
+    sourceAddress: number | null;
+    /** Target address chosen for sourceAddress; null when not found or not applicable. */
+    newAddress: number | null;
+    /** How the line's code type was handled, e.g. "Pointer offsets — copied unchanged". */
+    note: string | null;
 }
 
 /**
@@ -2302,6 +2348,27 @@ export class SocketClient {
     }
 
     /**
+     * PCSX2 PINE: mute or unmute the emulator's audio output (opcode 0x45).
+     * Returns the resulting state; PCSX2's "Mute All Sound" setting blocks unmuting.
+     */
+    public async pineSetAudioMuted(muted: boolean): Promise<AudioState> {
+        const response = await this.sendCommand({ Command: 'PINESETAUDIOMUTED', AudioMuted: muted });
+        if (!response.Success) {
+            throw new Error(response.Error || 'SetAudioMuted failed');
+        }
+        return { muted: !!response.AudioMuted, mutedInSettings: !!response.AudioMutedInSettings };
+    }
+
+    /** PCSX2 PINE: read whether the emulator's audio output is muted (opcode 0x46). */
+    public async pineGetAudioState(): Promise<AudioState> {
+        const response = await this.sendCommand({ Command: 'PINEGETAUDIOSTATE' });
+        if (!response.Success) {
+            throw new Error(response.Error || 'GetAudioState failed');
+        }
+        return { muted: !!response.AudioMuted, mutedInSettings: !!response.AudioMutedInSettings };
+    }
+
+    /**
      * PCSX2 PINE: read the full input state of a PS2 controller pad (opcode 0x33).
      * Returns buttons bitmask, analog stick positions, and 16 pressure values.
      */
@@ -2870,6 +2937,42 @@ export class SocketClient {
     }
 
     /**
+     * Build (or rebuild) the bridge's cross-reference index for a region
+     * ('ee', 'iop' or 'bios'). Returns once the build has started unless
+     * `wait` is set. The message describes the indexes the bridge holds.
+     */
+    public async buildXrefIndex(region: string, rebuild = false, wait = false): Promise<string> {
+        const response = await this.sendCommand({
+            Command: 'XREFINDEX',
+            Region: region,
+            XrefRebuild: rebuild,
+            XrefWait: wait,
+        }, wait ? 300000 : 10000);
+        if (!response.Success) {
+            throw new Error(response.Error || 'XREFINDEX failed');
+        }
+        return response.Message ?? '';
+    }
+
+    /**
+     * References to `targetAddress` from the cross-reference index (building it
+     * first if needed): calls, jumps, branches, built addresses, loads, stores,
+     * pointers, and ASCII/CRC32 matches when `kinds` asks for them.
+     */
+    public async xrefsTo(targetAddress: number, kinds?: string[], region?: string): Promise<ReferenceEntry[]> {
+        const response = await this.sendCommand({
+            Command: 'XREFSTO',
+            TargetAddress: targetAddress,
+            ReferenceKinds: kinds,
+            Region: region,
+        }, 300000);
+        if (!response.Success) {
+            throw new Error(response.Error || 'XREFSTO failed');
+        }
+        return response.References ?? [];
+    }
+
+    /**
      * Get EE OS thread list from the emulator.
      */
     public async getThreads(): Promise<ThreadEntry[]> {
@@ -3076,6 +3179,7 @@ export class SocketClient {
         const raw = response.PortCheatResults as Array<Record<string, unknown>> ?? [];
         const results: PortCheatResult[] = raw.map(r => ({
             blockIndex:   (r['BlockIndex']   as number)  ?? 0,
+            lineIndex:    (r['LineIndex']    as number)  ?? 0,
             blockName:    (r['BlockName']    as string)  ?? '',
             blockText:    (r['BlockText']    as string | null) ?? null,
             originalCode: (r['OriginalCode'] as string)  ?? '',
@@ -3085,6 +3189,9 @@ export class SocketClient {
             confidence:   (r['Confidence']   as number)  ?? 0,
             ambiguous:    (r['Ambiguous']    as boolean) ?? false,
             candidates:   (r['Candidates']   as string[] | null) ?? null,
+            sourceAddress: (r['SourceAddress'] as number | null) ?? null,
+            newAddress:    (r['NewAddress']    as number | null) ?? null,
+            note:          (r['Note']          as string | null) ?? null,
         }));
         return { results, log: response.Data ?? '' };
     }
@@ -4516,9 +4623,76 @@ export class SocketClient {
             NetMaxPackets: maxPackets,
         } as CommandMessage);
         if (!r.Success) { throw new Error(r.Error || 'NETRECVCAPTURE failed'); }
-        const packets = r.CapturedPackets ?? [];
-        const parsedRows = this.normalizeParsedPacketRows(packets, r.ParsedPacketRows ?? []);
-        return { packets, parsedRows };
+        return { packets: r.CapturedPackets ?? [], parsedRows: r.ParsedPacketRows ?? [] };
+    }
+
+    /**
+     * NETDISSECTMANY — dissect a batch of frames (e.g. a loaded pcap) in one call. Returns the
+     * same packet + row shapes as NETRECVCAPTURE.
+     */
+    public async netDissectMany(frames: Array<{ data: string; direction: number; timestampUs: number }>): Promise<{ packets: CapturedPacketInfo[]; parsedRows: ParsedPacketRow[] }> {
+        const r = await this.sendCommand({ Command: 'NETDISSECTMANY', NetFrames: frames } as CommandMessage);
+        if (!r.Success) { throw new Error(r.Error || 'NETDISSECTMANY failed'); }
+        return { packets: r.CapturedPackets ?? [], parsedRows: r.ParsedPacketRows ?? [] };
+    }
+
+    /**
+     * NETINJECT (into the PS2 RX path) / NETINJECTTX (out through the DEV9 adapter). The options
+     * swap the TCP/UDP payload, fix lengths + checksums and continue a live TCP flow first.
+     * Returns the frame that was actually sent.
+     */
+    public async netInject(frameBase64: string, tx: boolean, options: NetFrameOptions = {}): Promise<{ ok: boolean; frame: string; message: string }> {
+        const r = await this.sendCommand({
+            Command: tx ? 'NETINJECTTX' : 'NETINJECT',
+            NetFrameData: frameBase64,
+            NetPayloadData: options.payload,
+            NetFixFrame: options.fix,
+            NetTcpContinue: options.tcpContinue,
+        } as CommandMessage);
+        if (!r.Success) { throw new Error(r.Error || 'NETINJECT failed'); }
+        return { ok: r.InjectionSuccess === true, frame: r.NetFrame ?? frameBase64, message: r.Message ?? '' };
+    }
+
+    /** NETBUILDFRAME — apply the injection edits without sending; returns the frame and its dissection. */
+    public async netBuildFrame(frameBase64: string, options: NetFrameOptions = {}): Promise<{ frame: string; layers: DissectedLayer[]; row?: ParsedPacketRow; message: string }> {
+        const r = await this.sendCommand({
+            Command: 'NETBUILDFRAME',
+            NetFrameData: frameBase64,
+            NetPayloadData: options.payload,
+            NetFixFrame: options.fix,
+            NetTcpContinue: options.tcpContinue,
+        } as CommandMessage);
+        if (!r.Success) { throw new Error(r.Error || 'NETBUILDFRAME failed'); }
+        return {
+            frame:   r.NetFrame ?? frameBase64,
+            layers:  (r as { DissectionLayers?: DissectedLayer[] }).DissectionLayers ?? [],
+            row:     (r as { ParsedPacketRow?: ParsedPacketRow }).ParsedPacketRow,
+            message: r.Message ?? '',
+        };
+    }
+
+    /**
+     * NETBUILDMESSAGE — encode one catalog message from field values into a plaintext SCERT
+     * record (base64), ready to use as a frame payload.
+     */
+    public async netBuildMessage(protocol: string, id: number, values: Record<string, string>, rtType?: number, target?: number): Promise<{ data: string; message: string }> {
+        const r = await this.sendCommand({
+            Command: 'NETBUILDMESSAGE',
+            NetMessageProtocol: protocol,
+            NetMessageId: id,
+            NetMessageValues: values,
+            NetRtType: rtType,
+            NetAppTarget: target,
+        } as CommandMessage);
+        if (!r.Success) { throw new Error(r.Error || 'NETBUILDMESSAGE failed'); }
+        return { data: r.NetMessageData ?? '', message: r.Message ?? '' };
+    }
+
+    /** NETCATALOG — every message the multiplayer server defines, with field layouts. */
+    public async netCatalog(): Promise<NetCatalogEntry[]> {
+        const r = await this.sendCommand({ Command: 'NETCATALOG' });
+        if (!r.Success) { throw new Error(r.Error || 'NETCATALOG failed'); }
+        return r.NetCatalog ?? [];
     }
 
     /**
@@ -4566,80 +4740,6 @@ export class SocketClient {
             NetFilterIP: ip,
         } as CommandMessage);
         if (!r.Success) { throw new Error(r.Error || 'NETSETFILTER failed'); }
-    }
-
-    /**
-     * Bridge-side normalization for pre-parsed packet rows so all consumers see
-     * consistent Server/Protocol/Info values.
-     */
-    private normalizeParsedPacketRows(packets: CapturedPacketInfo[], parsedRows: ParsedPacketRow[]): ParsedPacketRow[] {
-        const scertDecodePorts = new Set([10071, 10078, 10075, 10070, 10069]);
-        const serverPortNames = new Map<number, string>([
-            [10071, 'MUIS'],
-            [10078, 'MAS'],
-            [10075, 'MLS'],
-            [10070, 'DME'],
-            [10069, 'NAT'],
-            [443, 'DNAS'],
-            [53, 'DNS'],
-        ]);
-
-        const parsePort = (endpoint: string): number | null => {
-            if (!endpoint || !endpoint.includes('.')) { return null; }
-            const idx = endpoint.lastIndexOf(':');
-            if (idx < 0 || idx >= endpoint.length - 1) { return null; }
-            const p = Number.parseInt(endpoint.slice(idx + 1), 10);
-            return Number.isInteger(p) && p >= 0 && p <= 65535 ? p : null;
-        };
-
-        const clone = parsedRows.map(row => ({ ...row }));
-
-        for (let i = 0; i < clone.length; i++) {
-            const row = clone[i];
-            const srcPort = parsePort(row.src);
-            const dstPort = parsePort(row.dst);
-            if (srcPort == null || dstPort == null) { continue; }
-
-            const isDns = srcPort === 53 || dstPort === 53;
-            const isScertPort = scertDecodePorts.has(srcPort) || scertDecodePorts.has(dstPort);
-
-            const server = serverPortNames.get(dstPort) ?? serverPortNames.get(srcPort) ?? '';
-            if (server && !row.server) {
-                row.server = server;
-            }
-
-            if (isDns) {
-                row.server = 'DNS';
-                row.proto = 'DNS';
-                row.info = `${row.src} -> ${row.dst} DNS`;
-                continue;
-            }
-
-            // Prevent TLS over port 443 from being mislabeled as SCERT.
-            if (row.proto === 'SCERT' && !isScertPort) {
-                row.proto = 'TCP';
-                row.info = `${row.src} -> ${row.dst} TCP`;
-                continue;
-            }
-
-            // If the bridge gave us TCP for a known SCERT port pair, surface SCERT.
-            if (isScertPort && row.proto === 'TCP') {
-                row.proto = 'SCERT';
-            }
-
-            // Keep row.no/time/dir/len as provided by bridge. Only normalize
-            // protocol-related fields that commonly drift.
-            if (!row.server && server) {
-                row.server = server;
-            }
-
-            // Best-effort backfill when bridge row is missing or sparse.
-            if (!row.info && i < packets.length) {
-                row.info = `${row.src} -> ${row.dst} ${row.proto || 'Unknown'}`;
-            }
-        }
-
-        return clone;
     }
 }
 
@@ -4696,6 +4796,40 @@ export interface DissectedLayer {
     fields: DissectedField[];
     offset: number;
     length: number;
+}
+
+/** Payload / fix-up options shared by NETINJECT, NETINJECTTX and NETBUILDFRAME. */
+export interface NetFrameOptions {
+    /** New TCP/UDP payload (base64); lengths and checksums are recomputed. */
+    payload?: string;
+    /** Recompute IPv4/TCP/UDP lengths and checksums after hand edits. */
+    fix?: boolean;
+    /** Rewrite TCP seq/ack to continue the live flow (learned from drained captures). */
+    tcpContinue?: boolean;
+}
+
+/** One field of a NETCATALOG message (see MessageCatalog.cs). */
+export interface NetCatalogField {
+    name: string;
+    /** uint, int, bool, f32, vec3, string, bytes, cstr or hex. */
+    type: string;
+    offset: number;
+    length: number;
+    options?: string[] | null;
+    auto?: string | null;
+    optional?: boolean;
+}
+
+/** One message the multiplayer server defines, returned by NETCATALOG. */
+export interface NetCatalogEntry {
+    /** SCERT, Lobby, LobbyExt, MGCL, DME, Game or Object. */
+    protocol: string;
+    cls: number;
+    id: number;
+    name: string;
+    description: string;
+    size: number | null;
+    fields: NetCatalogField[];
 }
 
 /** A pre-parsed packet table row returned alongside NETRECVCAPTURE. */

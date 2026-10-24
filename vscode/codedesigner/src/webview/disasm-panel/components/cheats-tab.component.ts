@@ -64,7 +64,7 @@ interface ArchiveCheatsUpdatedMsg {
           </button>
           <button class="cheats-tool-btn" (click)="openPorterClick.emit()"
                   title="Open the Cheat Code Porter to port cheats between game revisions">
-            <app-icon name="gitcompare" [size]="13" /><span>Porter</span>
+            <app-icon name="repeat" [size]="13" /><span>Porter</span>
           </button>
           <button class="cheats-tool-btn" (click)="openScannerClick.emit()"
                   title="Open the Memory Scanner to search for values in memory">

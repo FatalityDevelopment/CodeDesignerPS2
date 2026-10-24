@@ -186,6 +186,16 @@ converts the selected character, weapon, vehicle or prop, optionally with animat
   (`Convert_Socom2ToCaRoundTripsTheMesh`). Whether CA itself loads it is not known (no CA pack loader yet).
 - Mesh and pixel bytes are shared by both games, so both directions copy them as they are; CA stores V top-down,
   which the viewers flip (see the CA section).
+- **GTA -> SOCOM II** (`Conversion/ModelToSocom2`, game-neutral: any `ModelMesh`): SOCOM II geometry is *encoded*
+  from triangles. Characters: every ped bone skins to an alg_UN01 bone (`Gta/GtaPedRig`); each influence is
+  re-expressed relative to its bone's anchor joint, limbs turned onto SOCOM II's limb directions, scaled by the ped's
+  head-to-toe ratio (~10.4 units / m), and packed into skinned groups (<= 40 vertices / 45 triangles; first vertex
+  batch covers every slot, flags 2 / 1 / 5, or 6 alone; draw block = V4-8 triangles, V4-32 GIF header, V2-16 UVs).
+  Clips (`<source>/<name>`) are retargeted with the same alignment (W_b = G_anchor K_b^-1), hips carrying the motion.
+  Weapons: the retail held layout (`<name>_high` / `_low`, firepoint from the `gunflash` frame, firepoint_shell,
+  aimpoint, Gun_box), positions in the chunk-scale unit; vehicles / objects become map props (1/16 units). Textures
+  are median-cut to 8-bit with 32-bit CSM1 palettes. `Convert_GtaToSocom2OpensAsSocom2`; the weapon / prop packs pass
+  `ca2s2static.check`. Not tested in game yet.
 
 ## Packs
 

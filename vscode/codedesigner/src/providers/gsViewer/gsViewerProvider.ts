@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as net from 'net';
 import { getOutputChannel } from '../../extension';
+import { SocketClient } from '../../socketClient';
 import { getNonce } from '../../utils/nonce';
 import { applyCodeDesignerPanelIcon } from '../../utils/webviewPanel';
 
@@ -44,7 +45,15 @@ export class GsViewerProvider {
     private _readBuf: Buffer = Buffer.alloc(0);
     private _frameCount = 0;
 
-    constructor(private readonly _extensionUri: vscode.Uri) {}
+    constructor(
+        private readonly _extensionUri: vscode.Uri,
+        private readonly _socketClient?: SocketClient,
+    ) {}
+
+    /** Re-read PCSX2's mute state when the bridge connection changes. */
+    public notifyConnectionChanged(): void {
+        void this._sendAudioState();
+    }
 
     /**
      * Open (or focus) the GS frame viewer panel and connect to the bridge's
@@ -99,6 +108,10 @@ export class GsViewerProvider {
                 vscode.commands.executeCommand('codedesigner.saveScreenshot');
             } else if (msg?.type === 'controller') {
                 vscode.commands.executeCommand('codedesigner.openJokerMaker');
+            } else if (msg?.type === 'setMuted') {
+                void this._sendAudioState(!!msg.muted);
+            } else if (msg?.type === 'ready') {
+                void this._sendAudioState();
             } else if (msg?.type === 'decodeError') {
                 log.warn(`[GsViewer] webview decode error: ${msg.error}`);
             }
@@ -212,6 +225,30 @@ export class GsViewerProvider {
         }
     }
 
+    /**
+     * Post PCSX2's audio state to the webview, muting/unmuting first when
+     * `muted` is given. Sound control rides the JSON bridge (PINE 0x45/0x46),
+     * not the frame socket, so it needs a PCSX2 connection.
+     */
+    private async _sendAudioState(muted?: boolean): Promise<void> {
+        if (!this._panel) { return; }
+        const client = this._socketClient;
+        if (!client?.isConnected()) {
+            this._panel.webview.postMessage({ type: 'audio', available: false, error: 'Connect to PCSX2 to control sound.' });
+            return;
+        }
+        try {
+            const state = muted === undefined
+                ? await client.pineGetAudioState()
+                : await client.pineSetAudioMuted(muted);
+            this._panel?.webview.postMessage({ type: 'audio', available: true, ...state });
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            getOutputChannel().warn(`[GsViewer] sound toggle: ${message}`);
+            this._panel?.webview.postMessage({ type: 'audio', available: false, error: message });
+        }
+    }
+
     private _teardownSocket(): void {
         if (this._socket) {
             try { this._socket.destroy(); } catch { /* ignore */ }
@@ -253,6 +290,8 @@ export class GsViewerProvider {
         #text { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
         .actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:6px; margin-left:0; }
         button { min-height:28px; display:inline-flex; align-items:center; justify-content:center; gap:5px; background:#333; color:var(--text); border:1px solid #4a4a4a; border-radius:3px; padding:5px 9px; cursor:pointer; font:inherit; white-space:nowrap; }
+        button:disabled { opacity:.45; cursor:default; pointer-events:none; }
+        button svg { width:14px; height:14px; flex:none; } #sound.muted { color:#f48771; border-color:#7d3c2a; }
         button:hover { background:#414141; border-color:#666; } button:active { background:#0e639c; } button.primary { background:#0e639c; border-color:#1177bb; color:#fff; } button.primary:hover { background:#1177bb; }
         #stage { position:relative; flex:1 1 auto; min-height:0; display:flex; align-items:center; justify-content:center; overflow:hidden; padding:20px; background-color:#101010; background-image:linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px); background-size:18px 18px; }
         .frame-shell { position:relative; max-width:100%; max-height:100%; display:flex; border:1px solid #333; box-shadow:0 12px 35px rgba(0,0,0,.35); background:#000; }
@@ -270,6 +309,7 @@ export class GsViewerProvider {
         <div id="status" class="connection"><span class="dot" id="dot"></span><span id="text">connecting…</span></div>
         <div class="actions">
             <button id="smoothing" title="Toggle pixel smoothing"><span>Smoothing</span></button><button id="fullscreen" title="Toggle fullscreen stage"><span>Fullscreen</span></button>
+            <button id="sound" title="Toggle PCSX2 sound" disabled><svg id="soundIcon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></svg><span id="soundText">Sound</span></button>
             <button id="screenshot" class="primary" title="Save a screenshot in PCSX2"><span>Screenshot</span></button><button id="controller" title="Open the virtual controller"><span>Controller</span></button><button id="reconnect" title="Reconnect to the GS bridge"><span>Reconnect</span></button>
         </div>
     </header>
@@ -431,6 +471,36 @@ export class GsViewerProvider {
         document.getElementById('controller').addEventListener('click', () => {
             vscode.postMessage({ type: 'controller' });
         });
+
+        // Sound toggle: PCSX2's own audio output (the stream carries no audio).
+        const soundBtn = document.getElementById('sound');
+        const soundIcon = document.getElementById('soundIcon');
+        const soundText = document.getElementById('soundText');
+        const SPEAKER = '<path d="M11 5 6 9H2v6h4l5 4V5z" />';
+        const WAVES = '<path d="M15.5 8.5a5 5 0 0 1 0 7" /><path d="M19 5a10 10 0 0 1 0 14" />';
+        const CROSS = '<line x1="22" x2="16" y1="9" y2="15" /><line x1="16" x2="22" y1="9" y2="15" />';
+        let audioMuted = false;
+        function renderSound(state) {
+            soundBtn.disabled = !state.available || state.pending;
+            audioMuted = !!state.muted;
+            soundBtn.classList.toggle('muted', state.available && audioMuted);
+            soundIcon.innerHTML = SPEAKER + (state.available && audioMuted ? CROSS : WAVES);
+            soundText.textContent = !state.available ? 'Sound' : (audioMuted ? 'Muted' : 'Sound on');
+            soundBtn.title = !state.available
+                ? (state.error || 'Connect to PCSX2 to control sound.')
+                : state.mutedInSettings
+                    ? 'Muted by "Mute All Sound" in PCSX2 settings. Turn that off in PCSX2 to unmute here.'
+                    : (audioMuted ? 'PCSX2 sound is muted. Click to unmute.' : 'PCSX2 sound is on. Click to mute.');
+        }
+        soundBtn.addEventListener('click', () => {
+            renderSound({ available: true, muted: audioMuted, pending: true });
+            vscode.postMessage({ type: 'setMuted', muted: !audioMuted });
+        });
+        window.addEventListener('message', (event) => {
+            if (event.data && event.data.type === 'audio') renderSound(event.data);
+        });
+        renderSound({ available: false });
+        vscode.postMessage({ type: 'ready' });
 
         // Tick the UI every second so the "no frames for Ns" indicator
         // updates even when no events are arriving.

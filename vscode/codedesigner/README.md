@@ -1,63 +1,45 @@
-# CodeDesigner — PS2 Emotion Engine MIPS Toolkit for VS Code
+# CodeDesigner for VS Code
 
-A VS Code extension that provides **MIPS64 assembly, disassembly, and live PS2 emulator debugging** for the PlayStation 2 Emotion Engine (EE). Connects to the CodeDesigner C# backend via a local TCP socket.
+PS2 reverse engineering and modding inside VS Code: a live Emotion Engine disassembler, PCSX2 debugging, CDS patches, cheats, asset editors, packet capture and an AI agent panel. The extension is the front end for the CodeDesigner backend, which it starts and talks to over a local socket (`localhost:8765`).
 
 ---
 
 ## Features
 
-### Live Disassembler
-- Scrollable disassembly view over live EE memory while the emulator is running
-- `▷` marker on the current PC row; auto-scrolls on pause
-- `Ctrl+G` — go to any virtual address; `Alt+Left` — navigate back
-- `Ctrl+F` — search by text, byte pattern, or ASCII string
-- `F9` — toggle breakpoints; execution pauses automatically on hit
-- Single-step, step-into, step-over
-- Resizable hex dump panel beside the disassembly grid
+- **Disassembler** — one panel per memory region (EE RAM, IOP RAM, BIOS, scratchpad, VU memory, hardware registers). Comment hints, function and switch/pointer/float table detection, cross-references (`X`), breakpoints (`F9`), watches, registers (`Ctrl+Alt+R`), search (`Ctrl+F`), go to address (`Ctrl+Alt+A`), data formats (`B H W F D Q`).
+- **PCSX2 integration** — run, pause and step PCSX2 over PINE; save states with screenshots; a live **Preview** of the game with a sound toggle; a virtual **Controller**.
+- **Cheats** — the game's known codes from the CheatCodeArchive, a cheats editor, converter, scanner, **Cheat Porter** and a **joker code builder**.
+- **CDS** — syntax highlighting, snippets and a compiler for Code Designer Script patches.
+- **Memory tools** — Memory Diff (GitHub-style), Snapshots, Label Manager, Structure diagrams, struct offset calculator.
+- **Assets** — Viewer, Model, Map and Animation editors for SOCOM II and SOCOM: Combined Assault packages.
+- **Network** — start the SOCOM II online servers; the Packet Viewer captures, labels, builds and injects PS2 traffic.
+- **Media** — memory card and HDD browsers, the PCSX2 compatibility list, an ELF → C++ recompiler.
+- **AI** — start the `CodeDesigner.AI` MCP server, chat with Claude, Codex, Copilot or a local model, and manage agents, plans and memories.
 
-### Register & State Inspection (`Ctrl+Alt+R`)
-| Tab | Contents |
-|---|---|
-| **GPR** | 32 × 128-bit general-purpose registers |
-| **CP0** | COP0 system control registers |
-| **FPR** | 32 COP1 float registers + FACC |
-| **VU0f** | 32 × (x/y/z/w) VU0 vector floats |
-| **VU0i** | 16 VU0 integer registers |
-| **GS** | GS privileged register values |
-| **Stack** | 32-word stack frame at `$sp` |
+---
 
-### Symbols Panel (`Ctrl+Alt+S`)
-Labels, strings, functions, pointers, floats, and integers — click any entry to navigate there.
+## Requirements
 
-### Emulator Settings Tab
-Connect to the built-in emulator or PCSX2, load a BIOS and game, take snapshots, and import binary patches.
-
-### Cheats Tab
-Apply one-shot GameShark codes or inject a persistent frame-loop cheat engine. Automatically fetches known cheats for the running PCSX2 game from CheatCodeArchive.
-
-### CDS Tab
-Compile Code Designer Script (`.cds`) patch files to MIPS machine code, GameShark codes, or a persistent cheat-engine table. Built-in assertions, breakpoints, watchpoints, and log sidecars.
-
-### Recompile Tab
-Static-recompile a PS2 ELF binary to C++ source.
-
-### Memory Card & HDD Viewers
-Browse PS2 memory card saves and HDD partition images directly in VS Code.
-
-### GitHub Copilot Integration
-MCP tools let Copilot assemble/disassemble MIPS, read/write live memory, compile CDS patches, and query the symbol database.
+- The CodeDesigner backend, built from the repository (`dotnet build CodeDesigner.sln`). The build deploys it to `%LOCALAPPDATA%\CodeDesigner\`.
+- SQL Server LocalDB.
+- PCSX2 with PINE enabled. CodeDesigner's PCSX2 fork (`pcsx2/`) is needed for breakpoints, stepping, Preview and Sound.
 
 ---
 
 ## Quick start
 
-1. Build `CodeDesigner.sln` with `dotnet build`.
-2. Open `vscode/codedesigner` in VS Code and press **F5** to start the extension host.
-3. In the extension host window, open the CodeDesigner sidebar.
-4. Select your emulator, BIOS, and game in the **Emulator Settings** tab and click **Connect**.
+1. Open this folder in VS Code, run `npm ci`, and press **F5**.
+2. In the development host, open the **CodeDesigner** sidebar.
+3. In the **Emulator** tab, choose the emulator, BIOS and game, then click **Run**.
+4. Open **EE RAM** under *Memory Region*.
+
+Each sidebar tab has a **?** button that opens its guide.
 
 ---
 
-## Help
+## Documentation
 
-Click the **? Help** button in any tab to open the relevant guide in the Markdown preview.
+- [VS Code Extension guide](../../docs/vscode-extension.md) — every page explained
+- [Disassembler](../../docs/disassembler.md)
+- [CDS language](CODE_DESIGNER_SOURCE.md)
+- [All docs](../../docs/README.md)

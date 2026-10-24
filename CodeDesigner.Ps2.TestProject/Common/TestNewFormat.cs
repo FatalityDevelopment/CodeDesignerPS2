@@ -57,12 +57,12 @@ namespace CodeDesigner.Ps2.TestProject
         [TestMethod]
         public void TestImmediateFormatWithDollarPrefix()
         {
-            // Test that immediates use $ prefix instead of 0x
-            uint instr = 0x27BDFFD0;  // addiu sp, sp, $FFD0
+            // Immediates use the $ prefix; sign-extended ones print signed.
+            uint instr = 0x27BDFFD0;  // addiu sp, sp, -$0030
             string disasm = MipsDisassembler.Disassemble(instr);
-            
-            Assert.IsTrue(disasm.Contains("$FFD0"), $"Expected $FFD0 in disassembly but got: {disasm}");
-            Assert.IsFalse(disasm.Contains("0xFFD0"), $"Should not contain 0xFFD0: {disasm}");
+
+            Assert.AreEqual("addiu sp, sp, -$0030", disasm);
+            Assert.AreEqual(instr, MipsAssembler.Assemble(disasm), "signed spelling must re-assemble");
         }
 
         [TestMethod]
@@ -158,7 +158,7 @@ namespace CodeDesigner.Ps2.TestProject
             Assert.IsTrue(disassembled[0].Contains("27BDFFD0"));
             Assert.IsTrue(disassembled[0].Contains("addiu"));
             Assert.IsTrue(disassembled[0].Contains("sp"));
-            Assert.IsTrue(disassembled[0].Contains("$FFD0"));
+            Assert.IsTrue(disassembled[0].Contains("-$0030"));
         }
 
         [TestMethod]
@@ -209,7 +209,7 @@ namespace CodeDesigner.Ps2.TestProject
             // Test various I-type instructions
             var testCases = new[]
             {
-                new { asmLine = "addiu t0, zero, $1234", mnemonic = "addiu", expected = "$1234" },
+                new { asmLine = "addiu t0, t1, $1234", mnemonic = "addiu", expected = "$1234" },
                 new { asmLine = "addi t1, t0, $0064", mnemonic = "addi", expected = "$0064" },
                 new { asmLine = "andi t2, t1, $00FF", mnemonic = "andi", expected = "$00FF" },
                 new { asmLine = "ori t3, t2, $1000", mnemonic = "ori", expected = "$1000" },

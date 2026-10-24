@@ -2,736 +2,533 @@
 
 # MCP Server — User Guide
 
-The MCP (Model Context Protocol) server exposes the full CodeDesigner toolset to AI assistants such as GitHub Copilot, Claude, and any other MCP-compatible client. It covers ~200 tools spanning emulator control, memory analysis, disassembly, cheat authoring, label management, disc/media access, network capture, and multi-agent orchestration. All tool descriptions are stored and managed in the SQL Server database, allowing runtime customisation without recompilation.
+`CodeDesigner.AI` is CodeDesigner's MCP (Model Context Protocol) server. It gives AI assistants such as Claude, GitHub Copilot or any other MCP client the same toolset a human has in VS Code: emulator control, memory and disassembly, breakpoints, labels, CDS patches, cheats, controller input, packet capture, disc/card/HDD images, and the Zipper asset editors.
+
+It exposes **242 tools** in 11 domains. A **profile** picks which domains and how much risk a client sees, so a small session doesn't pay for the whole tool list.
+
+> The older `CodeDesigner.Ps2.McpServer` project has been removed. `CodeDesigner.AI` is the only MCP server.
 
 ---
 
 ## Architecture
 
 ```
-AI Client (Copilot / Claude / ...)
-        │  stdio JSON-RPC (MCP protocol)
+AI client (Claude / Copilot / ...)
+        │  stdio JSON-RPC (MCP)
         ▼
-CodeDesigner.Ps2.McpServer    ← reads descriptions from SQL Server
-        │  TCP port 8765 (JSON-over-newline)
-        ▼
-CodeDesigner.Ps2.Bridge
-    ├── PINE IPC → PCSX2 (emulator live memory, breakpoints, registers)
-    ├── SQL Server (labels, cheats, snapshots, agents, orchestration)
-    └── Internal emulator (emu-only commands when PCSX2 is not used)
+CodeDesigner.AI   (%LOCALAPPDATA%\CodeDesigner\AI\CodeDesigner.AI.exe)
+        │                                 │
+        │ TCP localhost:8765 (JSON lines)  │ EF Core (direct, no emulator needed)
+        ▼                                 ▼
+CodeDesigner.Ps2.Bridge              SQL Server LocalDB (Database=CodeDesigner)
+    ├── PINE → PCSX2 (live memory, breakpoints, registers, pad, DEV9, GS stream)
+    └── built-in emulator (when PCSX2 is not used)
 ```
 
-- **MCP Server** (`CodeDesigner.Ps2.McpServer`) — stdio-based process; the AI spawns it or connects via a configured command.
-- **Bridge** (`CodeDesigner.Ps2.Bridge`) — long-running TCP server on `localhost:8765`; must be running before the MCP server starts.
-- **PINE** — PCSX2's built-in IPC socket; required for live emulator commands.
+- **Live work** (memory, registers, run state, pad, packets) goes through the **Bridge** socket on `localhost:8765`. The Bridge must be running; the VS Code extension starts it for you.
+- **Coordination state** (labels, progress reports, agent profiles, orchestration plans, sessions, messages) is read and written **directly in LocalDB**, so those tools work with no emulator running.
+
+For the full system map see [Architecture](ARCHITECTURE.md).
 
 ---
 
-## Running the MCP Server
+## Running the server
+
+Building `CodeDesigner.AI` deploys it to `%LOCALAPPDATA%\CodeDesigner\AI\`:
 
 ```bash
-# 1. Start the Bridge (if not already running)
-cd CodeDesigner.Ps2.Bridge
-dotnet run
-
-# 2. The MCP server is launched automatically by your AI client
-#    or can be started manually for testing:
-cd CodeDesigner.Ps2.McpServer
-dotnet run
+dotnet build CodeDesigner.AI/CodeDesigner.AI.csproj
 ```
 
-### VS Code / Copilot Configuration
+There are three ways to run it:
 
-Add to your `mcp.json` (workspace or user settings):
+- **From the extension.** The sidebar's MCP button (top of the Emulator panel) starts `CodeDesigner.AI.exe --profile all` in a *CodeDesigner.AI MCP* terminal and shows whether it is online.
+- **From your AI client.** Point the client at the exe. The repo's [`.vscode/mcp.json`](../.vscode/mcp.json) ships ready-made entries:
 
-```json
-{
-  "servers": {
-    "codedesigner": {
-      "type": "stdio",
-      "command": "dotnet",
-      "args": ["run", "--project", "CodeDesigner.Ps2.McpServer"]
+  ```json
+  {
+    "servers": {
+      "CodeDesigner": {
+        "type": "stdio",
+        "command": "${env:LOCALAPPDATA}/CodeDesigner/AI/CodeDesigner.AI.exe",
+        "args": ["--profile", "all"]
+      },
+      "CodeDesigner-AI-re":       { "type": "stdio", "command": "${env:LOCALAPPDATA}/CodeDesigner/AI/CodeDesigner.AI.exe", "args": ["--profile", "re"] },
+      "CodeDesigner-AI-readonly": { "type": "stdio", "command": "${env:LOCALAPPDATA}/CodeDesigner/AI/CodeDesigner.AI.exe", "args": ["--profile", "re", "--readonly"] }
     }
   }
-}
-```
+  ```
+
+  For Claude Code: `claude mcp add codedesigner -- "%LOCALAPPDATA%\CodeDesigner\AI\CodeDesigner.AI.exe" --profile re`.
+- **By hand, to inspect a profile.** `CodeDesigner.AI.exe --profile lite --list-tools` prints the tools a profile exposes and exits. It needs no bridge or database.
+
+### Command-line options
+
+| Option | Meaning |
+|---|---|
+| `--profile <name>` | Tool profile (default `core`). See the table below. |
+| `--readonly` | Cap the profile at read-only tools. |
+| `--dangerous-tools false` | Drop tools rated `dangerous`. |
+| `--agent-id <n>` | Run as agent persona *n*. `cd_session_init` then shows that agent's onboarding. |
+| `--parent-session <n>` | Link this process to a lead session (sub-agents). |
+| `--host <h>` / `--port <p>` | Bridge address (default `127.0.0.1:8765`, or `CODEDESIGNER_HOST` / `CODEDESIGNER_PORT`). |
+| `--connection-string <cs>` | Database (default LocalDB, or `CODEDESIGNER_CONNECTION_STRING`). |
+| `--list-tools` | Print the profile's tools and exit. |
+
+### Profiles
+
+| Profile | Domains | Max risk | Tools |
+|---|---|---|---|
+| `lite` | curated list (session, progress, labels, read/disasm/scan, PC) | database | 18 |
+| `core` | Core | database | 25 |
+| `multi-agent` | Core + Admin | database | 49 |
+| `packets` | Core + Network, Labels | network | 64 |
+| `live-debug` | Core + Memory, Debug | memory | 67 |
+| `cheats` | Core + Memory, Patching, Cheats | memory | 76 |
+| `media` | Core + Media, Labels | disk | 101 |
+| `re` | Core + Memory, Debug, Labels, Pcsx2, Pad | memory | 133 |
+| `pcsx2` | Core + Pcsx2, Memory, Debug, Labels, Pad | memory | 133 |
+| `patching` | Core + Memory, Debug, Labels, Patching, Cheats, Pcsx2 | memory | 152 |
+| `admin` / `all` | everything | dangerous | 242 |
+
+A session can widen itself without relaunching: `cd_enable_domain` adds a domain (within the launch risk cap) and the client receives `tools/list_changed`. `cd_list_domains` shows what is on.
+
+**Risk levels**, lowest to highest: `read-only` → `database` → `disk` → `memory` → `network` → `dangerous`. Tools above `database` take an optional `reason` argument; calling one without a reason adds a short reminder to the result.
 
 ---
 
-## Starting a Session
+## Starting a session
 
-Every session must begin with `session_start`. This single call:
-
-1. Notifies the VS Code extension that an AI session has started (enabling Follow-AI mode in the disassembly editor).
-2. Returns the full operational guidelines loaded from the lead agent's database profile.
-3. Lists the complete agent team roster so sub-agents know their role IDs.
-4. Returns the active orchestration plan.
-5. Lists all existing progress reports so prior work can be resumed immediately.
+Start every session with **`cd_session_init`**. It returns a compact summary: the active profile, bridge and game status, matching progress reports to resume, the agent's onboarding (when `--agent-id` is set), core rules and suggested next calls.
 
 ```
-session_start → loads guidelines + agent roster + progress reports
-get_progress_report "socom2-player-health" → resumes prior session
-get_agent_profile 1 → load your own rules and objectives (sub-agents)
+cd_session_init                      → profile, bridge/game status, resume candidates
+progress_search "socom2 health"      → find earlier work
+progress_get "socom2-player-health"  → read it
+cd_set_goal "map the player struct"  → keeps the session on task
 ```
+
+Other session helpers:
+
+- `cd_tool_index` lists the profile's tools; `cd_tool_help <tool>` gives one tool's full description and parameters.
+- `cd_context_get` fetches heavier docs on demand (agent profile, orchestration plan, progress report, DB schema, workflows), so `cd_session_init` stays small.
+- `cd_milestone_reached`, `cd_check_session_health` and `cd_session_summary` track progress and say when it is time to save.
+- Save findings with `progress_save` at milestones and before you stop.
+
+The server also publishes MCP **resources** (`cd://docs/rules`, `cd://docs/db-schema`, `cd://docs/packet-workflow`) and **prompts** (`session_bootstrap`, `packet_reversing`).
 
 ---
 
-## Tool Reference
+## Tool reference
 
-### How Tool Descriptions Work
+Tool descriptions come from the `[CdTool]` attribute on each tool class under `CodeDesigner.AI/Tools/<Domain>/`. That source is the only definition; there are no database overrides. The tables below list every tool. `cd_tool_help` shows parameters.
 
-Every MCP tool is defined with two description sources:
+### Core (25)
 
-1. **Compiled fallback** — a `[Description("...")]` attribute directly in the C# source (e.g. `Tools/Memory.cs`). This is the authoritative definition and is always present even without a database.
-2. **Database override** — a `[DynamicDescription("tool_name_desc")]` attribute that points to a key in the `McpConfigs` SQL table. When the server starts, it auto-seeds any missing keys from the compiled fallback. After seeding, the database value takes precedence and can be edited at runtime via the VS Code description editor — no recompile needed.
+Always on. Session start, status, tool discovery, goals, progress reports, multi-agent messaging, and basic labels.
 
-Priority at runtime: **DB value → compiled fallback** (fallback used only if the DB key is missing).
+| Tool | Risk | Description |
+|------|------|-------------|
+| `cd_active_sessions` | read-only | List currently active (sub-)agent sessions. |
+| `cd_check_session_health` | read-only | Report session age, last progress save, labels added, current goal, milestones, recommendations. |
+| `cd_context_get` | read-only | Fetch one context doc on demand (agent_profile, orchestration_plan, progress_report, db_schema, *_workflow). Keeps session_init small. |
+| `cd_enable_domain` | read-only | Expose another tool domain at runtime without relaunching (memory\|debug\|labels\|network\|patching\|cheats\|pcsx2\|pad\|media\|admin). Honours the launch risk cap. |
+| `cd_get_goal` | read-only | Return the current session goal (or hint to set one). |
+| `cd_inbox_pop` | database | Pull unread messages addressed to your session (or your agent persona). Marks them read. |
+| `cd_list_domains` | read-only | List tool domains and whether each is currently enabled (launch profile + any widened at runtime). |
+| `cd_milestone_reached` | read-only | Mark a milestone (e.g. 'found struct', 'verified hook'). Shows up in cd_check_session_health. |
+| `cd_orch_advance` | database | Advance the active orchestration to a stage (step number or label) with an optional summary; optionally notify active sessions. |
+| `cd_orch_current_step` | read-only | Show the active orchestration plan's current stage, the resolved current/next workflow step, and the parsed step list. |
+| `cd_send_message` | database | Send a message to a specific session, a specific agent persona, or broadcast (both null). |
+| `cd_session_begin` | database | Register a new (sub-)agent session and surface that agent's Rules/Guidelines/Objective/SessionBegin Markdown. Returns the new session id. |
+| `cd_session_end` | database | Mark a (sub-)agent session complete and surface the agent's SessionEnd checklist. |
+| `cd_session_init` | read-only | Start a session: compact summary (profile, game, bridge, active progress, agent onboarding, core rules, suggested next calls). |
+| `cd_session_status` | read-only | Read full details for one (sub-)agent session by id. |
+| `cd_session_summary` | read-only | Recap the session so far: goal, age, labels/saves, and the milestone narrative. The 'where are we?' view. |
+| `cd_set_goal` | read-only | Declare the current session goal (one line). Helps keep the AI on task. |
+| `cd_status` | read-only | Compact backend status: profile, bridge connectivity, emulator/game info. |
+| `cd_tool_help` | read-only | Full description and parameter schema for one tool. Use when the one-line summary isn't enough. |
+| `cd_tool_index` | read-only | List the tools in the current profile (names grouped by domain; verbose:true adds one-line descriptions). |
+| `label_add` | database | Create or update a label at an address. |
+| `label_list` | read-only | List labels from the active label set; optional substring filter on the label name. |
+| `progress_get` | read-only | Read the full Markdown of one progress report by name. |
+| `progress_save` | database | Create or overwrite a progress report. Use at milestones and before ending a session. |
+| `progress_search` | read-only | Search saved progress reports by text; returns matching report names. |
 
-To read all current descriptions from the database:
+### Memory (27)
 
-```sql
-SELECT [Key], [Value] FROM McpConfigs WHERE [Key] LIKE '%_desc' ORDER BY [Key]
-```
+Read, write, scan and disassemble EE/IOP memory; snapshots; ELF loading; cross-references and function lookup.
 
-To reset a description to its compiled default, delete the DB row — the next server startup will re-seed it from source:
+| Tool | Risk | Description |
+|------|------|-------------|
+| `file_load_elf` | memory | Load a PS2 ELF32 executable into the internal emulator at its PT_LOAD addresses (paused). |
+| `file_load_snapshot` | memory | Load a memory snapshot into the internal emulator (paused). Inspect with read_memory then resume. |
+| `file_set_pc` | memory | Set the EE PC in the internal emulator (call after file_load_*). |
+| `find_code_references` | read-only | Find every MIPS instruction in live RAM that references a target address (J/JAL/branches/LUI+ADDIU pairs). |
+| `get_floats` | read-only | Scan a base64 binary blob for plausible single-precision floats. |
+| `get_function` | read-only | Return the detected function containing an address: entry, last instruction, size and how many places call or point to it. Functions come from the cross-reference index (call targets and stack-frame prologues after jr ra). |
+| `get_functions` | read-only | Scan a base64 binary blob for MIPS function entry points. |
+| `get_integers` | read-only | Scan a base64 binary blob for non-zero 4-byte aligned integers. |
+| `get_pointers` | read-only | Scan a base64 binary blob for confirmed EE RAM pointers. |
+| `get_snapshots` | read-only | List saved memory snapshots for a game (lookup by ISO filename or title). |
+| `get_strings` | read-only | Scan a base64 binary blob for printable ASCII strings. |
+| `get_xrefs` | read-only | List cross-references to an address from the bridge's index: calls, jumps, branches, lui-built addresses, loads, stores and data pointers (optionally ASCII/CRC32 matches of a string there). The index is built once per region and reused; the first call may take a few seconds. |
+| `load_bin` | memory | Load a raw binary file from disk into live emulator memory at an address (inject code/data). |
+| `load_snapshot` | memory | Reload a previously saved memory snapshot into the running emulator. |
+| `memory_capture_range` | read-only | Capture a large memory range server-side and return a handle + preview. Alias of memory_read(large:true). |
+| `memory_disasm` | read-only | Disassemble a window of EE memory to MIPS. Use for reading code. Returns instructions. |
+| `memory_read` | read-only | Read an EE/IOP memory range as inline hex; set large=true (or length>4096) to get a capture handle + preview instead. |
+| `memory_scan` | read-only | Scan EE/IOP RAM for a byte pattern ('?' wildcards) and return match addresses. |
+| `memory_write` | memory | Write hex bytes to EE/IOP memory. Use for patches/pokes. Returns confirmation. |
+| `rebuild_xrefs` | read-only | Rebuild the cross-reference index for a region after the game loads new code or data. Waits for the build. |
+| `scan_floats` | read-only | Scan live RAM for plausible IEEE-754 single-precision floats. |
+| `scan_functions` | read-only | Scan live EE/IOP RAM for likely MIPS function entry points (ADDIU $sp,$sp,-N prologues). |
+| `scan_integers` | read-only | Scan live RAM for non-zero 4-byte aligned 32-bit integers. |
+| `scan_pointers` | read-only | Scan live RAM for 4-byte aligned values that are confirmed EE RAM pointers. |
+| `scan_strings` | read-only | Scan live EE/IOP RAM for null-terminated ASCII strings. |
+| `scan_value` | read-only | Scan live RAM for a specific value (u8/u16/u32/u64/f32) with a comparison operator. |
+| `snapshot` | disk | Save a full memory snapshot to disk; optionally associate with isoName for later lookup. |
 
-```sql
-DELETE FROM McpConfigs WHERE [Key] = 'read_memory_desc'
-```
+### Debug (15)
 
-### Connectivity
+Run control, breakpoints, stepping, registers and threads. Works on the built-in emulator and PCSX2.
 
-| Tool | Description |
-|------|-------------|
-| `ping` | Verify the Bridge is reachable on `localhost:8765`. Returns `PONG`. |
-| `session_start` | Load guidelines, agent roster, orchestration plan, and prior progress reports. Call first every session. |
+| Tool | Risk | Description |
+|------|------|-------------|
+| `debug_breakpoint_clear` | memory | Remove a breakpoint at a specific address. |
+| `debug_breakpoint_clear_all` | memory | Remove every breakpoint currently set in the emulator. |
+| `debug_breakpoint_set` | memory | Set an execution breakpoint at an address. |
+| `debug_pause` | memory | Pause emulator execution. |
+| `debug_restart` | memory | Full hardware reset of the emulator (reloads BIOS, restarts game). |
+| `debug_resume` | memory | Resume emulator execution from a pause or breakpoint. |
+| `debug_run_until_pc` | memory | Resume execution and block until EE PC reaches targetPc, then pause. Returns final CPU state. |
+| `debug_step` | memory | Execute exactly one EE instruction while paused. Returns new PC + any per-instruction analysis. |
+| `debug_thread_list` | read-only | List EE threads with status, PC, SP, priority, entry. Requires the emulator PAUSED (hit a breakpoint or pause first) — empty on a running game. |
+| `debug_trace_calls` | memory | Step the emulator from current PC to endPc and record every JAL/JALR call seen. |
+| `get_pc` | read-only | Get current EE PC and pause state (also reports last breakpoint hit). |
+| `get_registers` | read-only | Full EE CPU register dump (GPRs, HI/LO, COP0, COP1 FPU, VU0). Meaningful only when the emulator is PAUSED (hit a breakpoint or pause first). |
+| `pcsx2_game_info` | read-only | Query running game title, serial, UUID, version via PINE. |
+| `pcsx2_status` | read-only | Query PCSX2 status via PINE (Running/Paused, game loaded). |
+| `set_register` | memory | Write a value to a named EE CPU register (GPR/PC/HI/LO/COP0_x/COP1_x). |
 
-### Emulator Control
+### Pcsx2 (33)
 
-| Tool | Description |
-|------|-------------|
-| `pause_emulator` | Pause PS2 EE execution. Required before register/memory writes. |
-| `resume_emulator` | Resume after a pause or breakpoint. |
-| `restart_emulator` | Full hardware reset without changing the disc. |
-| `reset_emulator` | CPU reset signal (PINE or internal). |
-| `get_pc` | Read the current EE program counter and check pause state. |
-| `get_registers` | Full EE register dump: 32 GPRs, HI/LO, COP0, FPU, VU0. |
-| `set_register` | Write a new value to a named EE CPU register. |
-| `run_until_pc` | Resume and block until the PC hits a target address. |
-| `pcsx2_status` | Query PCSX2 status (running, paused, game title, serial). |
-| `pcsx2_game_info` | Game title, serial, UUID, disc CRC. |
-| `pcsx2_version` | PINE IPC protocol version. |
+PCSX2-only PINE extensions: save states, screenshots, symbols, watches, stepping, audio and speed.
 
-### Memory
+| Tool | Risk | Description |
+|------|------|-------------|
+| `pcsx2_add_watch` | memory | Add a hardware memory watchpoint (PINE opcode 0x2E). JIT-only. |
+| `pcsx2_clear_all_watches` | memory | Clear all hardware watchpoints on all CPUs (PINE opcode 0x31). |
+| `pcsx2_disassemble` | read-only | Disassemble instructions on EE/IOP via PINE live-memory. |
+| `pcsx2_extract_p2s` | disk | Extract EEmem.bin / IOPmem.bin from a .p2s archive. |
+| `pcsx2_frame_advance` | memory | Advance a fixed number of video frames then pause. |
+| `pcsx2_get_audio_state` | read-only | Read whether PCSX2's audio output is muted (PINE opcode 0x46). |
+| `pcsx2_get_call_stack` | read-only | Walk the EE call stack and return each frame (entry, PC, SP, symbol). Requires the emulator PAUSED (hit a breakpoint first) — meaningless on a running game. |
+| `pcsx2_get_fps` | read-only | Read current emulated framerate via PINE. |
+| `pcsx2_get_iop_threads` | read-only | List all IOP OS threads via PINE. |
+| `pcsx2_get_locals` | read-only | List parameters + locals for the EE function containing an address (DWARF). |
+| `pcsx2_get_modules` | read-only | List loaded IOP modules (IRX) via PINE. |
+| `pcsx2_get_paths` | read-only | Return the absolute on-disk directories PCSX2 is using for this session, captured from the emu log on connection. Use this whenever you need to read or write a PCSX2-managed file (memory cards, save states, screenshots, cheats, patches, logs, textures, ISO covers, per-game .ini overrides, etc.) instead of guessing or hardcoding %DOCUMENTS%\\PCSX2.\nReturned keys (each value is an absolute directory):\n  pcsx2.path.dataRoot         — root of the user's PCSX2 data tree (parent of inis/, memcards/, sstates/, ...).\n  pcsx2.path.bios             — BIOS image search path.\n  pcsx2.path.snapshots        — in-game screenshot captures.\n  pcsx2.path.savestates       — .p2s save-state files.\n  pcsx2.path.memoryCards      — virtual PS2 memory card images (.ps2).\n  pcsx2.path.logs             — emulog.txt and other diagnostic logs.\n  pcsx2.path.cheats           — per-game .pnach cheat files.\n  pcsx2.path.patches          — built-in compatibility patches.\n  pcsx2.path.covers           — cover-art images shown in the game list.\n  pcsx2.path.gameSettings     — per-disc .ini overrides keyed by serial+CRC.\n  pcsx2.path.resources        — bundled, read-only resource tree shipped with PCSX2.\n  pcsx2.path.userResources    — user-overridable copy of the Resources tree.\n  pcsx2.path.cache            — shader/program/state caches (regenerated as needed).\n  pcsx2.path.textures         — HD-texture replacement / dump folder.\n  pcsx2.path.inputProfiles    — saved controller mapping profiles.\n  pcsx2.path.videos           — GS-dump / video capture output.\n  pcsx2.path.debuggerLayouts  — saved debugger window layouts.\n  pcsx2.path.debuggerSettings — per-game persisted debugger state.\n  pcsx2.path.discovered       — JSON array of every other path-shaped string seen in the emu log (diagnostics only).\nValues are populated automatically the first time PCSX2 connects in a session; empty values mean PCSX2 has not yet been launched (or the emu log line for that key has not been seen). |
+| `pcsx2_get_register` | read-only | Read any EE/IOP register by category and index via PINE. |
+| `pcsx2_get_symbol` | read-only | Look up EE function symbol name at an address via PINE. |
+| `pcsx2_get_symbol_by_name` | read-only | Look up an EE symbol address and size by demangled name via PINE. |
+| `pcsx2_list_breakpoints` | read-only | List active PC breakpoints in PCSX2 via PINE. |
+| `pcsx2_list_functions` | read-only | Paginated list of EE function symbols from PCSX2's symbol DB. |
+| `pcsx2_list_globals` | read-only | Paginated list of EE global variable symbols from PCSX2's symbol DB. |
+| `pcsx2_list_watches` | read-only | List active hardware memory watchpoints (PINE opcode 0x30). |
+| `pcsx2_load_state_file` | memory | Load a PCSX2 .p2s state file. |
+| `pcsx2_load_state_slot` | memory | Load PCSX2 save state from a numbered slot (0-9). |
+| `pcsx2_remove_watch` | memory | Remove a hardware memory watchpoint (PINE opcode 0x2F). |
+| `pcsx2_reset` | memory | Send a CPU reset to the emulator (no BIOS reload). |
+| `pcsx2_save_screenshot` | disk | Preferred way to preview the screen: take a screenshot via PINE (saved to PCSX2's configured screenshot directory). Use this over get_gs_frame for routine 'what's on screen' checks. |
+| `pcsx2_save_state_file` | disk | Save PCSX2 state to a named .p2s file. |
+| `pcsx2_save_state_slot` | disk | Save PCSX2 emulator state to a numbered slot (0-9). |
+| `pcsx2_set_audio_muted` | memory | Mute or unmute PCSX2's audio output (PINE opcode 0x45, same as the Toggle Mute hotkey). Replies with the resulting state; PCSX2's 'Mute All Sound' setting blocks unmuting. |
+| `pcsx2_set_limiter_mode` | memory | Set speed limiter mode: 0=Nominal, 1=Turbo, 2=Slomo, 3=Unlimited. |
+| `pcsx2_set_register` | memory | Write any EE/IOP register by category and index via PINE. |
+| `pcsx2_step_into` | memory | Step into the next EE instruction (follows calls). |
+| `pcsx2_step_out` | memory | Step out of the current EE subroutine (run to JR $ra). |
+| `pcsx2_step_over` | memory | Step over the next EE instruction (skips into calls). |
+| `pcsx2_version` | read-only | Query the PINE IPC protocol version string. |
 
-| Tool | Description |
-|------|-------------|
-| `read_memory` | Read raw bytes from live EE RAM; returns base64. |
-| `read_memory_region` | Read a large contiguous region in one call. |
-| `write_memory` | Write arbitrary bytes to live EE RAM. |
-| `get_address_snapshot_history` | Historical 4-byte value at an address across all snapshots. |
-| `load_bin` | Load a binary file directly into live EE memory. |
+### Labels (28)
 
-### Scanning
+Label sets, pointer structs, groups, data formats, call graphs and IOP module labels.
 
-| Tool | Description |
-|------|-------------|
-| `scan_value` | Scan EE RAM for a specific value (integer, float, or hex). |
-| `scan_integers` | Scan a region for non-zero 4-byte integers. |
-| `scan_floats` | Scan for plausible IEEE-754 single-precision floats. |
-| `scan_strings` | Scan for printable null-terminated strings. |
-| `scan_pattern` | Scan for a hex byte pattern (supports wildcards `??`). |
-| `scan_functions` | Detect likely MIPS function entry points in a region. |
-| `scan_pointers` | Scan for 4-byte aligned EE RAM pointer values. |
-| `get_integers` | Decode integers from a base64 data blob. |
-| `get_floats` | Decode floats from a base64 data blob. |
-| `get_strings` | Decode strings from a base64 data blob. |
-| `get_functions` | Detect function boundaries in a base64 data blob. |
-| `get_pointers` | Find confirmed EE pointers in a base64 data blob. |
+| Tool | Risk | Description |
+|------|------|-------------|
+| `callgraph_query` | read-only | Return callers/callees of a focus function, up to a depth. Requires a prior callgraph_scan. |
+| `callgraph_scan` | read-only | Scan a code region for JAL/JALR call edges and persist them. Run once before callgraph_query. |
+| `data_format_clear` | database | Remove data-format overrides covering an address range (reverts to instruction decoding). |
+| `data_format_list` | read-only | List data-format overrides for a game (optionally within an address range). |
+| `data_format_set` | database | Tag a memory range as a data type (Byte\|Half\|Word\|DWord\|QWord\|Float\|Double) for disassembler rendering. |
+| `group_add_member` | database | Add the label at an address to a group (the label must already exist in the set). |
+| `group_create` | database | Create/update a label group (Class/Module/Subsystem/VTable) for the Structure Visualizer. |
+| `group_delete` | database | Delete a label group (its members are detached, not deleted). |
+| `group_list` | read-only | List label groups in a set with their members (for the Structure Visualizer). |
+| `group_remove_member` | database | Remove the member at an address from a label group. |
+| `iop_labels_refresh` | database | Refresh every 'IOP: <module>' label set from loaded IOP modules (PCSX2 PINE mode). Idempotent. |
+| `iop_labels_refresh_module` | database | Refresh the 'IOP: <module>' label set for a single IOP module. PINE mode required. |
+| `label_add_batch` | database | Create/update many labels at once from a JSON array. |
+| `label_add_pointer` | database | Define a struct: a named base address whose fields you then map with label_add_pointer_member. |
+| `label_add_pointer_member` | database | Add/update a struct field: a named member at a byte offset from the (dereferenced) base. |
+| `label_create_set` | database | Create a new, empty label set. |
+| `label_delete` | database | Remove a label entry from a label set. |
+| `label_delete_pointer` | database | Delete a struct definition by name. |
+| `label_delete_set` | database | Permanently delete a label set and all its entries (irreversible). |
+| `label_get_pointers` | read-only | List struct definitions (a named base address + its member fields). 'Pointer' = struct here. |
+| `label_list_functions` | read-only | List only Function-typed labels (FNC_ prefix) from the active label set. |
+| `label_list_sets` | read-only | List all label sets for a game (including the built-in set). |
+| `label_repair_orphan_members` | database | Repair labels whose address contains ':+...' but whose ParentId/Offset relationship is missing. |
+| `label_resolve_linked_list` | read-only | Walk a linked list in live PCSX2 memory from a head, using a per-node next-offset. |
+| `label_resolve_strings` | database | Read live PCSX2 memory for each String-typed label and update with the null-terminated ASCII found there. |
+| `label_search` | read-only | Search labels by name, address, comment, value type, or label type across a game/set. Returns compact hits; fetch full set only when needed. |
+| `label_search_sets` | read-only | Search label-set names and count matching labels inside each set. Use before fetching full sets to keep token usage low. |
+| `label_set_active` | database | Mark a label set as active (merged with built-in for lookups). |
 
-### Disassembly and Assembly
+### Patching (7)
 
-| Tool | Description |
-|------|-------------|
-| `disassemble_memory` | Read EE memory and disassemble as MIPS64 EE instructions. |
-| `disassemble` | Disassemble raw hex opcodes without connecting to the emulator. |
-| `assemble` | Assemble MIPS64 EE instructions to raw opcodes. |
-| `pcsx2_disassemble` | Disassemble at a given address on EE or IOP via PINE. |
-| `decompile_to_cds` | Read a memory range, disassemble it, and emit a CDS source file. |
-| `find_code_references` | Find all MIPS instructions in EE RAM that reference a given address. |
-| `trace_calls` | Step instruction-by-instruction from the current PC and log the call tree. |
-| `navigate_to` | Tell the VS Code disasm editor to jump to a specific address. |
+Assemble/disassemble and compile, validate, explain or apply CDS scripts.
 
-### Breakpoints and Watchpoints
+| Tool | Risk | Description |
+|------|------|-------------|
+| `apply_cds_patch` | memory | Compile a CDS source and atomically apply the resulting patch to live emulator memory (with assert/sidecar checks). After it runs, show the user the applied code + result. |
+| `assemble` | read-only | Assemble PS2 MIPS64 EE assembly (one instruction per line) into hex opcodes. |
+| `compile_cds` | read-only | Compile a Code Designer Script (.cds) into GameShark/AR codes + MIPS memory patches. |
+| `decompile_to_cds` | read-only | Read live memory, disassemble it, and emit a re-compilable .cds source (branch targets become :target_ labels). |
+| `disassemble` | read-only | Disassemble PS2 MIPS64 EE hex opcodes (space/newline separated) into assembly. |
+| `explain_cds` | read-only | Parse a .cds source locally and describe each directive in human-readable terms (no emit, no bridge call). |
+| `validate_cds` | read-only | Parse a CDS source without emitting; returns diagnostics (errors + warnings). |
 
-| Tool | Description |
-|------|-------------|
-| `set_breakpoint` | Set a PC breakpoint at a virtual EE address. |
-| `clear_breakpoint` | Remove a specific breakpoint. |
-| `clear_all_breakpoints` | Remove every active breakpoint. |
-| `pcsx2_list_breakpoints` | List active PINE breakpoints. |
-| `set_memory_watchpoint` | Set a write watchpoint on a range of EE RAM. |
-| `clear_memory_watchpoint` | Remove a watchpoint by ID. |
-| `clear_all_memory_watchpoints` | Remove all watchpoints. |
-| `list_memory_watchpoints` | List active watchpoints with IDs and addresses. |
-| `get_watchpoint_hit` | Check if any watchpoint has fired since the last call. |
-| `run_until_watchpoint` | Resume and block until a watchpoint fires. |
-| `pcsx2_add_watch` | Add a hardware memory watchpoint via PINE. |
-| `pcsx2_remove_watch` | Remove a PINE hardware watchpoint. |
-| `pcsx2_clear_all_watches` | Clear all PINE hardware watchpoints. |
-| `pcsx2_list_watches` | List active PINE hardware watchpoints. |
+### Cheats (17)
 
-### Execution Control
+Cheat lists, archive search, format conversion and porting, and the frame-loop cheat engine.
 
-| Tool | Description |
-|------|-------------|
-| `step` | Execute exactly one EE instruction. |
-| `step_into` | Step into the next instruction, following calls. |
-| `step_over` | Step over the next instruction, skipping into subroutines. |
-| `step_out` | Step out of the current subroutine. |
-| `pcsx2_frame_advance` | Advance PCSX2 by a fixed number of video frames. |
-| `get_call_stack` | Walk the EE call stack and return all frames. |
-| `get_locals` | List EE function parameters and local variables. |
-| `get_threads` | Enumerate PS2 EE OS threads by walking the kernel thread list. |
-| `get_modules` | List all loaded IOP modules. |
-| `get_iop_threads` | List all IOP OS threads. |
+| Tool | Risk | Description |
+|------|------|-------------|
+| `apply_cheats` | memory | Apply GameShark/Action Replay cheat codes to live emulator memory. |
+| `cheat_list_builds` | read-only | List the saved cheat lists ('builds') for a game. |
+| `cheat_list_create` | database | Create a new empty cheat list/build for a game. |
+| `cheat_list_delete` | database | Delete a cheat list/build by id. |
+| `cheat_list_games` | read-only | List games that own at least one saved cheat list/build. |
+| `cheat_list_get` | read-only | Read a full cheat list as editor text. Prefer cheat_list_sections/search/get_section first to keep token usage low. |
+| `cheat_list_get_section` | read-only | Read only one section from a cheat list as editor text; optionally filter cheats inside it. |
+| `cheat_list_import` | database | Import a cheat list from a file on disk into the archive database. |
+| `cheat_list_save` | database | Overwrite a cheat list's entries. Data is the editor text returned by cheat_list_get or cheat_list_get_section. |
+| `cheat_list_sections` | read-only | List section headers in one cheat list with cheat/code counts. Use this before reading codes to keep token usage low. |
+| `cheat_search` | read-only | Search cheat labels, section headers, descriptions, and code text. Returns compact hits; fetch a section afterward for full codes. |
+| `convert_cheat` | read-only | Convert cheat codes between raw and device-specific formats (CodeBreaker / GameShark / Action Replay). Offline. |
+| `detect_cheat_format` | read-only | Detect the encryption format of a cheat-code block (offline). |
+| `inject_cheat_engine` | memory | Inject the CDS cheat engine and activate a cheat set. |
+| `port_cheats` | read-only | Port cheats between game revisions by scanning two memory dumps for matching patterns. |
+| `remove_cheat_engine` | memory | Remove the injected CDS cheat engine and restore original instructions at the hook point. |
+| `update_cheat_engine` | memory | Update the active cheat table in the already-injected engine (no re-hook). |
 
-### Labels
+### Pad (5)
 
-| Tool | Description |
-|------|-------------|
-| `label_add` | Insert or update a label in the specified label set. |
-| `label_add_batch` | Insert or update multiple labels in one call. |
-| `label_delete` | Remove a label by address. |
-| `label_list` | Return all labels from the active label set. |
-| `label_list_functions` | Return only Function-typed labels. |
-| `label_list_sets` | List all label sets for a game. |
-| `label_create_set` | Create a new empty label set. |
-| `label_delete_set` | Permanently delete a label set and all its entries. |
-| `label_set_active` | Make a named label set the active one. |
-| `label_add_pointer` | Create or update a named pointer definition with member fields. |
-| `label_add_pointer_member` | Add or update a child field in an existing pointer definition. |
-| `label_delete_pointer` | Remove a pointer definition. |
-| `label_get_pointers` | Return all user-defined pointer definitions. |
-| `label_resolve_linked_list` | Walk a linked list in live memory starting from a given address. |
-| `label_resolve_strings` | Read each String-typed label's memory content from the emulator. |
+Controller input over PINE.
 
-### Cheat Codes
+| Tool | Risk | Description |
+|------|------|-------------|
+| `pad_get_state` | read-only | Read full input state of a pad: buttons bitmask, sticks, pressures. |
+| `pad_get_type` | read-only | Query the controller type installed in a pad slot (NotConnected/DualShock2/Guitar/...). |
+| `pad_set_analog` | memory | Set raw analog stick positions (bypasses deadzone). |
+| `pad_set_button` | memory | Set a single button/axis to a normalized value. PRESS THEN RELEASE: set 1, advance a few frames, then set 0 — a held value with no release never fires as a button event in-game. |
+| `pad_set_state` | memory | Atomically replace the complete pad input state (suitable for TAS). |
 
-| Tool | Description |
-|------|-------------|
-| `apply_cheats` | Apply GameShark/Action Replay codes to live PS2 memory. |
-| `inject_cheat_engine` | Inject the CDS MIPS cheat engine into the emulator. |
-| `update_cheat_engine` | Update the active cheat table in the already-injected engine. |
-| `remove_cheat_engine` | Remove the injected cheat engine. |
-| `convert_cheat` | Convert cheat codes between raw and encrypted GameShark formats. |
-| `detect_cheat_format` | Heuristically detect the encryption format of a cheat block. |
-| `port_cheats` | Port cheat codes from one game revision to another. |
+### Network (11)
 
-### CDS — Code Designer Script
+DEV9 packet capture and injection, Medius decoding and message building.
 
-| Tool | Description |
-|------|-------------|
-| `compile_cds` | Compile a `.cds` script to PS2 cheat codes. |
-| `apply_cds_patch` | Compile and immediately apply a CDS script to live EE memory. |
-| `validate_cds` | Parse a CDS source and report diagnostics without assembling. |
-| `explain_cds` | Explain a CDS source in human-readable terms. |
-| `decompile_to_cds` | Decompile a live memory range back to CDS source. |
-| `recompile_elf` | Extract and statically recompile an ELF from a disc image. |
+| Tool | Risk | Description |
+|------|------|-------------|
+| `medius_decode` | read-only | Decode a raw Medius payload (bytes after the class+type prefix) against the registered struct schema. Returns named fields. |
+| `net_build_message` | read-only | Encode one multiplayer-server message (SCERT, Lobby, LobbyExt, MGCL, DME or SOCOM II Game, see NETCATALOG) from field values into a plaintext SCERT record, returned as base64 for net_inject's payloadBase64. |
+| `net_capture` | read-only | Enable or disable DEV9 packet capture (ring buffer). Use net_recv_capture to drain. |
+| `net_decrypt_scert` | read-only | Decrypt every encrypted SCERT record in a captured Ethernet frame using an RC4 session key, then dissect to layers + fields. |
+| `net_disassemble` | read-only | Dissect a raw Ethernet frame into a structured layer tree (Ethernet/ARP/IPv4/ICMP/TCP/UDP/SCERT/Medius) with field-level Medius decoding. |
+| `net_get_stats` | read-only | Cumulative TX/RX counters + capture queue stats for the DEV9 adapter. |
+| `net_get_status` | read-only | DEV9 adapter status: enabled flag, adapter type, PS2 MAC, PS2 IP. |
+| `net_inject` | network | Inject a raw Ethernet frame into the PS2 RX path (as if from network). Optionally swap its TCP/UDP payload (e.g. a SCERT record from net_build_message), fix lengths/checksums and continue a live TCP flow's seq/ack. |
+| `net_inject_tx` | network | Inject a raw Ethernet frame out the TX adapter (as if PS2 sent it). Same payload/fix/TCP options as net_inject. |
+| `net_recv_capture` | read-only | Drain captured packets from the DEV9 queue. Returns metadata table (no/time/dir/src/dst/proto/len/info). |
+| `net_set_filter` | read-only | Set the capture filter (none / protocol / port / IPv4). Applied in addition to direction filter. |
 
-### Save States and Snapshots
+### Media (48)
 
-| Tool | Description |
-|------|-------------|
-| `snapshot` | Save a full EE + IOP memory snapshot to disk. |
-| `load_snapshot` | Reload a snapshot as a save state into the emulator. |
-| `file_load_snapshot` | Load a snapshot from a directory path. |
-| `get_snapshots` | List all saved snapshots for a game (by serial or CRC). |
-| `get_address_snapshot_history` | Read the historical 4-byte value at an address across snapshots. |
-| `pcsx2_save_state_slot` | Save PCSX2 state to a numbered slot (0–9). |
-| `pcsx2_load_state_slot` | Load PCSX2 state from a numbered slot. |
-| `pcsx2_save_state_file` | Save PCSX2 state to a named `.p2s` file. |
-| `pcsx2_load_state_file` | Load a `.p2s` file into the running emulator. |
-| `pcsx2_extract_p2s` | Extract `EEmem.bin` / `IOPmem.bin` from a `.p2s` archive. |
+Disc, memory card and HDD images; the Zipper asset editors; weapon authoring; GS frames; compatibility list; recompiler.
 
-### Symbols (PINE)
+| Tool | Risk | Description |
+|------|------|-------------|
+| `assets_animation` | read-only | One animation clip's tracks: per bone (names match the character skeleton from assets_model_mesh) its kind and positions [[x,y,z]] (local translation, units) and rotations [[x,y,z,w]] (local unit quaternions under the skeleton parent), one entry when static or one per sample (frames + 1, evenly over the duration). Extra bones rifle / pistol / launcher / weapon sit under the hand (weapon attachment). |
+| `assets_close` | read-only | Close an asset session, discarding unsaved edits. |
+| `assets_describe_model` | read-only | Describe one model: visuals (N<node>_<visual>), chunks (texture, vertex/triangle counts, vertex colours), each texture (size, format, palette id, transparency, alpha test) and its GEO definition node (transform, bounds, position unit, children). Use before retexture / tintVertexColors edits. |
+| `assets_edit` | database | Apply one edit to a session (undoable, not written to disk until assets_save). opJson is an object with "op":\n- moveClutter {clutterIndex, position?, yaw?, scale?, matrix?}\n- addClutter {model, position, yaw?, scale?} (model = a prop such as oaktree_near, bush2_near)\n- deleteClutter {clutterIndex}\n- moveInstance {geoIndex, position?, yaw?, scale?, matrix?} (world space; scene defaults to the map scene)\n- duplicateInstance {geoIndex, position?, yaw?, scale?, name?}\n- deleteInstance {geoIndex}\n- replaceTexture {texture, pngBase64 \| imagePath, namespace?} (resampled to the texture's size)\n- retexture {archive, model, from, to, visual?} (point a model's sections at another .tif)\n- tintVertexColors {archive, model, multiply:[r,g,b], add?:[r,g,b], visual?, texture?, alpha?}\n- transformVertices {archive, model, translate?:[x,y,z], rotate?:[x,y,z] degrees, scale?: n \| [x,y,z], pivot?, chunks?:[geometryOffset], vertices?:{geometryOffset:[i...]}, matrix?} (model space; default pivot = centre of the affected vertices)\n- setVertices {archive, model, geometryOffset, vertices:[{i, position?, uv?, color?:[r,g,b,a 0..255, 128=1.0], normal?}]} or {archive, model, chunks:[{geometryOffset, vertices:[...]}]} (model space, as assets_model_mesh returns)\n- batch {label?, ops:[{op...}, ...]} (several edits as one undo step; answers each op's result)\n- movePoint {name, position:[x,y,z]} (an AIMAPS point; snaps to its AI grid cell)\n- addAnimation {name, from?: clip (default seal_stand), fromSource?, frames?, duration?, after?} (a new package clip copied from any clip, optionally resampled to `frames` intervals / given a duration in s; answers {result, name})\n- deleteAnimation {name} / renameAnimation {name, newName} (package clips only)\n- setAnimation {name, frames?, duration?, bones?:[{name, positions?:[[x,y,z]], rotations?:[[x,y,z,w]]}]} (replace tracks: 1 key = static or one per sample, as assets_animation returns; frames resamples first)\n- setAnimationKey {name, bone, frame \| allFrames:true, rotation?:[x,y,z,w], position?:[x,y,z]} (one key; a static track becomes animated)\n- addClutter answers {result, newClutterIndex}; duplicateInstance answers {result, newGeoIndex}\n- deleteFaces {archive, model, faces:{geometryOffset:[triangle...]}} (unused vertices and emptied chunks go too)\n- duplicateFaces {archive, model, faces:{...}, translate?, rotate?, scale?, matrix?} (copies into new chunks)\n- addMesh {archive, model, visual:"N000_000", texture:"x.tif", replace?, and one of: obj:"<OBJ text>" (Y up, yUp?, scale?, offset?) \| primitive:{kind:"cube"\|"plane", size, center:[x,y,z]} \| mesh:{positions:[[x,y,z]], triangles:[[a,b,c]], normals?, uvs?, colors?}} (model space; a new texture gets its own section). Topology ops answer {result, newChunks} with the new chunks' indices in assets_model_mesh order.\nPositions are map units [x, y, z] (y is height; the ground is around y = -100..300 depending on map; read nearby instances with assets_map_scene first). yaw is degrees about Y; omitted parts keep current values. Indices come from assets_map_scene and shift after add/delete, so re-read before chaining. |
+| `assets_effect` | read-only | One ZANIM effect script fully decoded: names, node refs (its objects: models, model nodes, lights), and per track (tracks run in parallel) the instructions with official names, nesting depth, whether they are IF / ELSEIF conditions, decoded fields (e.g. WAIT frames/seconds, RANDOM_WEIGHT weight, OBJECT_ROTATE_STATE object/reference/euler, OBJECT_MOTION_FROM_TO duration + scaleStart/End/Rate, LIGHT colour/range/time, CALL_ANIMATION animation) and raw words. Objects: self = the effect's object, owner = what started it (a weapon's firepoint). |
+| `assets_effects` | read-only | Every ZANIM effect script in the package's CZANIM.ZAR (muzzle flashes, shells, smoke, explosions, sounds, camera shakes ...): name, its tracks, the effects it calls (CALL_ANIMATION), the package models it uses and the opcodes it contains (official names from the game's opcode table). |
+| `assets_export` | disk | Convert a model to the other game. From a SOCOM 3 / Combined Assault session: a character, weapon, vehicle or prop becomes a SOCOM II pack <outputDir>/<pack>/<PACK>.CDB (+ its ZEDs; the same bytes as the in-game-confirmed Mods/SOCOMCA converters), optionally with CA clips retargeted into its MOTION_S.ZAR. Templates come from SOCOM II's RUN folder (socom2Run, else found on any drive). Answers {path, pack, model, kind, library, triangles, textures, palettes, clips, warnings, open:{archive, name}} - open the path with assets_open to see it. From a SOCOM II session: the model as a SOCOM 3 / CA package. From a GTA: San Andreas session: a ped (with clips as '<source>/<name>', e.g. ped.ifp/WALK_civi, retargeted onto alg_UN01), weapon, vehicle or object becomes a SOCOM II pack (geometry encoded from triangles; vehicles as static props). |
+| `assets_list_animations` | read-only | Character animation clips: the package's own MOTION_S.ZAR (editable) and the shared RUN/MOTION_P.ZAR (read-only; copy one in with assets_edit addAnimation {from}). Each: name, source, editable, duration (s), frames (intervals; samples = frames + 1), fps, bones. |
+| `assets_list_models` | read-only | List models in a session: archive, name, kind (prop, weapon, character, world, sky, library), visual count. Filter by kind, name substring or archive (M51_MDL.ZED). |
+| `assets_map_points` | read-only | The map's named points from AIMAPS.MPS (player / hostage starts, waypoints) with world X / Z and the AI grid. Move one with assets_edit movePoint. |
+| `assets_map_scene` | read-only | List what the map places: kind (model = worldmodel, reference = a placed prop/turret/vehicle/sky, clutter = trees/bushes/grass/rocks from CLUTTER.ZAR), model, position, scale, matrix, and the geoIndex / clutterIndex that edit ops take. Filter by kind or name/path substring; limit defaults to 500. |
+| `assets_model_mesh` | read-only | The editable mesh of a model in model space, the geometry the Model Editor shows: per chunk its geometryOffset (the id setVertices / transformVertices take), visual, texture, vertex/triangle counts, unit and placement. With arrays=true also base64 float32 positions/uvs/normals, RGBA colours (128 = 1.0) and uint32 triangles. Skinned characters (MESH_* in CLIB_MDL) come in bind pose (Y up, feet at 0) with a skeleton [{name, matrixId, parent, local, world}] and per vertex skinInfluences slots: skinBones int32 (skeleton index, -1 unused), skinWeights, skinPositions / skinNormals (bone-local); their vertices are view-only for now. |
+| `assets_open` | read-only | Open a SOCOM II map package (G:\\RUN\\M51.ZDB, or a folder with its unpacked files) as an asset session, or join the session already open on it. Returns the session id and a summary (models by kind, changed archives). Start here before any other assets_* tool. |
+| `assets_save` | disk | Write a session's changed archives. mode=zdb writes the package to outputPath (default: over the source, keeping a one-time .bak); mode=pack writes a memory-card pack <NAME>.CDB (packName must start with 'm', max 7 characters) to outputPath and, with folderCard (a PCSX2 folder memory card), installs it as BASCUS-97275<NAME>/<NAME>.CDB. Prefer writing a copy (outputPath) over the retail file. |
+| `assets_sessions` | read-only | List open asset sessions (including ones a person opened in an editor) with revision and unsaved archives. |
+| `assets_texture` | read-only | Decode a texture (.tif) with the palette the game binds (TEX0.CBP) and return its info plus a base64 PNG with real alpha. |
+| `assets_undo` | database | Undo the last edit in a session (or redo with redo=true). |
+| `assets_weapon_fx` | read-only | What firing a weapon plays: its zweapon.rdr record (all scalar fields) and the CZANIM.ZAR effect tree from FireAnimName: each effect's names, the package models it uses (muzzle_flash_* / bullet_shell_* in EFFE_MDL), textures, tracks (target + instructions: opcode, block depth, words as floats) and the effects it spawns (opcode 0x2D). Weapon models carry firepoint / firepoint_shell / aimpoint locators (assets_model_mesh locators) where these spawn. |
+| `assets_weapons` | read-only | Weapons whose model is in the package (RUN/ZWEAPON.ZAR zweapon.rdr): internal name, model, the ZANIM effect played when fired (fireAnimName, e.g. muzzle_m4) and fireWait (s between shots). |
+| `compat_cover` | read-only | Check whether cover art exists for a disc serial (fetches/caches it; the binary image itself is not returned). |
+| `compat_details` | read-only | Get the compatibility details for one game by serial and/or title. |
+| `compat_list` | read-only | List every game disc that carries a PCSX2 compatibility status, by title. |
+| `compat_sync` | disk | Download the latest PCSX2 compatibility database and update local game statuses. |
+| `get_gs_frame` | read-only | Get the latest PCSX2 GS frame as base64 JPEG (in-memory snapshot). For a quick visual check prefer pcsx2_save_screenshot; reserve this for deeper frame analysis / streaming. |
+| `get_gs_stream_status` | read-only | Report GS streaming pipeline health (connection, port, subscribers, frame counters, drops). |
+| `hdd_create` | disk | Create a new blank HDD image with an APA table (overwrites if exists). |
+| `hdd_delete` | disk | Delete a partition from an HDD image (irreversible). |
+| `hdd_export` | disk | Export a file from an HDD partition to disk. |
+| `hdd_import` | disk | Import a file/directory into an HDD partition (PFS write may be unimplemented in backend). |
+| `hdd_list` | read-only | List APA partitions on a PS2 HDD image. |
+| `hdd_list_files` | read-only | List files in a specific partition on a PS2 HDD image. |
+| `iso_get_info` | read-only | Get metadata about a PS2 disc image (format, sector count, size, title). |
+| `iso_list_files` | read-only | List all files/directories on a PS2 disc image (ISO-9660). |
+| `iso_read_file` | read-only | Extract a file from a disc image to disk (or return base64 when outputPath is omitted). |
+| `list_disc_elfs` | read-only | Open a PS2 disc image and list every ELF/IRX on it (name, size). |
+| `mc_delete` | disk | Delete a save-game directory from a memory card image (irreversible). |
+| `mc_export` | disk | Export a save-game directory from a memory card image to disk. |
+| `mc_format` | disk | Create a new blank 8 MB PS2 memory card image (overwrites if exists). |
+| `mc_import` | disk | Import a save-game directory into a memory card image. |
+| `mc_list` | read-only | List all save-game directories on a PS2 memory card image. |
+| `mc_read_file` | read-only | Read the raw bytes of a file inside a memory card save directory (base64). |
+| `recompile_elf` | disk | Extract a named ELF from a disc image and statically recompile it to C++ source. |
+| `weapons_create` | disk | End-to-end orchestrator: pick a template, regenerate its texture from a user image (file path OR base64 for chat-attached images) and optionally tweak the mesh, then add the result as new entries (model + texture, plus palette if indexed) alongside the template inside the archive. Originals are untouched. |
+| `weapons_describe_template` | read-only | Get a structured DTO for one template weapon: per-chunk vertex/triangle/scale data, vertex bounds, texture metadata, and a short explainer of the .mdl/.tif binary layout. |
+| `weapons_encode_model` | read-only | Re-encode a template weapon's .mdl with optional per-chunk vertex transforms and texture-name rebinds. Returns base64 model bytes. Use to preview mesh edits before weapons_create. Edits JSON shape: { "perChunk": [{ "chunkIndex": 0, "transform": { "scaleX": 1.2, "translateY": 100 }, "newTextureName": "new.tif" }] }. |
+| `weapons_encode_texture` | read-only | Resample a PNG image into the chosen template weapon's TIM format (matching dimensions, bpp, CLUT layout) and return the encoded .tif bytes as base64. Provide EITHER imagePath OR imageBase64 — for an image attached in chat, base64-encode it and pass via imageBase64. Use before weapons_create to preview the texture without committing. |
+| `weapons_list` | read-only | List every weapon entry in a ZED archive with vertex/triangle counts and bound texture names. Use when picking a template that visually resembles a target image. |
+| `weapons_thumbnail` | read-only | Render a template weapon's bound texture as a base64 PNG. Use to visually compare templates against a user-supplied weapon image. |
 
-| Tool | Description |
-|------|-------------|
-| `pcsx2_get_symbol` | Look up the EE function symbol name for an address. |
-| `pcsx2_get_symbol_by_name` | Look up a symbol address and size by demangled name. |
-| `pcsx2_list_functions` | Paginated list of EE function symbols. |
-| `pcsx2_list_globals` | Paginated list of EE global variable symbols. |
-| `get_nav_history` | Return the server-side navigation history. |
-| `clear_nav_history` | Clear the navigation history. |
+### Admin (26)
 
-### Controller / Pad Input
+Settings, raw DB queries, agent profiles, orchestration plans, navigation history. Never in default profiles.
 
-| Tool | Description |
-|------|-------------|
-| `pad_get_state` | Read the full input state: buttons bitmask, analog sticks, 16 pressure values. |
-| `pad_get_type` | Query the controller type in a pad slot. |
-| `pad_set_button` | Set a single button or axis to a normalized value. |
-| `pad_set_analog` | Set raw analog stick positions bypassing the deadzone pipeline. |
-| `pad_set_state` | Atomically replace the complete pad state in one call. |
-| `pcsx2_set_limiter_mode` | Set the PCSX2 speed limiter (normal, unlimited, etc.). |
-| `pcsx2_save_screenshot` | Take a screenshot of the current PCSX2 frame and save to disk. |
-| `pcsx2_get_register` | Read any EE or IOP CPU register via PINE. |
-| `pcsx2_set_register` | Write any EE or IOP CPU register via PINE. |
-
-### Disc Media (ISO)
-
-| Tool | Description |
-|------|-------------|
-| `iso_get_info` | Get metadata about a PS2 disc image (format, size, label). |
-| `iso_list_files` | List all files in a PS2 ISO/BIN image. |
-| `iso_read_file` | Extract a file from a disc image to disk or return its bytes. |
-| `list_disc_elfs` | List all ELF executables in a disc image. |
-| `file_load_elf` | Load a PS2 ELF into the internal emulator. |
-| `file_set_pc` | Set the EE PC to a specific address without loading a new ELF. |
-
-### Memory Card
-
-| Tool | Description |
-|------|-------------|
-| `mc_list` | List all save-game directories on a PS2 memory card image. |
-| `mc_read_file` | Read raw bytes from a file inside a memory card. |
-| `mc_export` | Export a save-game directory from a memory card. |
-| `mc_import` | Import a save-game directory into a memory card. |
-| `mc_delete` | Delete a save-game directory from a memory card. |
-| `mc_format` | Create a new blank 8 MB PS2 memory card image. |
-
-### HDD Images
-
-| Tool | Description |
-|------|-------------|
-| `hdd_list` | List all APA partitions on a PS2 HDD image. |
-| `hdd_list_files` | List files in a specific HDD partition. |
-| `hdd_export` | Export a file from a partition to a directory. |
-| `hdd_import` | Import a file into a partition. |
-| `hdd_delete` | Delete a partition from an HDD image. |
-| `hdd_create` | Create a new blank HDD image. |
-
-### Network Capture (DEV9)
-
-| Tool | Description |
-|------|-------------|
-| `net_get_status` | Query DEV9 network adapter status. |
-| `net_capture` | Enable or disable packet capture (rolling ring buffer). |
-| `net_recv_capture` | Drain captured packets from the queue. |
-| `net_disassemble` | Dissect a raw Ethernet frame into human-readable layers. |
-| `net_inject` | Inject a raw Ethernet frame into the PS2 RX path. |
-| `net_inject_tx` | Inject a frame out through the TX adapter. |
-| `net_set_filter` | Set the DEV9 capture filter. |
-| `net_get_stats` | Return TX/RX counters and capture queue statistics. |
-
-### Progress Reports (Session Memory)
-
-| Tool | Description |
-|------|-------------|
-| `list_progress_reports` | List all saved progress reports in the database. |
-| `get_progress_report` | Read a specific report by name. |
-| `save_progress_report` | Create or overwrite a progress report. Scope to an agent with `agentId`. |
-| `delete_progress_report` | Delete a report when the task is complete. |
-| `get_agent_memories` | List all reports private to a specific agent. |
-| `get_shared_memories` | List all shared (non-agent-scoped) reports. |
-
-### Orchestration and Agent Management
-
-| Tool | Description |
-|------|-------------|
-| `list_orchestration_plans` | List all plans; the active one is marked with `●`. |
-| `get_active_orchestration_plan` | Read the full active plan (description, strategy, roles, workflow, rules). |
-| `get_orchestration_plan` | Read a specific plan by database ID. |
-| `set_active_orchestration_plan` | Activate a plan (deactivates the previous one automatically). |
-| `create_orchestration_plan` | Create a new plan from Markdown fields. |
-| `update_orchestration_plan` | Patch any fields of an existing plan. |
-| `delete_orchestration_plan` | Permanently delete a plan. |
-| `export_orchestration_plan` | Export a plan to a Markdown file on the server. |
-| `import_orchestration_plan` | Import a plan from a Markdown file. |
-| `list_agent_profiles` | List all agent profiles; the lead agent is starred `★`. |
-| `get_agent_profile` | Read an agent's full profile (rules, guidelines, workflow, research). |
-| `create_agent_profile` | Create a new agent profile. |
-| `update_agent_profile` | Update an existing profile's fields. |
-| `delete_agent_profile` | Permanently delete a profile. |
-
-### Settings and Database
-
-| Tool | Description |
-|------|-------------|
-| `get_setting` | Read a single setting by key (e.g. `BiosPath`, `DiscPath`). |
-| `set_setting` | Insert or update a setting. |
-| `delete_setting` | Remove a setting by key. |
-| `get_all_settings` | Return all settings, optionally filtered by key prefix. |
-| `query_db` | Execute raw SQL against the SQL Server database. SELECT, INSERT, UPDATE, DELETE supported. DDL blocked. |
-
----
-
-## Example: AI Remote Control with Screenshots and Pad Input
-
-This is the primary workflow for navigating game menus or driving the emulator to a specific state for analysis. The AI can "see" the game using screenshots and "interact" with it via controller input.
-
-### Workflow
-
-```
-session_start
-  → loads guidelines, agent roster, orchestration plan
-
-pcsx2_save_screenshot
-  → captures the current screen; AI examines which menu is visible
-
-# Option A — use a joker cheat (most reliable, frame-synchronized)
-apply_cheats codes="2045259C 0000FFBF"   # hold Down
-pcsx2_frame_advance frames=2             # wait 2 frames
-apply_cheats codes="2045259C 0000FFFF"   # release
-pcsx2_save_screenshot                    # verify cursor moved
-
-apply_cheats codes="2045259C 0000BFFF"   # press X to confirm
-pcsx2_frame_advance frames=2
-apply_cheats codes="2045259C 0000FFFF"   # release
-pcsx2_save_screenshot                    # verify new screen
-
-# Option B — direct pad state (bypasses joker)
-pad_set_state padSlot=0 buttons=0xBFFF   # X pressed (clear bit = pressed)
-pcsx2_frame_advance frames=2
-pad_set_state padSlot=0 buttons=0xFFFF   # all released
-pcsx2_save_screenshot
-
-save_progress_report name="socom2-lan-lobby-nav"
-  content="Navigated to LAN lobby: 2× Down + 1× X from main menu boot position."
-```
-
-### Joker Cheat Format
-
-The joker cheat approach writes directly to the pad input register every frame, making it rock-solid for navigation:
-
-| Code | Button |
-|------|--------|
-| `2045259C 0000FFBF` | Down |
-| `2045259C 0000FFEF` | Up |
-| `2045259C 0000FF7F` | Left |
-| `2045259C 0000FFDF` | Right |
-| `2045259C 0000BFFF` | X (Cross) |
-| `2045259C 0000DFFF` | Circle |
-| `2045259C 0000EFFF` | Triangle |
-| `2045259C 00007FFF` | Square |
-| `2045259C 0000FFF7` | Start |
-| `2045259C 0000FFFF` | Release all |
-
-> The pad input address varies per game/disc revision. For SOCOM II (SCUS-97275 r0004): `0x0045259C`.  
-> Find the address for other games with `scan_value` while pressing a known button, then label it.
+| Tool | Risk | Description |
+|------|------|-------------|
+| `clear_nav_history` | database | Clear the navigation history. |
+| `create_agent_profile` | database | Create a new AI agent profile. All Markdown fields optional. |
+| `create_orchestration_plan` | database | Create a new orchestration plan. All Markdown fields optional. |
+| `delete_agent_profile` | database | Permanently delete an agent profile by ID (irreversible). |
+| `delete_orchestration_plan` | database | Permanently delete an orchestration plan (irreversible). |
+| `delete_progress_report` | database | Delete a progress report by name. Use only when fully complete. |
+| `delete_setting` | database | Delete a CodeDesigner setting by key. |
+| `export_orchestration_plan` | disk | Export an orchestration plan to a Markdown file with YAML front-matter. |
+| `get_active_orchestration_plan` | read-only | Get the active orchestration plan: live stage (current/next step) + all its Markdown fields. |
+| `get_address_snapshot_history` | read-only | Read the 4-byte value at an EE address across every memory snapshot in a directory. |
+| `get_agent_memories` | read-only | List memory entries scoped to a specific agent (private memories). |
+| `get_agent_profile` | read-only | Get full details (Markdown fields) of an agent profile by ID. |
+| `get_all_settings` | read-only | List all settings, optionally filtered by key prefix. |
+| `get_nav_history` | read-only | Get the navigation history (addresses visited via navigate_to). |
+| `get_orchestration_plan` | read-only | Get a specific orchestration plan by ID. |
+| `get_setting` | read-only | Read a single CodeDesigner setting by key. |
+| `get_shared_memories` | read-only | List shared memory entries (not scoped to any specific agent). |
+| `import_orchestration_plan` | database | Import a plan from a Markdown file (with optional YAML front-matter). Updates if name exists. |
+| `list_agent_profiles` | read-only | List all AI agent profiles in the database. |
+| `list_orchestration_plans` | read-only | List all orchestration plans (active marked). |
+| `navigate_to` | database | Record a navigation step to an address (for the nav history). |
+| `query_db` | dangerous | Run arbitrary SQL against the CodeDesigner DB. For LABELS prefer the label tools (label_search / label_search_sets / label_list / get_functions) — they are cheaper and indexed; use query_db only for data with no dedicated tool. |
+| `set_active_orchestration_plan` | database | Mark an orchestration plan as active (deactivates the previously active one). |
+| `set_setting` | database | Set a CodeDesigner setting key/value. |
+| `update_agent_profile` | database | Update fields of an existing agent profile (null = unchanged). |
+| `update_orchestration_plan` | database | Update fields of an existing orchestration plan (null = unchanged). |
 
 ---
 
-## Example: Memory Scanning and Labeling
+## Example workflows
+
+### Find and label a value
 
 ```
-# Find player health (value = 100 at full health)
-scan_value value=100 type=int32
-  → returns a list of candidate addresses
-
-# Reduce health in game, then narrow down
-scan_value value=75 type=int32 addresses=[...previous candidates...]
-  → shortlist of likely addresses
-
-# Verify by writing to the candidate
-write_memory address="0x00352F4C" bytes="64000000"   # 100 as little-endian int32
-pcsx2_save_screenshot                                 # confirm HUD shows 100
-
-# Label the find
-label_add address="0x00352F4C" name="player_health" type="Int32" labelSetName="socom2"
-
-# Save progress
-save_progress_report name="socom2-player-health"
-  content="Player health: 0x00352F4C (int32, LE). Verified via write."
+scan_value scanValue=100 dataType=uint32 comparison=eq       # player health at full
+                                                          # take damage in game, then narrow:
+scan_value scanValue=85 dataType=uint32 comparison=eq previousAddresses=<hits from the first scan>
+memory_write address=0x0045A1B0 hexData=64000000           # confirm by writing it back
+label_add address=0x0045A1B0 label=player_health
+progress_save name=socom2-player-health content=<markdown>
 ```
 
----
-
-## Example: Disassembly and Call Tracing
+### Read code around a hit
 
 ```
-# Pause the emulator
-pause_emulator
-
-# Check where we are
-get_pc  → "EE PC: 0x001A3F28 (game running)"
-
-# Disassemble 32 instructions at the current PC
-disassemble_memory address="0x001A3F28" count=32
-
-# Set a breakpoint on a suspected damage function
-set_breakpoint address="0x001C8A00"
-resume_emulator
-
-# Wait for the breakpoint to fire (cause damage in game)
-# When stopped:
-get_registers        # examine a0, a1, v0 etc.
-get_call_stack       # trace how we got here
-navigate_to "0x001C8A00"   # jump VS Code editor to this address
-
-# Walk the call tree from here
-trace_calls maxSteps=200
-
-# Label confirmed functions
-label_add address="0x001C8A00" name="ApplyDamage" type="Function"
-label_add address="0x001A3F28" name="PlayerUpdate" type="Function"
+get_pc
+memory_disasm address=<pc> count=32
+get_function address=<pc>                 # boundaries + name
+get_xrefs targetAddress=<function start>  # callers, branches, loads/stores, pointers
+debug_breakpoint_set address=<function start>
+debug_resume                       # trigger it in game
+get_registers
+debug_trace_calls
 ```
 
----
-
-## Example: Applying a CDS Patch
+### Apply a CDS patch
 
 ```
-# Infinite health via CDS script
-apply_cds_patch source="""
-.option freeze
-.code 0x00352F4C
-  li $v0, 100
-  sw $v0, 0($zero)
-"""
-
-# Or compile first, inspect, then apply cheats
-compile_cds source="..." → cheat code lines
-apply_cheats codes="..."
+validate_cds sourceCode=...
+compile_cds sourceCode=...       # inspect the codes and patch words first
+snapshot                         # safety copy
+apply_cds_patch sourceCode=...
 ```
 
----
+### Drive the game
 
-## Example: Network Packet Capture
+Use `pad_set_state` (full pad state) or `pad_set_button`, then check the screen with `pcsx2_save_screenshot` or `get_gs_frame`. `pcsx2_frame_advance` steps a fixed number of frames. To build a button activator ("joker") code for a cheat, use the Controller page in VS Code (see [VS Code Extension](vscode-extension.md#controller)).
+
+### Capture packets
 
 ```
-# Check DEV9 adapter status
 net_get_status
-
-# Enable capture with a protocol filter
-net_set_filter filter="tcp"
-net_capture enabled=true
-
-# Play the game (online lobby), then drain captured packets
-net_recv_capture maxPackets=50
-
-# Dissect a specific frame
-net_disassemble frameHex="..." → layer-by-layer breakdown
-
-# Disable capture
-net_capture enabled=false
-net_get_stats  → TX/RX counters
+net_set_filter protocol=udp
+net_capture enable=true
+net_recv_capture                      # after playing online for a bit
+net_disassemble frameBase64=<frame>   # or medius_decode for Medius messages
+net_capture enable=false
 ```
 
----
-
-## Orchestration System
-
-The orchestration system lets you define multi-agent workflows and store them in the database. An orchestration plan describes the strategy, team roles, and step-by-step workflow that agents follow when working together. There is always one **active plan**.
-
-### What an Orchestration Plan Contains
-
-| Field | Purpose |
-|-------|---------|
-| `name` | Display name for the plan |
-| `description` | High-level summary of what this plan is for |
-| `strategy` | How agents divide and sequence their work |
-| `roles` | Named roles and their responsibilities |
-| `workflow` | Ordered steps the team follows |
-| `rules` | Hard constraints all agents must obey |
-| `notes` | Reference links, coverage matrix, supplementary context |
-
-Plans are stored in the `McpOrchestrations` SQL table. Use `get_active_orchestration_plan` to read the running plan at any time. Use `export_orchestration_plan` to write it to a Markdown file, and `import_orchestration_plan` to load one back.
-
-### Reading the Active Plan
-
-```
-list_orchestration_plans       → shows all plans; active one marked ●
-get_active_orchestration_plan  → full plan content
-```
-
-### Active Plan: [Fatality] Team — CodeDesigner Master
-
-This is the plan currently active in the database. It defines a **lead + specialist squad** model.
-
-#### Description
-
-SQL Server-first multi-agent orchestration for complete CodeDesigner operations.  
-Rules: enforce `navigate_to` visibility, agent self-introduction, explicit handoffs, and full tool-family ownership.
-
-#### Strategy
-
-**Always delegate sub-agents.** Every tool family has a primary and backup owner. Execution follows:
-
-```
-Initialize → Locate → Verify → Map → Patch → Persist
-```
-
-Agents must introduce themselves, post handoff messages, and keep user context visible with `navigate_to`.
-
-#### Roles
-
-| Agent | Role |
-|-------|------|
-| **[Fatality] Raiden** ★ | Lead Coordinator — orchestrates all sub-agents |
-| **[Fatality] Scorpion** | Call Graph Hunter — traces writers, callers, hook paths |
-| **[Fatality] Sub-Zero** | Memory Scanner — narrows candidates through scan rounds |
-| **[Fatality] Kitana** | Structure Architect — maps object layouts, arrays, pointer chains |
-| **[Fatality] Kano** | CDS Patcher — builds and applies CDS patch routines |
-| **[Fatality] Sonya** | Runtime Verifier — confirms findings with watchpoints and breakpoints |
-| **[Fatality] Liu Kang** | Persistence Curator — owns SQL Server labels, seeds, deduplication |
-| **[Fatality] Johnny Cage** | PCSX2 Navigator — drives menus and game states via screenshots and pad input |
-
-#### Workflow
-
-1. `session_start` → load prior report → `navigate_to` active anchor
-2. Locate with scan + call graph + labelled candidates
-3. Verify with watchpoints, register/memory checks, and screenshots
-4. Map structures and pointer chains; label only confirmed findings
-5. Patch with CDS/cheats under snapshot safety gates
-6. Persist to SQL Server and refresh seed files
-
-#### Rules
-
-- **Always spin up sub-agents and delegate work — this is mandatory.**
-- SQL Server is authoritative; do not use SQLite flows.
-- `snapshot` before any write/patch/`apply_cheats`.
-- `navigate_to` before and after every major focus change.
-- Every agent introduces itself and includes handoff target and next action.
-- No orphan tools: every tool family must have a primary and backup owner.
+`cd_tool_help <tool>` gives each tool's full parameter schema.
 
 ---
 
-## Agent Profiles
+## Multi-agent sessions
 
-Agent profiles are stored in the `McpAgents` SQL table. Each profile contains Markdown fields that are injected into the agent's context at session start:
+Sub-agents are separate `CodeDesigner.AI` processes that share the same database. The server never spawns processes; the host's own sub-agent feature does that, passing `--agent-id <n>` to each child.
 
-| Field | Purpose |
-|-------|---------|
-| `description` | What this agent does |
-| `objective` | The high-level goal driving all decisions |
-| `rules` | Hard constraints — always followed |
-| `guidelines` | Recommended practices, not hard rules |
-| `sessionBegin` | Actions to take at the start of every session |
-| `concurrentTasks` | Background tasks to maintain throughout the session |
-| `sessionEnd` | Actions to take when wrapping up |
-| `recommendedWorkflow` | Step-by-step pattern for this agent's typical task |
-| `research` | Source files, URLs, and knowledge bases to consult |
+| Need | Tools |
+|---|---|
+| Register / end a session | `cd_session_begin`, `cd_session_end` |
+| See the team | `cd_active_sessions`, `cd_session_status` |
+| Message another agent | `cd_send_message`, `cd_inbox_pop` |
+| Follow the active plan | `cd_orch_current_step`, `cd_orch_advance` |
+| Manage personas and plans (Admin) | `list_agent_profiles`, `get_agent_profile`, `create/update/delete_agent_profile`, `list/get/create/update/delete_orchestration_plan`, `set_active_orchestration_plan` |
 
-The `★` lead agent's profile is returned by `session_start` and provides the master guidelines. Sub-agents call `get_agent_profile` with their own ID to load their specialist rules.
+The default team (the *[Fatality]* personas) and its plans are kept as Markdown in [`agent-profiles/`](../agent-profiles/README.md), with notes on loading them into the `McpAgents` and `McpOrchestrations` tables. The AI Config page in VS Code edits the same rows. [Architecture §4](ARCHITECTURE.md#4-multi-agent-coordination) explains how coordination works.
 
-### The [Fatality] Team — Agent Profiles
-
-#### [Fatality] Raiden ★ (Lead Coordinator) — ID 1
-
-Primary PS2 reverse-engineering and cheat-development agent. Specialises in MIPS64 EE assembly analysis, memory scanning, and cheat code authoring. Orchestrates all sub-agents.
-
-Key rules:
-- `session_start` must be the very first call — no exceptions.
-- Split all work across sub-agents (Johnny Cage navigates, Sub-Zero scans, etc.).
-- Never modify memory or registers without pausing the emulator first.
-- End every session with `save_progress_report`.
-
-Recommended workflow: `session_start` → review progress report → assess state with `get_pc` + `get_registers` → analyse → test live → save report.
+Reusable recipes for common jobs live as Agent Skills in [`.github/skills/`](../.github/skills/README.md).
 
 ---
 
-#### [Fatality] Scorpion (Call Graph Hunter) — ID 2
+## Progress reports
 
-Traces writers, callers, and hookable execution paths through disassembly. Uses `disassemble_memory`, `get_functions`, and `trace_calls` aggressively. Produces concise caller-chain summaries for handoff.
-
-Workflow: Receive target value/function → build writer and caller chain → hand off to Kitana/Kano with exact hook candidates.
-
----
-
-#### [Fatality] Sub-Zero (Memory Scanner) — ID 3
-
-Narrows memory candidates using `scan_value`, `scan_integers`, `scan_floats`, `scan_pattern`, `scan_pointers`. Requires multiple narrowing rounds before promoting a candidate. Tracks confidence level in every handoff.
-
-Workflow: Baseline scan → game-state change + rescan → promote ranked candidates to Sonya for verification.
-
----
-
-#### [Fatality] Kitana (Structure Architect) — ID 4
-
-Maps object layouts, arrays (e.g. `CZPlayer`), sibling fields, and stable base relations. Turns isolated addresses into reusable data models. Labels only verified structure members; prefers reusable names and comments.
-
-Workflow: Receive verified root/pointer chain → map neighbouring fields and arrays → commit labels and layout notes.
-
----
-
-#### [Fatality] Kano (CDS Patcher) — ID 5
-
-Builds controlled CDS routines, joker-safe helpers, and hook-aware patch payloads. All patches must be minimal, reversible, and have a pre-patch snapshot. Maintains a patch ledger with inputs, outputs, and rollback instructions.
-
-Workflow: Receive validated hook + behaviour target → build minimal CDS routine → compile/apply → hand off to Sonya for verification.
-
----
-
-#### [Fatality] Sonya (Runtime Verifier) — ID 6
-
-Confirms findings and patches are behaviourally correct using watchpoints, breakpoints, `get_registers`, `step_over`/`step_out`, `get_fps`, and screenshots. Every verification requires at least one independent check path.
-
-Workflow: Set validation conditions → trigger event → confirm effect → share screenshot evidence → publish pass/fail summary.
-
----
-
-#### [Fatality] Liu Kang (Persistence Curator) — ID 7
-
-Owns all SQL Server persistence: `label_add_batch`, deduplication, seed-data refresh, and reproducibility artifacts. Ensures all validated findings survive rebuilds and migrations. SQL Server is source of truth.
-
-Workflow: Merge canonical artifacts → persist to SQL Server → refresh seed files and validate JSON.
-
----
-
-#### [Fatality] Johnny Cage (PCSX2 Navigator) — ID 8
-
-Drives deterministic menu/state transitions using PCSX2-prefixed tools, snapshots, joker-assisted control flow, and screenshots. Primary job is getting the emulator into the exact state the team needs as efficiently as possible.
-
-Key workflow:
-1. Check labels/cheat database for a joker address; ask the team if not found.
-2. Apply joker cheat to write pad inputs every frame.
-3. Take screenshots before and after each input to confirm state.
-4. Wait ~5 seconds (or `pcsx2_frame_advance`) after each button press.
-5. Publish the exact navigation sequence with step count at session end.
-
-Pre-loaded navigation data (SOCOM II SCUS-97275 r0004):
-- **Pad input address**: `0x0045259C`
-- **Joker format**: `2045259C 0000????`
-- **Main Menu → LAN lobby**: 2× Down + 1× X (3 inputs total)
-- Screenshots saved to: `C:\Users\tholu\OneDrive\Documents\PCSX2\snaps`
-
----
-
-## Progress Reports
-
-Progress reports are the team's persistent memory between sessions. They are stored in `McpMemories` and can be scoped globally or to a specific agent.
-
-```sql
--- View all reports directly
-SELECT Id, Name, CreatedAt, UpdatedAt FROM McpMemories ORDER BY UpdatedAt DESC
-
--- View agent-scoped reports
-SELECT m.Name, m.Content, a.Name as Agent
-FROM McpMemories m
-JOIN McpAgents a ON a.Id = m.GameId  -- GameId column stores agentId when scoped
-WHERE m.GameId IS NOT NULL
-```
-
-Use `save_progress_report` at every significant finding. Include:
-- Game name and disc serial  
-- Current objective  
-- All discovered addresses with labels  
-- Structure maps  
-- Confirmed cheat codes  
-- Clear list of next steps
+Progress reports are the persistent memory between sessions, stored in the `McpMemories` table. Use `progress_search` / `progress_get` to resume and `progress_save` at each milestone. A useful report has the game and serial, the goal, every confirmed address with its label, structure notes, working codes, and the next steps.
 
 ---
 
 ## Troubleshooting
 
 | Symptom | Fix |
-|---------|-----|
-| `PONG` not returned by `ping` | Start `CodeDesigner.Ps2.Bridge` first; it must be running on `localhost:8765` |
-| `PINE timeout` errors | Enable PINE in PCSX2: Settings → Advanced → Enable PINE IPC |
-| Tool descriptions are stale | Update the `McpConfigs` table: `UPDATE McpConfigs SET [Value] = '...' WHERE [Key] = 'tool_name_desc'` |
-| `session_start` returns no guidelines | Create an agent profile with `isAgentLead = true` and populate the `Rules` and `Guidelines` fields |
-| Screenshots not saving | Check `C:\Users\tholu\OneDrive\Documents\PCSX2\snaps` exists and PCSX2 has write access |
-| Joker cheat not applying | Verify the cheat engine is not injected simultaneously; use `apply_cheats` directly |</content>
-<parameter name="filePath">c:\Users\tholu\Desktop\CodeDesigner\docs\mcp-server.md
+|---|---|
+| `cd_status` says the bridge is offline | Start the Bridge (the extension's Connect, or its *CodeDesigner* terminal). It listens on `localhost:8765`. |
+| PINE timeouts | Use the CodeDesigner PCSX2 build with PINE enabled (Settings → Advanced → Enable PINE). The extension's **Run** launches it correctly. |
+| PCSX2-only tool fails on a PINE opcode | The PCSX2 build predates that opcode. Rebuild the fork in `pcsx2/`. |
+| A tool you expect is missing | It isn't in your profile. `cd_list_domains`, then `cd_enable_domain`, or relaunch with a wider `--profile`. A risk cap (`--readonly`) can still hide it. |
+| `CodeDesigner.AI not found` in VS Code | Build `CodeDesigner.AI` so it deploys to `%LOCALAPPDATA%\CodeDesigner\AI\`. |
+| Database errors at startup | LocalDB isn't running. `sqllocaldb start MSSQLLocalDB`, or pass `--connection-string`. |

@@ -254,8 +254,9 @@ export class AnimViewport extends ViewportCore {
     if (!b.track && !o) { return b.bind; }
     const bindPos = new THREE.Vector3(), bindRot = new THREE.Quaternion(), bindScale = new THREE.Vector3();
     b.bind.decompose(bindPos, bindRot, bindScale);
-    const p = o?.position ?? (b.track ? new THREE.Vector3(...this.sampleTrack(b.track.positions, f, false) as [number, number, number]) : bindPos);
-    const q = o?.rotation ?? (b.track ? new THREE.Quaternion(...this.sampleTrack(b.track.rotations, f, true) as [number, number, number, number]) : bindRot);
+    // A track without positions (GTA: every bone but the root) keeps the bind translation.
+    const p = o?.position ?? (b.track?.positions.length ? new THREE.Vector3(...this.sampleTrack(b.track.positions, f, false) as [number, number, number]) : bindPos);
+    const q = o?.rotation ?? (b.track?.rotations.length ? new THREE.Quaternion(...this.sampleTrack(b.track.rotations, f, true) as [number, number, number, number]) : bindRot);
     return new THREE.Matrix4().compose(p, q, new THREE.Vector3(1, 1, 1));
   }
 
@@ -316,7 +317,10 @@ export class AnimViewport extends ViewportCore {
     this.joints = [];
     this.lines?.geometry.dispose();
     this.skeletonGroup.clear();
-    const r = 0.28;
+    // ~1.5% of the rig's height: 0.28 on a SOCOM character (~19 units tall), a few cm on a GTA ped (metres).
+    const ys = (this.meshData?.skeleton ?? []).map(b => b.world[13]);
+    const height = ys.length ? Math.max(...ys) - Math.min(...ys) : 0;
+    const r = height > 0 ? Math.min(0.28, height * 0.016) : 0.28;
     const geo = new THREE.SphereGeometry(r, 10, 8);
     this.bones.forEach((b, i) => {
       const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: this.jointColor(i), depthTest: false, transparent: true, opacity: 0.9 }));
@@ -412,7 +416,8 @@ export class AnimViewport extends ViewportCore {
 
   private mountIndex(): number {
     const i = this.bones.findIndex(b => b.name.toLowerCase() === this.mountName);
-    return i >= 0 ? i : this.bones.findIndex(b => b.name.toLowerCase() === 'rhand' || b.name.toLowerCase() === 'righthand');
+    // SOCOM 'rhand', other rigs 'RightHand' / GTA 'R Hand'.
+    return i >= 0 ? i : this.bones.findIndex(b => ['rhand', 'righthand'].includes(b.name.toLowerCase().replace(/\s+/g, '')));
   }
 
   private weaponMatrix(): THREE.Matrix4 | null {
@@ -423,7 +428,13 @@ export class AnimViewport extends ViewportCore {
   private placeWeapon(): void {
     const m = this.weaponMatrix();
     this.weaponGroup.visible = this.showWeapon && !!m && this.weaponViews.length > 0;
-    if (m) { this.weaponGroup.matrix.copy(m); this.weaponGroup.matrixWorldNeedsUpdate = true; }
+    if (m) {
+      // A "mount" locator (GTA) is the hand -> weapon mesh transform; SOCOM weapons sit on their bone as is.
+      const mount = this.locators.get('mount');
+      this.weaponGroup.matrix.copy(m);
+      if (mount) { this.weaponGroup.matrix.multiply(mount); }
+      this.weaponGroup.matrixWorldNeedsUpdate = true;
+    }
   }
 
   setWeaponVisible(on: boolean): void { this.showWeapon = on; this.placeWeapon(); }

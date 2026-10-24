@@ -1,199 +1,60 @@
 [← Back to Documentation Index](README.md)
 
-# CodeDesigner.Ps2.MemoryCardManager — PS2 Memory Card Emulation
+# Memory Card Manager
 
-The `CodeDesigner.Ps2.MemoryCardManager` project provides comprehensive emulation and management of PlayStation 2 memory cards, including save file manipulation and cross-platform compatibility.
+`CodeDesigner.Ps2.MCManager` reads and writes PS2 memory card images, with the same core operations as mymc: list saves, export, import, delete, read a file, and create a blank card. It handles both card types PCSX2 uses:
 
-## Overview
+- **File cards** — a single image (`.ps2`, 8 MB by default), opened with `Ps2MemoryCard`.
+- **Folder cards** — a directory with one sub-folder per save (PCSX2's "folder memory card"), read with `FolderMemoryCard`. PCSX2's `_pcsx2_*` bookkeeping files are ignored.
 
-PS2 memory cards store game save data, system settings, and downloadable content. This project emulates the PS2 memory card hardware and provides tools for managing save files across different formats and systems.
+---
 
-## Features
+## In VS Code
 
-### Memory Card Emulation
-- **8 MB card simulation** (standard PS2 capacity)
-- **2-slot support** (simultaneous card insertion)
-- **Hardware-accurate timing** and error simulation
-- **PS1 backward compatibility** mode
+**Emulator → Tools → Mem Card** opens the Memory Card browser:
 
-### Save File Management
-- **Import/Export saves** from/to .ps2 file format
-- **Directory browsing** and file operations
-- **Save state management** with metadata
-- **Corruption detection** and repair
+- Open a card, or create a **new** one.
+- The save list shows each save's animated 3D icon (parsed from `icon.sys` and the icon files, rendered with WebGL), name, size and date. Pick an icon slot (normal, copy, delete) to preview.
+- **Import** a save folder, **Export** the selected save, **Delete** it, and view its files.
 
-### Cross-Platform Support
-- **Windows/Linux/Mac** compatibility
-- **PS2/PS3/PSP** save file conversion
-- **Cloud backup** integration
-- **Network sharing** capabilities
+The browser reads and writes through the Bridge.
 
-## Memory Card Format
+---
 
-### Physical Structure
-- **8 MB total capacity** (2× 3.5 MB partitions + system area)
-- **Clusters**: 512-byte allocation units
-- **FAT-like filesystem** with directory entries
-- **ECC protection** for data integrity
+## From the Bridge and MCP
 
-### File System
-- **Root directory** with game save folders
-- **Icon.sys/Icon.icn** for save thumbnails
-- **Save data** in proprietary formats per game
-- **System files** for card management
+| MCP tool | Does |
+|---|---|
+| `mc_list` | List the saves on a card |
+| `mc_read_file` | Read one file from a save |
+| `mc_export` | Export a save to a host folder |
+| `mc_import` | Import a host folder as a save |
+| `mc_delete` | Delete a save |
+| `mc_format` | Create a blank card |
 
-## Usage
+---
 
-### Command Line
-
-```bash
-# Create new memory card
-MemoryCardManager.exe --create card.ps2
-
-# Import save file
-MemoryCardManager.exe --import save.psu --card card.ps2
-
-# Export all saves
-MemoryCardManager.exe --export-all --card card.ps2 --output saves/
-
-# List card contents
-MemoryCardManager.exe --list --card card.ps2
-```
-
-### API Usage
+## Library
 
 ```csharp
-var manager = new MemoryCardManager();
+using CodeDesigner.Ps2.MCManager;
 
-// Create new card
-var card = manager.CreateCard("card.ps2");
+Ps2MemoryCard.Create("blank.ps2");                     // 8 MB by default
 
-// Import save
-manager.ImportSave("save.psu", card);
+using var card = Ps2MemoryCard.Open("Mcd001.ps2");
+foreach (var save in card.ListSaves())
+    Console.WriteLine(save.Name);
 
-// Export save
-manager.ExportSave(card, "BASLUS-12345", "save.psu");
+card.ExportSave("BASCUS-97275SOCOM2", @"C:\saves");     // writes every file of the save
+card.ImportSave(@"C:\saves\BASCUS-97275SOCOM2");        // save name = folder name
+byte[] icon = card.ReadFile("BASCUS-97275SOCOM2", "icon.sys");
+card.DeleteSave("BASCUS-97275SOCOM2");
 ```
 
-## Save File Operations
+`Open(path, readOnly: true)` opens a card without write access. For folder cards use the static `FolderMemoryCard.ListSaves(dir)`, `ExportSave(dir, name, outputDir)` and `ReadFile(dir, name, file)`.
 
-### Import Formats
-- **.ps2**: Native PS2 memory card files
-- **.psu**: Single save file (PS2 format)
-- **.psv**: Single save file (PS3/PSP format)
-- **.max**: Action Replay save files
-- **.sps**: SharkPort save files
+---
 
-### Export Options
-- **Individual saves** as .psu files
-- **Full card images** as .ps2 files
-- **Batch export** with directory structure
-- **Compressed archives** for storage
+## Tests
 
-### File Management
-- **Copy/Move/Delete** saves between cards
-- **Rename saves** with custom titles
-- **Edit save metadata** (title, icon, description)
-- **Duplicate detection** and merging
-
-## Integration
-
-### With Emulator
-- **Hot-swap cards** during gameplay
-- **Save state compatibility** with card contents
-- **Automatic backup** on save operations
-- **Corruption recovery** from emulator crashes
-
-### With Database
-- **Save metadata storage** (play time, achievements)
-- **Game compatibility** tracking
-- **User profile management**
-- **Backup scheduling**
-
-### With VS Code Extension
-- **Graphical card browser**
-- **Drag-and-drop file operations**
-- **Save comparison tools**
-- **Bulk management operations**
-
-## Advanced Features
-
-### Save Analysis
-- **Hex editor** for save file contents
-- **Structure parsing** for known game formats
-- **Cheat detection** and removal
-- **Data validation** and repair
-
-### Backup and Sync
-- **Automatic backups** on save
-- **Cloud storage** integration
-- **Multi-device sync**
-- **Version history** tracking
-
-### Security
-- **Save encryption** for sensitive data
-- **Digital signatures** verification
-- **Tamper detection**
-- **Secure deletion** of old saves
-
-## Examples
-
-### Creating a Card
-
-```csharp
-var manager = new MemoryCardManager();
-var card = manager.CreateCard("my_card.ps2");
-card.Format(); // Initialize filesystem
-```
-
-### Importing Saves
-
-```csharp
-// Import single save
-manager.ImportSave("ffx_save.psu", card);
-
-// Import from directory
-manager.ImportDirectory("saves/", card);
-```
-
-### Managing Saves
-
-```csharp
-// List all saves
-var saves = card.ListSaves();
-foreach (var save in saves) {
-    Console.WriteLine($"{save.GameId}: {save.Title}");
-}
-
-// Delete old save
-card.DeleteSave("BASLUS-12345");
-```
-
-## Troubleshooting
-
-### Common Issues
-- **Corrupted cards**: Use repair tools
-- **Incompatible saves**: Check region/format
-- **Storage full**: Clean up old saves
-- **Permission errors**: Run as administrator
-
-### Recovery Options
-- **Filesystem repair** for damaged cards
-- **Data carving** from corrupted saves
-- **Backup restoration** from previous versions
-- **Format recovery** for bricked cards
-
-## Best Practices
-
-### Organization
-- **Game-specific folders** for saves
-- **Regular backups** to prevent loss
-- **Descriptive names** for save files
-- **Version numbering** for important saves
-
-### Maintenance
-- **Regular defragmentation** of cards
-- **Filesystem checks** before important operations
-- **Update tools** for new game compatibility
-- **Monitor storage usage** and clean up</content>
-<parameter name="filePath">c:\Users\tholu\Desktop\CodeDesigner\docs\memory-card-manager.md
+`CodeDesigner.Ps2.TestProject/MemoryCardManager/`.

@@ -11,6 +11,13 @@
     <InternalsVisibleTo Include="CodeDesigner.Ps2.TestProject" />
   </ItemGroup>
 
+  <!-- SOCOM II game messages + DME object classes, shared with the Python tools in Mods/SOCOM2.
+       The packet dissector labels DME traffic from these (see Socom2GameCatalog). -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\Mods\SOCOM2\packets\packets.json" LogicalName="Socom2.packets.json" Link="Resources\Socom2\packets.json" />
+    <EmbeddedResource Include="..\Mods\SOCOM2\packets\objects.json" LogicalName="Socom2.objects.json" Link="Resources\Socom2\objects.json" />
+  </ItemGroup>
+
   <ItemGroup>
     <Compile Remove="Coprocessors\**" />
     <Compile Remove="Instructions\**" />

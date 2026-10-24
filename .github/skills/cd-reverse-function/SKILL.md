@@ -48,7 +48,7 @@ function and persist it.
 ## Tips
 
 - If `memory_read` returns "(bridge down)", abort and instruct the user to
-  start the emulator with `--run`.
+  connect the emulator (VS Code sidebar → Emulator → **Run**).
 - Use `decompile_to_cds <address>` to get a re-compilable CDS skeleton for
   patching attempts later.
 - For lib functions (`sceXxx`, `ioman`, etc.), prefer matching against the

@@ -28,6 +28,14 @@ namespace CodeDesigner.Ps2.Common.CPU
         public ulong[] RegsLo { get; } = new ulong[32];
         public ulong[] RegsHi { get; } = new ulong[32];
 
+        /// <summary>
+        /// One bit per GPR: set when the register's value is known. Real CPU
+        /// state (emulator, PCSX2 snapshot) is fully known, so this defaults to
+        /// all bits. The static analyzer starts from a blank state, clears every
+        /// bit except $zero, and only prints values for known registers.
+        /// </summary>
+        public uint GprKnown { get; set; } = 0xFFFFFFFFu;
+
         // Program Counter
         public ulong PC { get; set; }
 
@@ -94,6 +102,8 @@ namespace CodeDesigner.Ps2.Common.CPU
             var snap = new CpuState();
             Array.Copy(RegsLo, snap.RegsLo, 32);
             Array.Copy(RegsHi, snap.RegsHi, 32);
+            snap.GprKnown = GprKnown;
+            snap.PC   = PC;
             snap.HI   = HI;
             snap.LO   = LO;
             snap.HI1  = HI1;

@@ -2,7 +2,7 @@
   "name": "codedesigner",
   "displayName": "CodeDesigner",
   "description": "A very cool description",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "engines": {
     "vscode": "^1.108.1"
   },
@@ -257,7 +257,7 @@
         },
         {
           "command": "codedesigner.openModelEditor",
-          "when": "resourceExtname == .zdb || resourceExtname == .ZDB || resourceExtname == .cdb || resourceExtname == .CDB || resourceExtname == .zed || resourceExtname == .ZED || resourceExtname == .zar || resourceExtname == .ZAR",
+          "when": "resourceExtname == .zdb || resourceExtname == .ZDB || resourceExtname == .cdb || resourceExtname == .CDB || resourceExtname == .zed || resourceExtname == .ZED || resourceExtname == .zar || resourceExtname == .ZAR || resourceExtname == .iso || resourceExtname == .ISO || resourceExtname == .img || resourceExtname == .IMG",
           "group": "navigation"
         },
         {
@@ -267,7 +267,7 @@
         },
         {
           "command": "codedesigner.openAnimationEditor",
-          "when": "resourceExtname == .zdb || resourceExtname == .ZDB || resourceExtname == .cdb || resourceExtname == .CDB || resourceExtname == .zed || resourceExtname == .ZED || resourceExtname == .zar || resourceExtname == .ZAR",
+          "when": "resourceExtname == .zdb || resourceExtname == .ZDB || resourceExtname == .cdb || resourceExtname == .CDB || resourceExtname == .zed || resourceExtname == .ZED || resourceExtname == .zar || resourceExtname == .ZAR || resourceExtname == .iso || resourceExtname == .ISO || resourceExtname == .img || resourceExtname == .IMG",
           "group": "navigation"
         }
       ]

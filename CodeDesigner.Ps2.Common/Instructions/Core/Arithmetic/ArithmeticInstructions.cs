@@ -19,12 +19,8 @@ using System.Numerics;
 | DADDIU | Add immediate 64-bit unsigned |
 | MULT | Multiply signed 32-bit |
 | MULTU | Multiply unsigned 32-bit |
-| DMULT | Multiply signed 64-bit |
-| DMULTU | Multiply unsigned 64-bit |
 | DIV | Divide signed 32-bit |
 | DIVU | Divide unsigned 32-bit |
-| DDIV | Divide signed 64-bit |
-| DDIVU | Divide unsigned 64-bit |
 | MFHI | Move from HI register |
 | MFLO | Move from LO register |
 | MTHI | Move to HI register |
@@ -394,7 +390,7 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Disasm(Args_I args, uint? pc = null)
         {
-            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}, ${args.Imm:X4}";
+            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.FormatSignedImmediate(args.Imm)}";
         }
 
         public override uint Asm(int[] args)
@@ -435,7 +431,7 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Disasm(Args_I args, uint? pc = null)
         {
-            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}, ${args.Imm:X4}";
+            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.FormatSignedImmediate(args.Imm)}";
         }
 
         public override uint Asm(int[] args)
@@ -450,16 +446,19 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
             int imm = CpuHelpers.SignExtend16(args.Imm);
             uint result = (uint)(rsVal + imm);
 
+            bool known = CpuHelpers.IsRegisterKnown(cpu, args.Rs);
+
             // Detect stack frame allocation/deallocation: ADDIU $sp, $sp, ±N
             if (args.Rt == 29 && args.Rs == 29)
             {
+                string value = known ? $" → $sp = 0x{result:X8}" : string.Empty;
                 if (imm < 0)
-                    return $"allocate {-imm}-byte stack frame → $sp = 0x{result:X8}";
+                    return $"allocate {-imm}-byte stack frame{value}";
                 if (imm > 0)
-                    return $"free {imm}-byte stack frame → $sp = 0x{result:X8}";
+                    return $"free {imm}-byte stack frame{value}";
             }
 
-            return $"{CpuHelpers.RegName(args.Rt)} = 0x{result:X8}";
+            return known ? $"{CpuHelpers.RegName(args.Rt)} = 0x{result:X8}" : string.Empty;
         }
     }
 
@@ -489,7 +488,7 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Disasm(Args_I args, uint? pc = null)
         {
-            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}, ${args.Imm:X4}";
+            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.FormatSignedImmediate(args.Imm)}";
         }
 
         public override uint Asm(int[] args)
@@ -531,7 +530,7 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Disasm(Args_I args, uint? pc = null)
         {
-            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}, ${args.Imm:X4}";
+            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.FormatSignedImmediate(args.Imm)}";
         }
 
         public override uint Asm(int[] args)
@@ -567,15 +566,18 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
             int rs = CpuHelpers.GetReg32(cpu, args.Rs);
             int rt = CpuHelpers.GetReg32(cpu, args.Rt);
             long result = rs * (long)rt;
-            
+
             // EE sign-extends each 32-bit half to 64 bits when writing to HI/LO
             cpu.LO = (ulong)(long)(int)(result & 0xFFFFFFFF);
             cpu.HI = (ulong)(long)(int)(result >> 32);
+            // EE three-operand form also copies LO to rd.
+            CpuHelpers.SetReg32(cpu, args.Rd, (int)(result & 0xFFFFFFFF));
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
         {
-            return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
+            string ops = $"{CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
+            return args.Rd != 0 ? $"{Name} {CpuHelpers.RegName(args.Rd)}, {ops}" : $"{Name} {ops}";
         }
 
         public override uint Asm(int[] args)
@@ -614,15 +616,18 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
             uint rs = (uint)CpuHelpers.GetReg32(cpu, args.Rs);
             uint rt = (uint)CpuHelpers.GetReg32(cpu, args.Rt);
             ulong result = rs * (ulong)rt;
-            
+
             // EE sign-extends each 32-bit half to 64 bits when writing to HI/LO
             cpu.LO = (ulong)(long)(int)(result & 0xFFFFFFFF);
             cpu.HI = (ulong)(long)(int)(result >> 32);
+            // EE three-operand form also copies LO to rd.
+            CpuHelpers.SetReg32(cpu, args.Rd, (int)(result & 0xFFFFFFFF));
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
         {
-            return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
+            string ops = $"{CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
+            return args.Rd != 0 ? $"{Name} {CpuHelpers.RegName(args.Rd)}, {ops}" : $"{Name} {ops}";
         }
 
         public override uint Asm(int[] args)
@@ -637,98 +642,6 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
             uint rt = (uint)CpuHelpers.GetReg32(cpu, args.Rt);
             ulong product = (ulong)rs * rt;
             return $"HI=0x{(uint)(product >> 32):X8}, LO=0x{(uint)(product & 0xFFFFFFFF):X8}";
-        }
-    }
-
-    // DMULT - Multiply signed 64-bit
-    public sealed class DMULT : Instruction<Args_R>
-    {
-        public DMULT()
-        {
-            Opcode = 0x00;
-            Funct = 0x1C;
-            Name = "dmult";
-            ArgType = InstrArgType.R;
-            ArgNames = ["rs", "rt"];
-            Equation = "HI:LO = rs * rt";
-            Description = "Multiply signed 64-bit, result in HI:LO";
-        }
-
-        public override void Exec(CpuState cpu, Args_R args)
-        {
-            long rs = (long)cpu.RegsLo[args.Rs];
-            long rt = (long)cpu.RegsLo[args.Rt];
-            
-            // Use BigInteger to handle the long.MinValue case safely
-            var product = (System.Numerics.BigInteger)rs * rt;
-            cpu.LO = (ulong)(product & 0xFFFFFFFFFFFFFFFF);
-            cpu.HI = (ulong)((product >> 64) & 0xFFFFFFFFFFFFFFFF);
-        }
-
-        public override string Disasm(Args_R args, uint? pc = null)
-        {
-            return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
-        }
-
-        public override uint Asm(int[] args)
-        {
-            return (uint)(args[0] << 21 | args[1] << 16 | (Funct ?? 0x1C));
-        }
-
-        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
-        {
-            if (cpu == null) return string.Empty;
-            long rs = (long)cpu.RegsLo[args.Rs];
-            long rt = (long)cpu.RegsLo[args.Rt];
-            var product = (System.Numerics.BigInteger)rs * rt;
-            ulong lo = (ulong)(product & 0xFFFFFFFFFFFFFFFF);
-            ulong hi = (ulong)((product >> 64) & 0xFFFFFFFFFFFFFFFF);
-            return $"HI=0x{hi:X16}, LO=0x{lo:X16}";
-        }
-    }
-
-    // DMULTU - Multiply unsigned 64-bit
-    public sealed class DMULTU : Instruction<Args_R>
-    {
-        public DMULTU()
-        {
-            Opcode = 0x00;
-            Funct = 0x1D;
-            Name = "dmultu";
-            ArgType = InstrArgType.R;
-            ArgNames = ["rs", "rt"];
-            Equation = "HI:LO = rs * rt";
-            Description = "Multiply unsigned 64-bit, result in HI:LO";
-        }
-
-        public override void Exec(CpuState cpu, Args_R args)
-        {
-            ulong rs = cpu.RegsLo[args.Rs];
-            ulong rt = cpu.RegsLo[args.Rt];
-            
-            ulong high = Math.BigMul(rs, rt, out ulong low);
-            
-            cpu.LO = low;
-            cpu.HI = high;
-        }
-
-        public override string Disasm(Args_R args, uint? pc = null)
-        {
-            return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
-        }
-
-        public override uint Asm(int[] args)
-        {
-            return (uint)(args[0] << 21 | args[1] << 16 | (Funct ?? 0x1D));
-        }
-
-        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
-        {
-            if (cpu == null) return string.Empty;
-            ulong rs = cpu.RegsLo[args.Rs];
-            ulong rt = cpu.RegsLo[args.Rt];
-            ulong high = Math.BigMul(rs, rt, out ulong low);
-            return $"HI=0x{high:X16}, LO=0x{low:X16}";
         }
     }
 
@@ -846,120 +759,6 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
             uint rt = (uint)CpuHelpers.GetReg32(cpu, args.Rt);
             if (rt == 0) return "LO=?, HI=?  (div by 0)";
             return $"LO=0x{rs / rt:X8}, HI=0x{rs % rt:X8}";
-        }
-    }
-
-    // DDIV - Divide signed 64-bit
-    public sealed class DDIV : Instruction<Args_R>
-    {
-        public DDIV()
-        {
-            Opcode = 0x00;
-            Funct = 0x1E;
-            Name = "ddiv";
-            ArgType = InstrArgType.R;
-            ArgNames = ["rs", "rt"];
-            Equation = "LO = rs / rt; HI = rs % rt";
-            Description = "Divide signed 64-bit, quotient in LO, remainder in HI";
-        }
-
-        public override void Exec(CpuState cpu, Args_R args)
-        {
-            long rs = (long)cpu.RegsLo[args.Rs];
-            long rt = (long)cpu.RegsLo[args.Rt];
-            
-            if (rt == 0)
-            {
-                // Division by zero
-                cpu.LO = rs >= 0 ? 0xFFFFFFFFFFFFFFFF : 1;
-                cpu.HI = (ulong)rs;
-            }
-            else if (rs == long.MinValue && rt == -1)
-            {
-                // Overflow case
-                cpu.LO = unchecked((ulong)long.MinValue);
-                cpu.HI = 0;
-            }
-            else
-            {
-                long quotient = rs / rt;
-                long remainder = rs % rt;
-                cpu.LO = (ulong)quotient;
-                cpu.HI = (ulong)remainder;
-            }
-        }
-
-        public override string Disasm(Args_R args, uint? pc = null)
-        {
-            return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
-        }
-
-        public override uint Asm(int[] args)
-        {
-            return (uint)(args[0] << 21 | args[1] << 16 | (Funct ?? 0x1E));
-        }
-
-        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
-        {
-            if (cpu == null) return string.Empty;
-            long rs = (long)cpu.RegsLo[args.Rs];
-            long rt = (long)cpu.RegsLo[args.Rt];
-            if (rt == 0) return "LO=?, HI=?  (div by 0)";
-            return $"LO=0x{(ulong)(rs / rt):X16}, HI=0x{(ulong)(rs % rt):X16}";
-        }
-    }
-
-    // DDIVU - Divide unsigned 64-bit
-    public sealed class DDIVU : Instruction<Args_R>
-    {
-        public DDIVU()
-        {
-            Opcode = 0x00;
-            Funct = 0x1F;
-            Name = "ddivu";
-            ArgType = InstrArgType.R;
-            ArgNames = ["rs", "rt"];
-            Equation = "LO = rs / rt; HI = rs % rt";
-            Description = "Divide unsigned 64-bit, quotient in LO, remainder in HI";
-        }
-
-        public override void Exec(CpuState cpu, Args_R args)
-        {
-            ulong rs = cpu.RegsLo[args.Rs];
-            ulong rt = cpu.RegsLo[args.Rt];
-            
-            if (rt == 0)
-            {
-                // Division by zero
-                cpu.LO = 0xFFFFFFFFFFFFFFFF;
-                cpu.HI = rs;
-            }
-            else
-            {
-                ulong quotient = rs / rt;
-                ulong remainder = rs % rt;
-                cpu.LO = quotient;
-                cpu.HI = remainder;
-            }
-        }
-
-        public override string Disasm(Args_R args, uint? pc = null)
-        {
-            return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
-        }
-
-        public override uint Asm(int[] args)
-        {
-            return (uint)(args[0] << 21 | args[1] << 16 | (Funct ?? 0x1F));
-        }
-
-        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
-        {
-            if (cpu == null) return string.Empty;
-            ulong rs = cpu.RegsLo[args.Rs];
-            ulong rt = cpu.RegsLo[args.Rt];
-            if (rt == 0) return "LO=?, HI=?  (div by 0)";
-            return $"LO=0x{rs / rt:X16}, HI=0x{rs % rt:X16}";
         }
     }
 

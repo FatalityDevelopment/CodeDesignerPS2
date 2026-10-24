@@ -1,3 +1,4 @@
+using CodeDesigner.Ps2.FileFormats.Assets;
 using CodeDesigner.Ps2.FileFormats.Zipper.Geo;
 using CodeDesigner.Ps2.FileFormats.Zipper.Model;
 using CodeDesigner.Ps2.FileFormats.Zipper.Package;
@@ -162,7 +163,7 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.Ca
                             GeometryOffset = o, GeometryLength = part.GeometryOffset + part.GeometryLength - o,
                             ColorOffset = part.ColorOffset, ColorLength = part.ColorLength,
                         };
-                        var chunk = ModelMesh.DecodeChunk(Data, r, firstIndex + list.Count, visual, texture, null, unit, world);
+                        var chunk = ZipperModelMesh.DecodeChunk(Data, r, firstIndex + list.Count, visual, texture, null, unit, world);
                         if (chunk != null)
                         {
                             for (int i = 1; i < chunk.Uvs.Length; i += 2) chunk.Uvs[i] = 1f - chunk.Uvs[i];

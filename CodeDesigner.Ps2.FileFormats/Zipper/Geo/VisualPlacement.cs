@@ -1,3 +1,4 @@
+using CodeDesigner.Ps2.FileFormats.Assets;
 using System.Text.RegularExpressions;
 using CodeDesigner.Ps2.FileFormats.Zipper.Model;
 

@@ -1,3 +1,4 @@
+using CodeDesigner.Ps2.FileFormats.Assets;
 using CodeDesigner.Ps2.FileFormats.Zipper.Anim;
 using System;
 using System.IO;
@@ -232,7 +233,7 @@ public class ZipperPackageTests
     public void Mesh_MatchesGeoBoundsAndTriangulates()
     {
         var pkg = OpenMap("M51");
-        var mesh = ModelMesh.Build(pkg, pkg.FindModel("M51_MDL.ZED", "oaktree_near")!);
+        var mesh = ZipperModelMesh.Build(pkg, pkg.FindModel("M51_MDL.ZED", "oaktree_near")!);
         Assert.AreEqual(6, mesh.Chunks.Count);
         Assert.IsTrue(mesh.Chunks.All(c => c.Triangles.Length > 0 && c.Colors != null));
         var b = pkg.DefinitionNode(pkg.FindModel("M51_MDL.ZED", "oaktree_near")!)!.Bounds!.Value;
@@ -248,11 +249,11 @@ public class ZipperPackageTests
     {
         var pkg = OpenMap("M51");
         var model = pkg.FindModel("M51_MDL.ZED", "oaktree_near")!;
-        var c = ModelMesh.Build(pkg, model).Chunks[0];
+        var c = ZipperModelMesh.Build(pkg, model).Chunks[0];
         float[] p = { c.Positions[0] + 5, c.Positions[1] + 7, c.Positions[2] - 3 };
-        Apply(pkg, ModelMesh.SetVertices(pkg, "M51_MDL.ZED", "oaktree_near", c.GeometryOffset,
-            new[] { new ModelMesh.VertexEdit(0, p, new[] { 0.25f, 0.75f }, new byte[] { 10, 20, 30, 128 }) }));
-        var after = ModelMesh.Build(pkg, model).Chunks[0];
+        Apply(pkg, ZipperModelMesh.SetVertices(pkg, "M51_MDL.ZED", "oaktree_near", c.GeometryOffset,
+            new[] { new ZipperModelMesh.VertexEdit(0, p, new[] { 0.25f, 0.75f }, new byte[] { 10, 20, 30, 128 }) }));
+        var after = ZipperModelMesh.Build(pkg, model).Chunks[0];
         for (int k = 0; k < 3; k++) Assert.AreEqual(p[k], after.Positions[k], 0.1f, $"position {k}");
         Assert.AreEqual(0.25f, after.Uvs[0], 1e-3f);
         Assert.AreEqual(0.75f, after.Uvs[1], 1e-3f);
@@ -265,14 +266,14 @@ public class ZipperPackageTests
     {
         var pkg = OpenMap("M51");
         var model = pkg.FindModel("M51_MDL.ZED", "oaktree_near")!;
-        var before = ModelMesh.Build(pkg, model);
-        Apply(pkg, ModelMesh.TransformVertices(pkg, "M51_MDL.ZED", "oaktree_near", Matrix4.Compose(0, 25, 0), null, null));
-        var moved = ModelMesh.Build(pkg, model);
+        var before = ZipperModelMesh.Build(pkg, model);
+        Apply(pkg, ZipperModelMesh.TransformVertices(pkg, "M51_MDL.ZED", "oaktree_near", Matrix4.Compose(0, 25, 0), null, null));
+        var moved = ZipperModelMesh.Build(pkg, model);
         Assert.AreEqual(before.BoundsMin[1] + 25, moved.BoundsMin[1], 0.2f);
 
         // 40x larger no longer fits int16 at the original chunk scale: the chunks are rescaled.
-        Apply(pkg, ModelMesh.TransformVertices(pkg, "M51_MDL.ZED", "oaktree_near", Matrix4.Compose(0, 0, 0, 0, 40), null, null));
-        var big = ModelMesh.Build(pkg, model);
+        Apply(pkg, ZipperModelMesh.TransformVertices(pkg, "M51_MDL.ZED", "oaktree_near", Matrix4.Compose(0, 0, 0, 0, 40), null, null));
+        var big = ZipperModelMesh.Build(pkg, model);
         Assert.AreEqual(moved.BoundsMax[0] * 40, big.BoundsMax[0], Math.Abs(moved.BoundsMax[0] * 40) * 0.01f + 1);
         Assert.IsTrue(big.Chunks.Any(c => c.Scale > before.Chunks[0].Scale), "chunk scale grew");
     }
@@ -320,12 +321,12 @@ public class ZipperPackageTests
         foreach (string name in new[] { "oaktree_near", "crate_small", "room_table01", "worldmodel" })
         {
             var model = pkg.Models().First(m => m.Name == name);
-            var before = ModelMesh.Build(pkg, model);
+            var before = ZipperModelMesh.Build(pkg, model);
             var container = ZedContainer.FromBytes(pkg.Entry(model.Archive)!.Data);
             ModelLayout.Parse(container, model.NodeIndex)!.Write(container, model.NodeIndex);
             var copy = ZipperPackage.Open(Path.Combine(RunDir, "M51.ZDB"));
             copy.ReplaceEntry(model.Archive, container.ToBytes());
-            var after = ModelMesh.Build(copy, copy.FindModel(model.Archive, name)!);
+            var after = ZipperModelMesh.Build(copy, copy.FindModel(model.Archive, name)!);
             Assert.AreEqual(before.Chunks.Count, after.Chunks.Count, name);
             for (int i = 0; i < before.Chunks.Count; i++)
             {
@@ -344,10 +345,10 @@ public class ZipperPackageTests
     {
         var pkg = OpenMap("M51");
         var model = pkg.FindModel("M51_MDL.ZED", "crate_small")!;
-        var before = ModelMesh.Build(pkg, model);
+        var before = ZipperModelMesh.Build(pkg, model);
         var c0 = before.Chunks[0];
         Apply(pkg, MeshTopology.DeleteFaces(pkg, "M51_MDL.ZED", "crate_small", new Dictionary<int, int[]> { [c0.GeometryOffset] = new[] { 0 } }).Changed);
-        var after = ModelMesh.Build(pkg, model);
+        var after = ZipperModelMesh.Build(pkg, model);
         Assert.AreEqual(before.Chunks.Count, after.Chunks.Count);
         Assert.AreEqual(c0.Triangles.Length - 3, after.Chunks[0].Triangles.Length);
         CollectionAssert.AreEqual(before.Chunks[1].Positions, after.Chunks[1].Positions, "other chunks untouched");
@@ -356,7 +357,7 @@ public class ZipperPackageTests
         Apply(pkg, MeshTopology.DeleteFaces(pkg, "M51_MDL.ZED", "crate_small", new Dictionary<int, int[]> { [c1.GeometryOffset] = Enumerable.Range(0, c1.Triangles.Length / 3).ToArray() }).Changed);
         // crate_small's visuals share their geometry blocks: the emptied chunk leaves every visual that drew it.
         int sharing = after.Chunks.Count(c => c.GeometryOffset == c1.GeometryOffset);
-        Assert.AreEqual(before.Chunks.Count - sharing, ModelMesh.Build(pkg, model).Chunks.Count, "emptied chunk removed");
+        Assert.AreEqual(before.Chunks.Count - sharing, ZipperModelMesh.Build(pkg, model).Chunks.Count, "emptied chunk removed");
     }
 
     [TestMethod]
@@ -364,10 +365,10 @@ public class ZipperPackageTests
     {
         var pkg = OpenMap("M51");
         var model = pkg.FindModel("M51_MDL.ZED", "oaktree_near")!;
-        int before = ModelMesh.Build(pkg, model).Chunks.Count;
+        int before = ZipperModelMesh.Build(pkg, model).Chunks.Count;
         var r = MeshTopology.AddMesh(pkg, "M51_MDL.ZED", "oaktree_near", "N000_000", "oaktrunk.tif", MeshTopology.Primitive("cube", 20, new[] { 5f, -30f, 2f }), false);
         Apply(pkg, r.Changed);
-        var mesh = ModelMesh.Build(pkg, model);
+        var mesh = ZipperModelMesh.Build(pkg, model);
         Assert.AreEqual(before + 1, mesh.Chunks.Count);
         var cube = mesh.Chunks[r.NewChunks.Single()];
         Assert.AreEqual("oaktrunk.tif", cube.Texture);
@@ -382,7 +383,7 @@ public class ZipperPackageTests
 
         var r2 = MeshTopology.AddMesh(pkg, "M51_MDL.ZED", "oaktree_near", "N000_001", "thintree1.tif", MeshTopology.Primitive("plane", 40, new[] { 0f, 0f, 0f }), false);
         Apply(pkg, r2.Changed);
-        var plane = ModelMesh.Build(pkg, model).Chunks[r2.NewChunks.Single()];
+        var plane = ZipperModelMesh.Build(pkg, model).Chunks[r2.NewChunks.Single()];
         Assert.AreEqual("thintree1.tif", plane.Texture, "new section with its own name field");
         Assert.AreEqual("N000_001", plane.Visual);
     }
@@ -392,10 +393,10 @@ public class ZipperPackageTests
     {
         var pkg = OpenMap("M51");
         var model = pkg.FindModel("M51_MDL.ZED", "crate_small")!;
-        var c0 = ModelMesh.Build(pkg, model).Chunks[0];
+        var c0 = ZipperModelMesh.Build(pkg, model).Chunks[0];
         var r = MeshTopology.DuplicateFaces(pkg, "M51_MDL.ZED", "crate_small", new Dictionary<int, int[]> { [c0.GeometryOffset] = new[] { 0, 1 } }, Matrix4.Compose(0, -10, 0));
         Apply(pkg, r.Changed);
-        var copy = ModelMesh.Build(pkg, model).Chunks[r.NewChunks.Single()];
+        var copy = ZipperModelMesh.Build(pkg, model).Chunks[r.NewChunks.Single()];
         Assert.AreEqual(2, copy.Triangles.Length / 3);
         for (int t = 0; t < 6; t++)
         {
@@ -420,10 +421,10 @@ public class ZipperPackageTests
     {
         var pkg = OpenMap("M51");
         var model = pkg.FindModel("WORL_MDL.ZED", "worldmodel")!;
-        var visual = ModelMesh.Build(pkg, model).Chunks[0].Visual!;
+        var visual = ZipperModelMesh.Build(pkg, model).Chunks[0].Visual!;
         var r = MeshTopology.AddMesh(pkg, "WORL_MDL.ZED", "worldmodel", visual, "concrete_base.tif", MeshTopology.Primitive("plane", 200, new[] { 4000f, -50f, 3000f }), false);
         Apply(pkg, r.Changed);
-        var plane = ModelMesh.Build(pkg, model).Chunks[r.NewChunks.Single()];
+        var plane = ZipperModelMesh.Build(pkg, model).Chunks[r.NewChunks.Single()];
         Assert.AreEqual("Sixteenth", plane.Unit.ToString());
         Assert.AreEqual(3900, Enumerable.Range(0, 4).Min(i => Pos(plane, i)[0]), 0.2f);
         Assert.AreEqual(3100, Enumerable.Range(0, 4).Max(i => Pos(plane, i)[2]), 0.2f);
@@ -472,7 +473,7 @@ public class ZipperPackageTests
         var cases = new[] { ("MESH_seal_A_woodland_LO", 74, 1980, 0.12f, 19.09f), ("MESH_alban_informant", 63, 1664, 0.12f, 19.63f) };
         foreach (var (name, groups, tris, minY, maxY) in cases)
         {
-            var mesh = ModelMesh.Build(pkg, pkg.FindModel("CLIB_MDL.ZED", name)!);
+            var mesh = ZipperModelMesh.Build(pkg, pkg.FindModel("CLIB_MDL.ZED", name)!);
             Assert.IsTrue(mesh.Skinned, name);
             Assert.AreEqual(groups, mesh.Chunks.Count, name + " groups");
             Assert.AreEqual(tris, mesh.Chunks.Sum(c => c.Triangles.Length / 3), name + " triangles");
@@ -481,10 +482,10 @@ public class ZipperPackageTests
             Assert.IsTrue(mesh.Chunks.All(c => !string.IsNullOrEmpty(c.Texture)), name + " textures");
             Assert.IsTrue(mesh.Chunks.All(c => c.SkinBones!.Where((b, i) => i % ModelMesh.SkinInfluences == 0).All(b => b >= 0)), name + " every vertex has a bone");
         }
-        var seal = ModelMesh.Build(pkg, pkg.FindModel("CLIB_MDL.ZED", "MESH_seal_A_woodland_LO")!);
+        var seal = ZipperModelMesh.Build(pkg, pkg.FindModel("CLIB_MDL.ZED", "MESH_seal_A_woodland_LO")!);
         Assert.AreEqual("seal_A_woodland_LO", seal.Skeleton!.Bones[0].Name);
         Assert.IsTrue(seal.Skeleton.Bones.Any(b => b.Name == "hips" && b.MatrixId == 1));
-        Assert.ThrowsException<NotSupportedException>(() => ModelMesh.SetVertices(pkg, "CLIB_MDL.ZED", "MESH_seal_A_woodland_LO", seal.Chunks[0].GeometryOffset, new[] { new ModelMesh.VertexEdit(0, new[] { 0f, 0f, 0f }) }));
+        Assert.ThrowsException<NotSupportedException>(() => ZipperModelMesh.SetVertices(pkg, "CLIB_MDL.ZED", "MESH_seal_A_woodland_LO", seal.Chunks[0].GeometryOffset, new[] { new ZipperModelMesh.VertexEdit(0, new[] { 0f, 0f, 0f }) }));
     }
 
     [TestMethod]
@@ -586,7 +587,7 @@ public class ZipperPackageTests
             {
                 var pkg = ZipperPackage.Open(open);
                 var mesh = pkg.Models().First(m => m.Kind == "character" && m.Name.StartsWith("MESH_"));
-                var built = ModelMesh.Build(pkg, mesh);
+                var built = ZipperModelMesh.Build(pkg, mesh);
                 Assert.IsTrue(built.Skinned && built.Chunks.Count > 0, $"{open}: {mesh.Name}");
                 Assert.IsTrue(built.BoundsMax[1] > 15 && built.BoundsMin[1] > -1, $"{open}: {mesh.Name} stands Y up");
             }
@@ -653,7 +654,7 @@ public class ZipperPackageTests
         var c = CodeDesigner.Ps2.FileFormats.Zipper.Conversion.CaToSocom2.Export(pkg, soldier, templates,
             new CodeDesigner.Ps2.FileFormats.Zipper.Conversion.CaToSocom2.Options("mcsold", "ca_c54fb483", dir, new[] { "seal_stand", "seal_healing" }));
         var s2 = ZipperPackage.Open(c.CdbPath);
-        var mesh = ModelMesh.Build(s2, s2.Models().Single(m => m.Name == "MESH_ca_c54fb483"));
+        var mesh = ZipperModelMesh.Build(s2, s2.Models().Single(m => m.Name == "MESH_ca_c54fb483"));
         Assert.AreEqual(1304, mesh.Chunks.Sum(x => x.Triangles.Length / 3));
         var clips = PackageAnimations.List(s2, null).Select(x => x.Name).ToList();
         CollectionAssert.AreEquivalent(new[] { "seal_stand", "seal_healing" }, clips);
@@ -669,7 +670,7 @@ public class ZipperPackageTests
         {
             var pkg = ZipperPackage.Open(Path.Combine(run, zdb + ".ZDB"));
             var model = pkg.Models().First(m => m.Name == name);
-            var source = ModelMesh.Build(pkg, model);
+            var source = ZipperModelMesh.Build(pkg, model);
             var r = CodeDesigner.Ps2.FileFormats.Zipper.Conversion.Socom2ToCa.Export(pkg, model,
                 new CodeDesigner.Ps2.FileFormats.Zipper.Conversion.Socom2ToCa.Options(name.Replace("MESH_", ""), dir, clips));
             var ca = CodeDesigner.Ps2.FileFormats.Zipper.Ca.CaPackage.Open(r.Path);

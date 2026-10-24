@@ -17,6 +17,8 @@ namespace CodeDesigner.Ps2.Bridge.Services
             reg.Add(c => HandlePineListWatches(c.CpuSel),                                    "PINELISTWATCHES");
             reg.Add(_ => HandlePineClearAllWatches(),                                        "PINECLEARALLWATCHES");
             reg.Add(_ => HandlePineSaveScreenshot(),                                         "PINESAVESCREENSHOT");
+            reg.Add(c => HandlePineAudio(c.AudioMuted, "PINESETAUDIOMUTED"),                 "PINESETAUDIOMUTED");
+            reg.Add(_ => HandlePineAudio(null, "PINEGETAUDIOSTATE"),                         "PINEGETAUDIOSTATE");
         }
 
         // ── PINEADDWATCH ──────────────────────────────────────────────────────
@@ -200,6 +202,43 @@ namespace CodeDesigner.Ps2.Bridge.Services
             catch (Exception ex)
             {
                 return Responses.Error($"PINE SaveScreenshot failed: {ex.Message}");
+            }
+        }
+
+        // ── PINESETAUDIOMUTED / PINEGETAUDIOSTATE ─────────────────────────────
+
+        /// <summary>
+        /// Handle PINESETAUDIOMUTED (AudioMuted required) and PINEGETAUDIOSTATE —
+        /// mute/unmute or query PCSX2's audio output via the PINE MsgSetAudioMuted
+        /// (0x45) / MsgGetAudioState (0x46) opcodes. Both reply with the resulting
+        /// state, since PCSX2's "Mute All Sound" setting can veto an unmute.
+        /// </summary>
+        private string HandlePineAudio(bool? muted, string command)
+        {
+            if (_ctx.PineClient == null)
+                return Responses.Error($"{command} requires PINE mode (connect to PCSX2 first)");
+            if (command == "PINESETAUDIOMUTED" && muted == null)
+                return Responses.Error("AudioMuted is required for PINESETAUDIOMUTED");
+
+            try
+            {
+                var state = muted is bool m
+                    ? _ctx.PineClient!.SetAudioMuted(m)
+                    : _ctx.PineClient!.GetAudioState();
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success              = true,
+                    Command              = command,
+                    AudioMuted           = state.Muted,
+                    AudioMutedInSettings = state.MutedInSettings,
+                    Message              = state.Muted
+                        ? (state.MutedInSettings ? "Audio muted (Mute All Sound is on in PCSX2 settings)" : "Audio muted")
+                        : "Audio on",
+                });
+            }
+            catch (Exception ex)
+            {
+                return Responses.Error($"PINE audio command failed: {ex.Message} (needs the CodeDesigner PCSX2 build with opcodes 0x45/0x46)");
             }
         }
     }

@@ -24,9 +24,9 @@ Errors and warnings are reported per line with a stable code (`CDS0014`, …) so
 ## Your first script
 
 ```cds
-address $20123456
+address $20123450
 
-addiu $v0, $zero, 9999
+addiu $v0, $zero, 9999      // immediates are decimal unless prefixed with $ or 0x
 sw    $v0, 0($a0)
 ```
 
@@ -36,8 +36,8 @@ sw    $v0, 0($a0)
 Click **Compile**. The output box will show GameShark codes like:
 
 ```
-20123456 24029999
-2012345A AC040000
+20123450 2402270F
+20123454 AC820000
 ```
 
 ---
@@ -78,7 +78,7 @@ Coprocessor instructions are supported as well:
 
 Single-word pseudo-instructions: `move`, `not`, `neg`, `negu`, `b`, `beqz`, `bnez`, `li` (16-bit), `jalr $t9` (link in `$ra`).
 
-VU0 macro-mode arithmetic (`vadd.xyzw …`) is not assemblable yet; use `hexcode` for those words.
+VU0 macro-mode instructions go through the same assembler, so forms such as `vadd.xyzw vf1, vf2, vf3`, `vmulq.xyz vf1, vf2, Q`, `vsqrt Q, vf2y` and `viaddi vi1, vi2, -1` can be written directly. The destination mask must be in `xyzw` order.
 
 ---
 

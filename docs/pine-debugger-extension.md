@@ -1,12 +1,10 @@
-[← Back to Documentation Index](README.md)
-
 # PINE Protocol Extension — Debugger Commands
 
 ## Summary
 
-This proposal extends the PINE IPC protocol with opcodes 0x10–0x3F that expose the
-complete PCSX2 GUI debugger interface, controller input, and DEV9 network bridge to
-external tools. The additions allow a remote client to control execution, manage save
+This proposal extends the PINE IPC protocol with opcodes 0x10–0x46 that expose the
+complete PCSX2 GUI debugger interface, controller input, the DEV9 network bridge,
+GS stream status, batched memory access and audio muting to external tools. The additions allow a remote client to control execution, manage save
 states by name, inspect all registers across both CPUs, enumerate threads, modules,
 and call stacks, list and look up EE function symbols and global variables, retrieve
 local variables and function parameters, disassemble instruction ranges, save game
@@ -132,6 +130,32 @@ opcodes makes PINE a self-contained debugger transport.
 | 0x3D  | `MsgNetDisassemble` | Dissect a packet and return a human-readable text summary       |
 | 0x3E  | `MsgNetSetFilter`   | Set the capture filter (protocol, port, or IP)                  |
 | 0x3F  | `MsgNetGetStats`    | Return TX/RX counters and capture queue statistics              |
+
+### GS stream control (0x40–0x42)
+
+The frames themselves go over the separate GS stream socket (`GSStreamServer`), not PINE. These opcodes only report on it.
+
+| Value | Name                   | Purpose                                                         |
+|-------|------------------------|-----------------------------------------------------------------|
+| 0x40  | `MsgGSStreamGetPort`   | Return the GS stream listener port (0 when disabled)            |
+| 0x41  | `MsgGSStreamGetStatus` | Return active flag, port, subscribers, frames delivered/dropped |
+| 0x42  | `MsgGSStreamPing`      | Empty reply; confirms the GS stream control plane is wired up   |
+
+### Batched memory access (0x43–0x44)
+
+| Value | Name               | Purpose                                                  |
+|-------|--------------------|----------------------------------------------------------|
+| 0x43  | `MsgReadMemBatch`  | Read fixed-size slices from many EE or IOP addresses     |
+| 0x44  | `MsgWriteMemBatch` | Write fixed-size slices to many EE or IOP addresses      |
+
+The batch wire format is described in [`pcsx2_pine_readmembatch_design.md`](pcsx2_pine_readmembatch_design.md) in the CodeDesigner repository.
+
+### Audio output (0x45–0x46)
+
+| Value | Name               | Purpose                                                    |
+|-------|--------------------|------------------------------------------------------------|
+| 0x45  | `MsgSetAudioMuted` | Mute or unmute audio output (same as the Toggle Mute hotkey) |
+| 0x46  | `MsgGetAudioState` | Query the audio output mute state                          |
 
 ---
 
@@ -835,11 +859,48 @@ are reset by `TermNet()` (when the adapter is torn down).
 
 ---
 
-All opcodes 0x10–0x3F are **single-command only** — they must not appear inside a
-multi-command batch request. If any of them is encountered after another command
-has already been processed in the same request buffer, the server returns `IPC_FAIL`
-for the entire batch. This restriction exists because these opcodes mutate or observe
-CPU state where strict ordering guarantees are required.
+### MsgGSStreamGetPort (0x40)
+
+- **Request:** 5 bytes — opcode only.
+- **Reply (OK):** 7 bytes — `IPC_OK` + `port` (u16 LE); 0 when the stream listener is not initialized.
+
+---
+
+### MsgGSStreamGetStatus (0x41)
+
+- **Request:** 5 bytes — opcode only.
+- **Reply (OK):** 20 bytes — `IPC_OK` + `active` (u8) + `port` (u16 LE) + `subscribers` (u32 LE)
+  + `frames_delivered` (u32 LE) + `frames_dropped` (u32 LE).
+
+---
+
+### MsgGSStreamPing (0x42)
+
+- **Request:** 5 bytes — opcode only.
+- **Reply (OK):** 5 bytes — `IPC_OK`, no payload.
+
+---
+
+### MsgSetAudioMuted (0x45) / MsgGetAudioState (0x46)
+
+Mute, unmute, or query PCSX2's audio output. Muting goes through
+`SPU2::SetOutputMuted`, the same path as the Toggle Mute hotkey, so the saved
+volume comes back on unmute.
+
+- **Request (0x45):** 6 bytes — opcode + `muted` (u8, 0 = unmute, 1 = mute).
+- **Request (0x46):** 5 bytes — opcode only.
+- **Reply (OK):** 7 bytes — `IPC_OK` + `muted` (u8) + `muted_in_settings` (u8).
+  `muted` is the effective state after the request. `muted_in_settings` is set
+  when the user's "Mute All Sound" setting is on; that setting wins, so an
+  unmute request leaves `muted = 1`.
+- **Reply (fail):** 5 bytes — `IPC_FAIL` if no valid VM.
+
+---
+
+Send opcodes 0x10–0x46 as **single commands**, one per request buffer. Many of them
+mutate or observe CPU state and are run on the CPU thread, so mixing them into a
+multi-command request makes ordering hard to reason about. The server does not
+currently reject them inside a multi-command request; this is a client rule.
 
 ---
 
@@ -909,7 +970,9 @@ current PC.
 - [ ] `MsgClearAllWatches` removes all watchpoints; `MsgListWatches` returns count=0
 - [ ] `MsgSaveSnapshot` queues a screenshot; a file appears in the snapshots directory
 - [ ] `MsgSaveSnapshot` returns `IPC_FAIL` when no game is running
-- [ ] All opcodes 0x10–0x3F return `IPC_FAIL` gracefully when called inside a batch
+- [ ] `MsgGSStreamGetStatus` reports `active=1` and a non-zero port while the GS stream is running
+- [ ] `MsgSetAudioMuted(1)` mutes output and replies `muted=1`; `MsgSetAudioMuted(0)` restores the previous volume
+- [ ] `MsgSetAudioMuted(0)` replies `muted=1, muted_in_settings=1` while "Mute All Sound" is on
 - [ ] `MsgPadGetState(0)` returns buttons, analogs, and pressures for pad 0
 - [ ] `MsgPadGetState` returns `IPC_FAIL` for an out-of-range slot or disconnected pad
 - [ ] `MsgPadSetButton(0, 6, 1.0)` presses Cross on pad 0; the game sees the button held

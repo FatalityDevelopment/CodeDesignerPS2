@@ -11,9 +11,16 @@ import {
     effect,
     viewChild,
     ElementRef,
+    WritableSignal,
 } from '@angular/core';
 import { getVsCodeApi } from '../shared/vscode-api';
 import { PageHeaderComponent } from '../shared/page-header.component';
+import {
+    ButtonName, BUTTON_LABEL, JokerCandidate, Polarity, WrapFormat,
+    buildJokerCode, buttonsFromPadWord, comboLabel, decodeJoker, encodeJoker,
+    findJokerCandidates, hex, parseAddress, parseCodeLines, sortButtons,
+} from './joker-codes';
+import '../shared/styles/shared.css';
 import './joker-maker-page.css';
 
 // Geometry
@@ -22,13 +29,6 @@ import './joker-maker-page.css';
 
 const CANVAS_W = 1000;
 const CANVAS_H = 750;
-
-type ButtonName =
-    | 'l2' | 'l1' | 'r2' | 'r1'
-    | 'up' | 'down' | 'left' | 'right'
-    | 'select' | 'start' | 'ps'
-    | 'triangle' | 'square' | 'circle' | 'cross'
-    | 'l3' | 'r3';
 
 interface RectButton { name: ButtonName; kind: 'rect'; x: number; y: number; w: number; h: number; }
 interface CircleButton { name: ButtonName; kind: 'circle'; x: number; y: number; r: number; }
@@ -44,6 +44,8 @@ interface Stick {
     pressButton: ButtonName; // l3 / r3
 }
 
+// The PS button is not part of the pad word (no joker bit, no PINE input),
+// so it has no hit region.
 const BUTTONS: readonly Button[] = [
     { name: 'l2', kind: 'rect', x: 186, y: 84,  w: 104, h: 36 },
     { name: 'l1', kind: 'rect', x: 178, y: 120, w: 127, h: 52 },
@@ -55,9 +57,8 @@ const BUTTONS: readonly Button[] = [
     { name: 'left',  kind: 'rect', x: 148, y: 254, w: 70, h: 56 },
     { name: 'right', kind: 'rect', x: 250, y: 254, w: 70, h: 56 },
 
-    { name: 'select', kind: 'rect',   x: 388, y: 252, w: 36, h: 30 },
-    { name: 'start',  kind: 'rect',   x: 546, y: 252, w: 40, h: 38 },
-    { name: 'ps',     kind: 'circle', x: 500, y: 334, r: 24 },
+    { name: 'select', kind: 'rect', x: 388, y: 252, w: 36, h: 30 },
+    { name: 'start',  kind: 'rect', x: 546, y: 252, w: 40, h: 38 },
 
     { name: 'triangle', kind: 'circle', x: 760, y: 207, r: 40 },
     { name: 'square',   kind: 'circle', x: 680, y: 290, r: 40 },
@@ -73,56 +74,59 @@ const STICKS: readonly Stick[] = [
 /** Glow colour for pressed buttons. */
 const GLOW: Record<ButtonName, string> = {
     triangle: '#4ec9b0', circle: '#f48771', cross: '#569cd6', square: '#c586c0',
-    ps: '#007acc', start: '#9cdcfe', select: '#9cdcfe',
+    start: '#9cdcfe', select: '#9cdcfe',
     l1: '#569cd6', l2: '#569cd6', r1: '#569cd6', r2: '#569cd6',
     up: '#dcdcaa', down: '#dcdcaa', left: '#dcdcaa', right: '#dcdcaa',
     l3: '#c586c0', r3: '#c586c0',
 };
+const LIVE_GLOW = '#ffb454';
 
 /** Webview keyboard shortcuts for driving the virtual controller. */
 const KEY_MAP: Record<string, ButtonName> = {
     ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
     KeyW: 'triangle', KeyA: 'square', KeyD: 'circle', KeyS: 'cross',
     KeyQ: 'l1', Digit1: 'l2', KeyE: 'r1', Digit3: 'r2',
-    Enter: 'start', ShiftRight: 'select', Space: 'ps',
+    KeyZ: 'l3', KeyC: 'r3',
+    Enter: 'start', ShiftRight: 'select',
 };
 
-/**
- * Joker hex mask values - same as the original VB tool. PS3/PS2 cheat codes
- * use the inverted (0xFFFF - sum of pressed bits) form.
- */
-const JOKER_MASK: Record<ButtonName, number> = {
-    select: 0x0001, l3: 0x0002, r3: 0x0004, start: 0x0008,
-    up: 0x0010, right: 0x0020, down: 0x0040, left: 0x0080,
-    l2: 0x0100, r2: 0x0200, l1: 0x0400, r1: 0x0800,
-    triangle: 0x1000, circle: 0x2000, cross: 0x4000, square: 0x8000,
-    ps: 0,
-};
+/** Build: clicks toggle buttons into a joker combo. Play: momentary input sent to PCSX2. */
+type Mode = 'build' | 'play';
+type PolaritySetting = 'auto' | Polarity;
 
-interface LogEntry { kind: 'press' | 'release' | 'stick'; name: string; t: number; }
+interface LogEntry { id: number; kind: 'press' | 'release' | 'stick' | 'live' | 'capture'; name: string; t: number; }
 
-interface JsonState {
-    pressed:    ButtonName[];
-    leftStick:  { x: number; y: number };
-    rightStick: { x: number; y: number };
-    /** 8-digit GameShark joker data value (0000XXXX). */
-    hex:        string;
-    /** Raw 16-bit mask in PS2 active-low form (0xFFFF means nothing pressed). */
-    buttonsRaw: string;
+type ActivePointer =
+    | { kind: 'button'; name: ButtonName }
+    | { kind: 'stick'; stick: Stick }
+    | { kind: 'stickPress'; stick: Stick };
+
+type GameStatus = 'offline' | 'loading' | 'ok' | 'error';
+
+/** Per-viewer settings kept across reloads via the webview state. */
+interface SavedState {
+    mode?:          Mode;
+    combo?:         ButtonName[];
+    wrapText?:      string;
+    format?:        WrapFormat;
+    polarity?:      PolaritySetting;
+    swap?:          boolean;
+    addressChoice?: string;
+    customAddress?: string;
+    sideCollapsed?: boolean;
 }
 
-interface ActivePointer {
-    kind:  'button' | 'stick';
-    name?: ButtonName;
-    stick?: Stick;
-}
+interface InitMsg            { type: 'jokerInit'; controllerImage: string; }
+interface ConnectionMsg      { type: 'jokerConnectionStatus'; connected: boolean; }
+interface LivePadStateMsg    { type: 'jokerLivePadState'; buttons: number;
+                               lx: number; ly: number; rx: number; ry: number; }
+interface LivePollStoppedMsg { type: 'jokerLivePollStopped'; }
+interface GameContextMsg     { type: 'jokerGameContext'; status: GameStatus; game?: string; serial?: string;
+                               cheats?: Array<{ name: string; codes: string[] }>; error?: string; }
+type IncomingMsg = InitMsg | ConnectionMsg | LivePadStateMsg | LivePollStoppedMsg | GameContextMsg;
 
-interface InitMsg               { type: 'jokerInit'; controllerImage: string; }
-interface ConnectionMsg         { type: 'jokerConnectionStatus'; connected: boolean; }
-interface LivePadStateMsg       { type: 'jokerLivePadState'; buttons: number;
-                                  lx: number; ly: number; rx: number; ry: number; }
-interface LivePollStoppedMsg    { type: 'jokerLivePollStopped'; }
-type IncomingMsg = InitMsg | ConnectionMsg | LivePadStateMsg | LivePollStoppedMsg;
+/** Address select value meaning "type an address". */
+const CUSTOM = 'custom';
 
 @Component({
     selector: 'app-joker-maker-page',
@@ -132,99 +136,203 @@ type IncomingMsg = InitMsg | ConnectionMsg | LivePadStateMsg | LivePollStoppedMs
     encapsulation: ViewEncapsulation.None,
     template: `
 <div class="jm-host">
-  <app-page-header icon="gamepad2" title="Controller" subtitle="Virtual PS2 controller and active-low cheat mask builder">
+  <app-page-header icon="gamepad2" title="Controller" subtitle="Joker code builder and virtual PS2 controller">
     <div page-header-actions class="jm-header-actions">
       <span class="jm-connection" [class.jm-connection-on]="connected()">{{ connected() ? 'connected' : 'offline' }}</span>
-      <button class="jm-panel-toggle" type="button" (click)="toggleSidePanel()" [attr.aria-expanded]="!sideCollapsed()" title="Toggle details panel">
-        {{ sideCollapsed() ? 'Show Details' : 'Hide Details' }}
+      <button class="lm-tool-btn" type="button" (click)="toggleSidePanel()" [attr.aria-expanded]="!sideCollapsed()">
+        {{ sideCollapsed() ? 'Show panel' : 'Hide panel' }}
       </button>
     </div>
   </app-page-header>
 
-  <div class="jm-main" [class.jm-main-collapsed]="sideCollapsed()">
+  <div class="jm-main">
 
     <div class="jm-stage">
-      @if (sideCollapsed()) {
-        <button class="jm-side-reopen" type="button" (click)="toggleSidePanel()">Show details</button>
-      }
-      <div class="jm-hint">
-        <div><span class="c">// click any button</span></div>
-        <div><span class="c">// drag the analog sticks</span></div>
-        <div><span class="c">// keys: WASD / arrows / Q E 1 3 / Enter Shift Space</span></div>
-      </div>
-      <canvas #canvas
-              [attr.width]="canvasW"
-              [attr.height]="canvasH"
-              aria-label="PS controller"></canvas>
-    </div>
-
-    <aside class="jm-side" [class.jm-side-collapsed]="sideCollapsed()" [attr.aria-hidden]="sideCollapsed()">
-
-      <div class="jm-metrics">
-        <div class="jm-metric"><div class="jm-metric-label">Joker code</div><div class="jm-metric-value">{{ hexCode() }}</div></div>
-        <div class="jm-metric"><div class="jm-metric-label">Raw mask</div><div class="jm-metric-value">{{ buttonsRaw() }}</div></div>
-        <div class="jm-metric"><div class="jm-metric-label">Pressed</div><div class="jm-metric-value">{{ pressed().length }} buttons</div></div>
-      </div>
-
-      <div class="jm-metrics">
-        <div class="jm-metric"><div class="jm-metric-label">Joker code</div><div class="jm-metric-value">{{ hexCode() }}</div></div>
-        <div class="jm-metric"><div class="jm-metric-label">Raw mask</div><div class="jm-metric-value">{{ buttonsRaw() }}</div></div>
-        <div class="jm-metric"><div class="jm-metric-label">Pressed</div><div class="jm-metric-value">{{ pressed().length }} buttons</div></div>
-      </div>
-
-      <div class="jm-toggles">
-        <label class="jm-toggle" title="Click multiple buttons to build a combined code.">
-          <input type="checkbox"
-                 [checked]="multiPress()"
-                 (change)="setMultiPress($any($event.target).checked)" />
-          Multi-press
-        </label>
-        <label class="jm-toggle"
-               [class.jm-toggle-dim]="!connected()"
-               title="Mirror the real controller state via PINE (PCSX2 mode).">
-          <input type="checkbox"
-                 [checked]="liveEnabled()"
-                 [disabled]="!connected()"
+      <div class="jm-stage-bar">
+        <div class="jm-seg" role="tablist" aria-label="Mode">
+          <button type="button" role="tab" [class.jm-seg-on]="mode() === 'build'" [attr.aria-selected]="mode() === 'build'"
+                  (click)="setMode('build')" title="Click buttons to build a joker combo. Nothing is sent to PCSX2.">Build code</button>
+          <button type="button" role="tab" [class.jm-seg-on]="mode() === 'play'" [attr.aria-selected]="mode() === 'play'"
+                  (click)="setMode('play')" title="Hold buttons and drag sticks to send input to PCSX2.">Play</button>
+        </div>
+        <label class="jm-toggle" [class.jm-toggle-dim]="!connected()" title="Mirror the real controller via PINE (orange).">
+          <input type="checkbox" [checked]="liveEnabled()" [disabled]="!connected()"
                  (change)="setLiveEnabled($any($event.target).checked)" />
           Live pad
           <span class="jm-live-dot" [class.jm-live-dot-on]="liveActive()"></span>
         </label>
       </div>
 
-      <div class="jm-section-head">controller.state.json</div>
-      <div class="jm-json">
-        <div class="jm-gutter">{{ gutter() }}</div>
-        <pre class="jm-code" [innerHTML]="jsonHtml()"></pre>
-      </div>
+      <canvas #canvas
+              [attr.width]="canvasW"
+              [attr.height]="canvasH"
+              aria-label="PS2 controller"></canvas>
 
-      <div class="jm-section-head">input events</div>
-      <div class="jm-log">
-        @if (logEntries().length === 0) {
-          <div class="jm-log-empty">// no events yet</div>
+      <div class="jm-hint">
+        @if (mode() === 'build') {
+          Click buttons or press keys to toggle them into the combo. Click a stick for L3 / R3.
         } @else {
-          @for (e of logEntries(); track e.t + e.kind + e.name) {
+          Hold buttons or keys to press them in PCSX2. Drag sticks; right-click or Shift+click a stick for L3 / R3.
+          @if (!connected()) { <span class="jm-warn">Not connected: input is not sent.</span> }
+        }
+        <span class="jm-keys">Keys: arrows &middot; W A S D &middot; Q E 1 3 &middot; Z C &middot; Enter &middot; Right Shift</span>
+      </div>
+    </div>
+
+    @if (!sideCollapsed()) {
+    <aside class="jm-side">
+
+      <!-- Combo -->
+      <section class="jm-card">
+        <div class="jm-card-head">
+          <span class="jm-card-title">Button combo</span>
+          <span class="jm-card-tools">
+            <button class="lm-row-btn" type="button" (click)="toggleCapture()" [disabled]="!connected()"
+                    [class.jm-capturing]="captureArmed()"
+                    title="Press and release a combo on the real controller to record it.">
+              {{ captureArmed() ? 'Waiting for pad... (cancel)' : 'Capture from pad' }}
+            </button>
+            <button class="lm-row-btn" type="button" (click)="clearCombo()" [disabled]="combo().length === 0">Clear</button>
+          </span>
+        </div>
+        <div class="jm-chips">
+          @for (b of combo(); track b) {
+            <button class="jm-chip" type="button" (click)="toggleCombo(b)" title="Remove {{ label(b) }}">
+              {{ label(b) }} <span aria-hidden="true">&times;</span>
+            </button>
+          } @empty {
+            <span class="lm-muted">Click buttons on the controller, or capture them from the pad.</span>
+          }
+        </div>
+        <div class="jm-kv">
+          <span>Value</span><span class="lm-mono">{{ valueHex() }}</span>
+          <span>Pad word</span><span class="lm-mono">0x{{ padWordHex() }}</span>
+        </div>
+        @if (conflicts().length) {
+          <div class="jm-note jm-note-warn">Already used by: {{ conflicts().join(', ') }}</div>
+        }
+      </section>
+
+      <!-- Joker address -->
+      <section class="jm-card">
+        <div class="jm-card-head">
+          <span class="jm-card-title">Joker address</span>
+          <span class="jm-card-tools">
+            <button class="lm-row-btn" type="button" (click)="refreshGame()" [disabled]="!connected() || gameStatus() === 'loading'">Refresh</button>
+          </span>
+        </div>
+        <div class="jm-game">
+          @switch (gameStatus()) {
+            @case ('ok')      { <span class="jm-game-title">{{ gameTitle() || 'Unknown game' }}</span> <span class="lm-mono">{{ gameSerial() }}</span> }
+            @case ('loading') { <span class="lm-muted">Reading the game's cheats...</span> }
+            @case ('error')   { <span class="jm-err">{{ gameError() }}</span> }
+            @default          { <span class="lm-muted">Connect to PCSX2 to find the game's joker address.</span> }
+          }
+        </div>
+        @if (gameStatus() === 'ok' && candidates().length === 0) {
+          <div class="jm-note">No joker codes found in this game's archive cheats. Enter the pad address yourself.</div>
+        }
+        <div class="jm-field">
+          @if (candidates().length) {
+            <select class="jm-input" [value]="addressSelectValue()" (change)="setAddressChoice($any($event.target).value)">
+              @for (c of candidates(); track c.address) {
+                <option [value]="addrKey(c.address)">{{ addrLabel(c) }}</option>
+              }
+              <option [value]="CUSTOM">Custom address...</option>
+            </select>
+          }
+          @if (showCustomAddress()) {
+            <input class="jm-input lm-mono" type="text" spellcheck="false" placeholder="e.g. 003D4F4C"
+                   [value]="customAddress()" (input)="setCustomAddress($any($event.target).value)"
+                   [class.jm-input-bad]="customAddress().trim() !== '' && address() === null" />
+          }
+        </div>
+        <div class="jm-field jm-field-row">
+          <label class="jm-field-label" for="jm-pol">Stored as</label>
+          <select id="jm-pol" class="jm-input" [value]="polaritySetting()" (change)="setPolarity($any($event.target).value)">
+            <option value="auto">Auto ({{ polarityName(detectedPolarity()) }})</option>
+            <option value="low">Active-low (pressed = 0)</option>
+            <option value="high">Active-high (pressed = 1)</option>
+          </select>
+          <label class="jm-toggle" title="Some games keep the pad word byte-swapped.">
+            <input type="checkbox" [checked]="swap()" (change)="setSwap($any($event.target).checked)" />
+            Swap bytes
+          </label>
+        </div>
+      </section>
+
+      <!-- Output -->
+      <section class="jm-card">
+        <div class="jm-card-head">
+          <span class="jm-card-title">Code</span>
+          <span class="jm-card-tools">
+            <select class="jm-input jm-input-sm" [value]="format()" (change)="setFormat($any($event.target).value)"
+                    title="How to gate more than one line">
+              <option value="auto">One E line for the block</option>
+              <option value="each">D line before each line</option>
+            </select>
+          </span>
+        </div>
+        <textarea class="jm-input jm-textarea lm-mono" spellcheck="false" rows="4"
+                  placeholder="Codes to activate with this combo (optional)&#10;e.g. 2034A1B0 00000063"
+                  [value]="wrapText()" (input)="setWrapText($any($event.target).value)"></textarea>
+        @if (ignoredLines() > 0) {
+          <div class="jm-note">{{ ignoredLines() }} line(s) are not codes and were left out.</div>
+        }
+        <pre class="jm-output lm-mono">{{ outputText() }}</pre>
+        <div class="jm-actions">
+          <button class="jm-primary-btn" type="button" (click)="copyCode()" [disabled]="combo().length === 0">{{ copyCodeLabel() }}</button>
+          <button class="lm-tool-btn" type="button" (click)="copyJson()">{{ copyJsonLabel() }}</button>
+        </div>
+      </section>
+
+      <!-- Combos already in the archive -->
+      @if (uses().length) {
+        <section class="jm-card">
+          <div class="jm-card-head">
+            <span class="jm-card-title">Combos in use ({{ uses().length }})</span>
+          </div>
+          <div class="jm-uses">
+            @for (u of uses(); track u.cheat + u.value) {
+              <button class="jm-use" type="button" [class.jm-use-match]="u.value === value() && combo().length > 0"
+                      (click)="loadCombo(u.buttons)" title="Load this combo">
+                <span class="jm-use-combo">{{ u.combo }}</span>
+                <span class="jm-use-cheat">{{ u.cheat }}</span>
+              </button>
+            }
+          </div>
+        </section>
+      }
+
+      <!-- Event log -->
+      <section class="jm-card">
+        <div class="jm-card-head">
+          <span class="jm-card-title">Input events</span>
+          <span class="jm-card-tools">
+            <button class="lm-row-btn" type="button" (click)="logEntries.set([])" [disabled]="logEntries().length === 0">Clear</button>
+          </span>
+        </div>
+        <div class="jm-log">
+          @for (e of logEntries(); track e.id) {
             <div class="jm-log-row">
-              <span class="t">[{{ fmtTime(e.t) }}]</span>
+              <span class="t">{{ fmtTime(e.t) }}</span>
               <span class="{{ e.kind }}">{{ e.kind }}</span>
               <span class="name">{{ e.name }}</span>
             </div>
+          } @empty {
+            <div class="lm-muted">No events yet.</div>
           }
-        }
-      </div>
-
-      <div class="jm-actions">
-        <button (click)="resetAll()">Reset input</button>
-        <button class="primary" (click)="copyCode()">{{ copyCodeLabel() }}</button>
-        <button (click)="copyJson()">{{ copyLabel() }}</button>
-      </div>
+        </div>
+      </section>
 
     </aside>
+    }
   </div>
 
   <div class="jm-statusbar">
-    <span>Controller</span>
-    <span>pressed: {{ pressed().length }}</span>
-    <span class="jm-status-right">{{ hexCode() }}</span>
+    <span>{{ mode() === 'build' ? 'Build code' : 'Play' }}</span>
+    <span>{{ comboText() }}</span>
+    <span class="jm-status-right">{{ statusCode() }}</span>
   </div>
 </div>
 `,
@@ -233,58 +341,114 @@ export class JokerMakerPageComponent implements AfterViewInit, OnDestroy {
 
     readonly canvasW = CANVAS_W;
     readonly canvasH = CANVAS_H;
+    readonly CUSTOM = CUSTOM;
 
     private readonly canvasRef = viewChild.required<ElementRef<HTMLCanvasElement>>('canvas');
     private readonly zone = inject(NgZone);
     private readonly vscode = getVsCodeApi();
+    private readonly saved = (this.vscode.getState() as SavedState | undefined) ?? {};
 
     // Reactive state
-    /** Pressed-buttons set as a sorted array signal so templates react. */
-    readonly pressed       = signal<ButtonName[]>([]);
+    readonly mode          = signal<Mode>(this.saved.mode ?? 'build');
+    /** Build-mode joker combo. */
+    readonly combo         = signal<ButtonName[]>(sortButtons(this.saved.combo ?? []));
+    /** Play-mode buttons currently held. */
+    readonly held          = signal<ButtonName[]>([]);
     readonly leftStick     = signal({ x: 0, y: 0 });
     readonly rightStick    = signal({ x: 0, y: 0 });
     readonly logEntries    = signal<LogEntry[]>([]);
-    readonly multiPress    = signal(false);
     readonly liveEnabled   = signal(false);
     readonly liveActive    = signal(false);
     readonly connected     = signal(false);
-    /** Live pad-button mask (0xFFFF = nothing pressed) - only valid while liveActive. */
+    /** Live pad word (0xFFFF = nothing pressed) and sticks - valid while liveActive. */
     readonly livePadButtons = signal(0xFFFF);
-    readonly copyLabel     = signal('Copy JSON');
+    readonly liveSticks    = signal({ lx: 0x7F, ly: 0x7F, rx: 0x7F, ry: 0x7F });
+    readonly captureArmed  = signal(false);
+    readonly copyJsonLabel = signal('Copy JSON');
     readonly copyCodeLabel = signal('Copy code');
-    readonly sideCollapsed = signal(false);
+    readonly sideCollapsed = signal(this.saved.sideCollapsed ?? false);
 
-    /** Hex value computed from currently-pressed buttons (excluding 'ps'). */
-    readonly hexCode = computed(() => {
-        let h = 0xFFFF;
-        for (const name of this.pressed()) {
-            h -= JOKER_MASK[name] ?? 0;
-        }
-        return '0000' + h.toString(16).padStart(4, '0').toUpperCase();
+    readonly gameStatus    = signal<GameStatus>('offline');
+    readonly gameTitle     = signal('');
+    readonly gameSerial    = signal('');
+    readonly gameError     = signal('');
+    readonly candidates    = signal<JokerCandidate[]>([]);
+    readonly addressChoice = signal(this.saved.addressChoice ?? '');
+    readonly customAddress = signal(this.saved.customAddress ?? '');
+    readonly polaritySetting = signal<PolaritySetting>(this.saved.polarity ?? 'auto');
+    readonly swap          = signal(this.saved.swap ?? false);
+    readonly wrapText      = signal(this.saved.wrapText ?? '');
+    readonly format        = signal<WrapFormat>(this.saved.format ?? 'auto');
+
+    /** Candidate the address select points at (null when custom or none). */
+    readonly selectedCandidate = computed<JokerCandidate | null>(() => {
+        const list = this.candidates();
+        const choice = this.addressChoice();
+        if (choice === CUSTOM || list.length === 0) { return null; }
+        return list.find(c => this.addrKey(c.address) === choice) ?? list[0];
     });
 
-    /** Raw active-low 16-bit mask matching PS2 wire format. */
-    readonly buttonsRaw = computed(() => {
-        let mask = 0xFFFF;
-        for (const name of this.pressed()) {
-            mask &= ~(JOKER_MASK[name] ?? 0);
-        }
-        return '0x' + (mask & 0xFFFF).toString(16).padStart(4, '0').toUpperCase();
+    readonly showCustomAddress = computed(() => this.candidates().length === 0 || this.addressChoice() === CUSTOM);
+    readonly addressSelectValue = computed(() => {
+        const c = this.selectedCandidate();
+        return c ? this.addrKey(c.address) : CUSTOM;
     });
 
-    /** Snapshot exposed in the JSON panel + sent back to the provider. */
-    readonly jsonState = computed<JsonState>(() => ({
-        pressed:    this.pressed(),
-        leftStick:  this.leftStick(),
-        rightStick: this.rightStick(),
-        hex:        this.hexCode(),
-        buttonsRaw: this.buttonsRaw(),
-    }));
+    readonly address = computed<number | null>(() => {
+        const c = this.selectedCandidate();
+        return c ? c.address : parseAddress(this.customAddress());
+    });
 
-    readonly jsonHtml = computed(() => this.formatJson(this.jsonState()));
-    readonly gutter   = computed(() => {
-        const lines = this.jsonHtml().split('\n').length;
-        return Array.from({ length: lines }, (_, i) => i + 1).join('\n');
+    readonly detectedPolarity = computed<Polarity>(() => this.selectedCandidate()?.polarity ?? 'low');
+    readonly polarity = computed<Polarity>(() => {
+        const p = this.polaritySetting();
+        return p === 'auto' ? this.detectedPolarity() : p;
+    });
+    private readonly encoding = computed(() => ({ polarity: this.polarity(), swap: this.swap() }));
+
+    readonly value      = computed(() => encodeJoker(this.combo(), this.encoding()));
+    readonly valueHex   = computed(() => '0000' + hex(this.value(), 4));
+    /** The combo as the PS2 wire word (active-low), independent of the game's encoding. */
+    readonly padWordHex = computed(() => hex(encodeJoker(this.combo(), { polarity: 'low', swap: false }), 4));
+
+    private readonly bodyLines = computed(() => parseCodeLines(this.wrapText()));
+    readonly ignoredLines = computed(() =>
+        this.wrapText().split(/\r?\n/).filter(l => l.replace(/\/\/.*$|#.*$/, '').trim() !== '').length
+        - this.bodyLines().length);
+
+    readonly outputLines = computed<string[] | null>(() => {
+        const addr = this.address();
+        if (addr === null) { return null; }
+        return buildJokerCode(addr, this.value(), this.bodyLines(), this.format());
+    });
+    readonly outputText = computed(() => {
+        if (this.combo().length === 0) { return '// pick a button combo'; }
+        return this.outputLines()?.join('\n') ?? `// joker value ${this.valueHex()}\n// pick or enter a joker address for the full code`;
+    });
+
+    /** Archive cheats gated by the selected joker address, decoded with the current encoding. */
+    readonly uses = computed(() => {
+        const c = this.selectedCandidate();
+        if (!c) { return []; }
+        const enc = this.encoding();
+        return c.uses
+            .map(u => {
+                const buttons = decodeJoker(u.value, enc);
+                return { cheat: u.cheat, value: u.value, buttons, combo: comboLabel(buttons) };
+            })
+            .sort((a, b) => a.combo.localeCompare(b.combo) || a.cheat.localeCompare(b.cheat));
+    });
+
+    readonly conflicts = computed(() => {
+        if (this.combo().length === 0) { return []; }
+        const v = this.value();
+        return [...new Set(this.uses().filter(u => u.value === v).map(u => u.cheat))];
+    });
+
+    readonly comboText  = computed(() => comboLabel(this.mode() === 'build' ? this.combo() : this.held()));
+    readonly statusCode = computed(() => {
+        const lines = this.outputLines();
+        return this.combo().length === 0 ? '' : lines ? lines[0] : this.valueHex();
     });
 
     // Non-reactive scratch state
@@ -293,31 +457,56 @@ export class JokerMakerPageComponent implements AfterViewInit, OnDestroy {
     private imgReady = false;
     private hoverTarget: { type: 'button'; button: Button } | { type: 'stick'; stick: Stick } | null = null;
     private readonly activePointers = new Map<number, ActivePointer>();
+    /** Play-mode buttons held down by keyboard keys (released on blur). */
+    private readonly keysHeld = new Set<ButtonName>();
+    /** Union of live buttons seen while a capture is armed. */
+    private captureUnion = new Set<ButtonName>();
+    private logSeq = 0;
 
     private readonly messageListener = (event: MessageEvent) => this.onMessage(event);
-    private keydownHandler?: (e: KeyboardEvent) => void;
-    private keyupHandler?:   (e: KeyboardEvent) => void;
+    private readonly keydownHandler = (e: KeyboardEvent) => this.onKey(e, true);
+    private readonly keyupHandler   = (e: KeyboardEvent) => this.onKey(e, false);
+    private readonly blurHandler    = () => this.zone.run(() => this.releaseKeyboard());
     /** Coalesces repeat virtual-state posts. */
     private virtualStatePending = false;
-    /** Prevents opening the tool from clearing the emulator pad state. */
+    /** Set once Play-mode input happens, so opening the page never clears the emulator pad. */
     private virtualControllerArmed = false;
 
     constructor() {
         // Every time the rendered state changes, repaint the canvas.
         effect(() => {
-            // Touch the dependencies so the effect re-runs.
-            this.pressed();
+            this.mode();
+            this.combo();
+            this.held();
             this.leftStick();
             this.rightStick();
             this.livePadButtons();
+            this.liveSticks();
             this.liveActive();
             this.draw();
         });
 
-        // Whenever the user changes the virtual pad state, push it to the host.
+        // Play-mode input goes to the host as it changes.
         effect(() => {
-            const snapshot = this.jsonState();
-            this.scheduleVirtualStatePost(snapshot);
+            this.held();
+            this.leftStick();
+            this.rightStick();
+            if (this.mode() === 'play') { this.scheduleVirtualStatePost(); }
+        });
+
+        effect(() => {
+            const state: SavedState = {
+                mode:          this.mode(),
+                combo:         this.combo(),
+                wrapText:      this.wrapText(),
+                format:        this.format(),
+                polarity:      this.polaritySetting(),
+                swap:          this.swap(),
+                addressChoice: this.addressChoice(),
+                customAddress: this.customAddress(),
+                sideCollapsed: this.sideCollapsed(),
+            };
+            this.vscode.setState(state);
         });
     }
 
@@ -325,15 +514,18 @@ export class JokerMakerPageComponent implements AfterViewInit, OnDestroy {
         const canvas = this.canvasRef().nativeElement;
         this.ctx = canvas.getContext('2d');
         this.attachPointer(canvas);
-        this.attachKeyboard();
+        window.addEventListener('keydown', this.keydownHandler);
+        window.addEventListener('keyup',   this.keyupHandler);
+        window.addEventListener('blur',    this.blurHandler);
         window.addEventListener('message', this.messageListener);
         this.vscode.postMessage({ type: 'ready' });
     }
 
     ngOnDestroy(): void {
         window.removeEventListener('message', this.messageListener);
-        if (this.keydownHandler) { window.removeEventListener('keydown', this.keydownHandler); }
-        if (this.keyupHandler)   { window.removeEventListener('keyup',   this.keyupHandler); }
+        window.removeEventListener('keydown', this.keydownHandler);
+        window.removeEventListener('keyup',   this.keyupHandler);
+        window.removeEventListener('blur',    this.blurHandler);
     }
 
     // Host messages
@@ -351,18 +543,61 @@ export class JokerMakerPageComponent implements AfterViewInit, OnDestroy {
                     if (!msg.connected) {
                         this.liveActive.set(false);
                         this.liveEnabled.set(false);
+                        this.captureArmed.set(false);
                     }
                     break;
                 case 'jokerLivePadState':
-                    this.liveActive.set(true);
-                    this.livePadButtons.set(msg.buttons & 0xFFFF);
-                    this.logLivePadChange(msg.buttons & 0xFFFF);
+                    this.onLivePadState(msg);
                     break;
                 case 'jokerLivePollStopped':
                     this.liveActive.set(false);
+                    this.liveEnabled.set(false);
+                    this.captureArmed.set(false);
+                    break;
+                case 'jokerGameContext':
+                    this.onGameContext(msg);
                     break;
             }
         });
+    }
+
+    private onGameContext(msg: GameContextMsg): void {
+        this.gameStatus.set(msg.status);
+        this.gameError.set(msg.error ?? '');
+        if (msg.status === 'ok') {
+            const serial = msg.serial ?? '';
+            // A different game invalidates the remembered address pick.
+            if (serial !== this.gameSerial() && this.gameSerial() !== '') { this.addressChoice.set(''); }
+            this.gameTitle.set(msg.game ?? '');
+            this.gameSerial.set(serial);
+            this.candidates.set(findJokerCandidates(msg.cheats ?? []));
+        } else if (msg.status !== 'loading') {
+            this.candidates.set([]);
+        }
+    }
+
+    private onLivePadState(msg: LivePadStateMsg): void {
+        const word = msg.buttons & 0xFFFF;
+        const prev = this.livePadButtons();
+        this.liveActive.set(true);
+        this.livePadButtons.set(word);
+        this.liveSticks.set({ lx: msg.lx, ly: msg.ly, rx: msg.rx, ry: msg.ry });
+        if (word === prev) { return; }
+
+        const names = buttonsFromPadWord(word);
+        this.logEvent('live', comboLabel(names));
+
+        if (this.captureArmed()) {
+            if (names.length) {
+                for (const n of names) { this.captureUnion.add(n); }
+            } else if (this.captureUnion.size) {
+                // Combo released: take everything that was held together.
+                this.combo.set(sortButtons(this.captureUnion));
+                this.logEvent('capture', comboLabel(this.combo()));
+                this.captureUnion.clear();
+                this.captureArmed.set(false);
+            }
+        }
     }
 
     private loadControllerImage(uri: string): void {
@@ -377,32 +612,36 @@ export class JokerMakerPageComponent implements AfterViewInit, OnDestroy {
 
     // Outgoing virtual state
 
-    private scheduleVirtualStatePost(_snapshot: JsonState): void {
+    private scheduleVirtualStatePost(): void {
         if (!this.virtualControllerArmed) { return; }
         if (this.virtualStatePending) { return; }
         this.virtualStatePending = true;
         queueMicrotask(() => {
             this.virtualStatePending = false;
-            const snapshot = this.jsonState();
+            if (this.mode() !== 'play') { return; }
             this.vscode.postMessage({
                 type:       'jokerVirtualState',
-                pressed:    snapshot.pressed,
-                leftStick:  snapshot.leftStick,
-                rightStick: snapshot.rightStick,
+                pressed:    this.held(),
+                leftStick:  this.leftStick(),
+                rightStick: this.rightStick(),
             });
         });
     }
 
     // UI handlers
 
-    setMultiPress(on: boolean): void {
-        this.multiPress.set(on);
-        // Switching modes: any latched buttons are cleared so the user does not
-        // get stuck with a phantom press.
-        if (this.pressed().length) {
-            this.armVirtualController();
-            this.pressed.set([]);
-            this.logEvent('release', 'all');
+    setMode(mode: Mode): void {
+        if (this.mode() === mode) { return; }
+        // Drop any Play input so nothing stays held in the game.
+        this.activePointers.clear();
+        this.keysHeld.clear();
+        this.held.set([]);
+        this.leftStick.set({ x: 0, y: 0 });
+        this.rightStick.set({ x: 0, y: 0 });
+        this.mode.set(mode);
+        if (mode === 'build' && this.virtualControllerArmed) {
+            this.virtualControllerArmed = false;
+            this.vscode.postMessage({ type: 'jokerReleasePad' });
         }
     }
 
@@ -413,46 +652,91 @@ export class JokerMakerPageComponent implements AfterViewInit, OnDestroy {
     setLiveEnabled(on: boolean): void {
         this.liveEnabled.set(on);
         this.vscode.postMessage({ type: 'jokerLiveToggle', enabled: on });
-        if (!on) { this.liveActive.set(false); }
+        if (!on) {
+            this.liveActive.set(false);
+            this.captureArmed.set(false);
+        }
     }
 
-    resetAll(): void {
-        this.armVirtualController();
-        this.pressed.set([]);
-        this.leftStick.set({ x: 0, y: 0 });
-        this.rightStick.set({ x: 0, y: 0 });
-        this.logEntries.set([]);
-        this.activePointers.clear();
+    toggleCapture(): void {
+        if (this.captureArmed()) {
+            this.captureArmed.set(false);
+            return;
+        }
+        this.captureUnion.clear();
+        this.captureArmed.set(true);
+        if (!this.liveEnabled()) { this.setLiveEnabled(true); }
     }
+
+    clearCombo(): void {
+        if (this.combo().length === 0) { return; }
+        this.combo.set([]);
+        this.logEvent('release', 'all');
+    }
+
+    loadCombo(buttons: ButtonName[]): void {
+        this.combo.set(sortButtons(buttons));
+        if (this.mode() !== 'build') { this.setMode('build'); }
+    }
+
+    toggleCombo(name: ButtonName): void {
+        const has = this.combo().includes(name);
+        this.combo.set(sortButtons(has ? this.combo().filter(n => n !== name) : [...this.combo(), name]));
+        this.logEvent(has ? 'release' : 'press', name);
+    }
+
+    refreshGame(): void { this.vscode.postMessage({ type: 'jokerRefreshGame' }); }
+    setAddressChoice(v: string): void { this.addressChoice.set(v); }
+    setCustomAddress(v: string): void { this.customAddress.set(v); }
+    setPolarity(v: PolaritySetting): void { this.polaritySetting.set(v); }
+    setSwap(on: boolean): void { this.swap.set(on); }
+    setWrapText(v: string): void { this.wrapText.set(v); }
+    setFormat(v: WrapFormat): void { this.format.set(v); }
+
+    label(b: ButtonName): string { return BUTTON_LABEL[b]; }
+    addrKey(address: number): string { return hex(address, 7); }
+    addrLabel(c: JokerCandidate): string {
+        return `${hex(c.address, 7)}  -  ${c.uses.length} cheat code${c.uses.length === 1 ? '' : 's'}`;
+    }
+    polarityName(p: Polarity): string { return p === 'low' ? 'active-low' : 'active-high'; }
 
     copyCode(): void {
-        navigator.clipboard.writeText(this.hexCode()).then(
-            () => {
-                this.copyCodeLabel.set('Copied!');
-                setTimeout(() => this.copyCodeLabel.set('Copy code'), 1500);
-            },
-            () => this.copyCodeLabel.set('Copy code'),
-        );
+        const text = this.outputLines()?.join('\n') ?? this.valueHex();
+        this.copy(text, this.copyCodeLabel, 'Copy code');
     }
 
     copyJson(): void {
-        const text = JSON.stringify(this.jsonState(), null, 2);
+        const addr = this.address();
+        const text = JSON.stringify({
+            combo:      this.combo(),
+            value:      this.valueHex(),
+            padWord:    '0x' + this.padWordHex(),
+            address:    addr === null ? null : '0x' + hex(addr, 8),
+            polarity:   this.polarity(),
+            swapBytes:  this.swap(),
+            code:       this.outputLines(),
+        }, null, 2);
+        this.copy(text, this.copyJsonLabel, 'Copy JSON');
+    }
+
+    private copy(text: string, label: WritableSignal<string>, idle: string): void {
         navigator.clipboard.writeText(text).then(
             () => {
-                this.copyLabel.set('Copied!');
-                setTimeout(() => this.copyLabel.set('Copy JSON'), 1500);
+                label.set('Copied!');
+                setTimeout(() => label.set(idle), 1500);
             },
-            () => this.copyLabel.set('Copy JSON'),
+            () => label.set(idle),
         );
     }
 
     // Input plumbing
 
     private attachPointer(canvas: HTMLCanvasElement): void {
-        canvas.addEventListener('pointerdown', e => this.onPointerDown(canvas, e));
-        canvas.addEventListener('pointermove', e => this.onPointerMove(canvas, e));
-        canvas.addEventListener('pointerup',   e => this.onPointerUp(e));
-        canvas.addEventListener('pointercancel', e => this.onPointerUp(e));
+        canvas.addEventListener('pointerdown', e => this.zone.run(() => this.onPointerDown(canvas, e)));
+        canvas.addEventListener('pointermove', e => this.zone.run(() => this.onPointerMove(canvas, e)));
+        canvas.addEventListener('pointerup',     e => this.zone.run(() => this.onPointerUp(e)));
+        canvas.addEventListener('pointercancel', e => this.zone.run(() => this.onPointerUp(e)));
+        canvas.addEventListener('contextmenu', e => e.preventDefault());
         canvas.addEventListener('pointerleave', () => {
             if (this.hoverTarget) {
                 this.hoverTarget = null;
@@ -463,23 +747,28 @@ export class JokerMakerPageComponent implements AfterViewInit, OnDestroy {
     }
 
     private onPointerDown(canvas: HTMLCanvasElement, e: PointerEvent): void {
-        canvas.setPointerCapture(e.pointerId);
         const p = this.canvasPoint(canvas, e);
         const hit = this.hitTest(p);
         if (!hit) { return; }
+        e.preventDefault();
 
+        if (this.mode() === 'build') {
+            if (e.button !== 0) { return; }
+            this.toggleCombo(hit.type === 'button' ? hit.button.name : hit.stick.pressButton);
+            return;
+        }
+
+        canvas.setPointerCapture(e.pointerId);
+        this.virtualControllerArmed = true;
         if (hit.type === 'button') {
-            const name = hit.button.name;
-            if (this.multiPress()) {
-                this.togglePressed(name);
-            } else {
-                this.setSinglePressed(name);
-            }
+            this.activePointers.set(e.pointerId, { kind: 'button', name: hit.button.name });
+            this.setHeld(hit.button.name, true);
+        } else if (e.button === 2 || e.shiftKey) {
+            this.activePointers.set(e.pointerId, { kind: 'stickPress', stick: hit.stick });
+            this.setHeld(hit.stick.pressButton, true);
         } else {
-            const s = hit.stick;
-            this.activePointers.set(e.pointerId, { kind: 'stick', stick: s });
-            this.setPressed(s.pressButton, true);
-            this.updateStick(s, p);
+            this.activePointers.set(e.pointerId, { kind: 'stick', stick: hit.stick });
+            this.updateStick(hit.stick, p);
         }
     }
 
@@ -504,7 +793,7 @@ export class JokerMakerPageComponent implements AfterViewInit, OnDestroy {
             return;
         }
 
-        if (active.kind === 'stick' && active.stick) {
+        if (active.kind === 'stick') {
             this.updateStick(active.stick, p);
         }
     }
@@ -512,33 +801,42 @@ export class JokerMakerPageComponent implements AfterViewInit, OnDestroy {
     private onPointerUp(e: PointerEvent): void {
         const active = this.activePointers.get(e.pointerId);
         if (!active) { return; }
-        if (active.kind === 'button' && active.name) {
-            this.setPressed(active.name, false);
-        } else if (active.kind === 'stick' && active.stick) {
-            this.setPressed(active.stick.pressButton, false);
-            this.setStick(active.stick.name, 0, 0);
-            this.logEvent('stick', active.stick.name);
-        }
         this.activePointers.delete(e.pointerId);
+        if (active.kind === 'button') {
+            this.setHeld(active.name, false);
+        } else if (active.kind === 'stickPress') {
+            this.setHeld(active.stick.pressButton, false);
+        } else {
+            this.setStick(active.stick.name, 0, 0);
+            this.logEvent('stick', `${active.stick.name} centre`);
+        }
     }
 
-    private attachKeyboard(): void {
-        this.keydownHandler = (e: KeyboardEvent) => {
-            const btn = KEY_MAP[e.code];
-            if (!btn || e.repeat) { return; }
-            e.preventDefault();
-            this.setPressed(btn, true);
-        };
-        this.keyupHandler = (e: KeyboardEvent) => {
-            const btn = KEY_MAP[e.code];
-            if (!btn) { return; }
-            e.preventDefault();
-            // In multi-press mode the keyboard acts as a toggle too, since the
-            // intent is to "stack" buttons; otherwise we release on keyup.
-            if (!this.multiPress()) { this.setPressed(btn, false); }
-        };
-        window.addEventListener('keydown', this.keydownHandler);
-        window.addEventListener('keyup',   this.keyupHandler);
+    private onKey(e: KeyboardEvent, down: boolean): void {
+        const btn = KEY_MAP[e.code];
+        if (!btn || e.ctrlKey || e.metaKey || e.altKey) { return; }
+        // Typing in the side panel (and Enter on its buttons) must not press pad buttons.
+        const t = e.target as HTMLElement | null;
+        if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(t.tagName))) { return; }
+        e.preventDefault();
+        if (e.repeat) { return; }
+
+        this.zone.run(() => {
+            if (this.mode() === 'build') {
+                if (down) { this.toggleCombo(btn); }
+                return;
+            }
+            this.virtualControllerArmed = true;
+            if (down) { this.keysHeld.add(btn); } else { this.keysHeld.delete(btn); }
+            this.setHeld(btn, down);
+        });
+    }
+
+    /** Losing focus never delivers keyup, so let go of everything the keyboard held. */
+    private releaseKeyboard(): void {
+        const keys = [...this.keysHeld];
+        this.keysHeld.clear();
+        for (const b of keys) { this.setHeld(b, false); }
     }
 
     private canvasPoint(canvas: HTMLCanvasElement, e: PointerEvent): { x: number; y: number } {
@@ -583,76 +881,37 @@ export class JokerMakerPageComponent implements AfterViewInit, OnDestroy {
 
     // State mutation
 
-    private setPressed(name: ButtonName, on: boolean): void {
-        this.armVirtualController();
-        const cur = this.pressed();
+    private setHeld(name: ButtonName, on: boolean): void {
+        const cur = this.held();
         const has = cur.includes(name);
         if (on && !has) {
-            const next = [...cur, name].sort();
-            this.pressed.set(next);
+            this.held.set(sortButtons([...cur, name]));
             this.logEvent('press', name);
         } else if (!on && has) {
-            this.pressed.set(cur.filter(n => n !== name));
+            // A key and a pointer can hold the same button; keep it until both let go.
+            if (this.keysHeld.has(name) || [...this.activePointers.values()].some(a =>
+                (a.kind === 'button' && a.name === name) ||
+                (a.kind === 'stickPress' && a.stick.pressButton === name))) { return; }
+            this.held.set(cur.filter(n => n !== name));
             this.logEvent('release', name);
         }
-    }
-
-    private togglePressed(name: ButtonName): void {
-        const has = this.pressed().includes(name);
-        this.setPressed(name, !has);
-    }
-
-    private setSinglePressed(name: ButtonName): void {
-        this.armVirtualController();
-        const cur = this.pressed();
-        if (cur.length === 1 && cur[0] === name) {
-            this.pressed.set([]);
-            this.logEvent('release', name);
-            return;
-        }
-        for (const old of cur) {
-            this.logEvent('release', old);
-        }
-        this.pressed.set([name]);
-        this.logEvent('press', name);
     }
 
     private setStick(name: 'leftStick' | 'rightStick', x: number, y: number): void {
-        this.armVirtualController();
         const fx = Number(x.toFixed(2));
         const fy = Number(y.toFixed(2));
-        if (name === 'leftStick') {
-            const cur = this.leftStick();
-            if (cur.x !== fx || cur.y !== fy) { this.leftStick.set({ x: fx, y: fy }); }
-        } else {
-            const cur = this.rightStick();
-            if (cur.x !== fx || cur.y !== fy) { this.rightStick.set({ x: fx, y: fy }); }
-        }
-    }
-
-    private armVirtualController(): void {
-        this.virtualControllerArmed = true;
+        const sig = name === 'leftStick' ? this.leftStick : this.rightStick;
+        const cur = sig();
+        if (cur.x !== fx || cur.y !== fy) { sig.set({ x: fx, y: fy }); }
     }
 
     private logEvent(kind: LogEntry['kind'], name: string): void {
-        const entry: LogEntry = { kind, name, t: Date.now() };
-        const next = [entry, ...this.logEntries()].slice(0, 12);
-        this.logEntries.set(next);
+        const entry: LogEntry = { id: ++this.logSeq, kind, name, t: Date.now() };
+        this.logEntries.set([entry, ...this.logEntries()].slice(0, 40));
         // Forward to the host so the PadState output channel picks it up.
-        const time = new Date(entry.t).toLocaleTimeString();
         this.vscode.postMessage({
             type: 'jokerLog',
-            text: `[${time}] ${kind} ${name}`,
-        });
-    }
-
-    private logLivePadChange(buttons: number): void {
-        const pressedNames = (Object.keys(JOKER_MASK) as ButtonName[])
-            .filter(n => JOKER_MASK[n] !== 0 && (buttons & JOKER_MASK[n]) === 0);
-        const name = pressedNames.length ? pressedNames.join('+') : '(none)';
-        this.vscode.postMessage({
-            type: 'jokerLog',
-            text: `[${new Date().toLocaleTimeString()}] live ${name}`,
+            text: `[${this.fmtTime(entry.t)}] ${kind} ${name}`,
         });
     }
 
@@ -676,30 +935,28 @@ export class JokerMakerPageComponent implements AfterViewInit, OnDestroy {
             ctx.fillText('loading controller...', CANVAS_W / 2, CANVAS_H / 2);
         }
 
-        const pressedSet = new Set(this.pressed());
+        const pressedSet = new Set(this.mode() === 'build' ? this.combo() : this.held());
         // When the live pad toggle is active, light up the buttons the real
         // controller is currently pressing too (orange so they're distinct).
-        const livePressedSet = this.liveActive() ? this.computeLivePressedSet() : new Set<ButtonName>();
+        const livePressedSet = this.liveActive()
+            ? new Set(buttonsFromPadWord(this.livePadButtons()))
+            : new Set<ButtonName>();
 
         for (const b of BUTTONS) {
             if (pressedSet.has(b.name)) {
                 this.drawGlow(b, GLOW[b.name] ?? '#007acc');
             } else if (livePressedSet.has(b.name)) {
-                this.drawGlow(b, '#ffb454');
+                this.drawGlow(b, LIVE_GLOW);
             }
         }
-        for (const s of STICKS) { this.drawStickOverlay(s, pressedSet); }
-        if (this.hoverTarget) { this.drawHover(this.hoverTarget); }
-    }
-
-    private computeLivePressedSet(): Set<ButtonName> {
-        const mask = this.livePadButtons();
-        const out = new Set<ButtonName>();
-        for (const name of Object.keys(JOKER_MASK) as ButtonName[]) {
-            const m = JOKER_MASK[name];
-            if (m !== 0 && (mask & m) === 0) { out.add(name); }
+        for (const s of STICKS) {
+            this.drawStickOverlay(s, pressedSet);
+            if (livePressedSet.has(s.pressButton) && !pressedSet.has(s.pressButton)) {
+                this.drawStickRing(s, LIVE_GLOW);
+            }
+            if (this.liveActive()) { this.drawLiveStick(s); }
         }
-        return out;
+        if (this.hoverTarget) { this.drawHover(this.hoverTarget); }
     }
 
     private drawGlow(b: Button, color: string): void {
@@ -735,18 +992,16 @@ export class JokerMakerPageComponent implements AfterViewInit, OnDestroy {
         const cy = s.y + dy;
         const pressed = pressedSet.has(s.pressButton);
 
-        if (dx !== 0 || dy !== 0 || pressed) {
-            ctx.save();
-            ctx.strokeStyle = 'rgba(0,122,204,0.35)';
-            ctx.lineWidth = 1.5;
-            ctx.setLineDash([4, 4]);
-            ctx.beginPath();
-            ctx.arc(s.x, s.y, s.maxOffset, 0, Math.PI * 2);
-            ctx.stroke();
-            ctx.restore();
-        }
-
         if (dx === 0 && dy === 0 && !pressed) { return; }
+
+        ctx.save();
+        ctx.strokeStyle = 'rgba(0,122,204,0.35)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, s.maxOffset, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
 
         ctx.save();
         ctx.fillStyle = '#2b2b2b';
@@ -767,19 +1022,42 @@ export class JokerMakerPageComponent implements AfterViewInit, OnDestroy {
         ctx.beginPath();
         ctx.arc(cx, cy, s.capR * 0.62, 0, Math.PI * 2);
         ctx.fill();
+        ctx.restore();
 
-        ctx.strokeStyle = pressed ? this.hexA('#007acc', 0.8) : 'rgba(255,255,255,0.06)';
-        ctx.lineWidth = pressed ? 2 : 1;
+        if (pressed) { this.drawStickRing(s, GLOW[s.pressButton], cx, cy); }
+    }
+
+    private drawStickRing(s: Stick, color: string, cx = s.x, cy = s.y): void {
+        const ctx = this.ctx!;
+        ctx.save();
+        ctx.strokeStyle = this.hexA(color, 0.9);
+        ctx.lineWidth = 3;
         ctx.beginPath();
         ctx.arc(cx, cy, s.capR - 2, 0, Math.PI * 2);
         ctx.stroke();
         ctx.restore();
     }
 
+    /** Orange dot at the real controller's stick position. */
+    private drawLiveStick(s: Stick): void {
+        const live = this.liveSticks();
+        const ax = s.name === 'leftStick' ? live.lx : live.rx;
+        const ay = s.name === 'leftStick' ? live.ly : live.ry;
+        const nx = (ax - 0x7F) / 0x80, ny = (ay - 0x7F) / 0x80;
+        if (Math.abs(nx) < 0.08 && Math.abs(ny) < 0.08) { return; }
+        const ctx = this.ctx!;
+        ctx.save();
+        ctx.fillStyle = this.hexA(LIVE_GLOW, 0.9);
+        ctx.beginPath();
+        ctx.arc(s.x + nx * s.maxOffset, s.y + ny * s.maxOffset, 9, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+    }
+
     private drawHover(h: { type: 'button'; button: Button } | { type: 'stick'; stick: Stick }): void {
         const ctx = this.ctx!;
         ctx.save();
-        ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+        ctx.strokeStyle = 'rgba(255,255,255,0.12)';
         ctx.lineWidth = 2;
         if (h.type === 'stick') {
             ctx.beginPath();
@@ -795,57 +1073,11 @@ export class JokerMakerPageComponent implements AfterViewInit, OnDestroy {
         ctx.restore();
     }
 
-    private hexA(hex: string, a: number): string {
-        const h = hex.replace('#', '');
+    private hexA(hexColor: string, a: number): string {
+        const h = hexColor.replace('#', '');
         const r = parseInt(h.substring(0, 2), 16);
         const g = parseInt(h.substring(2, 4), 16);
         const b = parseInt(h.substring(4, 6), 16);
         return `rgba(${r},${g},${b},${a})`;
-    }
-
-    // JSON formatter
-
-    private escape(s: string): string {
-        return s.replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' })[c] as string);
-    }
-
-    private fmtVal(v: unknown): string {
-        if (typeof v === 'number') {
-            return `<span class="n">${Number.isInteger(v) ? v : v.toFixed(2)}</span>`;
-        }
-        if (typeof v === 'string') {
-            return `<span class="s">"${this.escape(v)}"</span>`;
-        }
-        if (typeof v === 'boolean') { return `<span class="b">${v}</span>`; }
-        if (v === null) { return `<span class="b">null</span>`; }
-        if (Array.isArray(v)) {
-            if (v.length === 0) { return `<span class="p">[]</span>`; }
-            return `<span class="p">[</span> ` +
-                v.map(x => this.fmtVal(x)).join('<span class="p">, </span>') +
-                ` <span class="p">]</span>`;
-        }
-        if (typeof v === 'object') {
-            const obj = v as Record<string, unknown>;
-            const ks = Object.keys(obj);
-            if (ks.length === 0) { return `<span class="p">{}</span>`; }
-            return `<span class="p">{ </span>` +
-                ks.map(k => `<span class="k">"${k}"</span><span class="p">: </span>${this.fmtVal(obj[k])}`)
-                  .join('<span class="p">, </span>') +
-                `<span class="p"> }</span>`;
-        }
-        return this.escape(String(v));
-    }
-
-    private formatJson(s: JsonState): string {
-        const lines = [
-            `<span class="p">{</span>`,
-            `  <span class="k">"pressed"</span><span class="p">:</span> ${this.fmtVal(s.pressed)}<span class="p">,</span>`,
-            `  <span class="k">"leftStick"</span><span class="p">:</span> ${this.fmtVal(s.leftStick)}<span class="p">,</span>`,
-            `  <span class="k">"rightStick"</span><span class="p">:</span> ${this.fmtVal(s.rightStick)}<span class="p">,</span>`,
-            `  <span class="k">"hex"</span><span class="p">:</span> ${this.fmtVal(s.hex)}<span class="p">,</span>`,
-            `  <span class="k">"buttonsRaw"</span><span class="p">:</span> ${this.fmtVal(s.buttonsRaw)}`,
-            `<span class="p">}</span>`,
-        ];
-        return lines.join('\n');
     }
 }

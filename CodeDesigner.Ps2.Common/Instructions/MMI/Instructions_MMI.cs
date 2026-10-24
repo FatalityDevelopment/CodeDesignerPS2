@@ -1020,27 +1020,27 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.MMI
         public PABSW()
         {
             Opcode = 0x1C; Funct = 0x28; Name = "pabsw";
-            ArgType = InstrArgType.R; ArgNames = ["rd", "rs"];
-            Equation = "rd = abs(rs) (4x32-bit)"; Description = "Parallel Absolute Word";
+            ArgType = InstrArgType.R; ArgNames = ["rd", "rt"];
+            Equation = "rd = abs(rt) (4x32-bit)"; Description = "Parallel Absolute Word";
         }
 
         public override void Exec(CpuState cpu, Args_R args)
         {
             for (int i = 0; i < 4; i++)
             {
-                int v = MMIHelpers.GetW(cpu, args.Rs, i);
+                int v = MMIHelpers.GetW(cpu, args.Rt, i);
                 MMIHelpers.SetW(cpu, args.Rd, i, v == int.MinValue ? int.MaxValue : Math.Abs(v));
             }
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
-            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}";
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rt)}";
 
         public override uint Asm(int[] args)
             => (uint)(0x1C << 26 | args[1] << 21 | args[0] << 11 | 0x01 << 6 | 0x28);
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
-            => Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rs", CpuHelpers.RegName(args.Rs));
+            => Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rt", CpuHelpers.RegName(args.Rt));
     }
 
     // PCEQW - Parallel Compare Equal Word
@@ -1099,27 +1099,27 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.MMI
         public PABSH()
         {
             Opcode = 0x1C; Funct = 0x28; Name = "pabsh";
-            ArgType = InstrArgType.R; ArgNames = ["rd", "rs"];
-            Equation = "rd = abs(rs) (8x16-bit)"; Description = "Parallel Absolute Halfword";
+            ArgType = InstrArgType.R; ArgNames = ["rd", "rt"];
+            Equation = "rd = abs(rt) (8x16-bit)"; Description = "Parallel Absolute Halfword";
         }
 
         public override void Exec(CpuState cpu, Args_R args)
         {
             for (int i = 0; i < 8; i++)
             {
-                short v = MMIHelpers.GetH(cpu, args.Rs, i);
+                short v = MMIHelpers.GetH(cpu, args.Rt, i);
                 MMIHelpers.SetH(cpu, args.Rd, i, v == short.MinValue ? short.MaxValue : (short)Math.Abs(v));
             }
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
-            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}";
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rt)}";
 
         public override uint Asm(int[] args)
             => (uint)(0x1C << 26 | args[1] << 21 | args[0] << 11 | 0x05 << 6 | 0x28);
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
-            => Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rs", CpuHelpers.RegName(args.Rs));
+            => Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rt", CpuHelpers.RegName(args.Rt));
     }
 
     // PCEQH - Parallel Compare Equal Halfword
@@ -1614,23 +1614,65 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.MMI
             Description = "Parallel Move From HI/LO - copies HI/LO to rd (128-bit)";
         }
 
+        private static readonly string[] Formats = ["lw", "uw", "slw", "lh", "sh"];
+
+        // HI/LO are 128-bit on the EE: words 0-1 in HI/LO, words 2-3 in HI1/LO1.
+        private static uint W(ulong lo64, ulong hi64, int i) => (uint)((i < 2 ? lo64 : hi64) >> (32 * (i & 1)));
+
         public override void Exec(CpuState cpu, Args_R args)
         {
-            if (args.Rd != 0) { cpu.RegsLo[args.Rd] = cpu.LO; cpu.RegsHi[args.Rd] = cpu.HI; }
+            if (args.Rd == 0) return;
+            uint[] lo = [W(cpu.LO, cpu.LO1, 0), W(cpu.LO, cpu.LO1, 1), W(cpu.LO, cpu.LO1, 2), W(cpu.LO, cpu.LO1, 3)];
+            uint[] hi = [W(cpu.HI, cpu.HI1, 0), W(cpu.HI, cpu.HI1, 1), W(cpu.HI, cpu.HI1, 2), W(cpu.HI, cpu.HI1, 3)];
+            uint[] r = new uint[4];
+            switch (args.Shamt)
+            {
+                case 0: r = [lo[0], hi[0], lo[2], hi[2]]; break;                    // .lw
+                case 1: r = [lo[1], hi[1], lo[3], hi[3]]; break;                    // .uw
+                case 2:                                                             // .slw
+                {
+                    for (int i = 0; i < 2; i++)
+                    {
+                        long v = (long)(((ulong)hi[i * 2] << 32) | lo[i * 2]);
+                        long s = Math.Clamp(v, int.MinValue, int.MaxValue);
+                        r[i * 2] = (uint)s;
+                        r[i * 2 + 1] = s < 0 ? 0xFFFFFFFFu : 0u;
+                    }
+                    break;
+                }
+                case 3:                                                             // .lh
+                    for (int i = 0; i < 2; i++)
+                    {
+                        r[i * 2]     = (lo[i * 2] & 0xFFFF) | (lo[i * 2 + 1] << 16);
+                        r[i * 2 + 1] = (hi[i * 2] & 0xFFFF) | (hi[i * 2 + 1] << 16);
+                    }
+                    break;
+                case 4:                                                             // .sh
+                {
+                    static uint Sat(uint w) => (ushort)(short)Math.Clamp((int)w, short.MinValue, short.MaxValue);
+                    for (int i = 0; i < 2; i++)
+                    {
+                        r[i * 2]     = Sat(lo[i * 2]) | (Sat(lo[i * 2 + 1]) << 16);
+                        r[i * 2 + 1] = Sat(hi[i * 2]) | (Sat(hi[i * 2 + 1]) << 16);
+                    }
+                    break;
+                }
+                default: return;
+            }
+            cpu.RegsLo[args.Rd] = r[0] | ((ulong)r[1] << 32);
+            cpu.RegsHi[args.Rd] = r[2] | ((ulong)r[3] << 32);
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
-            => $"{Name} {CpuHelpers.RegName(args.Rd)}";
+            => args.Shamt < Formats.Length
+                ? $"{Name}.{Formats[args.Shamt]} {CpuHelpers.RegName(args.Rd)}"
+                : $"{Name} {CpuHelpers.RegName(args.Rd)}, {args.Shamt}";
 
         public override uint Asm(int[] args)
             => (uint)(0x1C << 26 | args[0] << 11 | 0x30);
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
-        {
-            string eq = Equation.Replace("rd", CpuHelpers.RegName(args.Rd));
-            if (cpu != null) return $"{eq} => LO=0x{cpu.LO:X16}, HI=0x{cpu.HI:X16}";
-            return eq;
-        }
+            => $"{CpuHelpers.RegName(args.Rd)} = HI/LO ({(args.Shamt < Formats.Length ? Formats[args.Shamt] : "?")})";
     }
 
     // PMTHL - Parallel Move To HI/LO (funct=0x31)
@@ -1646,11 +1688,19 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.MMI
 
         public override void Exec(CpuState cpu, Args_R args)
         {
-            cpu.LO = cpu.RegsLo[args.Rs]; cpu.HI = cpu.RegsHi[args.Rs];
+            // pmthl.lw: LO.w0 = rs.w0, HI.w0 = rs.w1, LO.w2 = rs.w2, HI.w2 = rs.w3.
+            if (args.Shamt != 0) return;
+            ulong lo = cpu.RegsLo[args.Rs], hi = cpu.RegsHi[args.Rs];
+            cpu.LO  = (cpu.LO  & 0xFFFFFFFF_00000000UL) | (uint)lo;
+            cpu.HI  = (cpu.HI  & 0xFFFFFFFF_00000000UL) | (uint)(lo >> 32);
+            cpu.LO1 = (cpu.LO1 & 0xFFFFFFFF_00000000UL) | (uint)hi;
+            cpu.HI1 = (cpu.HI1 & 0xFFFFFFFF_00000000UL) | (uint)(hi >> 32);
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
-            => $"{Name} {CpuHelpers.RegName(args.Rs)}";
+            => args.Shamt == 0
+                ? $"{Name}.lw {CpuHelpers.RegName(args.Rs)}"
+                : $"{Name} {CpuHelpers.RegName(args.Rs)}, {args.Shamt}";
 
         public override uint Asm(int[] args)
             => (uint)(0x1C << 26 | args[0] << 21 | 0x31);

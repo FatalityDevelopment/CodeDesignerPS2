@@ -1,0 +1,331 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   Cheat Porter — port codes between two EE RAM images.
+   Chrome follows the disasm-panel / Memory Diff conventions (rounded
+   bordered cards, VS Code theme vars).
+   ══════════════════════════════════════════════════════════════════════════ */
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--vscode-editor-background, #1e1e1e);
+  color: var(--vscode-foreground, #d4d4d4);
+}
+
+:root {
+  --cp-border: var(--vscode-panel-border, #313131);
+  --cp-muted:  var(--vscode-descriptionForeground, #8f8f8f);
+  --cp-mono:   var(--vscode-editor-font-family, Consolas, 'Courier New', monospace);
+  --cp-ok:     var(--vscode-testing-iconPassed, #73c991);
+  --cp-warn:   var(--vscode-editorWarning-foreground, #cca700);
+  --cp-err:    var(--vscode-errorForeground, #f48771);
+  --cp-link:   var(--vscode-textLink-foreground, #9cdcfe);
+}
+
+.cp-outer {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ── Dump selection bar ──────────────────────────────────────────────────── */
+.cp-source-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 12px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--cp-border);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+  flex-shrink: 0;
+}
+.cp-side {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 260px;
+  min-width: 0;
+}
+.cp-side .cp-select { flex: 1; }
+
+.cp-field-label,
+.cp-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--cp-muted);
+  white-space: nowrap;
+}
+.cp-field-label { width: 32px; }
+
+.cp-select,
+.cp-input {
+  background: var(--vscode-input-background, #3c3c3c);
+  color: var(--vscode-input-foreground, #d4d4d4);
+  border: 1px solid var(--vscode-input-border, #3c3c3c);
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+  min-width: 0;
+}
+.cp-select:focus,
+.cp-input:focus { border-color: var(--vscode-focusBorder, #0078d4); }
+
+.cp-icon-btn {
+  display: inline-grid;
+  place-items: center;
+  min-width: 26px;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--cp-border);
+  border-radius: 4px;
+  background: var(--vscode-button-secondaryBackground, #2f2f30);
+  color: var(--vscode-button-secondaryForeground, #d4d4d4);
+  cursor: pointer;
+  font-size: 13px;
+}
+.cp-icon-btn:hover { background: var(--vscode-button-secondaryHoverBackground, #3a3a3b); }
+
+.cp-primary-btn {
+  height: 26px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: var(--vscode-button-background, #0e639c);
+  color: var(--vscode-button-foreground, #fff);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.cp-primary-btn:hover:not(:disabled) { background: var(--vscode-button-hoverBackground, #1177bb); }
+.cp-primary-btn:disabled { opacity: 0.5; cursor: default; }
+
+/* ── Progress / status ───────────────────────────────────────────────────── */
+.cp-progress {
+  position: relative;
+  margin: 8px 12px 0;
+  height: 22px;
+  border: 1px solid var(--cp-border);
+  border-radius: 6px;
+  overflow: hidden;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  color: var(--cp-muted);
+}
+.cp-progress span { position: relative; }
+.cp-progress-inner {
+  position: absolute;
+  top: 0; left: 0;
+  height: 100%;
+  width: 30%;
+  background: linear-gradient(90deg, transparent, rgba(56, 139, 253, 0.35), transparent);
+  animation: cp-slide 1.4s ease-in-out infinite;
+}
+@keyframes cp-slide { 0% { left: -30%; } 100% { left: 100%; } }
+
+.cp-status {
+  margin: 8px 12px 0;
+  padding: 5px 10px;
+  border: 1px solid var(--cp-border);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--cp-ok);
+  flex-shrink: 0;
+}
+.cp-status.cp-status-error { color: var(--cp-err); border-color: rgba(244, 135, 113, 0.4); }
+
+/* ── Body: input + results ───────────────────────────────────────────────── */
+.cp-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  gap: 12px;
+  padding: 10px 12px 12px;
+}
+@media (max-width: 760px) {
+  .cp-body { flex-direction: column; overflow-y: auto; }
+  .cp-input-card { width: auto !important; max-width: none !important; min-height: 220px; }
+  .cp-results-card { min-height: 360px; }
+}
+
+.cp-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: 1px solid var(--cp-border);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+  overflow: hidden;
+}
+.cp-input-card   { width: 34%; min-width: 260px; max-width: 440px; flex-shrink: 0; }
+.cp-results-card { flex: 1; min-width: 0; }
+
+.cp-card-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--cp-border);
+  background: var(--vscode-sideBar-background, #252526);
+  flex-shrink: 0;
+}
+.cp-count { font-size: 11px; color: var(--cp-muted); }
+.cp-head-actions { display: inline-flex; gap: 6px; margin-left: auto; }
+.cp-head-actions .lm-tool-btn { display: inline-flex; align-items: center; gap: 4px; }
+
+.cp-textarea {
+  flex: 1;
+  min-height: 0;
+  resize: none;
+  border: none;
+  outline: none;
+  padding: 8px 10px;
+  background: transparent;
+  color: var(--vscode-editor-foreground, #d4d4d4);
+  font-family: var(--cp-mono);
+  font-size: var(--vscode-editor-font-size, 12px);
+  line-height: 1.5;
+}
+.cp-hint {
+  padding: 5px 10px;
+  border-top: 1px solid var(--cp-border);
+  font-size: 11px;
+  color: var(--cp-muted);
+  flex-shrink: 0;
+}
+
+.cp-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  color: var(--cp-muted);
+  font-size: 12px;
+}
+.cp-results-card > .cp-empty { flex: 1; }
+.cp-steps { display: flex; flex-direction: column; gap: 10px; max-width: 420px; }
+.cp-steps b {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  margin-right: 8px;
+  border-radius: 4px;
+  background: var(--vscode-button-secondaryBackground, #2f2f30);
+  color: var(--vscode-foreground, #d4d4d4);
+  font-size: 10px;
+}
+
+/* ── Results toolbar ─────────────────────────────────────────────────────── */
+.cp-filter { flex: 1 1 140px; margin-left: auto; max-width: 240px; }
+.cp-seg {
+  display: inline-flex;
+  border: 1px solid var(--cp-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.cp-seg button {
+  border: none;
+  border-right: 1px solid var(--cp-border);
+  background: transparent;
+  color: var(--cp-muted);
+  padding: 3px 10px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.cp-seg button:last-child { border-right: none; }
+.cp-seg button:hover { background: rgba(255, 255, 255, 0.05); color: var(--vscode-foreground, #d4d4d4); }
+.cp-seg button.cp-seg-on {
+  background: var(--vscode-button-secondaryBackground, #2f2f30);
+  color: var(--vscode-foreground, #d4d4d4);
+  font-weight: 600;
+}
+
+/* ── Cheat blocks ────────────────────────────────────────────────────────── */
+.cp-block-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cp-block {
+  border: 1px solid var(--cp-border);
+  border-radius: 6px;
+  flex-shrink: 0;
+  overflow-x: auto;
+}
+.cp-block-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.cp-block-name { font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-block-text {
+  padding: 0 8px 4px 30px;
+  font-size: 11px;
+  color: var(--cp-muted);
+  white-space: pre-wrap;
+}
+
+.cp-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 8px;
+  border: 1px solid currentColor;
+  white-space: nowrap;
+}
+.cp-badge-ok      { color: var(--cp-ok); }
+.cp-badge-review  { color: var(--cp-warn); }
+.cp-badge-missing { color: var(--cp-err); }
+
+.cp-lines {
+  width: 100%;
+  border-collapse: collapse;
+  border-top: 1px solid var(--cp-border);
+  font-size: 12px;
+}
+.cp-lines td { padding: 2px 8px; vertical-align: middle; white-space: nowrap; }
+.cp-lines tr:hover td { background: var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.04)); }
+.cp-lines td:first-child { padding-left: 30px; }
+.cp-code  { font-family: var(--cp-mono); width: 1%; }
+.cp-old   { color: var(--cp-muted); }
+.cp-arrow { color: var(--cp-muted); width: 1%; padding: 0 2px !important; }
+.cp-new   { color: var(--cp-link); }
+.cp-same  { color: var(--vscode-foreground, #d4d4d4); }
+.cp-miss  { color: var(--cp-err); }
+.cp-cand  { font-family: var(--cp-mono); padding: 1px 4px; border-color: var(--cp-warn); }
+.cp-meta  { color: var(--cp-muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; max-width: 0; }
+.cp-conf  { margin-right: 6px; }
+.cp-line-review  .cp-conf { color: var(--cp-warn); }
+.cp-line-ok      .cp-conf { color: var(--cp-ok); }
+
+/* ── Output ──────────────────────────────────────────────────────────────── */
+.cp-output {
+  display: flex;
+  flex-direction: column;
+  height: 34%;
+  min-height: 120px;
+  border-top: 1px solid var(--cp-border);
+  flex-shrink: 0;
+}
+.cp-select-all { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.cp-output-text { color: var(--cp-link); }

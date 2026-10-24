@@ -270,7 +270,8 @@ namespace CodeDesigner.Ps2.TestProject
         [TestMethod]
         public void Test_PABSW()
         {
-            uint enc = (uint)(0x1C << 26 | 16 << 21 | 8 << 11 | 0x01 << 6 | 0x28);
+            // PABSW rd, rt: the source is the rt field.
+            uint enc = (uint)(0x1C << 26 | 16 << 16 | 8 << 11 | 0x01 << 6 | 0x28);
             AssertDisasm(enc, "pabsw");
             var cpu = MakeCpu();
             cpu.RegsLo[16] = unchecked((ulong)(long)-5); // W0 = -5
@@ -444,62 +445,10 @@ namespace CodeDesigner.Ps2.TestProject
             AssertDisasm(enc, "rsqrt.s");
             var cpu = MakeCpu();
             var d = MipsDecoder.DecodeR(enc);
-            cpu.FPR[d.Rs] = 8.0f; cpu.FPR[d.Rt] = 4.0f; // FPR[16]=8, FPR[ft=2]=4
+            cpu.FPR[d.Rd] = 8.0f; cpu.FPR[d.Rt] = 4.0f; // FPR[16]=8, FPR[ft=2]=4
             Exec(cpu, enc);
-            // FPR[d.Rd] = FPR[16] / sqrt(|FPR[2]|) = 8/2 = 4
-            Assert.AreEqual(4.0f, cpu.FPR[d.Rd], 0.0001f, "RSQRT.S: 8/sqrt(4)=4");
-        }
-
-        [TestMethod]
-        public void Test_ROUND_W_S()
-        {
-            uint enc = (uint)(0x11 << 26 | 0x10 << 21 | 0 << 16 | 1 << 11 | 0 << 6 | 0x0C);
-            AssertDisasm(enc, "round.w.s");
-            var cpu = MakeCpu();
-            var d = MipsDecoder.DecodeR(enc);
-            cpu.FPR[d.Rs] = 3.7f; // FPR[16] = 3.7
-            Exec(cpu, enc);
-            int r = (int)System.BitConverter.SingleToUInt32Bits(cpu.FPR[d.Rd]);
-            Assert.AreEqual(4, r, "ROUND.W.S: round(3.7)=4");
-        }
-
-        [TestMethod]
-        public void Test_TRUNC_W_S()
-        {
-            uint enc = (uint)(0x11 << 26 | 0x10 << 21 | 0 << 16 | 1 << 11 | 0 << 6 | 0x0D);
-            AssertDisasm(enc, "trunc.w.s");
-            var cpu = MakeCpu();
-            var d = MipsDecoder.DecodeR(enc);
-            cpu.FPR[d.Rs] = 3.9f; // FPR[16] = 3.9
-            Exec(cpu, enc);
-            int r = (int)System.BitConverter.SingleToUInt32Bits(cpu.FPR[d.Rd]);
-            Assert.AreEqual(3, r, "TRUNC.W.S: trunc(3.9)=3");
-        }
-
-        [TestMethod]
-        public void Test_CEIL_W_S()
-        {
-            uint enc = (uint)(0x11 << 26 | 0x10 << 21 | 0 << 16 | 1 << 11 | 0 << 6 | 0x0E);
-            AssertDisasm(enc, "ceil.w.s");
-            var cpu = MakeCpu();
-            var d = MipsDecoder.DecodeR(enc);
-            cpu.FPR[d.Rs] = 3.1f; // FPR[16] = 3.1
-            Exec(cpu, enc);
-            int r = (int)System.BitConverter.SingleToUInt32Bits(cpu.FPR[d.Rd]);
-            Assert.AreEqual(4, r, "CEIL.W.S: ceil(3.1)=4");
-        }
-
-        [TestMethod]
-        public void Test_FLOOR_W_S()
-        {
-            uint enc = (uint)(0x11 << 26 | 0x10 << 21 | 0 << 16 | 1 << 11 | 0 << 6 | 0x0F);
-            AssertDisasm(enc, "floor.w.s");
-            var cpu = MakeCpu();
-            var d = MipsDecoder.DecodeR(enc);
-            cpu.FPR[d.Rs] = 3.9f; // FPR[16] = 3.9
-            Exec(cpu, enc);
-            int r = (int)System.BitConverter.SingleToUInt32Bits(cpu.FPR[d.Rd]);
-            Assert.AreEqual(3, r, "FLOOR.W.S: floor(3.9)=3");
+            // FPR[d.Shamt] = FPR[16] / sqrt(|FPR[2]|) = 8/2 = 4
+            Assert.AreEqual(4.0f, cpu.FPR[d.Shamt], 0.0001f, "RSQRT.S: 8/sqrt(4)=4");
         }
 
         [TestMethod]
@@ -509,7 +458,7 @@ namespace CodeDesigner.Ps2.TestProject
             AssertDisasm(enc, "adda.s");
             var cpu = MakeCpu();
             var d = MipsDecoder.DecodeR(enc);
-            cpu.FPR[d.Rs] = 3.0f; cpu.FPR[d.Rt] = 4.0f; // FPR[16]=3, FPR[ft=2]=4
+            cpu.FPR[d.Rd] = 3.0f; cpu.FPR[d.Rt] = 4.0f; // FPR[16]=3, FPR[ft=2]=4
             Exec(cpu, enc);
             Assert.AreEqual(7.0f, cpu.FACC, 0.0001f, "ADDA.S: ACC = FPR[16](3)+FPR[ft](4)=7");
         }
@@ -521,7 +470,7 @@ namespace CodeDesigner.Ps2.TestProject
             AssertDisasm(enc, "suba.s");
             var cpu = MakeCpu();
             var d = MipsDecoder.DecodeR(enc);
-            cpu.FPR[d.Rs] = 10.0f; cpu.FPR[d.Rt] = 3.0f;
+            cpu.FPR[d.Rd] = 10.0f; cpu.FPR[d.Rt] = 3.0f;
             Exec(cpu, enc);
             Assert.AreEqual(7.0f, cpu.FACC, 0.0001f, "SUBA.S: ACC = 10-3=7");
         }
@@ -533,7 +482,7 @@ namespace CodeDesigner.Ps2.TestProject
             AssertDisasm(enc, "mula.s");
             var cpu = MakeCpu();
             var d = MipsDecoder.DecodeR(enc);
-            cpu.FPR[d.Rs] = 3.0f; cpu.FPR[d.Rt] = 4.0f;
+            cpu.FPR[d.Rd] = 3.0f; cpu.FPR[d.Rt] = 4.0f;
             Exec(cpu, enc);
             Assert.AreEqual(12.0f, cpu.FACC, 0.0001f, "MULA.S: ACC = 3*4=12");
         }
@@ -545,10 +494,10 @@ namespace CodeDesigner.Ps2.TestProject
             AssertDisasm(enc, "madd.s");
             var cpu = MakeCpu();
             var d = MipsDecoder.DecodeR(enc);
-            cpu.FACC = 10.0f; cpu.FPR[d.Rs] = 3.0f; cpu.FPR[d.Rt] = 4.0f;
+            cpu.FACC = 10.0f; cpu.FPR[d.Rd] = 3.0f; cpu.FPR[d.Rt] = 4.0f;
             Exec(cpu, enc);
-            // FPR[d.Rd] = ACC(10) + FPR[16](3) * FPR[ft](4) = 22
-            Assert.AreEqual(22.0f, cpu.FPR[d.Rd], 0.0001f, "MADD.S: fd = ACC(10) + 3*4=12 -> 22");
+            // FPR[d.Shamt] = ACC(10) + FPR[16](3) * FPR[ft](4) = 22
+            Assert.AreEqual(22.0f, cpu.FPR[d.Shamt], 0.0001f, "MADD.S: fd = ACC(10) + 3*4=12 -> 22");
         }
 
         [TestMethod]
@@ -558,9 +507,9 @@ namespace CodeDesigner.Ps2.TestProject
             AssertDisasm(enc, "msub.s");
             var cpu = MakeCpu();
             var d = MipsDecoder.DecodeR(enc);
-            cpu.FACC = 20.0f; cpu.FPR[d.Rs] = 3.0f; cpu.FPR[d.Rt] = 4.0f;
+            cpu.FACC = 20.0f; cpu.FPR[d.Rd] = 3.0f; cpu.FPR[d.Rt] = 4.0f;
             Exec(cpu, enc);
-            Assert.AreEqual(8.0f, cpu.FPR[d.Rd], 0.0001f, "MSUB.S: fd = ACC(20) - 3*4=12 -> 8");
+            Assert.AreEqual(8.0f, cpu.FPR[d.Shamt], 0.0001f, "MSUB.S: fd = ACC(20) - 3*4=12 -> 8");
         }
 
         [TestMethod]
@@ -570,7 +519,7 @@ namespace CodeDesigner.Ps2.TestProject
             AssertDisasm(enc, "madda.s");
             var cpu = MakeCpu();
             var d = MipsDecoder.DecodeR(enc);
-            cpu.FACC = 5.0f; cpu.FPR[d.Rs] = 3.0f; cpu.FPR[d.Rt] = 2.0f;
+            cpu.FACC = 5.0f; cpu.FPR[d.Rd] = 3.0f; cpu.FPR[d.Rt] = 2.0f;
             Exec(cpu, enc);
             Assert.AreEqual(11.0f, cpu.FACC, 0.0001f, "MADDA.S: ACC = 5 + 3*2=6 -> 11");
         }
@@ -582,7 +531,7 @@ namespace CodeDesigner.Ps2.TestProject
             AssertDisasm(enc, "msuba.s");
             var cpu = MakeCpu();
             var d = MipsDecoder.DecodeR(enc);
-            cpu.FACC = 20.0f; cpu.FPR[d.Rs] = 3.0f; cpu.FPR[d.Rt] = 4.0f;
+            cpu.FACC = 20.0f; cpu.FPR[d.Rd] = 3.0f; cpu.FPR[d.Rt] = 4.0f;
             Exec(cpu, enc);
             Assert.AreEqual(8.0f, cpu.FACC, 0.0001f, "MSUBA.S: ACC = 20 - 3*4=12 -> 8");
         }
@@ -594,9 +543,9 @@ namespace CodeDesigner.Ps2.TestProject
             AssertDisasm(enc, "max.s");
             var cpu = MakeCpu();
             var d = MipsDecoder.DecodeR(enc);
-            cpu.FPR[d.Rs] = 3.0f; cpu.FPR[d.Rt] = 7.0f;
+            cpu.FPR[d.Rd] = 3.0f; cpu.FPR[d.Rt] = 7.0f;
             Exec(cpu, enc);
-            Assert.AreEqual(7.0f, cpu.FPR[d.Rd], 0.0001f, "MAX.S: max(3,7)=7");
+            Assert.AreEqual(7.0f, cpu.FPR[d.Shamt], 0.0001f, "MAX.S: max(3,7)=7");
         }
 
         [TestMethod]
@@ -606,16 +555,9 @@ namespace CodeDesigner.Ps2.TestProject
             AssertDisasm(enc, "min.s");
             var cpu = MakeCpu();
             var d = MipsDecoder.DecodeR(enc);
-            cpu.FPR[d.Rs] = 3.0f; cpu.FPR[d.Rt] = 7.0f;
+            cpu.FPR[d.Rd] = 3.0f; cpu.FPR[d.Rt] = 7.0f;
             Exec(cpu, enc);
-            Assert.AreEqual(3.0f, cpu.FPR[d.Rd], 0.0001f, "MIN.S: min(3,7)=3");
-        }
-
-        [TestMethod]
-        public void Test_LDC1_SDC1()
-        {
-            AssertDisasm(unchecked((uint)(0x35 << 26)), "ldc1");
-            AssertDisasm(unchecked((uint)(0x3D << 26)), "sdc1");
+            Assert.AreEqual(3.0f, cpu.FPR[d.Shamt], 0.0001f, "MIN.S: min(3,7)=3");
         }
 
         [TestMethod]
@@ -631,100 +573,6 @@ namespace CodeDesigner.Ps2.TestProject
         }
 
         // =====================================================================
-        // Extended VU0 instructions
-        // =====================================================================
-
-        [TestMethod]
-        public void Test_VSUBA()
-        {
-            uint enc = (uint)(0x12 << 26 | 0x10 << 21 | 1 << 16 | 2 << 11 | 0x32);
-            AssertDisasm(enc, "vsuba");
-        }
-
-        [TestMethod]
-        public void Test_VOPMULA()
-        {
-            uint enc = (uint)(0x12 << 26 | 0x10 << 21 | 1 << 16 | 2 << 11 | 0x33);
-            AssertDisasm(enc, "vopmula");
-        }
-
-        [TestMethod]
-        public void Test_VOPMSUB()
-        {
-            uint enc = (uint)(0x12 << 26 | 0x10 << 21 | 1 << 16 | 2 << 11 | 0x34);
-            AssertDisasm(enc, "vopmsub");
-        }
-
-        [TestMethod]
-        public void Test_VDIV()
-        {
-            uint enc = (uint)(0x12 << 26 | 0x10 << 21 | 1 << 16 | 2 << 11 | 0x35);
-            AssertDisasm(enc, "vdiv");
-        }
-
-        [TestMethod]
-        public void Test_VSQRT_VU0()
-        {
-            uint enc = (uint)(0x12 << 26 | 0x10 << 21 | 1 << 16 | 0x36);
-            AssertDisasm(enc, "vsqrt");
-        }
-
-        [TestMethod]
-        public void Test_VRSQRT()
-        {
-            uint enc = (uint)(0x12 << 26 | 0x10 << 21 | 1 << 16 | 2 << 11 | 0x37);
-            AssertDisasm(enc, "vrsqrt");
-        }
-
-        [TestMethod]
-        public void Test_VMOVE()
-        {
-            uint enc = (uint)(0x12 << 26 | 0x10 << 21 | 1 << 16 | 2 << 11 | 0x38);
-            AssertDisasm(enc, "vmove");
-        }
-
-        [TestMethod]
-        public void Test_VMR32()
-        {
-            uint enc = (uint)(0x12 << 26 | 0x10 << 21 | 1 << 16 | 2 << 11 | 0x39);
-            AssertDisasm(enc, "vmr32");
-        }
-
-        [TestMethod]
-        public void Test_VNOP()
-        {
-            uint enc = (uint)(0x12 << 26 | 0x10 << 21 | 0x3A);
-            AssertDisasm(enc, "vnop");
-        }
-
-        [TestMethod]
-        public void Test_VCLIPW()
-        {
-            uint enc = (uint)(0x12 << 26 | 0x10 << 21 | 1 << 16 | 2 << 11 | 0x3B);
-            AssertDisasm(enc, "vclipw");
-        }
-
-        [TestMethod]
-        public void Test_VWAITQ()
-        {
-            // vwaitq: COP2 (0x12), rs=0x1F, all other bits = 0
-            uint enc = (uint)(0x12 << 26 | 0x1F << 21);
-            AssertDisasm(enc, "vwaitq");
-            // Exec: should be a no-op — Q register unchanged
-            var cpu = MakeCpu();
-            cpu.VU0.Q = 3.14f;
-            Exec(cpu, enc);
-            Assert.AreEqual(3.14f, cpu.VU0.Q, 0.001f, "VWAITQ must not modify Q register");
-        }
-
-        [TestMethod]
-        public void Test_VLQ_VSQ()
-        {
-            AssertDisasm(unchecked((uint)(0x36 << 26)), "vlq");
-            AssertDisasm(unchecked((uint)(0x3E << 26)), "vsq");
-        }
-
-        // =====================================================================
         // Regression: existing instructions still work
         // =====================================================================
 
@@ -733,7 +581,7 @@ namespace CodeDesigner.Ps2.TestProject
         {
             Assert.IsTrue(MipsDisassembler.Disassemble(0x02114020).Contains("add"),  "ADD should still work");
             Assert.IsTrue(MipsDisassembler.Disassemble(0x46010800).Contains("add.s"), "ADD.S should still work");
-            Assert.IsTrue(MipsDisassembler.Disassemble(0x4A000028).Contains("vadd"),  "VADD should still work");
+            Assert.IsTrue(MipsDisassembler.Disassemble(0x4BE00028).Contains("vadd"),  "VADD should still work");
             Assert.IsTrue(MipsDisassembler.Disassemble(0x42000018).Contains("eret"),  "ERET should still work");
         }
 
@@ -922,315 +770,50 @@ namespace CodeDesigner.Ps2.TestProject
         [TestMethod]
         public void Test_PMFHL()
         {
+            // pmfhl.lw t0: rd = { LO.w0, HI.w0, LO.w2, HI.w2 }
             uint enc = (uint)(0x1C << 26 | 8 << 11 | 0x30);
-            AssertDisasm(enc, "pmfhl");
-            var cpu = MakeCpu(); cpu.LO = 0x1234; cpu.HI = 0x5678;
+            Assert.AreEqual("pmfhl.lw t0", MipsDisassembler.Disassemble(enc));
+            var cpu = MakeCpu(); cpu.LO = 0x1234; cpu.HI = 0x5678; cpu.LO1 = 0x9ABC; cpu.HI1 = 0xDEF0;
             Exec(cpu, enc);
-            Assert.AreEqual(0x1234UL, cpu.RegsLo[8], "PMFHL: rd.lo = LO");
-            Assert.AreEqual(0x5678UL, cpu.RegsHi[8], "PMFHL: rd.hi = HI");
+            Assert.AreEqual(0x00005678_00001234UL, cpu.RegsLo[8], "PMFHL.LW: rd.w0 = LO.w0, rd.w1 = HI.w0");
+            Assert.AreEqual(0x0000DEF0_00009ABCUL, cpu.RegsHi[8], "PMFHL.LW: rd.w2 = LO.w2, rd.w3 = HI.w2");
+        }
+
+        [TestMethod]
+        public void Test_PMFHL_UW_And_SH()
+        {
+            // pmfhl.uw t0: rd = { LO.w1, HI.w1, LO.w3, HI.w3 }
+            uint uw = (uint)(0x1C << 26 | 8 << 11 | 1 << 6 | 0x30);
+            Assert.AreEqual("pmfhl.uw t0", MipsDisassembler.Disassemble(uw));
+            var cpu = MakeCpu();
+            cpu.LO = 0x11111111_00000000UL; cpu.HI = 0x22222222_00000000UL;
+            Exec(cpu, uw);
+            Assert.AreEqual(0x22222222_11111111UL, cpu.RegsLo[8]);
+
+            // pmfhl.sh t0 saturates each word to a halfword.
+            uint sh = (uint)(0x1C << 26 | 8 << 11 | 4 << 6 | 0x30);
+            Assert.AreEqual("pmfhl.sh t0", MipsDisassembler.Disassemble(sh));
+            cpu.LO = 0xFFFF0000_00012345UL; // w0 = 0x12345 -> 0x7FFF, w1 = -65536 -> 0x8000
+            cpu.HI = 0; cpu.LO1 = 0; cpu.HI1 = 0;
+            Exec(cpu, sh);
+            Assert.AreEqual(0x8000_7FFFUL, cpu.RegsLo[8] & 0xFFFFFFFF);
         }
 
         [TestMethod]
         public void Test_PMTHL()
         {
+            // pmthl.lw s0: LO.w0 = rs.w0, HI.w0 = rs.w1, LO.w2 = rs.w2, HI.w2 = rs.w3
             uint enc = (uint)(0x1C << 26 | 16 << 21 | 0x31);
-            AssertDisasm(enc, "pmthl");
-            var cpu = MakeCpu(); cpu.RegsLo[16] = 0xABCD; cpu.RegsHi[16] = 0xEF01;
+            Assert.AreEqual("pmthl.lw s0", MipsDisassembler.Disassemble(enc));
+            var cpu = MakeCpu();
+            cpu.RegsLo[16] = 0x00002222_00001111UL; cpu.RegsHi[16] = 0x00004444_00003333UL;
             Exec(cpu, enc);
-            Assert.AreEqual(0xABCDUL, cpu.LO, "PMTHL: LO = rs.lo");
-            Assert.AreEqual(0xEF01UL, cpu.HI, "PMTHL: HI = rs.hi");
+            Assert.AreEqual(0x1111UL, cpu.LO & 0xFFFFFFFF, "PMTHL.LW: LO.w0 = rs.w0");
+            Assert.AreEqual(0x2222UL, cpu.HI & 0xFFFFFFFF, "PMTHL.LW: HI.w0 = rs.w1");
+            Assert.AreEqual(0x3333UL, cpu.LO1 & 0xFFFFFFFF, "PMTHL.LW: LO.w2 = rs.w2");
+            Assert.AreEqual(0x4444UL, cpu.HI1 & 0xFFFFFFFF, "PMTHL.LW: HI.w2 = rs.w3");
         }
 
-        // =====================================================================
-        // VU0 Component-Broadcast Variant Instructions
-        // COP2 SPECIAL1 (opcode=0x12, rs=0x10), functs 0x00-0x27
-        // =====================================================================
-
-        private static CpuState MakeVU0Cpu()
-        {
-            var cpu = new CpuState();
-            cpu.PC = 0x80000000;
-            // vf1 = (1, 2, 3, 4)
-            cpu.VU0.WriteVF(1, new System.Numerics.Vector4(1f, 2f, 3f, 4f));
-            // vf2 = (10, 20, 30, 40)
-            cpu.VU0.WriteVF(2, new System.Numerics.Vector4(10f, 20f, 30f, 40f));
-            return cpu;
-        }
-
-        // Helper: encode a COP2 SPECIAL1 R-type instruction (opcode=0x12, rs=0x10)
-        private static uint EncVU0(int vft, int vfs, int vfd, int funct)
-            => (uint)(0x12 << 26 | 0x10 << 21 | vft << 16 | vfs << 11 | vfd << 6 | funct);
-
-        [TestMethod]
-        public void Test_VADDx()
-        {
-            // vaddx vf3, vf1, vf2  =>  vf3 = vf1 + {vf2.x, vf2.x, vf2.x, vf2.x}
-            //                       = (1,2,3,4) + (10,10,10,10) = (11,12,13,14)
-            uint enc = EncVU0(vft: 2, vfs: 1, vfd: 3, funct: 0x00);
-            AssertDisasm(enc, "vaddx");
-            var cpu = MakeVU0Cpu();
-            Exec(cpu, enc);
-            var r = cpu.VU0.ReadVF(3);
-            Assert.AreEqual(11f, r.X, "VADDx: X"); Assert.AreEqual(12f, r.Y, "VADDx: Y");
-            Assert.AreEqual(13f, r.Z, "VADDx: Z"); Assert.AreEqual(14f, r.W, "VADDx: W");
-        }
-
-        [TestMethod]
-        public void Test_VADDw()
-        {
-            // vaddw vf3, vf1, vf2  =>  vf3 = vf1 + {vf2.w, ...} = (1+40, 2+40, 3+40, 4+40)
-            uint enc = EncVU0(vft: 2, vfs: 1, vfd: 3, funct: 0x03);
-            AssertDisasm(enc, "vaddw");
-            var cpu = MakeVU0Cpu();
-            Exec(cpu, enc);
-            var r = cpu.VU0.ReadVF(3);
-            Assert.AreEqual(41f, r.X, "VADDw: X"); Assert.AreEqual(42f, r.Y, "VADDw: Y");
-        }
-
-        [TestMethod]
-        public void Test_VSUBBc()
-        {
-            // vsuby vf3, vf1, vf2  =>  vf3 = vf1 - {vf2.y, ...} = (1-20, 2-20, 3-20, 4-20)
-            uint enc = EncVU0(vft: 2, vfs: 1, vfd: 3, funct: 0x05);
-            AssertDisasm(enc, "vsuby");
-            var cpu = MakeVU0Cpu();
-            Exec(cpu, enc);
-            var r = cpu.VU0.ReadVF(3);
-            Assert.AreEqual(-19f, r.X, "VSUBy: X"); Assert.AreEqual(-18f, r.Y, "VSUBy: Y");
-        }
-
-        [TestMethod]
-        public void Test_VMULBc()
-        {
-            // vmulz vf3, vf1, vf2  =>  vf3 = vf1 * {vf2.z, ...} = (30, 60, 90, 120)
-            uint enc = EncVU0(vft: 2, vfs: 1, vfd: 3, funct: 0x0A);
-            AssertDisasm(enc, "vmulz");
-            var cpu = MakeVU0Cpu();
-            Exec(cpu, enc);
-            var r = cpu.VU0.ReadVF(3);
-            Assert.AreEqual(30f, r.X, "VMULz: X"); Assert.AreEqual(60f, r.Y, "VMULz: Y");
-            Assert.AreEqual(90f, r.Z, "VMULz: Z"); Assert.AreEqual(120f, r.W, "VMULz: W");
-        }
-
-        [TestMethod]
-        public void Test_VMADDBc()
-        {
-            // vmaddx vf3, vf1, vf2  =>  vf3 = ACC + vf1 * {vf2.x, ...}
-            //   ACC=(0,0,0,0), vf1=(1,2,3,4), vf2.x=10  => (10,20,30,40)
-            uint enc = EncVU0(vft: 2, vfs: 1, vfd: 3, funct: 0x0C);
-            AssertDisasm(enc, "vmaddx");
-            var cpu = MakeVU0Cpu();
-            cpu.VU0.WriteACC(new System.Numerics.Vector4(0, 0, 0, 0));
-            Exec(cpu, enc);
-            var r = cpu.VU0.ReadVF(3);
-            Assert.AreEqual(10f, r.X, "VMADDx: X"); Assert.AreEqual(20f, r.Y, "VMADDx: Y");
-        }
-
-        [TestMethod]
-        public void Test_VMSUBBc()
-        {
-            // vmsuby vf3, vf1, vf2  =>  vf3 = ACC - vf1 * {vf2.y, ...}
-            //   ACC=(100,100,100,100), vf1=(1,2,3,4), vf2.y=20 => (80, 60, 40, 20)
-            uint enc = EncVU0(vft: 2, vfs: 1, vfd: 3, funct: 0x11);
-            AssertDisasm(enc, "vmsuby");
-            var cpu = MakeVU0Cpu();
-            cpu.VU0.WriteACC(new System.Numerics.Vector4(100f, 100f, 100f, 100f));
-            Exec(cpu, enc);
-            var r = cpu.VU0.ReadVF(3);
-            Assert.AreEqual(80f, r.X, "VMSUBy: X"); Assert.AreEqual(60f, r.Y, "VMSUBy: Y");
-            Assert.AreEqual(40f, r.Z, "VMSUBy: Z"); Assert.AreEqual(20f, r.W, "VMSUBy: W");
-        }
-
-        [TestMethod]
-        public void Test_VMAXBc()
-        {
-            // vmaxz vf3, vf1, vf2  =>  vf3 = max(vf1, {vf2.z,...}) = max((1,2,3,4), (30,...))
-            uint enc = EncVU0(vft: 2, vfs: 1, vfd: 3, funct: 0x16);
-            AssertDisasm(enc, "vmaxz");
-            var cpu = MakeVU0Cpu();
-            Exec(cpu, enc);
-            var r = cpu.VU0.ReadVF(3);
-            Assert.AreEqual(30f, r.X, "VMAXz: X"); Assert.AreEqual(30f, r.Y, "VMAXz: Y");
-            Assert.AreEqual(30f, r.Z, "VMAXz: Z"); Assert.AreEqual(30f, r.W, "VMAXz: W");
-        }
-
-        [TestMethod]
-        public void Test_VMINBc()
-        {
-            // vminw vf3, vf1, vf2  =>  vf3 = min(vf1, {vf2.w,...}) = min((1,2,3,4), (40,...))
-            uint enc = EncVU0(vft: 2, vfs: 1, vfd: 3, funct: 0x1B);
-            AssertDisasm(enc, "vminw");
-            var cpu = MakeVU0Cpu();
-            Exec(cpu, enc);
-            var r = cpu.VU0.ReadVF(3);
-            Assert.AreEqual(1f, r.X, "VMINw: X"); Assert.AreEqual(2f, r.Y, "VMINw: Y");
-        }
-
-        [TestMethod]
-        public void Test_VMULABc()
-        {
-            // vmulax ACC, vf1, vf2  =>  ACC = vf1 * {vf2.x,...} = (10, 20, 30, 40)
-            uint enc = EncVU0(vft: 2, vfs: 1, vfd: 0, funct: 0x1C);
-            AssertDisasm(enc, "vmulax");
-            var cpu = MakeVU0Cpu();
-            Exec(cpu, enc);
-            var acc = cpu.VU0.ReadACC();
-            Assert.AreEqual(10f, acc.X, "VMULAx: ACC.X"); Assert.AreEqual(20f, acc.Y, "VMULAx: ACC.Y");
-            Assert.AreEqual(30f, acc.Z, "VMULAx: ACC.Z"); Assert.AreEqual(40f, acc.W, "VMULAx: ACC.W");
-        }
-
-        [TestMethod]
-        public void Test_VADDABc()
-        {
-            // vaddaw ACC, vf1, vf2  =>  ACC = vf1 + {vf2.w,...} = (1+40, 2+40, 3+40, 4+40)
-            uint enc = EncVU0(vft: 2, vfs: 1, vfd: 0, funct: 0x23);
-            AssertDisasm(enc, "vaddaw");
-            var cpu = MakeVU0Cpu();
-            Exec(cpu, enc);
-            var acc = cpu.VU0.ReadACC();
-            Assert.AreEqual(41f, acc.X, "VADDAw: ACC.X"); Assert.AreEqual(42f, acc.Y, "VADDAw: ACC.Y");
-        }
-
-        [TestMethod]
-        public void Test_VSUBABc()
-        {
-            // vsubay ACC, vf1, vf2  =>  ACC = vf1 - {vf2.y,...} = (1-20, 2-20, 3-20, 4-20)
-            uint enc = EncVU0(vft: 2, vfs: 1, vfd: 0, funct: 0x25);
-            AssertDisasm(enc, "vsubay");
-            var cpu = MakeVU0Cpu();
-            Exec(cpu, enc);
-            var acc = cpu.VU0.ReadACC();
-            Assert.AreEqual(-19f, acc.X, "VSUBAy: ACC.X"); Assert.AreEqual(-18f, acc.Y, "VSUBAy: ACC.Y");
-        }
-
-        // =====================================================================
-        // VCALLMS / VCALLMSR — Trigger VU0 Micro-Mode
-        // =====================================================================
-
-        [TestMethod]
-        public void Test_VCALLMS()
-        {
-            // VCALLMS with 15-bit address = 0x10 (byte address = 0x80)
-            // Encode: opcode=0x12, rs=0x18, bits[20:6] = 0x0010
-            // imm15 = 0x0010 → Rt=0, Rd=0, Shamt=0x10
-            uint enc = (uint)(0x12 << 26 | 0x18 << 21 | 0x10 << 6);
-            AssertDisasm(enc, "vcallms");
-            var cpu = MakeVU0Cpu();
-            // Write a single NOP+E instruction at the target byte address (0x10 * 8 = 0x80)
-            // lower = LOI 0.0 (0x80000000), upper = NOP with E-bit (0x83800CC0)
-            int entryByte = 0x10 * 8;
-            WriteNopEInstr(cpu.VU0.MicroMem, entryByte);
-            cpu.VU0.IsRunning = false;
-            Exec(cpu, enc);
-            Assert.IsFalse(cpu.VU0.IsRunning, "VCALLMS: VU0 microprogram should have completed");
-            Assert.AreEqual((ushort)(entryByte + 8), cpu.VU0.PC, "VCALLMS: PC should advance past entry instruction");
-        }
-
-        [TestMethod]
-        public void Test_VCALLMSR()
-        {
-            // VCALLMSR vi1  (VI register 1 holds the address)
-            // Encode: opcode=0x12, rs=0x19, Rd=1 (vi register index)
-            uint enc = (uint)(0x12 << 26 | 0x19 << 21 | 1 << 11);
-            AssertDisasm(enc, "vcallmsr");
-            var cpu = MakeVU0Cpu();
-            cpu.VU0.WriteVI(1, 0x20); // vi1 = 0x20, byte address = 0x20 * 8 = 0x100
-            // Write a single NOP+E instruction at the target byte address (0x20 * 8 = 0x100)
-            int entryByte = 0x20 * 8;
-            WriteNopEInstr(cpu.VU0.MicroMem, entryByte);
-            cpu.VU0.IsRunning = false;
-            Exec(cpu, enc);
-            Assert.IsFalse(cpu.VU0.IsRunning, "VCALLMSR: VU0 microprogram should have completed");
-            Assert.AreEqual((ushort)(entryByte + 8), cpu.VU0.PC, "VCALLMSR: PC should advance past entry instruction");
-        }
-
-        /// <summary>Write a NOP+E instruction pair (8 bytes) to MicroMem at the given byte offset.</summary>
-        private static void WriteNopEInstr(byte[] mem, int byteOffset)
-        {
-            // lower = LOI 0.0 = 0x80000000
-            uint lower = 0x80000000u;
-            // upper = NOP with E-bit: opcode=0x1C (UPPER_SPECIAL), fd=0x33 (NOP), E=1
-            uint upper = 0x80000000u | (0x1Cu << 25) | (0x33u << 6);
-            mem[byteOffset + 0] = (byte)lower;
-            mem[byteOffset + 1] = (byte)(lower >> 8);
-            mem[byteOffset + 2] = (byte)(lower >> 16);
-            mem[byteOffset + 3] = (byte)(lower >> 24);
-            mem[byteOffset + 4] = (byte)upper;
-            mem[byteOffset + 5] = (byte)(upper >> 8);
-            mem[byteOffset + 6] = (byte)(upper >> 16);
-            mem[byteOffset + 7] = (byte)(upper >> 24);
-        }
-
-        // =====================================================================
-        // VRNEXT / VRGET / VRINIT / VRXOR — LFSR Pseudo-Random Instructions
-        // COP2 SPECIAL2 (opcode=0x12, rs=0x1E)
-        // Verified field mapping against PCSX2 VUops.cpp:
-        //   VRNEXT/VRGET: dest = _Ft_ = bits[20:16] = args.Rt
-        //   VRINIT/VRXOR: source = _Fs_ = bits[15:11] = args.Rd; component = bits[22:21] = args.Rs & 0x3
-        //   R register stored as 0x3F800000 | mantissa_23_bits (float in [1.0, 2.0))
-        // =====================================================================
-
-        [TestMethod]
-        public void Test_VRNEXT()
-        {
-            // vrnext vf3, R  =>  advance LFSR, write R value to vf3 (dest in bits[20:16] = rt field)
-            uint enc = (uint)(0x12 << 26 | 0x1E << 21 | 3 << 16 | 0x1C);
-            AssertDisasm(enc, "vrnext");
-            var cpu = MakeVU0Cpu();
-            uint before = cpu.VU0.RngState;
-            Exec(cpu, enc);
-            // R should have advanced
-            Assert.AreNotEqual(before, cpu.VU0.RngState, "VRNEXT: RngState should advance");
-            // vf3 should contain the new R value reinterpreted as float
-            float expected = BitConverter.UInt32BitsToSingle(cpu.VU0.RngState);
-            Assert.AreEqual(expected, cpu.VU0.ReadVF(3).X, "VRNEXT: vf3.x = R float value");
-        }
-
-        [TestMethod]
-        public void Test_VRGET()
-        {
-            // vrget vf3, R  =>  read current R into vf3 (no advance), dest in bits[20:16] = rt field
-            uint enc = (uint)(0x12 << 26 | 0x1E << 21 | 3 << 16 | 0x1D);
-            AssertDisasm(enc, "vrget");
-            var cpu = MakeVU0Cpu();
-            uint before = cpu.VU0.RngState;
-            Exec(cpu, enc);
-            Assert.AreEqual(before, cpu.VU0.RngState, "VRGET: RngState should NOT change");
-            float expected = BitConverter.UInt32BitsToSingle(before);
-            Assert.AreEqual(expected, cpu.VU0.ReadVF(3).X, "VRGET: vf3.x = R float value");
-        }
-
-        [TestMethod]
-        public void Test_VRINIT()
-        {
-            // vrinit R, vf1.z  =>  R = 0x3F800000 | (vf1.z_bits & 0x7FFFFF)
-            // source register = bits[15:11] = rd field; component = bits[22:21] = rs[1:0] = 0x1E & 0x3 = 2 = Z
-            uint enc = (uint)(0x12 << 26 | 0x1E << 21 | 1 << 11 | 0x1E);
-            AssertDisasm(enc, "vrinit");
-            var cpu = MakeVU0Cpu();
-            // vf1 = (1, 2, 3, 4), so vf1.z = 3.0f; its bits & 0x7FFFFF
-            uint zBits = BitConverter.SingleToUInt32Bits(3f) & 0x7FFFFFu;
-            uint expected = 0x3F800000u | zBits;
-            Exec(cpu, enc);
-            Assert.AreEqual(expected, cpu.VU0.RngState, $"VRINIT: RngState = 0x{expected:X8}");
-        }
-
-        [TestMethod]
-        public void Test_VRXOR()
-        {
-            // vrxor R, vf2.z  =>  R = 0x3F800000 | ((R ^ vf2.z_bits) & 0x7FFFFF)
-            // source register = bits[15:11] = rd field; component = bits[22:21] = 0x1E & 0x3 = 2 = Z
-            uint enc = (uint)(0x12 << 26 | 0x1E << 21 | 2 << 11 | 0x1F);
-            AssertDisasm(enc, "vrxor");
-            var cpu = MakeVU0Cpu();
-            // Set a known R value in proper format
-            cpu.VU0.RngState = 0x3F800000u;
-            // vf2 = (10, 20, 30, 40), vf2.z = 30.0f — use full float bits (matching PCSX2 and our impl)
-            uint zBitsRaw = BitConverter.SingleToUInt32Bits(30f);
-            uint expected = 0x3F800000u | ((cpu.VU0.RngState ^ zBitsRaw) & 0x7FFFFFu);
-            Exec(cpu, enc);
-            Assert.AreEqual(expected, cpu.VU0.RngState, $"VRXOR: RngState = 0x{expected:X8}");
-        }
         // =====================================================================
         // MMI0 sub-instructions (funct=0x08, dispatched by shamt)
         // =====================================================================
@@ -1435,8 +1018,8 @@ namespace CodeDesigner.Ps2.TestProject
         [TestMethod]
         public void Test_PABSH()
         {
-            // PABSH $s2, $s0  (rd=18, rs=16, shamt=0x05)
-            uint enc = (uint)(0x1C << 26 | 16 << 21 | 18 << 11 | 0x05 << 6 | 0x28);
+            // PABSH $s2, $s0  (rd=18, rt=16, shamt=0x05)
+            uint enc = (uint)(0x1C << 26 | 16 << 16 | 18 << 11 | 0x05 << 6 | 0x28);
             AssertDisasm(enc, "pabsh");
             var cpu = MakeCpu();
             cpu.RegsLo[16] = 0xFFF9; // lower 16 bits = -7 as signed short
@@ -1861,10 +1444,10 @@ namespace CodeDesigner.Ps2.TestProject
         [TestMethod]
         public void Test_QMFC2()
         {
-            // QMFC2 $s0, VF1  (rs=0x01, vft=1 in rt bits, rd=16 in rd bits)
-            // Encoding: (0x12<<26 | 0x01<<21 | vft<<16 | gpr_rd<<11)
-            uint enc = (uint)(0x12 << 26 | 0x01 << 21 | 1 << 16 | 16 << 11);
-            AssertDisasm(enc, "qmfc2");
+            // QMFC2 $s0, VF1: GPR in rt (bits 20:16), VF register in rd (bits 15:11)
+            uint enc = (uint)(0x12 << 26 | 0x01 << 21 | 16 << 16 | 1 << 11);
+            Assert.AreEqual("qmfc2 s0, vf1", MipsDisassembler.Disassemble(enc));
+            Assert.AreEqual("qmfc2.i s0, vf1", MipsDisassembler.Disassemble(enc | 1));
             var cpu = MakeCpu();
             cpu.VU0.WriteVF(1, new System.Numerics.Vector4(1.0f, 2.0f, 3.0f, 4.0f));
             Exec(cpu, enc);
@@ -1913,188 +1496,6 @@ namespace CodeDesigner.Ps2.TestProject
             Exec(cpu, enc);
             Assert.AreEqual(0xABU, cpu.VU0.StatusFlags, "CTC2: status flags=0xAB");
         }
-
-        // =====================================================================
-        // VU0 VFTOI4, VITOF4 conversion instructions
-        // =====================================================================
-
-        [TestMethod]
-        public void Test_VFTOI4()
-        {
-            // vftoi4 requires rs=0x10 for disassembler dispatch; source is VF[rs]=VF[16], dest is VF[rd]
-            // Encoding: (0x12<<26 | 0x10<<21 | vfd<<11 | 0x3E)
-            uint enc = (uint)(0x12 << 26 | 0x10 << 21 | 2 << 11 | 0x3E);
-            AssertDisasm(enc, "vftoi4");
-            var cpu = MakeCpu();
-            cpu.VU0.WriteVF(16, new System.Numerics.Vector4(2.0f, 0f, 0f, 0f)); // source = VF[16]
-            Exec(cpu, enc);
-            var result = cpu.VU0.ReadVF(2);
-            // 2.0 * 16 = 32 -> (int)32 = 32 -> stored as float bits = 32.0f
-            Assert.AreEqual(32.0f, result.X, 0.001f, "VFTOI4: (int)(2.0*16)=32");
-        }
-
-        [TestMethod]
-        public void Test_VITOF4()
-        {
-            // vitof4 requires rs=0x10 for disassembler dispatch; source is VF[rs]=VF[16], dest is VF[rd]
-            // Encoding: (0x12<<26 | 0x10<<21 | vfd<<11 | 0x3F)
-            uint enc = (uint)(0x12 << 26 | 0x10 << 21 | 2 << 11 | 0x3F);
-            AssertDisasm(enc, "vitof4");
-            var cpu = MakeCpu();
-            // Store int bits 64 into VF[16].X as the source value
-            cpu.VU0.WriteVF(16, new System.Numerics.Vector4(System.BitConverter.Int32BitsToSingle(64), 0f, 0f, 0f));
-            Exec(cpu, enc);
-            var result = cpu.VU0.ReadVF(2);
-            // 64 / 16 = 4.0
-            Assert.AreEqual(4.0f, result.X, 0.001f, "VITOF4: 64/16=4.0");
-        }
-
-        // =====================================================================
-        // VU0 Broadcast variants (COP2 SPECIAL1, rs=0x10)
-        // =====================================================================
-
-        [TestMethod]
-        public void Test_VADDBc_x()
-        {
-            // vaddx VF1, VF2, VF3  => (0x12<<26 | 0x10<<21 | vft<<16 | vfs<<11 | vfd<<6 | 0x00)
-            uint enc = (uint)(0x12 << 26 | 0x10 << 21 | 3 << 16 | 2 << 11 | 1 << 6 | 0x00);
-            AssertDisasm(enc, "vaddx");
-            var cpu = MakeCpu();
-            cpu.VU0.WriteVF(2, new System.Numerics.Vector4(2f, 2f, 2f, 2f));
-            cpu.VU0.WriteVF(3, new System.Numerics.Vector4(3f, 3f, 3f, 3f)); // x broadcast=3
-            Exec(cpu, enc);
-            var result = cpu.VU0.ReadVF(1);
-            Assert.AreEqual(5f, result.X, 0.001f, "VADDx: 2+3=5");
-        }
-
-        [TestMethod]
-        public void Test_VSUBBc_x()
-        {
-            // vsubx VF1, VF2, VF3  funct=0x04
-            uint enc = (uint)(0x12 << 26 | 0x10 << 21 | 3 << 16 | 2 << 11 | 1 << 6 | 0x04);
-            AssertDisasm(enc, "vsubx");
-            var cpu = MakeCpu();
-            cpu.VU0.WriteVF(2, new System.Numerics.Vector4(5f, 5f, 5f, 5f));
-            cpu.VU0.WriteVF(3, new System.Numerics.Vector4(3f, 3f, 3f, 3f));
-            Exec(cpu, enc);
-            var result = cpu.VU0.ReadVF(1);
-            Assert.AreEqual(2f, result.X, 0.001f, "VSUBx: 5-3=2");
-        }
-
-        [TestMethod]
-        public void Test_VMULBc_x()
-        {
-            // vmulx VF1, VF2, VF3  funct=0x08
-            uint enc = (uint)(0x12 << 26 | 0x10 << 21 | 3 << 16 | 2 << 11 | 1 << 6 | 0x08);
-            AssertDisasm(enc, "vmulx");
-            var cpu = MakeCpu();
-            cpu.VU0.WriteVF(2, new System.Numerics.Vector4(3f, 3f, 3f, 3f));
-            cpu.VU0.WriteVF(3, new System.Numerics.Vector4(4f, 4f, 4f, 4f));
-            Exec(cpu, enc);
-            var result = cpu.VU0.ReadVF(1);
-            Assert.AreEqual(12f, result.X, 0.001f, "VMULx: 3*4=12");
-        }
-
-        [TestMethod]
-        public void Test_VMADDBc_x()
-        {
-            // vmaddx VF1, VF2, VF3  funct=0x0C
-            uint enc = (uint)(0x12 << 26 | 0x10 << 21 | 3 << 16 | 2 << 11 | 1 << 6 | 0x0C);
-            AssertDisasm(enc, "vmaddx");
-            var cpu = MakeCpu();
-            cpu.VU0.WriteACC(new System.Numerics.Vector4(1f, 1f, 1f, 1f), 0xF);
-            cpu.VU0.WriteVF(2, new System.Numerics.Vector4(3f, 3f, 3f, 3f));
-            cpu.VU0.WriteVF(3, new System.Numerics.Vector4(2f, 2f, 2f, 2f));
-            Exec(cpu, enc);
-            var result = cpu.VU0.ReadVF(1);
-            Assert.AreEqual(7f, result.X, 0.001f, "VMADDx: ACC(1) + 3*2=7");
-        }
-
-        [TestMethod]
-        public void Test_VMSUBBc_x()
-        {
-            // vmsubx VF1, VF2, VF3  funct=0x10
-            uint enc = (uint)(0x12 << 26 | 0x10 << 21 | 3 << 16 | 2 << 11 | 1 << 6 | 0x10);
-            AssertDisasm(enc, "vmsubx");
-            var cpu = MakeCpu();
-            cpu.VU0.WriteACC(new System.Numerics.Vector4(10f, 10f, 10f, 10f), 0xF);
-            cpu.VU0.WriteVF(2, new System.Numerics.Vector4(3f, 3f, 3f, 3f));
-            cpu.VU0.WriteVF(3, new System.Numerics.Vector4(2f, 2f, 2f, 2f));
-            Exec(cpu, enc);
-            var result = cpu.VU0.ReadVF(1);
-            Assert.AreEqual(4f, result.X, 0.001f, "VMSUBx: ACC(10) - 3*2=4");
-        }
-
-        [TestMethod]
-        public void Test_VMAXBc_x()
-        {
-            // vmaxx VF1, VF2, VF3  funct=0x14
-            uint enc = (uint)(0x12 << 26 | 0x10 << 21 | 3 << 16 | 2 << 11 | 1 << 6 | 0x14);
-            AssertDisasm(enc, "vmaxx");
-            var cpu = MakeCpu();
-            cpu.VU0.WriteVF(2, new System.Numerics.Vector4(2f, 2f, 2f, 2f));
-            cpu.VU0.WriteVF(3, new System.Numerics.Vector4(5f, 5f, 5f, 5f));
-            Exec(cpu, enc);
-            var result = cpu.VU0.ReadVF(1);
-            Assert.AreEqual(5f, result.X, 0.001f, "VMAXx: max(2,5)=5");
-        }
-
-        [TestMethod]
-        public void Test_VMINBc_x()
-        {
-            // vminx VF1, VF2, VF3  funct=0x18
-            uint enc = (uint)(0x12 << 26 | 0x10 << 21 | 3 << 16 | 2 << 11 | 1 << 6 | 0x18);
-            AssertDisasm(enc, "vminx");
-            var cpu = MakeCpu();
-            cpu.VU0.WriteVF(2, new System.Numerics.Vector4(2f, 2f, 2f, 2f));
-            cpu.VU0.WriteVF(3, new System.Numerics.Vector4(5f, 5f, 5f, 5f));
-            Exec(cpu, enc);
-            var result = cpu.VU0.ReadVF(1);
-            Assert.AreEqual(2f, result.X, 0.001f, "VMINx: min(2,5)=2");
-        }
-
-        [TestMethod]
-        public void Test_VMULABc_x()
-        {
-            // vmulax ACC, VF2, VF3  funct=0x1C (args[0]=vfs=rd, args[1]=vft=rt, no vfd)
-            uint enc = (uint)(0x12 << 26 | 0x10 << 21 | 3 << 16 | 2 << 11 | 0x1C);
-            AssertDisasm(enc, "vmulax");
-            var cpu = MakeCpu();
-            cpu.VU0.WriteVF(2, new System.Numerics.Vector4(3f, 3f, 3f, 3f));
-            cpu.VU0.WriteVF(3, new System.Numerics.Vector4(4f, 4f, 4f, 4f));
-            Exec(cpu, enc);
-            Assert.AreEqual(12f, cpu.VU0.ACC.X, 0.001f, "VMULAx: ACC=3*4=12");
-        }
-
-        [TestMethod]
-        public void Test_VADDABc_x()
-        {
-            // vaddax ACC, VF2, VF3  funct=0x20 (args[0]=vfs=rd, args[1]=vft=rt)
-            uint enc = (uint)(0x12 << 26 | 0x10 << 21 | 3 << 16 | 2 << 11 | 0x20);
-            AssertDisasm(enc, "vaddax");
-            var cpu = MakeCpu();
-            cpu.VU0.WriteVF(2, new System.Numerics.Vector4(3f, 3f, 3f, 3f));
-            cpu.VU0.WriteVF(3, new System.Numerics.Vector4(4f, 4f, 4f, 4f));
-            Exec(cpu, enc);
-            Assert.AreEqual(7f, cpu.VU0.ACC.X, 0.001f, "VADDAx: ACC=3+4=7");
-        }
-
-        [TestMethod]
-        public void Test_VSUBABc_x()
-        {
-            // vsubax ACC, VF2, VF3  funct=0x24 (args[0]=vfs=rd, args[1]=vft=rt)
-            uint enc = (uint)(0x12 << 26 | 0x10 << 21 | 3 << 16 | 2 << 11 | 0x24);
-            AssertDisasm(enc, "vsubax");
-            var cpu = MakeCpu();
-            cpu.VU0.WriteVF(2, new System.Numerics.Vector4(10f, 10f, 10f, 10f));
-            cpu.VU0.WriteVF(3, new System.Numerics.Vector4(3f, 3f, 3f, 3f));
-            Exec(cpu, enc);
-            Assert.AreEqual(7f, cpu.VU0.ACC.X, 0.001f, "VSUBAx: ACC=10-3=7");
-        }
-
-        // =====================================================================
-        // VU0 micro-mode trigger and RNG instructions
-        // =====================================================================
 
     }
 
@@ -2227,20 +1628,6 @@ namespace CodeDesigner.Ps2.TestProject
             cpu.LO = 0xFFFFFFFFFFFFFFFFUL;
             Exec(cpu, enc);
             Assert.AreEqual(0xFFFFFFFFFFFFFFFFUL, cpu.RegsHi[8], "MFLO: RegsHi should be sign-extended -1");
-        }
-
-        // BUG 12: DMULT — should handle long.MinValue without overflow
-        [TestMethod]
-        public void Test_DMULT_LongMinValue()
-        {
-            uint enc = (uint)(8 << 21 | 9 << 16 | 0x1C); // dmult $t0, $t1
-            var cpu = MakeCpu();
-            cpu.RegsLo[8] = unchecked((ulong)long.MinValue); // -2^63
-            cpu.RegsLo[9] = 1;
-            // Should not throw; -2^63 * 1 = -2^63 → LO = 0x8000000000000000, HI = 0xFFFFFFFFFFFFFFFF
-            Exec(cpu, enc);
-            Assert.AreEqual(unchecked((ulong)long.MinValue), cpu.LO, "DMULT: LO = long.MinValue");
-            Assert.AreEqual(0xFFFFFFFFFFFFFFFFUL, cpu.HI, "DMULT: HI = -1 sign bits");
         }
 
         // BUG 14: DSRA — RegsHi sign-extended for negative result

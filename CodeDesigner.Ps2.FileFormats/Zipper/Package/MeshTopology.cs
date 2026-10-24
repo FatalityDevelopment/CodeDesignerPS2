@@ -1,3 +1,4 @@
+using CodeDesigner.Ps2.FileFormats.Assets;
 using System.Globalization;
 using System.Text;
 using CodeDesigner.Ps2.FileFormats.Zipper.Geo;
@@ -38,7 +39,7 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.Package
         private static Context Open(ZipperPackage pkg, string archive, string modelName)
         {
             var model = pkg.FindModel(archive, modelName) ?? throw new KeyNotFoundException($"Model {archive}:{modelName} not found");
-            var mesh = ModelMesh.Build(pkg, model);
+            var mesh = ZipperModelMesh.Build(pkg, model);
             var container = ZedContainer.FromBytes(pkg.Entry(archive)!.Data);
             var layout = ModelLayout.Parse(container, model.NodeIndex)
                 ?? throw new InvalidOperationException($"{modelName} cannot be re-laid (line strips or unknown chain tags)");
@@ -235,7 +236,7 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.Package
         private static IEnumerable<ModelLayout.LayoutChunk> Encode(InputMesh input, ModelMesh.MeshChunk placement, ModelLayout.ChunkData head, ModelLayout.LayoutChunk template)
         {
             float[] inverse = Matrix4.InverseAffine(placement.Matrix);
-            bool sixteenth = placement.Unit == ZedModelFile.PositionUnit.Sixteenth;
+            bool sixteenth = placement.Unit == nameof(ZedModelFile.PositionUnit.Sixteenth);
             float div = sixteenth ? 16f : 32768f;
             var local = input.Positions.Select(p => { var (x, y, z) = Matrix4.Apply(inverse, p[0], p[1], p[2]); return new[] { x, y, z }; }).ToList();
             var localNormals = input.Normals.Count == input.Positions.Count

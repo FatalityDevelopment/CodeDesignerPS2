@@ -828,6 +828,14 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 CodeDesigner.Ps2.Common.Interfaces.IPs2MemoryBus analysisBus =
                     new PageBytesMemoryBus(byteBuf, baseAddr, mirrorBus);
 
+                // Simulated loads can be many per page, so they only read the page
+                // and the local analysis mirror — never the live PINE connection.
+                CodeDesigner.Ps2.Common.Interfaces.IPs2MemoryBus loadBus =
+                    new PageBytesMemoryBus(byteBuf, baseAddr,
+                        _ctx.AnalysisClient != null
+                            ? new ByteEditorMemoryBusAdapter(new DebugClientByteEditor(_ctx.AnalysisClient))
+                            : null);
+
                 // Walk the byte buffer.  For every offset, check whether an
                 // override covers it; if so emit data rows, otherwise emit an
                 // instruction row for the current 4-byte word.
@@ -937,6 +945,50 @@ namespace CodeDesigner.Ps2.Bridge.Services
                         continue;
                     }
 
+                    // ── Inferred data table (switch / pointer / float) ────────
+                    // From the cross-reference index: entries render as data
+                    // rows instead of being decoded as instructions. A user's
+                    // own data format (above) always wins.
+                    if ((rowAddr & 3u) == 0 && byteIndex + 4 <= byteBuf.Length
+                        && _ctx.Xrefs.TryGetDataTable(rowAddr, out var table, out int entry))
+                    {
+                        var kind = table.Kind == XrefIndexService.DataTableKind.Float
+                            ? Database.Entities.DataFormatKind.Float
+                            : Database.Entities.DataFormatKind.Word;
+                        string asm = FormatDataDirective(byteBuf, byteIndex, kind, out string? hexStr);
+                        uint val = BitConverter.ToUInt32(byteBuf, byteIndex);
+                        string? cmt = table.Kind switch
+                        {
+                            XrefIndexService.DataTableKind.Jump    => $"case {entry} -> {LabelOrAddress(val)}",
+                            XrefIndexService.DataTableKind.Pointer => TryResolvePointerComment(val, analysisBus) ?? $"-> {LabelOrAddress(val)}",
+                            _ => null,
+                        };
+                        if (entry == 0)
+                        {
+                            string title = table.Kind switch
+                            {
+                                XrefIndexService.DataTableKind.Jump    => "switch table",
+                                XrefIndexService.DataTableKind.Pointer => "pointer table",
+                                _                                      => "float table",
+                            };
+                            cmt = $"{title}, {table.Count} entries" + (cmt is null ? "" : $" | {cmt}");
+                        }
+
+                        results.Add(new InstructionResult
+                        {
+                            Address        = rowAddr,
+                            ByteLength     = 4,
+                            Hex            = hexStr,
+                            Assembly       = asm,
+                            Success        = true,
+                            Comment        = cmt,
+                            DataFormatKind = DataFormatService.KindToWire(kind),
+                            AutoFormatted  = true,
+                        });
+                        byteIndex += 4;
+                        continue;
+                    }
+
                     // ── Auto-detected string at this offset ───────────────────
                     // Emit byte rows for the printable-ASCII run + null
                     // terminator (and any trailing zero-pad needed to reach the
@@ -984,9 +1036,10 @@ namespace CodeDesigner.Ps2.Bridge.Services
                     }
 
                     // No override at this address.  Treat as a 4-byte instruction
-                    // row — if we have fewer than 4 bytes left fall back to a
-                    // byte row to keep the output aligned with the source.
-                    if (byteIndex + 4 > byteBuf.Length)
+                    // row — if we have fewer than 4 bytes left, or a string/override
+                    // ended off a word boundary, emit byte rows until the next
+                    // boundary so every following instruction decodes aligned.
+                    if (byteIndex + 4 > byteBuf.Length || (rowAddr & 3u) != 0)
                     {
                         string asm   = FormatDataDirective(byteBuf, byteIndex, Database.Entities.DataFormatKind.Byte, out string? hexStr);
                         results.Add(new InstructionResult
@@ -1061,17 +1114,16 @@ namespace CodeDesigner.Ps2.Bridge.Services
                     byteIndex += 4;
                 }
 
-                // State-aware analysis: when the live client is paused at a
-                // breakpoint and the disassembled range overlaps the paused PC
-                // (±64 KB), seed the analyzer with the mirrored register
-                // snapshot from AnalysisStateService. This unlocks concrete
-                // [TAKEN]/[NOT TAKEN] hints, real branch targets and resolved
-                // pointer/string values in the comment column.
-                // Far-away cold disassembly keeps the old blank-state behaviour
-                // so it doesn't show misleading state-dependent hints for
-                // unreached code.
+                // State-aware analysis: when the live client is paused and the
+                // paused PC is on this page, seed the analyzer with the mirrored
+                // register snapshot from AnalysisStateService at that row. Rows
+                // above the PC stay on blank state (the snapshot describes the
+                // PC, not the code before it), and [TAKEN]/[NOT TAKEN] hints are
+                // only shown from the PC to the next control-flow change.
                 CodeDesigner.Ps2.Common.CPU.CpuState? seedCpu = null;
+                uint? seedPc = null;
                 bool includeStateHints = false;
+                Func<uint, bool>? seedContext = null;
                 if (_ctx.AnalysisState is not null)
                 {
                     try
@@ -1080,16 +1132,20 @@ namespace CodeDesigner.Ps2.Bridge.Services
                         var snap = _ctx.AnalysisState.TryAcquire();
                         if (snap is not null)
                         {
-                            const uint NearWindow = 0x10000u; // 64 KB either side of PC
-                            uint disasmStart = startAddress ?? 0u;
-                            uint disasmEnd   = (uint)(disasmStart + (uint)byteBuf.Length);
-                            uint pcLo = snap.PcAtMirror >= NearWindow ? snap.PcAtMirror - NearWindow : 0u;
-                            uint pcHi = snap.PcAtMirror + NearWindow;
-                            if (disasmStart < pcHi && disasmEnd > pcLo)
-                            {
-                                seedCpu = snap.Cpu;
-                                includeStateHints = true;
-                            }
+                            // The full snapshot applies at the PC row (when it is on
+                            // this page). Rows elsewhere still get the registers a
+                            // function keeps for its whole body — $gp everywhere, $sp
+                            // and $s0-$s7/$fp inside the PC's function (or near the PC
+                            // without a function index) — so loads through an object
+                            // pointer or $gp resolve and show their pointer chains.
+                            uint pc = ToPagePhysical(snap.PcAtMirror);
+                            seedCpu = snap.Cpu;
+                            seedPc = pc;
+                            includeStateHints = pc >= rangeStart && pc < rangeEnd;
+                            if (_ctx.Xrefs.TryGetFunction(pc, out uint fnStart, out uint fnEnd))
+                                seedContext = a => a >= fnStart && a <= fnEnd;
+                            else
+                                seedContext = a => a + NearPcWindow >= pc && a <= pc + NearPcWindow;
                         }
                     }
                     catch
@@ -1105,14 +1161,67 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 // a blank register file. Only MIPS-instruction rows participate
                 // — data-format rows (.byte/.half/.word/...) are skipped so the
                 // analyzer does not try to "execute" embedded data.
+                // Lead-in: simulate the code just before this page (without
+                // emitting rows for it) so register values set above the page
+                // still resolve hints on it. With a function index that is the
+                // whole function from its entry (from the index's snapshot, no
+                // live read); otherwise the last 0x80 bytes.
+                var analyzedList = instructionList;
+                HashSet<uint>? functionStarts = null;
+                if (instructionList.Count > 0)
+                {
+                    byte[]? leadIn = null;
+                    uint leadStart = 0;
+                    if (_ctx.Xrefs.TryGetFunction(baseAddr, out uint fnStart, out _) && fnStart < baseAddr)
+                    {
+                        leadStart = Math.Max(fnStart, baseAddr >= MaxFunctionLeadIn ? baseAddr - MaxFunctionLeadIn : 0u);
+                        leadIn = _ctx.Xrefs.TryGetSnapshotBytes(leadStart, (int)(baseAddr - leadStart));
+                    }
+                    if (leadIn == null && hintClient != null && baseAddr >= LeadInBytes)
+                    {
+                        try
+                        {
+                            leadStart = baseAddr - LeadInBytes;
+                            leadIn = new DebugClientByteEditor(hintClient).Read((int)leadStart, LeadInBytes);
+                            if (leadIn.Length != LeadInBytes) leadIn = null;
+                        }
+                        catch
+                        {
+                            // Unreadable lead-in (region start, read failure): analyze the page alone.
+                            leadIn = null;
+                        }
+                    }
+                    if (leadIn != null)
+                    {
+                        analyzedList = new List<(uint instruction, uint address)>(instructionList.Count + leadIn.Length / 4);
+                        for (int off = 0; off + 4 <= leadIn.Length; off += 4)
+                            analyzedList.Add((BitConverter.ToUInt32(leadIn, off), leadStart + (uint)off));
+                        analyzedList.AddRange(instructionList);
+                    }
+
+                    // Register state resets at every function entry on (or before) the page.
+                    if (_ctx.Xrefs.HasIndex)
+                    {
+                        functionStarts = new HashSet<uint>();
+                        foreach (var (_, a) in analyzedList)
+                            if (_ctx.Xrefs.IsFunctionStart(a)) functionStarts.Add(a);
+                    }
+                }
+
+                HintLevel hintLevel = CurrentHintLevel();
                 var comments = MipsAnalyzer.AnalyzeInstructions(
-                    instructionList,
+                    analyzedList,
                     startAddress ?? 0,
                     executeInstructions: true,
                     bus: analysisBus,
                     lookupLabel: addr => _ctx.Labels.TryGetValue(addr, out var e) ? e.Label : null,
                     includeStateHints: includeStateHints,
-                    seedCpu: seedCpu);
+                    seedCpu: seedCpu,
+                    seedPc: seedPc,
+                    loadBus: loadBus,
+                    functionStarts: functionStarts,
+                    hintLevel: hintLevel,
+                    seedContext: seedContext);
 
                 // Apply comments and labels to results.  Look each row up by
                 // address rather than by index because the row stride is now
@@ -1127,11 +1236,27 @@ namespace CodeDesigner.Ps2.Bridge.Services
                         row.Comment = aComment;
                     }
 
+                    if (_ctx.Xrefs.HasIndex)
+                    {
+                        var (code, data) = _ctx.Xrefs.CountTo(addr);
+                        if (code > 0) row.XrefCount = code;
+                        if (data > 0) row.DataRefCount = data;
+                        if (functionStarts != null && functionStarts.Contains(addr)) row.FunctionStart = true;
+                    }
+
                     if (_ctx.Labels.TryGetValue(addr, out var labelEntry))
                     {
                         row.Label = labelEntry.Label;
-                        if (string.IsNullOrEmpty(row.Comment) && labelEntry.Comment != null)
-                            row.Comment = labelEntry.Comment;
+                        // A comment the user wrote comes first; the generated hint
+                        // follows it instead of hiding it.
+                        if (!string.IsNullOrWhiteSpace(labelEntry.Comment))
+                        {
+                            string userComment = labelEntry.Comment.Trim();
+                            string? hint = row.Comment?.TrimStart(';', ' ');
+                            row.Comment = string.IsNullOrEmpty(hint) || hint == userComment.TrimStart(';', ' ')
+                                ? userComment
+                                : $"{userComment} | {hint}";
+                        }
                     }
                 }
 
@@ -1141,7 +1266,8 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 // from PCSX2's EE BIOS table without needing the live register
                 // file. This gives game code the same "syscall (FlushCache)"
                 // annotation that paused-PC analysis already produces.
-                AnnotateSyscallsFromPriorV1Load(results);
+                if (hintLevel != HintLevel.Off)
+                    AnnotateSyscallsFromPriorV1Load(results);
 
                 var response = new CommandResponse
                 {
@@ -1426,6 +1552,71 @@ namespace CodeDesigner.Ps2.Bridge.Services
         private static string EscapeCommentString(string text) =>
             text.Replace("\\", "\\\\").Replace("\"", "\\\"");
 
+        /// <summary>Settings key for the comment-column hint level: "full", "addresses" or "off".</summary>
+        internal const string HintLevelSetting = "disasm.hintLevel";
+
+        private HintLevel _hintLevel = HintLevel.Full;
+        private static DateTime s_hintLevelReadUtc = DateTime.MinValue;
+
+        /// <summary>Forces the next disassembly to re-read the hint level (after SETSETTING changes it).</summary>
+        internal static void InvalidateHintLevelCache() => s_hintLevelReadUtc = DateTime.MinValue;
+
+        /// <summary>
+        /// Current hint level from the settings database, re-read at most every two
+        /// seconds (disassembly runs every second while the game runs).
+        /// </summary>
+        private HintLevel CurrentHintLevel()
+        {
+            if ((DateTime.UtcNow - s_hintLevelReadUtc) < TimeSpan.FromSeconds(2)) return _hintLevel;
+            s_hintLevelReadUtc = DateTime.UtcNow;
+            try
+            {
+                string? value = _ctx.SettingsRepo.GetAsync(HintLevelSetting).GetAwaiter().GetResult();
+                _hintLevel = value?.Trim().ToLowerInvariant() switch
+                {
+                    "addresses" => HintLevel.Addresses,
+                    "off"       => HintLevel.Off,
+                    _           => HintLevel.Full,
+                };
+            }
+            catch
+            {
+                // Settings unavailable (no database): keep the last level.
+            }
+            return _hintLevel;
+        }
+
+        /// <summary>A label for <paramref name="address"/> (as stored or as its KSEG0 alias), else the hex address.</summary>
+        private string LabelOrAddress(uint address)
+        {
+            if (_ctx.Labels.TryGetValue(address, out var e) && !string.IsNullOrEmpty(e.Label)) return e.Label;
+            uint alias = address >= 0x80000000u && address < 0xC0000000u ? address & 0x1FFFFFFFu : address | 0x80000000u;
+            if (alias < 0x20000000u || alias >= 0x80000000u)
+                if (_ctx.Labels.TryGetValue(alias, out e) && !string.IsNullOrEmpty(e.Label)) return e.Label;
+            return $"0x{address:X8}";
+        }
+
+        /// <summary>Without a function index, rows this close to the paused PC count as its function.</summary>
+        private const uint NearPcWindow = 0x10000;
+
+        /// <summary>Bytes before a page that the analyzer simulates (not shown) to carry register state in.</summary>
+        private const int LeadInBytes = 0x80;
+
+        /// <summary>
+        /// Longest stretch of a function above the page that is simulated. Real
+        /// functions are far shorter; this only bounds a mis-detected one.
+        /// </summary>
+        private const uint MaxFunctionLeadIn = 0x4000;
+
+        /// <summary>
+        /// Maps a CPU address to the form live panels disassemble at: KSEG0/KSEG1
+        /// aliases (0x80000000–0xBFFFFFFF) drop to their physical address.
+        /// </summary>
+        private static uint ToPagePhysical(uint address)
+        {
+            return address >= 0x80000000u && address < 0xC0000000u ? address & 0x1FFFFFFFu : address;
+        }
+
         /// <summary>True when <paramref name="address"/> falls inside the EE RAM windows usable as a pointer target.</summary>
         private static bool LooksLikeRamPointer(uint address)
         {
@@ -1500,55 +1691,62 @@ namespace CodeDesigner.Ps2.Bridge.Services
         }
 
         /// <summary>
-        /// Walks backward from <paramref name="syscallIndex"/> through
-        /// <paramref name="results"/> looking for the nearest preceding
-        /// instruction that writes a known immediate to <c>$v1</c>. Returns the
-        /// loaded immediate (sign-extended for addi/addiu, zero-extended for
-        /// ori), or null when no such write is found within a short window.
+        /// Computes the value <c>$v1</c> holds at <paramref name="syscallIndex"/> by
+        /// walking forward over the few instruction rows before it. Handles
+        /// <c>li</c> (addiu/ori from $zero), <c>lui</c>, and <c>lui</c> followed by
+        /// <c>ori</c>/<c>addiu</c> (sign-extended add). Any other write to
+        /// <c>$v1</c>, or a jump in the window, makes the value unknown.
+        /// Data rows are skipped. Returns null when the value isn't known.
         /// </summary>
         private static int? FindV1ImmediateBefore(List<InstructionResult> results, int syscallIndex)
         {
-            const int LookbackWindow = 4; // li / addiu / ori is almost always the row above
-            int luiHi = 0;
-            bool sawLuiV1 = false;
-            for (int k = syscallIndex - 1; k >= 0 && k >= syscallIndex - LookbackWindow; k--)
+            const int Window = 6; // instruction rows; li/lui+ori sit right above the syscall
+
+            int start = syscallIndex;
+            for (int seen = 0; start > 0 && seen < Window; )
+            {
+                start--;
+                var r = results[start];
+                if (r.Success && r.ByteLength is null or 4) seen++;
+            }
+
+            bool known = false;
+            int v1 = 0;
+            for (int k = start; k < syscallIndex; k++)
             {
                 var r = results[k];
-                if (!r.Success) continue;
-                if (r.ByteLength is not null and not 4) continue;
-                if (!TryParseHex(r.Hex, out uint instr)) continue;
+                if (!r.Success || r.ByteLength is not null and not 4) continue;
+                if (!TryParseHex(r.Hex, out uint instr)) { known = false; continue; }
+
+                var usage = CodeDesigner.Ps2.Common.GprUsage.Of(instr);
+                if (usage.Flow == CodeDesigner.Ps2.Common.FlowKind.Jump) known = false;
+                if ((usage.Writes & (1u << RegV1)) == 0) continue;
 
                 uint op = instr >> 26;
-                int  rt = (int)((instr >> 16) & 0x1F);
-                short imm16 = unchecked((short)(instr & 0xFFFF));
-
-                if (rt != RegV1) continue;
-
-                // addi (8) / addiu (9): sign-extended 16-bit immediate
-                if (op == 0x08 || op == 0x09)
+                int  rs = (int)((instr >> 21) & 0x1F);
+                int  imm = unchecked((short)(instr & 0xFFFF));
+                switch (op)
                 {
-                    if (sawLuiV1) return (luiHi << 16) | (ushort)imm16; // lui+addi pair
-                    return (int)(short)imm16;
+                    case 0x08: case 0x09: case 0x19:   // addi / addiu / daddiu
+                        if (rs == 0) { v1 = imm; known = true; }
+                        else if (rs == RegV1 && known) v1 += imm;
+                        else known = false;
+                        break;
+                    case 0x0D:                         // ori
+                        if (rs == 0) { v1 = imm & 0xFFFF; known = true; }
+                        else if (rs == RegV1 && known) v1 |= imm & 0xFFFF;
+                        else known = false;
+                        break;
+                    case 0x0F:                         // lui
+                        v1 = (imm & 0xFFFF) << 16;
+                        known = true;
+                        break;
+                    default:
+                        known = false;
+                        break;
                 }
-                // ori (13): zero-extended immediate; combine with prior lui $v1 if present
-                if (op == 0x0D)
-                {
-                    ushort imm = (ushort)imm16;
-                    if (sawLuiV1) return (luiHi << 16) | imm;
-                    return imm;
-                }
-                // lui (15): remember the high half for a potential ori/addiu pair
-                if (op == 0x0F)
-                {
-                    luiHi = (ushort)imm16;
-                    sawLuiV1 = true;
-                    continue;
-                }
-                // Any other instruction writing $v1 (e.g. add $v1, ...) makes the
-                // immediate analysis unreliable — bail.
-                return null;
             }
-            return null;
+            return known ? v1 : null;
         }
 
         private static bool TryParseHex(string? hex, out uint value)

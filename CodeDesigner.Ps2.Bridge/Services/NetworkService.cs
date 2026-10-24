@@ -21,14 +21,26 @@ namespace CodeDesigner.Ps2.Bridge.Services
         /// </summary>
         private static readonly MediusPortMap s_portMap = MediusPortMap.LoadFromMultiplayerConfig();
 
+        /// <summary>
+        /// Next sequence number per TCP direction, learned from every drained capture (and from our
+        /// own injections) so NetTcpContinue can place an injected segment on a live connection.
+        /// </summary>
+        private static readonly Dictionary<TcpFlowKey, uint> s_tcpNextSeq = new();
+
+        static NetworkService() => Socom2GameCatalog.Install();
+
         public void Register(CommandRegistry reg)
         {
             reg.Add(_ => HandleNetGetStatus(),                                                          "NETGETSTATUS");
             reg.Add(c => HandleNetCapture(c.NetCaptureEnable, c.NetCaptureDirection, c.NetCaptureMaxQueue), "NETCAPTURE");
             reg.Add(c => HandleNetRecvCapture(c.NetMaxPackets),                                         "NETRECVCAPTURE");
-            reg.Add(c => HandleNetInject(c.NetFrameData),                                               "NETINJECT");
-            reg.Add(c => HandleNetInjectTx(c.NetFrameData),                                             "NETINJECTTX");
+            reg.Add(c => HandleNetInject(c, tx: false),                                                 "NETINJECT");
+            reg.Add(c => HandleNetInject(c, tx: true),                                                  "NETINJECTTX");
             reg.Add(c => HandleNetDisassemble(c.NetFrameData),                                          "NETDISASSEMBLE");
+            reg.Add(c => HandleNetDissectMany(c.NetFrames),                                             "NETDISSECTMANY");
+            reg.Add(c => HandleNetBuildFrame(c),                                                        "NETBUILDFRAME");
+            reg.Add(c => HandleNetBuildMessage(c),                                                      "NETBUILDMESSAGE");
+            reg.Add(_ => HandleNetCatalog(),                                                            "NETCATALOG");
             reg.Add(c => HandleNetSetFilter(c.NetFilterType, c.NetFilterProtocol, c.NetFilterPort, c.NetFilterIP), "NETSETFILTER");
             reg.Add(_ => HandleNetGetStats(),                                                            "NETGETSTATS");
             reg.Add(c => HandleNetDecryptScert(c.NetFrameData, c.NetWorkingKey),                         "NETDECRYPTSCERT");
@@ -123,21 +135,9 @@ namespace CodeDesigner.Ps2.Bridge.Services
             try
             {
                 var packets = _ctx.PineClient!.NetRecvCapture(maxPackets ?? 50);
-                var portMap = s_portMap;
-                var infos = packets.Select(p => new CapturedPacketInfo
-                {
-                    Direction     = p.Direction,
-                    DirectionName = p.Direction == 0 ? "TX" : "RX",
-                    TimestampUs   = p.TimestampUs,
-                    Length        = p.Data.Length,
-                    Data          = Convert.ToBase64String(p.Data),
-                    // Dissect every drained frame so the webview's tree + hex
-                    // panels render instantly on click without a round-trip.
-                    Layers        = PacketDissector.Dissect(p.Data, p.Direction, portMap).ToList(),
-                }).ToList();
-
+                foreach (var p in packets) TrackTcp(p.Data);
                 ulong baseTs = packets.Length > 0 ? packets[0].TimestampUs : 0;
-                var rows = packets.Select((p, i) => NetBuildRow(i, baseTs, p.Direction, p.TimestampUs, p.Data)).ToList();
+                var (infos, rows) = DissectAll(packets.Select(p => (p.Data, p.Direction, p.TimestampUs)), baseTs);
 
                 return JsonSerializer.Serialize(new CommandResponse
                 {
@@ -154,78 +154,229 @@ namespace CodeDesigner.Ps2.Bridge.Services
             }
         }
 
-        // ── NETINJECT ────────────────────────────────────────────────────────
+        // ── NETINJECT / NETINJECTTX ──────────────────────────────────────────
 
         /// <summary>
-        /// Handle NETINJECT — injects a raw Ethernet frame into the PS2 RX path
-        /// via the PINE MsgNetInject (0x3B) opcode.
+        /// Handle NETINJECT (PINE 0x3B: the frame arrives on the PS2 RX path, as if the network
+        /// delivered it) and NETINJECTTX (PINE 0x3C: the frame leaves through the DEV9 adapter, as
+        /// if the PS2 sent it). NetPayloadData / NetFixFrame / NetTcpContinue edit the frame first
+        /// (see <see cref="PrepareFrame"/>); without them the bytes go out verbatim.
         /// </summary>
-        private string HandleNetInject(string? frameBase64)
+        private string HandleNetInject(CommandMessage c, bool tx)
         {
+            string cmd = tx ? "NETINJECTTX" : "NETINJECT";
             if (_ctx.PineClient == null)
-                return Responses.Error("NETINJECT requires PINE mode (connect to PCSX2 first)");
-            if (string.IsNullOrEmpty(frameBase64))
-                return Responses.Error("NetFrameData (base64) is required for NETINJECT");
+                return Responses.Error($"{cmd} requires PINE mode (connect to PCSX2 first)");
+            if (string.IsNullOrEmpty(c.NetFrameData))
+                return Responses.Error($"NetFrameData (base64) is required for {cmd}");
 
             try
             {
-                byte[] frame = Convert.FromBase64String(frameBase64);
-                bool ok = _ctx.PineClient!.NetInject(frame);
+                byte[] frame = PrepareFrame(c, out string note);
+                bool ok = tx ? _ctx.PineClient!.NetInjectTx(frame) : _ctx.PineClient!.NetInject(frame);
+                if (ok) TrackTcp(frame);
+                var summary = PacketDissector.Summarize(frame, tx ? 0 : 1, s_portMap);
+                string what = summary.Info.Length > 0 ? $": {summary.Protocol} {summary.Info}" : "";
                 return JsonSerializer.Serialize(new CommandResponse
                 {
                     Success          = true,
-                    Command          = "NETINJECT",
+                    Command          = cmd,
                     InjectionSuccess = ok,
-                    Message          = ok
-                        ? $"Frame ({frame.Length} bytes) injected into PS2 RX FIFO"
-                        : "Injection failed (adapter not initialised or FIFO full)",
+                    NetFrame         = Convert.ToBase64String(frame),
+                    Message          = (ok
+                        ? (tx ? $"Sent {frame.Length}-byte frame through the TX adapter" : $"Injected {frame.Length}-byte frame into the PS2 RX FIFO")
+                        : (tx ? "Injection failed (adapter not initialised)" : "Injection failed (adapter not initialised or FIFO full)"))
+                        + what + note,
                 });
             }
-            catch (FormatException)
+            catch (Exception ex) when (ex is FormatException or ArgumentException)
             {
-                return Responses.Error("NetFrameData is not valid base64");
+                return Responses.Error($"{cmd}: {ex.Message}");
             }
             catch (Exception ex)
             {
-                return Responses.Error($"PINE NetInject failed: {ex.Message}");
+                return Responses.Error($"PINE {(tx ? "NetInjectTx" : "NetInject")} failed: {ex.Message}");
             }
         }
 
-        // ── NETINJECTTX ──────────────────────────────────────────────────────
+        /// <summary>
+        /// Apply the frame edits shared by NETINJECT / NETINJECTTX / NETBUILDFRAME: swap in
+        /// NetPayloadData (lengths and checksums are always fixed then), else fix lengths and
+        /// checksums when NetFixFrame is set; NetTcpContinue moves a TCP segment onto the next
+        /// seq/ack of its live flow.
+        /// </summary>
+        private static byte[] PrepareFrame(CommandMessage c, out string note)
+        {
+            note = "";
+            byte[] frame = Convert.FromBase64String(c.NetFrameData!);
+            if (!string.IsNullOrEmpty(c.NetPayloadData))
+                frame = FrameBuilder.ReplacePayload(frame, Convert.FromBase64String(c.NetPayloadData));
+            else if (c.NetFixFrame == true)
+                FrameBuilder.FixLengthsAndChecksums(frame);
+
+            if (c.NetTcpContinue == true && FrameBuilder.TryReadTcp(frame, out var seg))
+            {
+                lock (s_tcpNextSeq)
+                {
+                    if (s_tcpNextSeq.TryGetValue(seg.Flow, out uint seq))
+                    {
+                        uint? ack = s_tcpNextSeq.TryGetValue(seg.Flow.Reverse, out uint a) ? a : null;
+                        FrameBuilder.SetTcpSeqAck(frame, seq, ack);
+                        note = $" (TCP seq {seq}{(ack is uint av ? $", ack {av}" : "")} continues the live flow)";
+                    }
+                    else
+                    {
+                        note = " (no captured segment of this TCP flow yet, so seq/ack were left as they were)";
+                    }
+                }
+            }
+            return frame;
+        }
+
+        /// <summary>Remember where each TCP direction's next segment starts.</summary>
+        private static void TrackTcp(byte[] frame)
+        {
+            if (!FrameBuilder.TryReadTcp(frame, out var seg)) return;
+            lock (s_tcpNextSeq)
+            {
+                // Only move forward (modulo 2^32) so retransmits don't rewind the flow; a SYN restarts it.
+                if (!s_tcpNextSeq.TryGetValue(seg.Flow, out uint cur) || (int)(seg.NextSeq - cur) > 0 || (seg.Flags & 0x02) != 0)
+                    s_tcpNextSeq[seg.Flow] = seg.NextSeq;
+            }
+        }
+
+        // ── NETBUILDFRAME / NETBUILDMESSAGE / NETCATALOG ─────────────────────
 
         /// <summary>
-        /// Handle NETINJECTTX — injects a raw Ethernet frame out through the TX
-        /// adapter via the PINE MsgNetInjectTx (0x3C) opcode.
+        /// Handle NETBUILDFRAME — apply the injection edits to NetFrameData without sending it, and
+        /// return the frame plus its dissection so the composer can preview exactly what goes out.
         /// </summary>
-        private string HandleNetInjectTx(string? frameBase64)
+        private static string HandleNetBuildFrame(CommandMessage c)
         {
-            if (_ctx.PineClient == null)
-                return Responses.Error("NETINJECTTX requires PINE mode (connect to PCSX2 first)");
-            if (string.IsNullOrEmpty(frameBase64))
-                return Responses.Error("NetFrameData (base64) is required for NETINJECTTX");
-
+            if (string.IsNullOrEmpty(c.NetFrameData))
+                return Responses.Error("NetFrameData (base64) is required for NETBUILDFRAME");
             try
             {
-                byte[] frame = Convert.FromBase64String(frameBase64);
-                bool ok = _ctx.PineClient!.NetInjectTx(frame);
+                byte[] frame = PrepareFrame(c, out string note);
+                var layers = PacketDissector.Dissect(frame, -1, s_portMap, out var summary);
                 return JsonSerializer.Serialize(new CommandResponse
                 {
                     Success          = true,
-                    Command          = "NETINJECTTX",
-                    InjectionSuccess = ok,
-                    Message          = ok
-                        ? $"Frame ({frame.Length} bytes) sent through TX adapter"
-                        : "Injection failed (adapter not initialised)",
+                    Command          = "NETBUILDFRAME",
+                    NetFrame         = Convert.ToBase64String(frame),
+                    DissectionLayers = layers.ToList(),
+                    ParsedPacketRow  = NetBuildRow(0, 0, 0, 0, frame, summary),
+                    Message          = $"{frame.Length}-byte frame: {summary.Protocol} {summary.Info}{note}",
+                });
+            }
+            catch (Exception ex) when (ex is FormatException or ArgumentException)
+            {
+                return Responses.Error($"NETBUILDFRAME: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Handle NETBUILDMESSAGE — encode one catalog message from field values and wrap it in a
+        /// plaintext SCERT record (NetRtType; default CLIENT_APP_TOSERVER for lobby messages and
+        /// CLIENT_APP_BROADCAST for DME/game messages). The result is a TCP/UDP payload for
+        /// NETBUILDFRAME / NETINJECT's NetPayloadData.
+        /// </summary>
+        private static string HandleNetBuildMessage(CommandMessage c)
+        {
+            if (string.IsNullOrEmpty(c.NetMessageProtocol) || c.NetMessageId == null)
+                return Responses.Error("NetMessageProtocol and NetMessageId are required for NETBUILDMESSAGE");
+            var entry = Socom2GameCatalog.Entries.FirstOrDefault(e =>
+                string.Equals(e.Protocol, c.NetMessageProtocol, StringComparison.OrdinalIgnoreCase) && e.Id == c.NetMessageId);
+            if (entry == null)
+                return Responses.Error($"No {c.NetMessageProtocol} message 0x{c.NetMessageId:X2} in the catalog");
+
+            try
+            {
+                byte[] body = MessageCatalog.Encode(entry, c.NetMessageValues ?? new Dictionary<string, string>());
+                RT_MSG_TYPE rt = entry.Protocol == MessageCatalog.Scert ? (RT_MSG_TYPE)entry.Id
+                    : c.NetRtType is byte t ? (RT_MSG_TYPE)t
+                    : entry.Protocol is MessageCatalog.Dme or MessageCatalog.Game ? RT_MSG_TYPE.RT_MSG_CLIENT_APP_BROADCAST
+                    : RT_MSG_TYPE.RT_MSG_CLIENT_APP_TOSERVER;
+                byte[] record = MessageCatalog.WrapScert(rt, body, c.NetAppTarget ?? 0);
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success        = true,
+                    Command        = "NETBUILDMESSAGE",
+                    NetMessageData = Convert.ToBase64String(record),
+                    Message        = $"{entry.Protocol} {entry.Name} in {rt}: {record.Length} bytes",
+                });
+            }
+            catch (Exception ex) when (ex is FormatException or ArgumentException or OverflowException)
+            {
+                return Responses.Error($"NETBUILDMESSAGE {entry.Name}: {ex.Message}");
+            }
+        }
+
+        /// <summary>Handle NETCATALOG — every message the multiplayer server defines, with field layouts.</summary>
+        private static string HandleNetCatalog()
+        {
+            var entries = Socom2GameCatalog.Entries;
+            return JsonSerializer.Serialize(new CommandResponse
+            {
+                Success    = true,
+                Command    = "NETCATALOG",
+                NetCatalog = entries.ToList(),
+                Message    = string.Join(", ", entries.GroupBy(e => e.Protocol).Select(g => $"{g.Count()} {g.Key}")),
+            });
+        }
+
+        // ── NETDISSECTMANY ───────────────────────────────────────────────────
+
+        /// <summary>
+        /// Handle NETDISSECTMANY — dissect a batch of frames (a loaded pcap) in one call, returning
+        /// the same packet + row shapes as NETRECVCAPTURE.
+        /// </summary>
+        private static string HandleNetDissectMany(List<NetFrameInput>? frames)
+        {
+            if (frames == null)
+                return Responses.Error("NetFrames is required for NETDISSECTMANY");
+            try
+            {
+                var decoded = frames.Select(f => (Convert.FromBase64String(f.Data), f.Direction, f.TimestampUs)).ToList();
+                var (infos, rows) = DissectAll(decoded, decoded.Count > 0 ? decoded[0].TimestampUs : 0);
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success          = true,
+                    Command          = "NETDISSECTMANY",
+                    CapturedPackets  = infos,
+                    ParsedPacketRows = rows,
+                    Message          = $"Dissected {infos.Count} frame(s)",
                 });
             }
             catch (FormatException)
             {
-                return Responses.Error("NetFrameData is not valid base64");
+                return Responses.Error("NetFrames contains a frame that is not valid base64");
             }
-            catch (Exception ex)
+        }
+
+        /// <summary>Dissect frames once each into packet infos (layer trees) and table rows.</summary>
+        private static (List<CapturedPacketInfo> Infos, List<ParsedPacketRow> Rows) DissectAll(
+            IEnumerable<(byte[] Data, byte Direction, ulong TimestampUs)> frames, ulong baseTs)
+        {
+            var infos = new List<CapturedPacketInfo>();
+            var rows  = new List<ParsedPacketRow>();
+            int i = 0;
+            foreach (var (data, dir, ts) in frames)
             {
-                return Responses.Error($"PINE NetInjectTx failed: {ex.Message}");
+                // Dissect every frame so the webview's tree + hex panels render instantly on click.
+                var layers = PacketDissector.Dissect(data, dir, s_portMap, out var summary);
+                infos.Add(new CapturedPacketInfo
+                {
+                    Direction     = dir,
+                    DirectionName = dir == 0 ? "TX" : "RX",
+                    TimestampUs   = ts,
+                    Length        = data.Length,
+                    Data          = Convert.ToBase64String(data),
+                    Layers        = layers.ToList(),
+                });
+                rows.Add(NetBuildRow(i++, baseTs, dir, ts, data, summary));
             }
+            return (infos, rows);
         }
 
         // ── NETDISASSEMBLE ───────────────────────────────────────────────────
@@ -250,12 +401,12 @@ namespace CodeDesigner.Ps2.Bridge.Services
             try
             {
                 byte[] frame  = Convert.FromBase64String(frameBase64);
-                var    layers = PacketDissector.Dissect(frame, direction: -1, ports: s_portMap);
+                var    layers = PacketDissector.Dissect(frame, -1, s_portMap, out var summary);
                 string text   = LayersToText(layers);
-                // Also build a ParsedPacketRow so the pcap-load path can hydrate
-                // the table columns from this single response — same shape as
-                // NETRECVCAPTURE rows but with index 0 / no relative timestamp.
-                var row = NetBuildRow(0, 0, dir: 0, tsUs: 0, frame);
+                // Also build a ParsedPacketRow so callers can hydrate the table columns
+                // from this single response — same shape as NETRECVCAPTURE rows but
+                // with index 0 / no relative timestamp.
+                var row = NetBuildRow(0, 0, dir: 0, tsUs: 0, frame, summary);
 
                 return JsonSerializer.Serialize(new CommandResponse
                 {
@@ -498,137 +649,27 @@ namespace CodeDesigner.Ps2.Bridge.Services
         }
 
 
-        // ── ParsedPacketRow builder (used by NETRECVCAPTURE) ─────────────────
+        // ── ParsedPacketRow builder ──────────────────────────────────────────
 
         /// <summary>
-        /// Build a summary row for one captured packet.
-        /// Reuses the canonical <see cref="PacketDissector"/> for SCERT and
-        /// Medius identification so the row's "Server" / "Info" columns match
-        /// the structured layer tree the same call would produce. Inline
-        /// Ethernet/IPv4/TCP parsing is kept for src/dst extraction because
-        /// those fields don't need the full Medius decode and the row builder
-        /// runs once per packet on every drain.
+        /// Build the table row for one frame from the dissector's <see cref="PacketSummary"/>, so the
+        /// Server / Proto / Info columns name exactly the messages the layer tree decodes.
         /// </summary>
-        private static ParsedPacketRow NetBuildRow(int idx, ulong baseTs, byte dir, ulong tsUs, byte[] raw)
+        private static ParsedPacketRow NetBuildRow(int idx, ulong baseTs, byte dir, ulong tsUs, byte[] raw, PacketSummary summary)
         {
-            string dirLabel = dir == 0 ? "TX" : "RX";
-            double relSec   = baseTs == 0 ? 0.0 : (tsUs - baseTs) / 1_000_000.0;
-            string timeStr  = relSec.ToString("F6");
-
-            if (raw.Length < 14)
-                return new ParsedPacketRow { No = idx + 1, Time = timeStr, Dir = dirLabel, Proto = "???", Len = raw.Length, Info = "Too short" };
-
-            int etherType = (raw[12] << 8) | raw[13];
-
-            // ARP
-            if (etherType == 0x0806 && raw.Length >= 42)
+            double relSec = baseTs == 0 ? 0.0 : (tsUs - baseTs) / 1_000_000.0;
+            return new ParsedPacketRow
             {
-                int op    = (raw[20] << 8) | raw[21];
-                string si = $"{raw[28]}.{raw[29]}.{raw[30]}.{raw[31]}";
-                string ti = $"{raw[38]}.{raw[39]}.{raw[40]}.{raw[41]}";
-                string info = op == 1
-                    ? $"Who has {ti}? Tell {si}"
-                    : $"{si} is at {FmtMac6(raw, 22)}";
-                return new ParsedPacketRow { No = idx+1, Time = timeStr, Dir = dirLabel,
-                    Src = FmtMac6(raw, 6), Dst = FmtMac6(raw, 0),
-                    Proto = "ARP", Len = raw.Length, Info = info };
-            }
-
-            if (etherType != 0x0800 || raw.Length < 34)
-                return new ParsedPacketRow { No = idx+1, Time = timeStr, Dir = dirLabel,
-                    Src = FmtMac6(raw, 6), Dst = FmtMac6(raw, 0),
-                    Proto = $"ETH(0x{etherType:X4})", Len = raw.Length,
-                    Info = $"EtherType 0x{etherType:X4}" };
-
-            // IPv4
-            int ihl        = (raw[14] & 0xF) * 4;
-            int ipTotalLen = (raw[16] << 8) | raw[17];
-            int ipProto    = raw[23];
-            string srcIP   = $"{raw[26]}.{raw[27]}.{raw[28]}.{raw[29]}";
-            string dstIP   = $"{raw[30]}.{raw[31]}.{raw[32]}.{raw[33]}";
-            int payOff     = 14 + ihl;
-
-            var portMap = s_portMap;
-
-            // TCP
-            if (ipProto == 6 && raw.Length >= payOff + 20)
-            {
-                int sp      = (raw[payOff]     << 8) | raw[payOff + 1];
-                int dp      = (raw[payOff + 2] << 8) | raw[payOff + 3];
-                int tcpHdr  = ((raw[payOff + 12] >> 4) & 0xF) * 4;
-                int flags   = raw[payOff + 13];
-                var fl      = new List<string>(6);
-                if ((flags & 0x02) != 0) fl.Add("SYN");
-                if ((flags & 0x10) != 0) fl.Add("ACK");
-                if ((flags & 0x01) != 0) fl.Add("FIN");
-                if ((flags & 0x04) != 0) fl.Add("RST");
-                if ((flags & 0x08) != 0) fl.Add("PSH");
-
-                string server   = portMap.ServerFromPorts(sp, dp);
-                int tcpPayOff   = payOff + tcpHdr;
-                // Use IP total length to exclude Ethernet padding from TCP payload length.
-                int tcpPayLen   = ipTotalLen - ihl - tcpHdr;
-
-                bool isScertPort = portMap.ScertPorts.Contains(sp) || portMap.ScertPorts.Contains(dp);
-                if (server.Length > 0 && tcpPayLen > 0 && isScertPort)
-                {
-                    var tcpPayload = raw.AsSpan(tcpPayOff, tcpPayLen).ToArray();
-                    // Direction-filter heuristic: TX (0) shouldn't carry SERVER_*;
-                    // RX (1) shouldn't carry CLIENT_*. Skips garbage matches in
-                    // payloads that aren't actually SCERT.
-                    var scert = PacketDissector.ParseScert(tcpPayload).Where(m =>
-                        !((dir == 0 && m.MsgTypeName.StartsWith("RT_MSG_SERVER_", StringComparison.Ordinal))
-                       || (dir == 1 && m.MsgTypeName.StartsWith("RT_MSG_CLIENT_", StringComparison.Ordinal)))
-                    ).ToList();
-
-                    if (scert.Count > 0)
-                    {
-                        int port = portMap.PortNames.ContainsKey(dp) ? dp : sp;
-                        string info = $"[{server}:{port}] {scert[0].MsgTypeName}";
-                        if (scert[0].Medius is { } m) info += $"({m.MsgTypeName})";
-                        else if (scert[0].IsEncrypted) info += " (encrypted)";
-                        if (scert.Count > 1) info += $" (+{scert.Count - 1} more)";
-                        return new ParsedPacketRow { No = idx+1, Time = timeStr, Dir = dirLabel,
-                            Server = server, Src = $"{srcIP}:{sp}", Dst = $"{dstIP}:{dp}",
-                            Proto = "SCERT", Len = raw.Length, Info = info };
-                    }
-                }
-
-                return new ParsedPacketRow { No = idx+1, Time = timeStr, Dir = dirLabel,
-                    Server = server, Src = $"{srcIP}:{sp}", Dst = $"{dstIP}:{dp}",
-                    Proto = "TCP", Len = raw.Length,
-                    Info = $"{srcIP}:{sp} → {dstIP}:{dp}  TCP [{string.Join(",", fl)}]" };
-            }
-
-            // UDP
-            if (ipProto == 17 && raw.Length >= payOff + 8)
-            {
-                int sp = (raw[payOff]     << 8) | raw[payOff + 1];
-                int dp = (raw[payOff + 2] << 8) | raw[payOff + 3];
-                return new ParsedPacketRow { No = idx+1, Time = timeStr, Dir = dirLabel,
-                    Src = $"{srcIP}:{sp}", Dst = $"{dstIP}:{dp}",
-                    Proto = "UDP", Len = raw.Length,
-                    Info = $"{srcIP}:{sp} → {dstIP}:{dp}  UDP" };
-            }
-
-            // ICMP
-            if (ipProto == 1 && raw.Length >= payOff + 2)
-            {
-                return new ParsedPacketRow { No = idx+1, Time = timeStr, Dir = dirLabel,
-                    Src = srcIP, Dst = dstIP,
-                    Proto = "ICMP", Len = raw.Length,
-                    Info = $"{srcIP} → {dstIP}  ICMP" };
-            }
-
-            return new ParsedPacketRow { No = idx+1, Time = timeStr, Dir = dirLabel,
-                Src = srcIP, Dst = dstIP,
-                Proto = $"IP({ipProto})", Len = raw.Length,
-                Info = $"{srcIP} → {dstIP}" };
+                No     = idx + 1,
+                Time   = relSec.ToString("F6"),
+                Dir    = dir == 0 ? "TX" : "RX",
+                Server = summary.Server,
+                Src    = summary.Source,
+                Dst    = summary.Destination,
+                Proto  = summary.Protocol,
+                Len    = raw.Length,
+                Info   = summary.Info,
+            };
         }
-
-        private static string FmtMac6(byte[] b, int o)
-            => b.Length >= o + 6
-                ? $"{b[o]:X2}:{b[o+1]:X2}:{b[o+2]:X2}:{b[o+3]:X2}:{b[o+4]:X2}:{b[o+5]:X2}"
-                : "00:00:00:00:00:00";
     }
 }

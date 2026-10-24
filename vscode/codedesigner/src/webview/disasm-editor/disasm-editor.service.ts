@@ -2,6 +2,7 @@ import { Injectable, OnDestroy, inject } from '@angular/core';
 import { Subject, Subscription } from 'rxjs';
 import { VsCodeBridgeService } from '../shared/vscode-bridge.service';
 import { EditorState } from './state/editor.state';
+import { findRowIndexForByteOffset } from './state/row-locator';
 import {
   DisasmRow,
   type DataFormatKind,
@@ -166,6 +167,14 @@ export class DisasmEditorService implements OnDestroy {
       this._bridge.on<Record<string, unknown>>('init').subscribe(msg => this._onInit(msg)),
       this._bridge.on<Record<string, unknown>>('disasmPage').subscribe(msg => this._onDisasmPage(msg)),
       this._bridge.on<Record<string, unknown>>('disasmRefreshSkipped').subscribe(msg => this._onDisasmRefreshSkipped(msg)),
+      // Something that changes row content without changing memory happened (the
+      // cross-reference index finished, the hint level changed): reload the
+      // visible page.
+      this._bridge.on<Record<string, unknown>>('reloadPage').subscribe(() => {
+        if (this.state.isLive) {
+          this._bridge.postMessage({ type: 'requestPage', startIndex: this.getPageStart(this.state.cursor) });
+        }
+      }),
       this._bridge.on<Record<string, unknown>>('hexview').subscribe(msg => this._onHexView(msg)),
       this._bridge.on<Record<string, unknown>>('searchResults').subscribe(msg => this._onSearchResults(msg)),
       this._bridge.on<Record<string, unknown>>('status').subscribe(msg => this._onStatus(msg)),
@@ -456,7 +465,9 @@ export class DisasmEditorService implements OnDestroy {
       const pageStart = this.getPageStart(instrIdx);
       const page      = updatedPages.get(pageStart) ?? this.state.loadedPages.get(pageStart);
       if (!page) { continue; }
-      const local = instrIdx - pageStart;
+      // Rows aren't one per 4 bytes once a page holds .byte/.half/string rows,
+      // so find the row by its address rather than by index.
+      const local = findRowIndexForByteOffset(page, this.state.baseAddress, physAddr - physBase);
       if (local >= 0 && local < page.length) {
         if ((page[local].comment ?? '') === (comment ?? '')) { continue; }
         const nextPage = page.slice();
