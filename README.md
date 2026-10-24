@@ -1,73 +1,75 @@
 # CodeDesigner — PS2 Emotion Engine Toolset
 
-CodeDesigner is a complete toolset for the Sony PlayStation 2 **Emotion Engine (EE)** MIPS R5900 processor. It lets you assemble, disassemble, debug, and modify PS2 games live — from a VS Code sidebar connected to a real emulator or hardware.
+CodeDesigner is a toolset for reverse engineering and modding PlayStation 2 games. It assembles and disassembles the Emotion Engine (MIPS R5900), debugs games live in PCSX2 or its own emulator, builds and ports cheats, edits game assets, and runs online servers, all from VS Code. An MCP server gives AI assistants the same tools.
 
 ---
 
 ## What it does
 
-| Capability | Description |
+| Area | Highlights |
 |---|---|
-| **Assembler / Disassembler** | Full EE MIPS R5900 instruction set, including MMI, COP1 (FPU), COP2 (VU0 macro mode), and VU1 micro instructions |
-| **Live Disassembler** | Scrollable disassembly view over live EE memory; auto-updates on pause, supports breakpoints, single-step, and PC tracking |
-| **Emulator** | Built-in dual-CPU PS2 emulator (EE + IOP) with full hardware peripherals; boots a real BIOS and loads game discs |
-| **PCSX2 Bridge** | Connect to a running PCSX2 process via the PINE protocol for real-time memory inspection and patching |
-| **CDS Language** | High-level patch scripting language that compiles to MIPS assembly, GameShark codes, or cheat-engine table entries |
-| **Cheat Engine** | Apply one-shot cheat codes or inject a persistent frame-loop routine that keeps re-applying cheats every frame |
-| **Static Recompiler** | Translate PS2 ELF binaries to portable C++ source |
-| **Memory Card Manager** | Read, write, and export PS2 memory card saves |
-| **HDD Image Manager** | Browse and extract PS2 HDD partition images |
-| **MCP Server** | GitHub Copilot / AI agent integration via the Model Context Protocol |
-| **Multiplayer Server** | Online infrastructure for PS2 LAN/online games |
-
----
-
-## Documentation
-
-See the **[docs/ catalog](docs/README.md)** for all guides and project references.
+| **Disassembler** | Live views of every memory region; comment hints, function and table detection, cross-references, breakpoints, watches, registers. Full R5900 ISA including MMI, FPU, VU0 macro and VU1. |
+| **Emulators** | Debugs commercial games in CodeDesigner's **PCSX2 fork** over PINE (breakpoints, stepping, symbols, save states, pad, network, live picture, sound), or in the built-in dual-CPU emulator. |
+| **CDS language** | A patch scripting language that compiles to MIPS, GameShark codes or a frame-loop cheat table. |
+| **Cheats** | Cheat lists and the CheatCodeArchive, format conversion, a cheat porter between game versions, a frame-loop cheat engine and a joker (button activator) code builder. |
+| **Memory tools** | Memory Diff, PCSX2 save states, scanners, labels, pointer structs and structure diagrams. |
+| **Assets** | Viewer, Model, Map and Animation editors for SOCOM II (and SOCOM: Combined Assault, read-only). |
+| **Network** | DEV9 packet capture with every Medius / DME / SOCOM II message labelled, plus packet building and injection. |
+| **Online** | SOCOM II online servers (DNAS, Medius, DME, NAT, patch download), verified on real hardware. |
+| **Media** | Memory card, HDD image, ISO and the PCSX2 compatibility list. |
+| **Recompiler** | Static ELF → C++ translation. |
+| **AI** | `CodeDesigner.AI`, an MCP server with 242 tools and profiles for Claude, Copilot and other clients; an AI chat and agent panel in VS Code. |
 
 ---
 
 ## Quick start
 
 ```powershell
-# Clone with submodules (pcsx2, CheatCodeArchive)
 git clone --recurse-submodules https://github.com/TylerDev888/CodeDesigner.git
 cd CodeDesigner
 
-# Build
-dotnet build CodeDesigner.sln
-
-# Run tests
+dotnet build CodeDesigner.sln          # builds and deploys to %LOCALAPPDATA%\CodeDesigner\
 dotnet test CodeDesigner.Ps2.TestProject/
-
-# Debug the VS Code extension
-# Open vscode/codedesigner in VS Code and press F5
 ```
+
+You need the .NET 8 SDK, SQL Server LocalDB and Node.js 20+. Details: [Building](docs/building.md).
+
+Then open `vscode/codedesigner` in VS Code, run `npm ci`, and press **F5**. In the development host:
+
+1. Open the **CodeDesigner** sidebar.
+2. In the **Emulator** tab, pick PCSX2 (or the built-in emulator), a BIOS and a game.
+3. Click **Run**. The extension starts the emulator and the Bridge and connects.
+4. Open **EE RAM** under *Memory Region* to start disassembling.
+
+For full PCSX2 support (breakpoints, stepping, Preview, Sound), build the fork in `pcsx2/`; see [Building → PCSX2 fork](docs/building.md#build-the-pcsx2-fork).
 
 ---
 
-## Connecting to PCSX2
+## AI assistants (MCP)
 
-1. Start PCSX2 with the PINE socket enabled.
-2. In the VS Code sidebar open **Emulator Settings**, select **PCSX2**, and click **Connect**.
-3. The live disassembler view opens automatically on the first pause.
-
-## Connecting the MCP server to GitHub Copilot
-
-1. Install the GitHub Copilot extension in VS Code.
-2. Add an entry to `%APPDATA%\Code\User\mcp.json` (replace `<PATH>` with the repo root):
+Building `CodeDesigner.AI` deploys it to `%LOCALAPPDATA%\CodeDesigner\AI\`. Start it from the sidebar's MCP button, or register it with your client. The repo's `.vscode/mcp.json` has ready-made entries:
 
 ```json
 {
   "servers": {
     "CodeDesigner": {
       "type": "stdio",
-      "command": "dotnet",
-      "args": ["run", "--no-build", "--project", "<PATH>\\CodeDesigner.Ps2.McpServer"]
+      "command": "${env:LOCALAPPDATA}/CodeDesigner/AI/CodeDesigner.AI.exe",
+      "args": ["--profile", "re"]
     }
   }
 }
 ```
 
-3. Restart VS Code.
+Profiles pick which tools a client sees (`lite`, `core`, `re`, `patching`, `packets`, `media`, `all`, …). See the [MCP Server guide](docs/mcp-server.md).
+
+---
+
+## Documentation
+
+Start at the **[documentation index](docs/README.md)**. Good first reads:
+
+- [VS Code Extension](docs/vscode-extension.md) — a tour of every page
+- [Disassembler](docs/disassembler.md)
+- [Architecture](docs/ARCHITECTURE.md) and [Projects](docs/projects.md)
+- [CHANGELOG](CHANGELOG.md)

@@ -1,5 +1,35 @@
 # Changelog
 
+## Unreleased
+
+### Controller (joker maker)
+- **Build code** and **Play** modes. Build code toggles buttons into a combo without touching the game; Play sends held buttons and sticks to PCSX2 and releases them when you switch mode or close the page.
+- The joker address is found from the running game's cheats: D/E compare lines are ranked by address, the stored polarity (pressed = 0 or 1) is detected, and the combos already in use are listed and can be loaded. A custom address and a byte-swap option cover other games.
+- Paste code lines to get the finished activator (`D` line, `E0nn` block, or a `D` line per line). **Capture from pad** records a combo from the real controller; Live pad also shows the real sticks.
+- Fixes: duplicated metrics, dragging a stick pressed L3/R3, keys couldn't un-toggle in multi-press, keys fired while typing, keys stuck down after switching windows, the Live checkbox stayed ticked after polling stopped, and stick drags could send pad writes out of order. The non-functional PS button is gone.
+
+### Preview
+- **Sound** button mutes and unmutes PCSX2 (new PINE opcodes `0x45` / `0x46` in the fork, `PINESETAUDIOMUTED` / `PINEGETAUDIOSTATE` on the Bridge, and the `pcsx2_set_audio_muted` / `pcsx2_get_audio_state` MCP tools). Needs a rebuilt PCSX2.
+
+### Packet Viewer
+- Every Medius, DME and SOCOM II message is labelled by name from the server's own definitions; DME app payloads, UDP server names, DNS and SCERT-over-UDP are decoded.
+- New composer: build a server message into a frame, preview the dissection, and inject it into the PS2 or send it from it, with repeat. Resend / Edit on a selected packet. MCP `net_build_message`.
+- Page redesigned; the relative time column no longer resets every drain.
+
+### Cheat Porter
+- Its own page, with From/To pickers for save states, live EE RAM and browsed dumps, **Load game cheats**, per-cheat results (Ported / Review / Not found), candidate pickers and a live output preview.
+- Ports multi-line code types correctly and uses the full 25-bit address, so codes above 16 MB port.
+
+### Memory Diff
+- Rebuilt as a GitHub-style diff of two dumps or live EE RAM: unified/split views, Bytes/Words/Instructions, expanders, hunk navigator, copy as codes and open in disassembler.
+
+### Disassembler
+- Pointer-chain hints work again when paused and through pointers loaded from elsewhere.
+- An exhaustive disassemble → assemble round-trip test over ~27,000 encodings; VU0 ops with an empty dest mask and undefined `pmfhl`/`pmthl` formats now decode as `.word`.
+
+### Documentation
+- Rewrote the README, the extension README and the docs index, and the MCP (all 242 tools, generated from source), VS Code extension, disassembler, building, projects, architecture, command-line, cheat engine, porter, converter, recompiler, test project, common library, emulator and memory card guides to match the current code. The socket protocol guide now lists every Bridge command.
+
 ## 1.4.0 — 2026-10-23
 
 ### Assets editors

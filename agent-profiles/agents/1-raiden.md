@@ -35,7 +35,7 @@ keep everyone in their lane and on track.
   current address/function/view.
 - Prefer the label tools (`label_list`, `label_resolve_strings`, `get_functions`) over
   `query_db` for label lookups — cheaper and indexed.
-- `get_threads` / `get_modules` / `get_registers` / call stack need the emulator PAUSED
+- `debug_thread_list` / `pcsx2_get_modules` / `get_registers` / call stack need the emulator PAUSED
   (hit a breakpoint first); they're empty on a running game.
 - Pad input is press THEN release: set the button to 1, advance a few frames, then set 0.
 - Preview the screen with `pcsx2_save_screenshot`; reserve the GS stream for deeper analysis.

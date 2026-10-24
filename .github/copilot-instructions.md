@@ -9,40 +9,51 @@ The `website/obj/` path contains literal backslashes that break Windows. A CI ch
 
 ## Project Overview
 
-This is a C# library and toolset for the **Sony PlayStation 2 Emotion Engine (EE)** MIPS64 architecture. It provides a complete assembler, disassembler, instruction decoder/encoder, and execution engine, verified against [PCSX2](https://pcsx2.net/) reference behaviour.
+CodeDesigner is a toolset for the **Sony PlayStation 2**: an assembler, disassembler and execution engine for the Emotion Engine (MIPS R5900, verified against [PCSX2](https://pcsx2.net/)), a socket bridge to PCSX2 and a built-in emulator, a VS Code extension, the CDS patch language, cheat tools, game asset editors, SOCOM II online servers and an MCP server for AI clients. See `docs/projects.md` and `docs/ARCHITECTURE.md`.
 
 ## Repository Structure
 
 ```
 CodeDesigner/
-├── CodeDesigner.Ps2.Common/     # Core library (assembler, disassembler, instructions, encoder/decoder)
-├── CodeDesigner.Ps2.EmulatorCore/   # PS2 emulator: EE + IOP CPUs, hardware peripherals, ELF loader
-├── CodeDesigner.Ps2/            # Console application + socket server
-├── CodeDesigner.Ps2.McpServer/  # MCP stdio bridge for GitHub Copilot
-├── CodeDesigner.Ps2.CdsLanguage/ # CDS compiler and parser
-├── CodeDesigner.Ps2.CheatEngine/ # Cheat code engine
-├── CodeDesigner.Ps2.CheatPorter/ # Port cheat codes between game revisions
-├── CodeDesigner.Ps2.CheatConverter/ # Cheat format converter
-├── CodeDesigner.Ps2.MemoryCardManager/ # PS2 memory card emulation
-├── CodeDesigner.Ps2.Recompiler/ # Static recompiler: PS2 ELF → C++
-├── CodeDesigner.Ps2.TestProject/ # Unit-test suite (1097 tests)
-└── vscode/codedesigner/         # VSCode extension frontend (TypeScript/Node.js)
+├── CodeDesigner.Ps2.Common/          # ISA: assembler, disassembler, instructions, encoder/decoder
+├── CodeDesigner.Ps2.EmulatorCore/    # PS2 emulator: EE + IOP CPUs, hardware peripherals, ELF loader
+├── CodeDesigner.Ps2.Emulator/        # Runs the built-in emulator as a process (PINE-compatible socket :28012)
+├── CodeDesigner.Ps2.Bridge/          # Socket server (:8765), PCSX2 PINE client, GS stream (:8766), services
+├── CodeDesigner.Ps2.CdsLanguage/     # CDS compiler and standard library
+├── CodeDesigner.Ps2.CheatEngine/     # Cheats, frame-loop engine, CheatConverter/, CheatPorter/
+├── CodeDesigner.Ps2.LabelManager/    # Label sets, IOP module exports
+├── CodeDesigner.Ps2.Database/        # EF Core model + migrations (SQL Server LocalDB)
+├── CodeDesigner.Ps2.FileFormats/     # Zipper (SOCOM II / CA), GTA, shared mesh types, ps2dis files
+├── CodeDesigner.Ps2.IsoManager/ .MCManager/ .HddManager/   # Disc, memory card and HDD images
+├── CodeDesigner.Ps2.Recompiler/      # Static recompiler: PS2 ELF → C++
+├── CodeDesigner.Ps2.Multiplayer/     # SOCOM II online servers (DNAS, Medius, DME, NAT, patch)
+├── CodeDesigner.AI/ .AI.Abstractions/ .AI.Tests/   # The MCP server (CodeDesigner.AI.exe) and its tests
+├── CodeDesigner.Ps2.DiscordBot/ .DiscordPresence/ .WebApi/ .Installer/
+├── CodeDesigner.Ps2.TestProject/     # Main MSTest suite (~1,400 tests)
+├── vscode/codedesigner/              # VS Code extension (TypeScript host + Angular webviews)
+├── pcsx2/                            # CodeDesigner's PCSX2 fork (submodule)
+├── CheatCodeArchive/                 # Cheat archive (submodule)
+├── Mods/                             # Game mods, research notes and scripts (SOCOM2, SOCOMCA)
+└── docs/                             # Documentation (start at docs/README.md)
 ```
 
 ## Build & Test
 
 ```bash
-# Build the solution
-dotnet build CodeDesigner.Ps2.sln
+# Build everything. This also deploys the Bridge, Emulator and AI server to %LOCALAPPDATA%\CodeDesigner\
+# and migrates LocalDB (add -p:SkipDatabaseInit=true to skip the migration).
+dotnet build CodeDesigner.sln
 
-# Run all tests
+# Run the tests
 dotnet test CodeDesigner.Ps2.TestProject/
+dotnet test CodeDesigner.AI.Tests/
 
-# Run the console app
-cd CodeDesigner.Ps2 && dotnet run
+# Run the Bridge by hand (the VS Code extension normally starts it)
+CodeDesigner.Ps2.Bridge.exe            # control server on :8765
+CodeDesigner.Ps2.Bridge.exe --pcsx2    # attach to a running PCSX2 over PINE
 
-# Start the socket server (for the VSCode extension)
-cd CodeDesigner.Ps2 && dotnet run -- --server
+# VS Code extension
+cd vscode/codedesigner && npm ci && npm run compile   # then F5 in VS Code
 ```
 
 ## Key Conventions

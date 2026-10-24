@@ -1,139 +1,81 @@
 [← Back to Documentation Index](README.md)
 
-# CodeDesigner.Ps2.CheatPorter — Cheat Code Porting
+# Cheat Porter
 
-The `CodeDesigner.Ps2.CheatPorter` project provides tools for porting cheat codes between different versions/revisions of PS2 games.
+The Cheat Porter moves cheat codes from one version of a game to another, for example from an NTSC release to a PAL one or from v1.0 to a patched build. It compares the EE RAM of both versions and works out where each address in the codes moved to.
 
-## Overview
+---
 
-PS2 games often have multiple revisions with different memory layouts. Cheat codes written for one version may not work on another due to shifted addresses, changed data structures, or relocated functions. CheatPorter automates the process of updating cheat codes for new game versions.
+## What you need
 
-## Key Features
+Two EE RAM images taken at a comparable point in each game (same level or menu is best):
 
-### Automatic Address Translation
-- Analyzes memory differences between game versions
-- Identifies relocated code and data sections
-- Updates cheat addresses automatically
+- PCSX2 save states (`.p2s`) of the current game,
+- the live EE RAM of the running emulator,
+- or dumps you browse to: `.bin` files, `.p2s` files or snapshot folders.
 
-### Pattern Matching
-- Uses binary signatures to locate functions/data
-- Handles code refactoring and optimization changes
-- Supports both static and dynamic address resolution
+---
 
-### Batch Processing
-- Processes entire cheat code collections
-- Generates compatibility reports
-- Validates ported codes against target version
+## Using the page
 
-## Usage
+Open it from the sidebar (**Emulator → Tools → Porter**, or **Cheats → Cheat Tools → Porter**).
 
-### Command Line
+1. Pick **From** (the version the codes were written for) and **To** (the version you want them for). Both lists show the game's save states, live EE RAM and any dumps you've browsed. The same picker is used by Memory Diff.
+2. Paste the codes, or click **Load game cheats** to fill the input from the current game's archive. Cheats are separated by name lines as usual.
+3. Run the port. Results are grouped per cheat:
 
-```bash
-# Port cheats from version A to version B
-CheatPorter.exe --source-version SLUS-12345.v1 --target-version SLUS-12345.v2 --cheat-file cheats.txt
+   | Filter | Meaning |
+   |---|---|
+   | **Ported** | Every address was found with a unique match (100% confidence). |
+   | **Review** | A match was found, but there were several candidates or the confidence is below 100%. Pick the right candidate from the line's picker. |
+   | **Not found** | At least one address couldn't be located. Partially found cheats can't be selected for output. |
 
-# Analyze differences between versions
-CheatPorter.exe --analyze --old-elf game_v1.elf --new-elf game_v2.elf
-```
+4. The output preview updates as you choose. **Copy** it, or **Open in editor**.
 
-### API Usage
+Your input and choices are kept when the page reloads.
 
-```csharp
-var porter = new CheatPorter();
-var portedCodes = porter.PortCheats(
-    sourceVersion: "SLUS-12345",
-    targetVersion: "SLUS-12346",
-    cheatCodes: originalCheats
-);
-```
+---
 
-## Algorithm
+## How addresses are found
 
-### 1. Binary Diff Analysis
-- Compares ELF executables or memory dumps
-- Identifies changed, moved, and identical sections
-- Builds relocation map
+For each unique address in the codes, the porter tries four strategies in order and stops at the first that finds something:
 
-### 2. Signature Generation
-- Extracts function prologue/epilogue patterns
-- Creates data structure fingerprints
-- Generates unique identifiers for code blocks
+1. **Hex pattern** — takes the bytes just before the address (48, 32, then 16 bytes, skipping all-zero runs) and searches the target dump. Matches at the *same* position in both dumps are dropped, since an address that didn't move shouldn't latch onto an unrelated copy.
+2. **Code fingerprint** — finds MIPS `lui` + load/store/`addiu` pairs that build the address in the source code (user, KSEG0 and KSEG1 forms), masks the address bits, and looks for the same instructions in the target.
+3. **Extended anchor** — scans back up to 512 bytes for the nearest meaningful byte run and uses it as an anchor.
+4. **Pointer scan** — finds 32-bit pointers to the address (or to its structure header) in the source, reads the same slot in the target, and applies the same offset. This works well when both versions keep a pointer table at a stable place.
 
-### 3. Address Resolution
-- Matches signatures in target version
-- Calculates address offsets
-- Updates cheat code addresses
+Candidates are ranked by distance from the source address. A unique match scores 100; more candidates lower the score and mark the line *ambiguous*.
 
-### 4. Validation
-- Tests ported codes in emulator
-- Verifies expected behavior
-- Reports success/failure rates
+### Code types
 
-## Supported Cheat Formats
+Only the words that hold an address are ported. The full 25-bit address is used, so codes above 16 MB port correctly.
 
-- GameShark/Action Replay codes
-- Raw memory addresses
-- CDS script references
-- Custom binary patches
+| Type | Handling |
+|---|---|
+| Everything else (`0`/`1`/`2` writes, `D` conditional, …) | Address in word 1 is ported. |
+| `3` increment / decrement | Address in word 2; the 32-bit forms keep their value line. |
+| `4` serial write | Address ported; the step/increment line is kept. |
+| `5` copy | Source (word 1) and destination (next line) are both ported. |
+| `6` pointer write | Base address ported; offset lines are kept. |
+| `E` multi-line conditional | Address in word 2 is ported. |
+| `B` timer | Kept as is. |
+| `F` master code | Both words are code addresses and are ported. |
 
-## Integration
+Each result line says how it was handled (for example *Pointer offsets — copied unchanged*) and which method found it (for example `HexPattern-48`).
 
-### With Database
-- Stores version metadata and signatures
-- Caches analysis results
-- Shares patterns across games
+---
 
-### With Emulator
-- Live testing of ported codes
-- Memory scanning for validation
-- Automated testing pipelines
+## From code and AI
 
-## Examples
+- **Bridge**: `PORTCHEATS` resolves the two images to raw dumps and runs the porter.
+- **MCP**: `port_cheats` takes the codes and two `.bin` dump paths.
+- **Library**: `CodeDesigner.Ps2.CheatEngine.CheatPorter.CheatPorter.Port(sourceData, targetData, blocks, …)` returns one `PortCheatResult` per line, with `Found`, `NewCode`, `Confidence`, `Ambiguous`, `Candidates`, `Method` and `Note`.
 
-### Porting Infinite Health Cheat
+---
 
-Original (v1.0):
-```
-80010000 000000FF  // Health = 255
-```
+## Tips
 
-Analysis finds health variable moved from 0x00100000 to 0x00105000.
-
-Ported (v1.1):
-```
-80015000 000000FF  // Health = 255 (updated address)
-```
-
-### Function Hook Porting
-
-Original hook on `Player::TakeDamage` at 0x00200000.
-
-Target version has function at 0x00210000.
-
-Porter updates hook address and adjusts relative offsets.
-
-## Limitations
-
-- Cannot handle major engine rewrites
-- Requires sufficient binary similarity
-- May need manual intervention for complex changes
-- Limited support for dynamically allocated data
-
-## Best Practices
-
-### Version Management
-- Maintain version history in database
-- Use consistent naming conventions
-- Document known incompatibilities
-
-### Testing
-- Always test ported codes thoroughly
-- Use emulator save states for comparison
-- Validate on multiple hardware configurations
-
-### Maintenance
-- Update signatures when new versions release
-- Monitor community reports for issues
-- Provide fallback manual porting options</content>
-<parameter name="filePath">c:\Users\tholu\Desktop\CodeDesigner\docs\cheat-porter.md
+- Dump both versions at the same game state. The more of the surrounding memory matches, the better the hex-pattern and anchor strategies work.
+- Codes that point into the heap (values that move every run) usually need the pointer scan, or a pointer (`6`) code instead.
+- Always test ported codes. Snapshot first.

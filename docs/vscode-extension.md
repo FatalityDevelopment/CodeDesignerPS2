@@ -1,255 +1,200 @@
 [← Back to Documentation Index](README.md)
 
-# VS Code Extension — CodeDesigner Frontend
+# VS Code Extension
 
-The VS Code extension provides a graphical user interface for CodeDesigner, enabling interactive debugging, code editing, and analysis of PS2 games within Visual Studio Code.
+The extension (`vscode/codedesigner`) is CodeDesigner's user interface. It adds a **CodeDesigner** sidebar to VS Code and opens each tool as an editor tab. Everything it does goes through the Bridge (`CodeDesigner.Ps2.Bridge`, TCP `localhost:8765`), which it starts and connects to for you.
 
-## Overview
+This page is a tour of what's there. The deeper guides are linked from each section.
 
-The extension integrates CodeDesigner functionality directly into VS Code, providing a seamless development and debugging experience for PS2 homebrew and reverse engineering projects.
+---
 
-## Features
+## Getting started
 
-### Disassembler Panel
-- **Live disassembly** of PS2 memory
-- **Interactive navigation** with click-to-jump
-- **Breakpoint management** with visual indicators
-- **Memory hex viewer** with search capabilities
+1. Build the backend once (`dotnet build CodeDesigner.sln`; see [Building](building.md)). This deploys the Bridge, the built-in emulator and the MCP server to `%LOCALAPPDATA%\CodeDesigner\`.
+2. Open the extension: press **F5** in `vscode/codedesigner` for a development host, or install a packaged `.vsix`.
+3. Open the **CodeDesigner** sidebar (activity bar) and the **Emulator** tab.
+4. Under **Connection**, pick PCSX2 (or the built-in emulator), a BIOS and a game, then click **Run**. The extension launches the emulator, starts the Bridge in its *CodeDesigner* terminal and attaches to it.
 
-### CDS Language Support
-- **Syntax highlighting** for .cds files
-- **IntelliSense** for cheat script commands
-- **Compilation** with error reporting
-- **Code snippets** for common patterns
+The **Welcome** page (`CodeDesigner: Open Welcome`) has quick links to every tool, keyboard tips and the What's New notes.
 
-### Cheat Engine Integration
-- **Real-time cheat application** during gameplay
-- **Cheat database browser** with search
-- **Code validation** and testing
-- **Batch operations** for multiple cheats
+Every sidebar tab has a **?** button that opens its help guide.
 
-### Memory Analysis Tools
-- **Label management** with database integration
-- **Pointer scanning** and following
-- **Value watching** with change notifications
-- **Memory comparison** between sessions
+---
 
-## Installation
+## The sidebar
 
-### From Marketplace
-1. Open VS Code
-2. Go to Extensions (Ctrl+Shift+X)
-3. Search for "CodeDesigner"
-4. Click Install
+The sidebar has four tabs, plus an MCP button that starts the AI server. Pause, resume and the step buttons are in its status bar.
 
-### From Source
-```bash
-cd vscode/
-npm install
-npm run build
-code --install-extension codedesigner-*.vsix
+### Emulator tab
+
+| Section | What's in it |
+|---|---|
+| **Connection** | Emulator, BIOS and disc paths; **Run** / **Kill**. |
+| **Actions** | **Restart**, **Import** (load a binary patch), **Snapshot**, **Preview**, **Docs**, **Archive** (cheat archive). |
+| **Network** | **Start Servers** (the SOCOM II online servers), **Packets**, **Config** (server `config.json`), **Debug** (script commands). |
+| **Tools** | AI, Labels, Mem Card, HDD, Snapshots, Diff, Porter, Games, Cheats. |
+| **Assets** | Viewer, Models, Maps, Animations. |
+| **Agents / Orchestration** | The AI agent personas and plans, with the lead agent and the active plan. |
+| **Memories** | Progress reports saved by AI sessions. |
+| **Memory Region** | Opens a disassembler panel for EE RAM, IOP RAM, BIOS ROM, Scratchpad, the hardware register windows, VU0/VU1 memory or ROM1/ROM2. |
+
+Below these are the navigation history and the label list.
+
+### Cheats tab
+
+Known codes for the running game, pulled from the database or the CheatCodeArchive, each with a toggle; **Apply All Enabled** writes them. A text box takes your own GameShark codes (**Update** applies them). **Cheat Tools** opens the Converter, the Memory Scanner and the [Cheat Porter](#cheat-porter). See [Cheat Engine](cheat-engine.md).
+
+### CDS tab
+
+Compiles the open `.cds` file and shows the generated GameShark codes. **Add Cheat** sends them to the Cheats tab and **Add Patch** writes the patch. `.cds` files also get syntax highlighting, snippets and a compile button in the editor title bar, with output in the *CodeDesigner - CDS Compiler* channel. See [CDS Language](cds-language.md).
+
+### Recompile tab
+
+Lists the ELFs on the game disc and statically recompiles one to C++. See [Recompiler](recompiler.md).
+
+---
+
+## Debugging
+
+### Disassembler / memory editor
+
+One panel per memory region: disassembly, hex, labels, comment hints, function and table detection, cross-references (`X`), breakpoints (`F9`), watches and the register panel. See the **[Disassembler guide](disassembler.md)**.
+
+Opening an `.elf`, `.bin` or `.raw` file loads it into the built-in emulator in file mode and opens a static view.
+
+### Preview
+
+**Preview** shows the live PCSX2 picture inside VS Code, streamed from the PCSX2 fork's GS stream server through the Bridge (port 8766). The toolbar has **Sound** (mute/unmute PCSX2), **Smoothing**, **Fullscreen**, **Screenshot**, **Controller** and **Reconnect**. It needs the CodeDesigner PCSX2 build; Sound needs a build with PINE opcodes 0x45/0x46.
+
+### Controller
+
+The **Controller** page is a virtual PS2 controller and a joker (button activator) code builder.
+
+- **Build code** mode: click buttons on the controller, or press keys, to toggle them into a combo. **Capture from pad** records a combo you press on the real controller. Nothing is sent to the game.
+- **Play** mode: hold buttons, drag the sticks (right-click or Shift+click a stick for L3/R3) and the input goes to PCSX2. Everything is released when you switch mode or close the page.
+- **Live pad** mirrors the real controller in orange, sticks included.
+- The **joker address** is found from the running game's cheats. The page ranks the addresses their D/E compare lines use, detects whether the game stores presses as 0 or 1, and lists the combos already in use. You can also type an address, and swap bytes for games that store the pad word big-endian.
+- Paste code lines to get the finished activator: a `D` line for one line, an `E0nn` block for several, or a `D` line before each line.
+
+Keys: arrows, `W A S D` (face buttons), `Q E 1 3` (shoulders), `Z C` (L3/R3), `Enter` (Start), `Right Shift` (Select).
+
+### Snapshots
+
+Lists the current game's PCSX2 save states with their screenshots. Load or delete a state, compare two, or extract their memory into the hex viewer.
+
+### Memory Diff
+
+Compares two memory dumps (snapshots, `.bin`/`.raw`/`.p2s`) or live EE RAM against a dump, shown as a GitHub-style diff: unified or split, Bytes / Words / Instructions views, adjustable context, expanders and a hunk navigator. Each hunk can be copied as write codes or opened in the disassembler.
+
+### Debug
+
+Runs your own script commands from `Mods/debug-commands.json` (a local, untracked file) in a terminal, with Copy / Run buttons.
+
+---
+
+## Cheats and patching
+
+### Cheats editor
+
+A three-pane editor: pick a game, one of its cheat lists, and edit the cheat file with syntax highlighting. Address links jump to the debugger. **Import** runs the bulk importer against a CheatCodeArchive folder.
+
+### Cheat Porter
+
+Moves cheat codes from one game version's EE RAM to another's. Pick the **From** and **To** images (the game's save states, live EE RAM, or browsed dumps), paste codes or **Load game cheats**, and review the results per cheat (Ported / Review / Not found, with confidence and a picker for ambiguous matches). See [Cheat Porter](cheat-porter.md).
+
+---
+
+## Labels and structure
+
+- **Labels** — the Label Manager: label sets, typed labels, pointer structs and imports. See [Labels](labels.md).
+- **Structure** — Mermaid diagrams of a game's classes, vtables and call chains, built from typed labels and label groups, editable in place.
+- **Struct offset calculator** — `Open Struct Offset Calculator` in the command palette.
+
+---
+
+## Assets
+
+The **Assets** section opens the Zipper asset tools for SOCOM II (full) and SOCOM: Combined Assault (read-only):
+
+- **Viewer** — browse `.ZDB` / `.ZAR` / `.ZED` packages and preview their files.
+- **Models** — models, textures and characters of a package.
+- **Maps** — a map composed from its GEO scene, with props, clutter, lighting and spawn points.
+- **Animations** — character animations and weapon firing effects.
+
+Every edit is a Bridge command with a matching MCP tool. See [Asset editing](asset-editing.md) and the [Zipper model format](zipper-model-format.md).
+
+---
+
+## Media
+
+- **Mem Card** — browse PS2 memory cards (`.ps2`, `.mcd`, `.mc2`) with animated save icons; create a new card, and import, export or delete saves. See [Memory Card Manager](memory-card-manager.md).
+- **HDD** — browse PS2 HDD images (APA partitions, PFS files). See [HDD Manager](hdd-manager.md).
+- **Games** — the PCSX2 compatibility list, mirrored into the database, with covers and details.
+
+---
+
+## Network
+
+- **Start Servers** runs the SOCOM II online servers (`CodeDesigner.Ps2.Multiplayer`). See [Multiplayer Servers](multiplayer-servers.md).
+- **Packets** opens the Packet Viewer: capture DEV9 traffic, see every Medius, DME and SOCOM II message by name (with a layer tree and raw bytes), filter and follow flows, and use the composer to build a server message, preview it and inject it into the PS2 or send it from it.
+
+---
+
+## AI
+
+- **MCP button** (top of the sidebar) starts the `CodeDesigner.AI` MCP server. See [MCP Server](mcp-server.md).
+- **AI** opens the agent control panel: Overview, **Chat** (Claude, Codex, Copilot or a local model, with ASM highlighting that matches the disassembler), Orchestration, Agents, Skills, Memories, Tools, Activity and History.
+- **AI** mode in the sidebar status bar (next to **Live**) hands the emulator to an MCP agent; the disassembler then follows the agent's navigation.
+
+---
+
+## Commands
+
+All commands are under **CodeDesigner:** in the command palette. The main ones:
+
+| Command | Opens |
+|---|---|
+| `Open Welcome` | Welcome page |
+| `Connect / Disconnect Emulator` | Toggles the emulator connection |
+| `Compile CDS File` | Compiles the active `.cds` file |
+| `Recompile Game ELF from Disc` | Recompiler |
+| `Open Preview (Live PCSX2 Display)` | Preview |
+| `Open Controller` | Controller |
+| `Open PS2 Cheats Editor` | Cheats editor |
+| `Open Asset Viewer (Zipper)`, `Open Model Editor`, `Open Map Editor`, `Open Animation Editor` | Asset tools |
+| `Open PS2 Memory Card Browser`, `Open PS2 HDD Browser` | Media browsers |
+| `Open PS2 Game Compatibility` | Games |
+| `Open Structure Visualizer` | Structure |
+| `Open AI Activity Feed` | AI panel, Activity view |
+
+Pages without a command (Labels, Snapshots, Diff, Porter, Packets, Debug) open from the sidebar.
+
+---
+
+## Source layout
+
+```
+vscode/codedesigner/
+├── src/extension.ts        activation, command registration, provider wiring
+├── src/socketClient.ts     every Bridge command (JSON over TCP :8765)
+├── src/providers/<page>/   one provider per page (extension-host side)
+├── src/webview/<page>/     the page's Angular standalone components
+├── src/webview/shared/     page header, icons, shared.css, VS Code API wrapper
+├── syntaxes/, snippets/    CDS grammar and snippets
+└── webpack.config.js       bundles the host and one entry per webview
 ```
 
-## Configuration
+New pages follow the disassembler panel's look: VS Code theme variables, bordered cards and the shared page header.
 
-### Settings
-- **Server Host/Port**: CodeDesigner socket server connection
-- **Database Path**: Location of labels/cheats database
-- **Theme**: Light/dark mode for panels
-- **Auto-connect**: Connect to emulator on startup
-
-### Keybindings
-- **F5**: Start debugging session
-- **F10**: Step over instruction
-- **F11**: Step into function
-- **Shift+F11**: Step out
-
-## User Interface
-
-### Main Panels
-
-#### Disassembler
-- **Address column** with labels
-- **Hex dump** of instruction bytes
-- **Assembly code** with syntax highlighting
-- **Breakpoint gutter** for setting stops
-
-#### Registers
-- **GPR view** with 128-bit display
-- **COP0 system registers**
-- **FPU registers** with float/hex toggle
-- **VU0 state** for vector operations
-
-#### Memory
-- **Hex editor** with data type overlay
-- **String viewer** for ASCII/UTF-8
-- **Structure viewer** for parsed data
-- **Search/replace** functionality
-
-#### Cheats
-- **Code list** with enable/disable
-- **Editor** for code modification
-- **Tester** for validation
-- **Importer** for external formats
-
-### Toolbar
-- **Connect/Disconnect** from emulator
-- **Load ELF** for analysis
-- **Save State** management
-- **Settings** access
-
-## CDS Language
-
-### Syntax Features
-- **Code blocks** with automatic formatting
-- **IntelliSense** for addresses and values
-- **Error squiggles** for invalid syntax
-- **Hover information** for commands
-
-### Compilation
-- **Real-time compilation** as you type
-- **Error panel** with detailed messages
-- **Output panel** showing generated codes
-- **Optimization suggestions**
-
-## Debugging Workflow
-
-### Setup
-1. **Start CodeDesigner server**: `dotnet run -- --server`
-2. **Open PS2 project** in VS Code
-3. **Connect extension** to server
-4. **Load game ELF** or start emulator
-
-### Session
-1. **Set breakpoints** in disassembler
-2. **Run game** until breakpoint hit
-3. **Inspect memory/registers**
-4. **Apply cheats** for testing
-5. **Continue/step** through code
-
-### Analysis
-1. **Create labels** for important addresses
-2. **Follow pointers** to data structures
-3. **Search memory** for values
-4. **Export findings** to database
-
-## Extension API
-
-### Commands
-- `codedesigner.connect`: Connect to CodeDesigner server
-- `codedesigner.disconnect`: Disconnect from server
-- `codedesigner.loadElf`: Load ELF file for analysis
-- `codedesigner.setBreakpoint`: Set breakpoint at address
-- `codedesigner.compileCds`: Compile CDS file
-
-### Events
-- `onConnected`: Server connection established
-- `onDisconnected`: Server connection lost
-- `onBreakpointHit`: Execution paused at breakpoint
-- `onMemoryChanged`: Memory write detected
-
-## Integration
-
-### With CodeDesigner Server
-- **Socket communication** for real-time data
-- **Database synchronization** for labels/cheats
-- **State management** for debugging sessions
-
-### With VS Code
-- **Native UI** using webview panels
-- **Workspace integration** for project files
-- **Task provider** for build operations
-- **Debug protocol** for stepping
-
-### With External Tools
-- **PCSX2 integration** via PINE protocol
-- **Cheat databases** import/export
-- **Save file management**
-- **Memory snapshot** sharing
-
-## Development
-
-### Project Structure
-```
-vscode/
-├── src/
-│   ├── extension.ts          # Main extension entry
-│   ├── providers/
-│   │   ├── disasmPanel.ts    # Disassembler panel
-│   │   └── cdsLanguage.ts    # CDS language support
-│   └── utils/
-│       └── serverClient.ts   # Server communication
-├── package.json              # Extension manifest
-└── webpack.config.js         # Build configuration
-```
-
-### Building
-```bash
-npm install
-npm run build
-npm run package  # Create .vsix file
-```
-
-### Testing
-```bash
-npm run test
-npm run test-ui  # UI tests
-```
+---
 
 ## Troubleshooting
 
-### Connection Issues
-- **Server not running**: Start CodeDesigner with `--server`
-- **Port mismatch**: Check settings for correct port
-- **Firewall blocking**: Allow VS Code network access
-
-### Performance Problems
-- **Large memory views**: Limit display range
-- **Frequent updates**: Reduce refresh rate
-- **Memory leaks**: Restart VS Code
-
-### Feature Not Working
-- **Check version**: Ensure latest extension
-- **Server compatibility**: Match CodeDesigner version
-- **Logs**: Check VS Code developer console
-
-## Examples
-
-### Basic Debugging
-1. Connect to running emulator
-2. Set breakpoint at function start
-3. Run until breakpoint
-4. Inspect register values
-5. Step through instructions
-
-### Cheat Development
-1. Open .cds file
-2. Write cheat script
-3. Compile and test
-4. Apply to running game
-5. Refine and save
-
-### Memory Analysis
-1. Search for specific value
-2. Follow pointer chain
-3. Create labels for findings
-4. Export to database
-
-## Best Practices
-
-### Workflow
-- **Organize projects** in workspace folders
-- **Use version control** for CDS files
-- **Document findings** with labels
-- **Test cheats thoroughly**
-
-### Performance
-- **Limit panel updates** during intensive debugging
-- **Use filters** in memory searches
-- **Close unused panels** to save resources
-
-### Maintenance
-- **Keep extension updated** for new features
-- **Backup databases** regularly
-- **Report issues** with detailed logs</content>
-<parameter name="filePath">c:\Users\tholu\Desktop\CodeDesigner\docs\vscode-extension.md
+| Problem | Fix |
+|---|---|
+| Sidebar shows *offline* | Click **Run**, or check the *CodeDesigner* terminal for Bridge errors. |
+| Bridge exits on startup | LocalDB didn't start. `sqllocaldb start MSSQLLocalDB`, then reload the window. |
+| Preview stays on "Waiting for frames" | Use the CodeDesigner PCSX2 build, launched from **Run**, with a game rendering. |
+| Step Over / Into do nothing | They need PCSX2 (PINE). The built-in emulator only supports Step. |
+| A page looks stale after rebuilding | `Developer: Reload Window`. |
+| Logs | The **CodeDesigner** output channel; webview errors also go there. |

@@ -9,9 +9,9 @@ CodeDesigner uses a JSON-over-TCP socket protocol on **port 8765** (localhost) t
 ## Overview
 
 ```
-VS Code Extension  ──┐
-MCP Server         ──┤──► SocketServer :8765 ──► Built-in Emulator / PCSX2 PINE
-External Client    ──┘
+VS Code extension  ──┐
+CodeDesigner.AI    ──┤──► Bridge :8765 ──► PCSX2 (PINE :28011) or built-in emulator (:28012)
+Scripts / tools    ──┘
 ```
 
 All clients connect to `127.0.0.1:8765`. The server accepts multiple concurrent clients. Each connection is handled independently.
@@ -34,16 +34,18 @@ All clients connect to `127.0.0.1:8765`. The server accepts multiple concurrent 
 
 ## Connection modes
 
-The backend starts in one of three modes, selected by command-line flags:
+The Bridge starts in one of these modes:
 
-| Mode | Flag | Description |
+| Mode | How | Description |
 |---|---|---|
-| Control server | *(no flag)* | Starts the socket server only; mode is then selected at runtime via `STARTEMULATOR` / `STARTPCSX2` commands |
-| Built-in emulator | `--run` | Boots a real PS2 BIOS + disc image and accepts debug commands |
-| PCSX2 bridge | `--pcsx2` | Connects to a running PCSX2 via PINE and bridges all commands to it |
-| File mode | `--file <elf>` | Loads a PS2 ELF into a bare emulator paused at the entry point |
+| Control server | *(no flag)* | The normal mode, used by the VS Code extension. Serves on `8765`; the emulator is attached at runtime with `STARTPCSX2`, `STARTEMULATOR` or `STARTFILEMODE`. |
+| PCSX2 bridge | `--pcsx2 [--pcsx2-host 127.0.0.1] [--pcsx2-slot 28011] [--port 8765]` | Connects to a running PCSX2 over PINE before serving. |
 
-Port can be overridden with `--port <number>` (default `8765`) or the `CODEDESIGNER_PORT` environment variable.
+The built-in emulator is a separate process (`CodeDesigner.Ps2.Emulator.exe`, PINE-compatible socket on `28012`) that `STARTEMULATOR` / `STARTFILEMODE` launch and attach to. See [Command-line tools](console-app.md).
+
+Clients (the MCP server, scripts) can point at another bridge with the `CODEDESIGNER_HOST` / `CODEDESIGNER_PORT` environment variables. The control server itself always listens on `8765`; `--port` applies to `--pcsx2` mode.
+
+The GS stream for the Preview window uses a second, binary socket on `8766`.
 
 ---
 
@@ -298,7 +300,7 @@ All Structure-Visualizer commands take their parameters as a JSON object in the
 |---|---|
 | `SESSION_START` | Signal that an AI session has started |
 | `SUBSCRIBE_ACTIVITY` | Subscribe to AI activity push notifications |
-| `QUERYDB` | Execute a SQLite query against the CodeDesigner database |
+| `QUERYDB` | Execute a SQL query against the CodeDesigner database (SQL Server LocalDB) |
 | `MCPMEMORY_LIST` | List MCP memory entries |
 | `MCPMEMORY_GET` | Get a specific MCP memory entry |
 | `MCPMEMORY_ADD` | Add a new MCP memory entry |
@@ -330,27 +332,114 @@ This lets the VS Code extension follow the AI agent's activity in real time.
 
 ---
 
+## All commands
+
+The sections above describe the commonly used commands. The full list below is generated from the `reg.Add(...)` registrations in `CodeDesigner.Ps2.Bridge/Services/` and the built-in cases in `SocketServer.cs`, grouped by the service that handles them. Underscore spellings (`PAD_GET_TYPE` for `PADGETTYPE`) are accepted as aliases and left out.
+
+**AgentService** (7): `MCPAGENTADD`, `MCPAGENTDELETE`, `MCPAGENTEXPORT`, `MCPAGENTGET`, `MCPAGENTIMPORT`, `MCPAGENTLIST`, `MCPAGENTUPDATE`
+
+**AnalysisStateService** (1): `REFRESHANALYSIS`
+
+**AssemblerService** (5): `ASSEMBLE`, `CDSPATCH`, `COMPILECDS`, `DISASSEMBLE`, `VALIDATECDS`
+
+**BreakpointDisassemblyService** (4): `LISTBP`, `LISTBREAKPOINTS`, `PINEDISASSEMBLE`, `PINE_DISASM`
+
+**ChatService** (11): `MCPCHAT_MESSAGE_APPEND`, `MCPCHAT_MESSAGE_CLEAR`, `MCPCHAT_MESSAGE_DELETE`, `MCPCHAT_MESSAGE_LIST`, `MCPCHAT_MESSAGE_UPDATE`, `MCPCHAT_SEND`, `MCPCHAT_SESSION_CREATE`, `MCPCHAT_SESSION_DELETE`, `MCPCHAT_SESSION_GET`, `MCPCHAT_SESSION_LIST`, `MCPCHAT_SESSION_RENAME`
+
+**CheatEditorService** (10): `CHEATEDITORCREATE`, `CHEATEDITORDELETE`, `CHEATEDITORGAMES`, `CHEATEDITORGET`, `CHEATEDITORGETSECTION`, `CHEATEDITORIMPORT`, `CHEATEDITORLISTS`, `CHEATEDITORSAVE`, `CHEATEDITORSEARCH`, `CHEATEDITORSECTIONS`
+
+**CheatsService** (7): `APPLYCHEATS`, `CONVERTCHEAT`, `GETGAMECHEATS`, `INJECTCHEATENGINE`, `PORTCHEATS`, `REMOVECHEATENGINE`, `UPDATECHEATENGINE`
+
+**CodeAnalysisService** (12): `GETFLOATS`, `GETFUNCTIONS`, `GETINTEGERS`, `GETPOINTERS`, `GETSTRINGS`, `SCANFLOATS`, `SCANFUNCTIONS`, `SCANINTEGERS`, `SCANPOINTERS`, `SCANREFERENCES`, `SCANSTRINGS`, `SEARCH`
+
+**CompatService** (4): `COMPATCOVER`, `COMPATDETAILS`, `COMPATLIST`, `COMPATSYNC`
+
+**DataFormatService** (4): `CLEARDATAFORMAT`, `GETDATAFORMATS`, `SETDATAFORMAT`, `SETDATAFORMATS`
+
+**DiscordPresenceService** (3): `CLEARDISCORDPRESENCE`, `SETDISCORDAPPID`, `SETDISCORDPRESENCE`
+
+**EmulatorControlService** (10): `EXTRACTP2S`, `LISTDISCELFS`, `LOADELF`, `LOADSNAPSHOT`, `PCSX2GAMEINFO`, `PCSX2STATUS`, `READP2SSCREENSHOT`, `RECOMPILE`, `RESTART`, `SNAPSHOT`
+
+**ExecutionService** (7): `CLEARBP`, `CLEARBP_ALL`, `GETPC`, `PAUSE`, `RESUME`, `SETBP`, `STEP`
+
+**GameDiscService** (1): `UPDATEGAMEDISC`
+
+**GsStreamService** (2): `GETGSFRAME`, `GSSTREAMSTATUS`
+
+**HddService** (7): `HDD_CREATE`, `HDD_DELETE`, `HDD_EXPORT`, `HDD_IMPORT`, `HDD_LIST`, `HDD_LIST_FILES`, `HDD_READ_FILE`
+
+**IsoService** (3): `ISO_GET_INFO`, `ISO_LIST_FILES`, `ISO_READ_FILE`
+
+**LabelManagerService** (18): `ADDLABELENTRIES`, `ADDLABELENTRY`, `CREATELABELSET`, `DELETELABELENTRY`, `DELETELABELSET`, `EXPORTLABELSET`, `GETLABELSET`, `GETLABELSETS`, `IMPORTLABELSET`, `IOPLABELSREFRESH`, `IOPLABELSREFRESHMODULE`, `RENAMELABELSET`, `REPAIRLABELORPHANMEMBERS`, `RESOLVELINKEDLIST`, `RESOLVESTRINGS`, `SEARCHLABELS`, `SEARCHLABELSETS`, `SETACTIVELABELSET`
+
+**LabelService** (3): `ADDLABEL`, `DELETELABEL`, `GETLABELS`
+
+**McpConfigService** (2): `MCPCONFIGLIST`, `MCPCONFIGUPDATE`
+
+**MemoryCardService** (7): `MC_DELETE`, `MC_EXPORT`, `MC_FORMAT`, `MC_IMPORT`, `MC_LIST`, `MC_READFILE`, `MC_READ_FILE`
+
+**MemoryEntryService** (11): `MCPMEMORYADD`, `MCPMEMORYDELETE`, `MCPMEMORYDELETEBYNAME`, `MCPMEMORYEXPORT`, `MCPMEMORYGET`, `MCPMEMORYIMPORT`, `MCPMEMORYLIST`, `MCPMEMORYLISTFORAGENT`, `MCPMEMORYLISTSHARED`, `MCPMEMORYUPDATE`, `MCPMEMORYUPSERT`
+
+**MemoryService** (6): `LOADBIN`, `READMEM`, `READMEMBATCH`, `READMEMREGION`, `SCANPATTERN`, `WRITEMEM`
+
+**NavHistoryService** (4): `CLEARNAVHISTORY`, `GETNAVHISTORY`, `NAVIGATETO`, `RECORDNAV`
+
+**NetworkService** (14): `MEDIUSDECODE`, `NETBUILDFRAME`, `NETBUILDMESSAGE`, `NETCAPTURE`, `NETCATALOG`, `NETDECRYPTSCERT`, `NETDISASSEMBLE`, `NETDISSECTMANY`, `NETGETSTATS`, `NETGETSTATUS`, `NETINJECT`, `NETINJECTTX`, `NETRECVCAPTURE`, `NETSETFILTER`
+
+**OrchestrationService** (9): `MCPORCHESTRATIONADD`, `MCPORCHESTRATIONDEACTIVATE`, `MCPORCHESTRATIONDELETE`, `MCPORCHESTRATIONEXPORT`, `MCPORCHESTRATIONGET`, `MCPORCHESTRATIONIMPORT`, `MCPORCHESTRATIONLIST`, `MCPORCHESTRATIONSETACTIVE`, `MCPORCHESTRATIONUPDATE`
+
+**PadService** (5): `PADGETSTATE`, `PADGETTYPE`, `PADSETANALOG`, `PADSETBUTTON`, `PADSETSTATE`
+
+**PineWatchService** (7): `PINEADDWATCH`, `PINECLEARALLWATCHES`, `PINEGETAUDIOSTATE`, `PINELISTWATCHES`, `PINEREMOVEWATCH`, `PINESAVESCREENSHOT`, `PINESETAUDIOMUTED`
+
+**ProcessStateService** (7): `CALLSTACK`, `GETIOPTHREADS`, `GETMODULES`, `GETSTACK`, `GETTHREADS`, `IOPMODULES`, `IOPTHREADS`
+
+**QueryDbService** (1): `QUERYDB`
+
+**RegisterService** (6): `GETREGISTER`, `GETREGS`, `PINEGETREGISTER`, `PINESETREG`, `PINESETREGISTER`, `SETREG`
+
+**SaveStateService** (12): `FRAMEADVANCE`, `GETFPS`, `LOADSTATEFILE`, `LOADSTATEFROMFILE`, `PINELOADSTATE`, `PINESAVESTATE`, `PINEVERSION`, `RESET`, `SAVESTATEFILE`, `SAVESTATETOFILE`, `SETLIMITER`, `SETLIMITERMODE`
+
+**SettingsService** (4): `DELETESETTING`, `GETALLSETTINGS`, `GETSETTING`, `SETSETTING`
+
+**SnapshotHistoryService** (1): `GETADDRESSHISTORY`
+
+**SnapshotsService** (1): `GETSNAPSHOTS`
+
+**SteppingService** (4): `GETSYMBOL`, `STEPINTO`, `STEPOUT`, `STEPOVER`
+
+**StructService** (4): `ADDSTRUCT`, `ADDSTRUCTMEMBER`, `DELETESTRUCT`, `GETSTRUCTS`
+
+**SymbolDatabaseService** (6): `GETLOCALS`, `GETSYMBOLBYNAME`, `LISTFUNCTIONS`, `LISTGLOBALS`, `PINEFUNCTIONS`, `PINEGLOBALS`
+
+**ValueScanService** (1): `SCANVALUE`
+
+**VisualizerService** (7): `ADDLABELGROUP`, `ADDLABELGROUPMEMBER`, `DELETELABELGROUP`, `DELETELABELGROUPMEMBER`, `GETCALLGRAPH`, `GETLABELGROUPS`, `SCANCALLGRAPH`
+
+**WatchpointTraceService** (2): `RUNUNTILPC`, `TRACECALLS`
+
+**XrefIndexService** (3): `FUNCTIONAT`, `XREFINDEX`, `XREFSTO`
+
+**ZipperAssetService** (22): `ASSET_ANIMATION`, `ASSET_CLOSE`, `ASSET_DESCRIBE_MODEL`, `ASSET_EDIT`, `ASSET_EFFECT`, `ASSET_EFFECTS`, `ASSET_ENTRY_BYTES`, `ASSET_EXPORT`, `ASSET_LIST_ANIMATIONS`, `ASSET_LIST_MODELS`, `ASSET_MAP_POINTS`, `ASSET_MAP_SCENE`, `ASSET_MODEL_MESH`, `ASSET_OPEN`, `ASSET_REDO`, `ASSET_SAVE`, `ASSET_SESSIONS`, `ASSET_STATUS`, `ASSET_TEXTURE`, `ASSET_UNDO`, `ASSET_WEAPONS`, `ASSET_WEAPON_FX`
+
+**ZipperFileFormatsService** (16): `APACHE_BUILD_PATCH`, `APACHE_DECRYPT_SECTION`, `FILEFORMATS_INSPECT`, `ZIPPER_EXTRACT_ALL`, `ZIPPER_EXTRACT_ENTRY`, `ZIPPER_GET_PRELOADED_RESOURCE`, `ZIPPER_INSPECT`, `ZIPPER_INSPECT_MPS`, `ZIPPER_INSPECT_RDR`, `ZIPPER_INSPECT_RDR_BYTES`, `ZIPPER_PRELOAD_MAP_PACKAGE`, `ZIPPER_READ_ALL_NODES`, `ZIPPER_READ_NODE`, `ZIPPER_RELEASE_PRELOAD`, `ZIPPER_SAVE_CRAFT`, `ZIPPER_SAVE_EXPORT_DECRYPTED`
+
+**ZipperWeaponsService** (6): `ZIPPER_ENCODE_WEAPON_MODEL`, `ZIPPER_ENCODE_WEAPON_TEXTURE`, `ZIPPER_GET_WEAPON_TEMPLATE`, `ZIPPER_LIST_WEAPONS`, `ZIPPER_WEAPON_TEXTURE_PNG`, `ZIPPER_WRITE_WEAPON`
+
+**SocketServer (runtime, mode control, built-ins)** (19): `AI_MESSAGE`, `AI_TOOL_CALL`, `CALLSTACK`, `IOPMODULES`, `IOPTHREADS`, `LISTBREAKPOINTS`, `PINEGETREGISTER`, `PINESETREGISTER`, `PINE_DISASM`, `PING`, `SESSION_START`, `STARTANALYSISEMU`, `STARTANALYSISEMULATOR`, `STARTBUILTINEMULATOR`, `STARTEMULATOR`, `STARTEMULATORMODE`, `STARTFILEMODE`, `STARTPCSX2`, `STARTPCSX2MODE`
+
+---
+
 ## Command-line quick reference
 
 ```powershell
-# Start control server only (mode selected at runtime)
-dotnet run -- 
-
-# Start built-in emulator with BIOS + disc
-dotnet run -- --run --bios "C:\bios\SCPH10000.BIN" --disc "C:\games\socom2.iso"
+# Control server (what the VS Code extension runs)
+CodeDesigner.Ps2.Bridge.exe
 
 # PCSX2 bridge (PCSX2 must be running with PINE enabled)
-dotnet run -- --pcsx2 [--pcsx2-host 127.0.0.1] [--pcsx2-slot 28011] [--port 8765]
+CodeDesigner.Ps2.Bridge.exe --pcsx2 [--pcsx2-host 127.0.0.1] [--pcsx2-slot 28011] [--port 8765]
 
-# Load ELF directly (no BIOS)
-dotnet run -- --file game.elf
-
-# Custom port
-dotnet run -- --port 9000
-```
-
-Environment variable override:
-```powershell
-$env:CODEDESIGNER_PORT = "9000"
-dotnet run
+# Built-in emulator, as its own process
+CodeDesigner.Ps2.Emulator.exe --bios SCPH-70012.bin --disc game.iso
+CodeDesigner.Ps2.Emulator.exe --file game.elf
 ```
