@@ -37,7 +37,9 @@
     environment variable) to also run the bulk cheat importer, e.g.:
         dotnet build -p:CheatArchiveRoot=/path/to/CheatCodeArchive
   -->
-  <Target Name="InitialiseDatabase" AfterTargets="Build">
+  <!-- -p:SkipDatabaseInit=true skips it (side builds that must not start LocalDB, e.g. ones with a redirected
+       LOCALAPPDATA while the bridge is running). -->
+  <Target Name="InitialiseDatabase" AfterTargets="Build" Condition="'$(SkipDatabaseInit)' != 'true'">
     <PropertyGroup>
       <_ArchiveArg Condition="'$(CheatArchiveRoot)' != ''">--archive-root &quot;$(CheatArchiveRoot)&quot;</_ArchiveArg>
       <_ArchiveArg Condition="'$(CheatArchiveRoot)' == ''"></_ArchiveArg>
