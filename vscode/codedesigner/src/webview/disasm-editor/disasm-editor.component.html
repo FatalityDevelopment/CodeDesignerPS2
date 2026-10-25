@@ -126,9 +126,6 @@
     (requestHistory)="onRequestHistory($event)"
     (requestRefs)="onRequestRefs($event)"
     (navigateRef)="onReferenceNavigate($event)" />
-<app-converter-overlay #converterOverlayComp
-    (close$)="onConverterOverlayClose()"
-    (convert$)="onConvertCheat($event)" />
 <app-memory-card-overlay #mcOverlayComp
     (browseMc)="onMcBrowse()"
     (newMc)="onMcNew()"
@@ -143,10 +140,6 @@
     (exportPartition)="onHddExport($event)"
     (viewFiles)="onHddViewFiles($event)"
     (deletePartition)="onHddDelete($event)" />
-<app-scanner-overlay #scannerOverlayComp
-    (close$)="onScannerOverlayClose()"
-    (scan$)="onScanValue($event)"
-    (navigate$)="onScannerNavigate($event)" />
 <app-struct-offset-overlay #structOverlayComp
     (close$)="onStructOverlayClose()"
     (loadStructs$)="onStructLoadStructs()"

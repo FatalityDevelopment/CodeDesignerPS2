@@ -36,7 +36,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
             reg.Add(c => HandleSave(c.CheatListId, c.Data),          "CHEATEDITOR_SAVE",   "CHEATEDITORSAVE");
             reg.Add(c => HandleCreate(c.CheatGameId, c.GameTitle),   "CHEATEDITOR_CREATE", "CHEATEDITORCREATE");
             reg.Add(c => HandleDelete(c.CheatListId),                "CHEATEDITOR_DELETE", "CHEATEDITORDELETE");
-            reg.Add(c => HandleImport(c.FilePath),                   "CHEATEDITOR_IMPORT", "CHEATEDITORIMPORT");
+            reg.Add(c => HandleImport(c.FilePath, c.GameSerial),     "CHEATEDITOR_IMPORT", "CHEATEDITORIMPORT");
         }
 
         // ── CHEATEDITOR_GAMES ─────────────────────────────────────────────────
@@ -513,7 +513,12 @@ namespace CodeDesigner.Ps2.Bridge.Services
 
         // ── CHEATEDITOR_IMPORT ────────────────────────────────────────────────
 
-        private string HandleImport(string? archiveRoot)
+        /// <summary>
+        /// Import the cheat repository's <c>Database/*.txt</c> files into cheat lists. With
+        /// <paramref name="gameSerial"/>, only that game's files are imported; lists attach to
+        /// the game that already owns a disc with the serial.
+        /// </summary>
+        private string HandleImport(string? archiveRoot, string? gameSerial)
         {
             if (_ctx.Db == null)
                 return Responses.Error("Database is not available");
@@ -524,17 +529,20 @@ namespace CodeDesigner.Ps2.Bridge.Services
 
             try
             {
-                var parser = new BulkCheatParser(_ctx.Db, archiveRoot!);
+                var parser = new BulkCheatParser(_ctx.Db, archiveRoot!, gameSerial);
                 var result = parser.RunAsync().GetAwaiter().GetResult();
 
                 var skipped = result.FilesSkipped > 0
                     ? $" Skipped {result.FilesSkipped} file(s); see the bridge console for details."
                     : string.Empty;
+                var message = string.IsNullOrWhiteSpace(gameSerial)
+                    ? $"Bulk import complete — imported {result.FilesImported}/{result.FilesProcessed} file(s), {result.CheatLists} cheat list(s), {result.Cheats} cheat(s) in the database.{skipped}"
+                    : $"Imported {result.FilesImported} repository file(s) for {gameSerial} into cheat lists.{skipped}";
                 return JsonSerializer.Serialize(new CommandResponse
                 {
                     Success = true,
                     Command = "CHEATEDITOR_IMPORT",
-                    Message = $"Bulk import complete — imported {result.FilesImported}/{result.FilesProcessed} file(s), {result.CheatLists} cheat list(s), {result.Cheats} cheat(s) in the database.{skipped}",
+                    Message = message,
                 });
             }
             catch (Exception ex) { return Responses.Error($"CHEATEDITOR_IMPORT error: {ex.Message}"); }

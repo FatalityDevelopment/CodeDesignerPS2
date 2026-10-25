@@ -1,0 +1,299 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   Cheat Scanner — first scan / next scan value search + structure scans.
+   Chrome follows the Cheat Porter / Packet Viewer conventions (rounded
+   bordered cards, uppercase section titles, VS Code theme vars).
+   ══════════════════════════════════════════════════════════════════════════ */
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--vscode-editor-background, #1e1e1e);
+  color: var(--vscode-foreground, #d4d4d4);
+}
+
+:root {
+  --cs-border: var(--vscode-panel-border, #313131);
+  --cs-muted:  var(--vscode-descriptionForeground, #8f8f8f);
+  --cs-mono:   var(--vscode-editor-font-family, Consolas, 'Courier New', monospace);
+  --cs-ok:     var(--vscode-testing-iconPassed, #73c991);
+  --cs-warn:   var(--vscode-editorWarning-foreground, #cca700);
+  --cs-err:    var(--vscode-errorForeground, #f48771);
+  --cs-link:   var(--vscode-textLink-foreground, #9cdcfe);
+  --cs-head:   var(--vscode-sideBar-background, #252526);
+  --cs-hover:  var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.04));
+  --cs-sel:    var(--vscode-list-inactiveSelectionBackground, rgba(56, 139, 253, 0.15));
+}
+
+.cs-outer {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ── Tab bar / status ────────────────────────────────────────────────────── */
+.cs-tabbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 12px 0;
+  flex-shrink: 0;
+}
+.cs-conn-warn { font-size: 11px; color: var(--cs-warn); }
+.cs-spacer { flex: 1; }
+
+.cs-status {
+  margin: 8px 12px 0;
+  padding: 5px 10px;
+  border: 1px solid var(--cs-border);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--cs-ok);
+  flex-shrink: 0;
+}
+.cs-status.cs-status-error { color: var(--cs-err); border-color: rgba(244, 135, 113, 0.4); }
+
+.cs-seg {
+  display: inline-flex;
+  border: 1px solid var(--cs-border);
+  border-radius: 6px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.cs-seg button {
+  border: none;
+  border-right: 1px solid var(--cs-border);
+  background: transparent;
+  color: var(--cs-muted);
+  padding: 3px 10px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.cs-seg button:last-child { border-right: none; }
+.cs-seg button:hover { background: rgba(255, 255, 255, 0.05); color: var(--vscode-foreground, #d4d4d4); }
+.cs-seg button.cs-seg-on {
+  background: var(--vscode-button-secondaryBackground, #2f2f30);
+  color: var(--vscode-foreground, #d4d4d4);
+  font-weight: 600;
+}
+
+/* ── Controls ────────────────────────────────────────────────────────────── */
+.cs-section-title,
+.cs-field-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--cs-muted);
+  white-space: nowrap;
+}
+.cs-count { font-size: 11px; color: var(--cs-muted); white-space: nowrap; }
+.cs-muted { color: var(--cs-muted); }
+.cs-mono  { font-family: var(--cs-mono); }
+
+.cs-select,
+.cs-input {
+  background: var(--vscode-input-background, #3c3c3c);
+  color: var(--vscode-input-foreground, #d4d4d4);
+  border: 1px solid var(--vscode-input-border, #3c3c3c);
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+  min-width: 0;
+}
+.cs-input.cs-mono { font-family: var(--cs-mono); }
+.cs-select:focus,
+.cs-input:focus { border-color: var(--vscode-focusBorder, #0078d4); }
+.cs-select:disabled,
+.cs-input:disabled { opacity: 0.6; }
+.cs-narrow { width: 90px; }
+.cs-filter { flex: 1 1 140px; margin-left: auto; max-width: 260px; }
+
+.lm-tool-btn { display: inline-flex; align-items: center; gap: 4px; }
+
+.cs-primary-btn {
+  height: 26px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: var(--vscode-button-background, #0e639c);
+  color: var(--vscode-button-foreground, #fff);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.cs-primary-btn:hover:not(:disabled) { background: var(--vscode-button-hoverBackground, #1177bb); }
+.cs-primary-btn:disabled { opacity: 0.5; cursor: default; }
+
+.cs-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.cs-check input { margin: 0; }
+.cs-check-locked { opacity: 0.6; cursor: default; }
+
+/* ── Body ────────────────────────────────────────────────────────────────── */
+.cs-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  gap: 12px;
+  padding: 10px 12px 12px;
+}
+.cs-body-column { flex-direction: column; gap: 8px; }
+@media (max-width: 760px) {
+  .cs-body:not(.cs-body-column) { flex-direction: column; overflow-y: auto; }
+  .cs-controls { width: auto !important; max-width: none !important; }
+  .cs-results { min-height: 360px; }
+}
+
+.cs-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: 1px solid var(--cs-border);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+  overflow: hidden;
+}
+.cs-controls { width: 300px; min-width: 260px; max-width: 340px; flex-shrink: 0; overflow-y: auto; }
+.cs-results  { flex: 1; min-width: 0; }
+
+.cs-card-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 22px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--cs-border);
+  background: var(--cs-head);
+  flex-shrink: 0;
+}
+.cs-head-actions { display: inline-flex; gap: 10px; margin-left: auto; align-items: center; }
+
+.cs-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+}
+.cs-field { display: flex; flex-direction: column; gap: 4px; }
+.cs-checks { display: flex; gap: 14px; }
+.cs-checks:empty { display: none; }
+.cs-range { display: flex; align-items: center; gap: 6px; }
+.cs-range .cs-input { flex: 1; }
+.cs-scan-buttons { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 2px; }
+.cs-hint {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--cs-muted);
+}
+.cs-hint b { color: var(--vscode-foreground, #d4d4d4); font-weight: 600; }
+
+.cs-progress {
+  position: relative;
+  height: 22px;
+  border: 1px solid var(--cs-border);
+  border-radius: 6px;
+  overflow: hidden;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  color: var(--cs-muted);
+}
+.cs-progress span { position: relative; }
+.cs-progress-inner {
+  position: absolute;
+  top: 0; left: 0;
+  height: 100%;
+  width: 30%;
+  background: linear-gradient(90deg, transparent, rgba(56, 139, 253, 0.35), transparent);
+  animation: cs-slide 1.4s ease-in-out infinite;
+}
+@keyframes cs-slide { 0% { left: -30%; } 100% { left: 100%; } }
+
+.cs-struct-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--cs-border);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+  flex-shrink: 0;
+}
+
+/* ── Results table ───────────────────────────────────────────────────────── */
+.cs-actionbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--cs-border);
+  flex-shrink: 0;
+}
+
+.cs-table-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.cs-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 120px;
+  padding: 24px;
+  color: var(--cs-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.cs-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.cs-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 4px 8px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--cs-muted);
+  background: var(--cs-head);
+  border-bottom: 1px solid var(--cs-border);
+  white-space: nowrap;
+}
+.cs-table td {
+  padding: 2px 8px;
+  white-space: nowrap;
+  vertical-align: middle;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+.cs-table tbody tr { cursor: default; }
+.cs-table tbody tr:hover td { background: var(--cs-hover); }
+.cs-table tbody tr.cs-row-selected td { background: var(--cs-sel); }
+.cs-col-check { width: 22px; }
+.cs-col-check input { margin: 0; }
+.cs-col-actions { width: 1%; text-align: right; }
+.cs-addr { color: var(--cs-link); }
+.cs-changed { color: var(--cs-err); }
+.cs-value-cell { max-width: 420px; overflow: hidden; text-overflow: ellipsis; }

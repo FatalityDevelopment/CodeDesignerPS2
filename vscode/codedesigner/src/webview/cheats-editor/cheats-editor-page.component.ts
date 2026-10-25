@@ -286,6 +286,8 @@ export class CheatsEditorPageComponent implements AfterViewInit {
   private readonly coverRequested = new Set<string>();
   /** A game title to pre-select once the game list arrives. */
   private pendingGameTitle: string | null = null;
+  /** Archive game id of the game being played (from 'initGame'); preferred over the title. */
+  private pendingGameId: number | null = null;
   private debuggerPostTimer: ReturnType<typeof setTimeout> | undefined;
   private measureCanvas: HTMLCanvasElement | undefined;
   private addressLinkFrame: number | undefined;
@@ -423,6 +425,13 @@ export class CheatsEditorPageComponent implements AfterViewInit {
           break;
         case 'initGameTitle':
           this.pendingGameTitle = (data['title'] as string) ?? null;
+          this.pendingGameId = null;
+          this.applyPendingGame();
+          break;
+        case 'initGame':
+          // The game being played: select it, or put its title in the search box.
+          this.pendingGameId = (data['gameId'] as number | null) ?? null;
+          this.pendingGameTitle = (data['title'] as string) || null;
           this.applyPendingGame();
           break;
       }
@@ -431,11 +440,23 @@ export class CheatsEditorPageComponent implements AfterViewInit {
   }
 
   private applyPendingGame(): void {
-    if (!this.pendingGameTitle) { return; }
-    const match = this.games().find(
-      g => g.title.toLowerCase() === this.pendingGameTitle!.toLowerCase());
+    if (!this.pendingGameTitle && this.pendingGameId === null) { return; }
+    // Wait for the game list; 'cheatGames' calls back in here.
+    if (this.games().length === 0) { return; }
+    const id = this.pendingGameId;
+    const title = this.pendingGameTitle;
+    this.pendingGameId = null;
     this.pendingGameTitle = null;
-    if (match) { this.selectGame(match); }
+    const match = (id !== null ? this.games().find(g => g.gameId === id) : undefined)
+      ?? (title ? this.games().find(g => g.title.toLowerCase() === title.toLowerCase()) : undefined);
+    if (match) {
+      this.selectGame(match);
+      // Show the game in the search box too; the builds stay listed while it is selected.
+      this.gameSearch.set(match.title);
+    } else if (title) {
+      // Not in the archive (yet): fill the search box so the closest titles show.
+      this.gameSearch.set(title);
+    }
   }
 
   // ── Game / build selection ─────────────────────────────────────────────

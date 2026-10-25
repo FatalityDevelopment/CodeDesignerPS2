@@ -5,7 +5,6 @@ import {
   PanelStatusBarComponent,
   SettingsTabComponent,
   CheatsTabComponent,
-  CdsTabComponent,
   RecompileTabComponent,
 } from './components';
 import type { McpMemoryEntry, McpMemoryListResult, McpMemoryActionResult } from './components';
@@ -153,7 +152,6 @@ interface OrchestrationsResultMsg {
     PanelStatusBarComponent,
     SettingsTabComponent,
     CheatsTabComponent,
-    CdsTabComponent,
     RecompileTabComponent,
     IconComponent,
   ],
@@ -173,9 +171,9 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
   selectedEmulator = '';
   selectedBios = '';
   selectedGame = '';
-  activeTab: 'settings' | 'cheats' | 'cds' | 'recompile' = 'settings';
+  activeTab: 'settings' | 'cheats' | 'recompile' = 'settings';
 
-  /** Cheat text owned here so the CDS "Add Cheat" action can inject codes. Persisted via localStorage. */
+  /** Cheats tab source (CDS: raw codes + assembly), owned here so it survives tab switches. Persisted via localStorage. */
   private static readonly CHEAT_TEXT_KEY = 'codedesigner.cheatsText';
   private _cheatText = localStorage.getItem(DisasmPanelComponent.CHEAT_TEXT_KEY) ?? '';
   get cheatText(): string { return this._cheatText; }
@@ -381,7 +379,7 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
 
   // ── Tab navigation ───────────────────────────────────────────────────────
 
-  setTab(tab: 'settings' | 'cheats' | 'cds' | 'recompile'): void {
+  setTab(tab: 'settings' | 'cheats' | 'recompile'): void {
     this.activeTab = tab;
   }
 
@@ -389,7 +387,6 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
   get viewLabel(): string {
     switch (this.activeTab) {
       case 'cheats':    return 'Cheats';
-      case 'cds':       return 'CDS';
       case 'recompile': return 'Recompile';
       default:          return 'Emulator';
     }
@@ -462,10 +459,9 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
 
   /** Open the markdown help guide that matches the active tab. */
   openHelp(): void {
-    const docs: Record<'settings' | 'cheats' | 'cds' | 'recompile', string> = {
+    const docs: Record<'settings' | 'cheats' | 'recompile', string> = {
       settings:  'docs/README.md',
       cheats:    'docs/cheat-engine.md',
-      cds:       'CODE_DESIGNER_SOURCE.md',
       recompile: 'docs/recompiler.md',
     };
     this.bridge.postMessage({ command: 'openMarkdownHelp', file: docs[this.activeTab] });
@@ -475,8 +471,9 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
     this.bridge.postMessage({ command: 'openMarkdownHelp', file: 'docs/README.md' });
   }
 
+  /** The Archive action opens the cheat archive (the Cheats editor). */
   openArchiveDocs(): void {
-    this.bridge.postMessage({ command: 'openMarkdownHelp', file: 'CheatCodeArchive/consoles/README.md' });
+    this.bridge.postMessage({ command: 'openCheatsEditor' });
   }
 
   importBin(): void {
@@ -517,16 +514,6 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
 
   browseGame(): void {
     this.bridge.postMessage({ command: 'browseGame' });
-  }
-
-  // ── CDS tab cross-tab handler ────────────────────────────────────────────
-
-  /** Called when the CDS tab's "Add Cheat" button is clicked. */
-  onAddCheat(codes: string): void {
-    this.cheatText = this.cheatText
-      ? this.cheatText.trimEnd() + '\n' + codes
-      : codes;
-    this.activeTab = 'cheats';
   }
 
   // ── MCP Memory Manager handlers ──────────────────────────────────────────
@@ -685,5 +672,9 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
 
   onOpenScanner(): void {
     this.bridge.postMessage({ command: 'openScanner' });
+  }
+
+  onOpenCheatList(): void {
+    this.bridge.postMessage({ command: 'openCheatList' });
   }
 }

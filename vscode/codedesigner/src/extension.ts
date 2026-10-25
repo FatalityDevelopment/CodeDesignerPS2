@@ -490,6 +490,8 @@ export function activate(context: vscode.ExtensionContext) {
 	// Three-panel cheat-code editor; also opened from the compatibility
 	// browser's per-game Cheats button (passing the game title to pre-select).
 	const cheatsEditorProvider = new CheatsEditorProvider(context.extensionUri, socketClient, editorProvider);
+	cheatsEditorProvider.getCurrentGame   = () => disasmPanelProvider.getCurrentGameForCheats();
+	cheatsEditorProvider.archiveCloneRoot = () => disasmPanelProvider.getArchiveCloneRoot();
 	const openCheatsEditorCommand = vscode.commands.registerCommand(
 		'codedesigner.openCheatsEditor',
 		(gameTitle?: string) => cheatsEditorProvider.open(gameTitle),

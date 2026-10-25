@@ -188,8 +188,6 @@ export class EditorState {
     registers: signal(false),
     bottom: signal(false),
     editOverlay: signal(false),
-    converterOverlay: signal(false),
-    scannerOverlay: signal(false),
     structOverlay: signal(false),
     labelManager: signal(false),
   };

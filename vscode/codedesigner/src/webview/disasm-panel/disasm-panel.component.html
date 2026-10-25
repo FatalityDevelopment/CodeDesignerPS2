@@ -77,12 +77,8 @@
     <app-icon name="gamepad2" [size]="16" />
   </button>
   <button class="view-btn" [class.active]="activeTab === 'cheats'"
-          (click)="setTab('cheats')" title="Cheats">
+          (click)="setTab('cheats')" title="Cheats — raw codes and Code Designer Source">
     <app-icon name="sparkles" [size]="16" />
-  </button>
-  <button class="view-btn" [class.active]="activeTab === 'cds'"
-          (click)="setTab('cds')" title="CDS — Code Designer Source">
-    <app-icon name="filecode" [size]="16" />
   </button>
   <button class="view-btn" [class.active]="activeTab === 'recompile'"
           (click)="setTab('recompile')" title="Recompile">
@@ -142,7 +138,6 @@
     (openDiffViewerClick)="onOpenDiffViewer()"
     (openCheatPorterClick)="onOpenCheatPorter()"
     (openCompatBrowserClick)="onOpenCompatBrowser()"
-    (openCheatsEditorClick)="onOpenCheatsEditor()"
     (openMemoryCardClick)="onOpenMemoryCard()"
     (openHddClick)="onOpenHdd()"
     (openZipperClick)="onOpenZipper()"
@@ -180,13 +175,8 @@
     (openConverterClick)="onOpenConverter()"
     (openPorterClick)="onOpenPorter()"
     (openScannerClick)="onOpenScanner()"
-  />
-</div>
-
-<div id="tab-cds" class="tab-content" [style.display]="activeTab === 'cds' ? 'flex' : 'none'">
-  <app-cds-tab
-    [isConnected]="isConnected"
-    (addCheatClick)="onAddCheat($event)"
+    (openCheatListClick)="onOpenCheatList()"
+    (openCheatsEditorClick)="onOpenCheatsEditor()"
   />
 </div>
 

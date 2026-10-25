@@ -31,34 +31,44 @@ namespace CodeDesigner.Ps2.Bridge.Services
 
         public void Register(CommandRegistry reg)
         {
-            reg.Add(c => HandleGetGameCheats(c.GameSerial),                                      "GETGAMECHEATS");
+            reg.Add(c => HandleGetGameCheats(c.GameSerial, c.CheatListId),                       "GETGAMECHEATS");
             reg.Add(c => HandleApplyCheats(c.Data),                                              "APPLYCHEATS");
             reg.Add(c => HandlePortCheats(c.Data, c.SourceDumpPath, c.TargetDumpPath),           "PORTCHEATS");
             reg.Add(c => HandleConvertCheat(c.Data, c.Format, c.Direction),                      "CONVERTCHEAT");
             reg.Add(c => HandleInjectCheatEngine(c.Data, c.HookAddress, c.EngineBase, c.CdsSource), "INJECTCHEATENGINE");
             reg.Add(c => HandleUpdateCheatEngine(c.Data, c.CdsSource),                           "UPDATECHEATENGINE");
             reg.Add(_ => HandleRemoveCheatEngine(),                                              "REMOVECHEATENGINE");
+            reg.Add(_ => HandleCheatEngineStatus(),                                              "CHEATENGINESTATUS");
+            reg.Add(c => HandleBuildCheatEngine(c.Data, c.HookAddress, c.EngineBase, c.CdsSource), "BUILDCHEATENGINE");
         }
 
         // ── GETGAMECHEATS ────────────────────────────────────────────────────
 
-        private string HandleGetGameCheats(string? serial)
+        /// <summary>
+        /// GETGAMECHEATS — the archive's cheats for a disc. Returns every cheat list for the
+        /// disc and its game (<see cref="CommandResponse.GameCheatLists"/>) plus the cheats of
+        /// <paramref name="cheatListId"/>, or of the first non-empty list when none is given.
+        /// </summary>
+        private string HandleGetGameCheats(string? serial, int? cheatListId)
         {
             if (_ctx.Db == null) return Responses.Error("Database is not available");
             if (string.IsNullOrWhiteSpace(serial)) return Responses.Error("GameSerial is required for GETGAMECHEATS");
 
             var normalized = DbLabelRepository.NormalizeSerial(serial);
 
-            var disc = _ctx.Db.GameDiscs
+            // Several disc rows can share a serial (the cheat importer and the label
+            // manager's game upsert each create one under their own title), so gather
+            // lists across all of them.
+            var discs = _ctx.Db.GameDiscs
                 .Include(d => d.Game)
-                .Include(d => d.CheatLists!)
-                    .ThenInclude(cl => cl.Cheats)
-                        .ThenInclude(c => c.CheatLines)
-                .FirstOrDefault(d =>
+                .Where(d =>
                     d.Serial != null &&
-                    d.Serial.Replace("_", "-").ToUpper() == normalized);
+                    d.Serial.Replace("_", "-").ToUpper() == normalized)
+                .ToList();
+            var discIds = discs.Select(d => d.Id).ToList();
+            var gameIds = discs.Select(d => d.GameId).Distinct().ToList();
 
-            if (disc == null)
+            if (discs.Count == 0)
             {
                 return Responses.Json(new CommandResponse
                 {
@@ -67,10 +77,42 @@ namespace CodeDesigner.Ps2.Bridge.Services
                     GameCheats     = [],
                     GameTitle      = null,
                     CheatListTitle = null,
+                    GameCheatLists = [],
                 });
             }
 
-            var cheatList = disc.CheatLists?.OrderBy(cl => cl.Id).FirstOrDefault();
+            // Lists made for the game in the cheats editor (game-level, e.g. r0001 / r0004)
+            // come first, then lists imported for the disc from the cheat repository.
+            var listRows = _ctx.Db.CheatLists
+                .Where(cl => (cl.GameDiscId != null && discIds.Contains(cl.GameDiscId.Value))
+                          || (cl.GameDiscId == null && cl.GameId != null && gameIds.Contains(cl.GameId.Value)))
+                .Select(cl => new { cl.Id, cl.Title, cl.GameDiscId, cl.GameId, CheatCount = cl.Cheats.Count })
+                .ToList();
+            var lists = listRows
+                .Select(cl => new GameCheatListInfo
+                {
+                    Id         = cl.Id,
+                    Title      = cl.Title,
+                    CheatCount = cl.CheatCount,
+                    ForDisc    = cl.GameDiscId != null,
+                })
+                .OrderBy(cl => cl.ForDisc)
+                .ThenBy(cl => cl.Title, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            // Title/game id from the disc that owns the lists (the imported one), else the first.
+            var ownerGameId = listRows.Select(cl => cl.GameDiscId != null
+                    ? discs.First(d => d.Id == cl.GameDiscId).GameId
+                    : cl.GameId)
+                .FirstOrDefault(id => id != null);
+            var disc = discs.FirstOrDefault(d => d.GameId == ownerGameId) ?? discs[0];
+
+            var chosen = (cheatListId.HasValue ? lists.FirstOrDefault(l => l.Id == cheatListId.Value) : null)
+                         ?? lists.FirstOrDefault(l => l.CheatCount > 0)
+                         ?? lists.FirstOrDefault();
+            var cheatList = chosen == null ? null : _ctx.Db.CheatLists
+                .Include(cl => cl.Cheats)
+                    .ThenInclude(c => c.CheatLines)
+                .FirstOrDefault(cl => cl.Id == chosen.Id);
             var cheats = cheatList?.Cheats
                 .OrderBy(c => c.SortOrder)
                 .Select(c => new CheatInfo
@@ -79,6 +121,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
                     Author = string.IsNullOrWhiteSpace(c.Author) ? null : c.Author,
                     Notes  = string.IsNullOrWhiteSpace(c.Description) ? null : c.Description,
                     Codes  = c.CheatLines.OrderBy(l => l.SortOrder).Select(l => l.Code).ToList(),
+                    Section = string.IsNullOrWhiteSpace(c.Section) ? null : c.Section,
                 })
                 .ToList() ?? [];
 
@@ -86,9 +129,12 @@ namespace CodeDesigner.Ps2.Bridge.Services
             {
                 Success        = true,
                 Command        = "GETGAMECHEATS",
-                GameCheats     = cheats,
-                GameTitle      = disc.Game?.Title,
-                CheatListTitle = cheatList?.Title,
+                GameCheats          = cheats,
+                GameTitle           = disc.Game?.Title,
+                CheatListTitle      = cheatList?.Title,
+                SelectedCheatListId = cheatList?.Id,
+                ArchiveGameId       = disc.GameId,
+                GameCheatLists      = lists,
             });
         }
 
@@ -212,24 +258,118 @@ namespace CodeDesigner.Ps2.Bridge.Services
 
             try
             {
+                // A previous injection still hooked (e.g. at another hook point) is removed first
+                // so the game never jumps into a half-rewritten engine.
+                if (_cdsCheatEngine?.IsInjected == true)
+                    _cdsCheatEngine.Remove();
+
                 IByteEditor byteEditor = new DebugClientByteEditor(_ctx.Client);
                 uint baseAddr          = engineBase ?? 0x000C0000;
-                _cdsCheatEngine        = new CdsCheatEngine(byteEditor, baseAddr);
+                var engine             = new CdsCheatEngine(byteEditor, baseAddr);
 
                 if (!string.IsNullOrWhiteSpace(cdsSource))
-                    _cdsCheatEngine.InjectFromCds(hookAddress.Value, cdsSource);
+                    engine.InjectFromCds(hookAddress.Value, cdsSource);
                 else
-                    _cdsCheatEngine.Inject(hookAddress.Value, cheatText!);
+                    engine.Inject(hookAddress.Value, cheatText!);
+                _cdsCheatEngine = engine;
 
                 return Responses.Json(new CommandResponse
                 {
-                    Success = true,
-                    Command = "INJECTCHEATENGINE",
-                    Data    = $"Cheat engine injected at 0x{baseAddr:X8}, hooked at 0x{hookAddress.Value:X8}",
+                    Success          = true,
+                    Command          = "INJECTCHEATENGINE",
+                    Data             = $"Cheat engine injected at 0x{baseAddr:X8}, hooked at 0x{hookAddress.Value:X8}",
+                    CheatEngineState = EngineInfo(engine),
                 });
             }
             catch (Exception ex) { return Responses.Error($"InjectCheatEngine error: {ex.Message}"); }
         }
+
+        private string HandleCheatEngineStatus()
+            => Responses.Json(new CommandResponse
+            {
+                Success          = true,
+                Command          = "CHEATENGINESTATUS",
+                CheatEngineState = _cdsCheatEngine != null
+                    ? EngineInfo(_cdsCheatEngine)
+                    : new CheatEngineInfo { Injected = false, EngineBase = 0x000C0000 },
+            });
+
+        /// <summary>
+        /// BUILDCHEATENGINE — build the engine image (code + data + table) for export
+        /// without touching memory. With a hook address and a live backend, the hooked
+        /// instructions are read and embedded so the image only needs loading at its
+        /// base plus <c>HookWord; nop</c> at the hook address.
+        /// </summary>
+        private string HandleBuildCheatEngine(string? cheatText, uint? hookAddress, uint? engineBase, string? cdsSource)
+        {
+            if (string.IsNullOrWhiteSpace(cheatText) && string.IsNullOrWhiteSpace(cdsSource))
+                return Responses.Error("No cheat data provided");
+
+            try
+            {
+                uint baseAddr = engineBase ?? 0x000C0000;
+                string codes  = !string.IsNullOrWhiteSpace(cdsSource)
+                    ? CdsCheatEngine.CompileCdsToCodeText(cdsSource)
+                    : cheatText!;
+                var translation = RawCodeTranslator.Translate(codes);
+                if (!translation.IsValid)
+                    return Responses.Error("Cheat codes not supported by the engine: " + string.Join("; ", translation.Errors));
+
+                var warnings = new List<string>(translation.Warnings);
+                uint word0 = 0, word1 = 0;
+                bool embedded = false;
+                if (hookAddress.HasValue && _ctx.Client != null)
+                {
+                    var editor = new DebugClientByteEditor(_ctx.Client);
+                    word0 = BitConverter.ToUInt32(editor.Read((int)hookAddress.Value, 4), 0);
+                    word1 = BitConverter.ToUInt32(editor.Read((int)hookAddress.Value + 4, 4), 0);
+                    // While hooked here, memory holds the engine's own jump — use the saved originals.
+                    if (_cdsCheatEngine?.IsInjected == true && _cdsCheatEngine.HookAddress == hookAddress.Value)
+                        (word0, word1) = _cdsCheatEngine.OriginalInstructions;
+                    CdsCheatEngine.ValidateHook(hookAddress.Value, word0, word1, baseAddr);
+                    embedded = true;
+                }
+                else if (hookAddress.HasValue)
+                {
+                    warnings.Add("No live backend: the hooked instructions are not embedded (nops) — patch them before use.");
+                }
+                else
+                {
+                    warnings.Add("No hook address: the image's return jump is a nop — patch it and the hook before use.");
+                }
+
+                byte[] image = CdsCheatEngine.BuildImage(translation.Entries, baseAddr, hookAddress, word0, word1);
+
+                return Responses.Json(new CommandResponse
+                {
+                    Success          = true,
+                    Command          = "BUILDCHEATENGINE",
+                    Data             = Convert.ToBase64String(image),
+                    CheatEngineState = new CheatEngineInfo
+                    {
+                        Injected     = _cdsCheatEngine?.IsInjected == true,
+                        EngineBase   = baseAddr,
+                        HookAddress  = hookAddress,
+                        Entries      = translation.Entries.Count,
+                        ImageSize    = image.Length,
+                        HookWord     = CdsCheatEngine.EncodeJ(baseAddr),
+                        HookEmbedded = embedded,
+                        Warnings     = warnings,
+                    },
+                });
+            }
+            catch (Exception ex) { return Responses.Error($"BuildCheatEngine error: {ex.Message}"); }
+        }
+
+        private static CheatEngineInfo EngineInfo(CdsCheatEngine engine) => new()
+        {
+            Injected    = engine.IsInjected,
+            EngineBase  = engine.EngineBase,
+            HookAddress = engine.IsInjected ? engine.HookAddress : null,
+            Entries     = engine.LastEntryCount,
+            ImageSize   = CdsCheatEngine.CheatTableOffset + (engine.LastEntryCount + 1) * CdsCheatEngine.EntrySize,
+            Warnings    = engine.LastWarnings.ToList(),
+        };
 
         private string HandleUpdateCheatEngine(string? cheatText, string? cdsSource)
         {
@@ -244,7 +384,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
                     _cdsCheatEngine.UpdateCheatTableFromCds(cdsSource);
                 else
                     _cdsCheatEngine.UpdateCheatTable(cheatText!);
-                return Responses.Success("Cheat table updated");
+                return Responses.Json(new CommandResponse { Success = true, Command = "UPDATECHEATENGINE", Message = "Cheat table updated", CheatEngineState = EngineInfo(_cdsCheatEngine) });
             }
             catch (Exception ex) { return Responses.Error($"UpdateCheatEngine error: {ex.Message}"); }
         }
@@ -257,7 +397,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
             try
             {
                 _cdsCheatEngine.Remove();
-                return Responses.Success("Cheat engine removed and original code restored");
+                return Responses.Json(new CommandResponse { Success = true, Command = "REMOVECHEATENGINE", Message = "Cheat engine removed and original code restored", CheatEngineState = EngineInfo(_cdsCheatEngine) });
             }
             catch (Exception ex) { return Responses.Error($"RemoveCheatEngine error: {ex.Message}"); }
         }

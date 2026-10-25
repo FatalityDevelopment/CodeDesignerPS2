@@ -157,7 +157,7 @@ const NET_POLL_MS = 30000;
               <button id="docsBtn" (click)="docsClick.emit()">
                 <app-icon name="bookopen" [size]="14" /><span>Docs</span>
               </button>
-              <button id="archiveDocsBtn" (click)="archiveDocsClick.emit()">
+              <button id="archiveDocsBtn" (click)="archiveDocsClick.emit()" title="Open the cheat archive (Cheats editor)">
                 <app-icon name="library" [size]="14" /><span>Archive</span>
               </button>
 
@@ -395,10 +395,6 @@ const NET_POLL_MS = 30000;
               <button (click)="openCompatBrowserClick.emit()"
                       title="Browse the PCSX2 game compatibility list">
                 <app-icon name="gamepad2" [size]="14" /><span>Games</span>
-              </button>
-              <button (click)="openCheatsEditorClick.emit()"
-                      title="Open the PS2 cheats editor">
-                <app-icon name="sparkles" [size]="14" /><span>Cheats</span>
               </button>
             </div>
           </div>
@@ -718,7 +714,6 @@ export class SettingsTabComponent implements OnDestroy {
   readonly openDiffViewerClick   = output<void>();
   readonly openCheatPorterClick  = output<void>();
   readonly openCompatBrowserClick = output<void>();
-  readonly openCheatsEditorClick = output<void>();
   readonly openMemoryCardClick   = output<void>();
   readonly openHddClick          = output<void>();
   readonly openZipperClick       = output<void>();

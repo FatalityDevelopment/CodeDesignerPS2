@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
-import { SocketClient, LabelEntry, StringEntry, FunctionEntry, PointerEntry, FloatEntry, IntegerEntry, SearchMatch, ReferenceEntry, AiActivityEvent, AiSessionStartEvent, AiLabelUpdateEvent, StructEntry, LabelManagerEntry, LabelSetPayload, type DataFormatKind } from "../../socketClient";
+import { SocketClient, LabelEntry, StringEntry, FunctionEntry, SearchMatch, ReferenceEntry, AiActivityEvent, AiSessionStartEvent, AiLabelUpdateEvent, StructEntry, LabelManagerEntry, LabelSetPayload, type DataFormatKind } from "../../socketClient";
 import { getOutputChannel } from "../../extension";
 import { getNonce, getWebviewErrorHandlerScript } from "../../utils/nonce";
 import { classifyAddress, MemoryRegion } from "../../shared/memoryRegions";
@@ -62,14 +62,6 @@ interface LivePanelInfo {
   pendingGoto?: number;     // goto queued while the panel was still bootstrapping
 }
 
-/** Cached scanner results stored per panel. */
-interface PanelScanCache {
-  strings?:   StringEntry[];
-  functions?: FunctionEntry[];
-  pointers?:  PointerEntry[];
-  floats?:    FloatEntry[];
-  integers?:  IntegerEntry[];
-}
 
 export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider {
   private static readonly HEX_VIEW_SIZE = 0x30;
@@ -93,12 +85,6 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   /** The single open Label Manager tab panel. Undefined when the user closes it. */
   private _labelManagerPanel: vscode.WebviewPanel | undefined;
 
-  /**
-   * Per-panel cache of the most recent scanner results (strings, functions, pointers,
-   * floats, integers).  Populated when a scan completes; re-sent to the webview when
-   * the symbols panel is opened after a page reload without requiring a re-scan.
-   */
-  private _panelScanCache: Map<vscode.WebviewPanel, PanelScanCache> = new Map();
   private _filePanels: Map<vscode.WebviewPanel, { fileData: Buffer; lastStartIndex: number }> = new Map();
 
   /**
@@ -161,6 +147,12 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
    */
   public onGetAddressHistory?: (address: number) => Array<{ name: string; date: string; value: string; disasm?: string }>;
 
+  /**
+   * Opens the Cheat Scanner page (where the Label Manager's old memory scans
+   * now live). Wired by DisasmPanelProvider, which owns that page.
+   */
+  public onOpenCheatScanner?: () => void;
+
   // ── Public helpers ──────────────────────────────────────────────────────────
 
   /**
@@ -186,11 +178,6 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     this._revealAndPost('openStructCalculator');
   }
 
-  /** Open the Cheat Code Converter overlay in the first live panel. */
-  public openConverterOverlay(): void {
-    this._revealAndPost('openConverterOverlay');
-  }
-
   /** Open the Memory Card Manager overlay in the first live panel. */
   public openMemoryCardOverlay(): void {
     this._revealAndPost('openMemoryCardOverlay');
@@ -199,11 +186,6 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   /** Open the HDD Image Manager overlay in the first live panel. */
   public openHddOverlay(): void {
     this._revealAndPost('openHddOverlay');
-  }
-
-  /** Open the Memory Scanner overlay in the first live panel. */
-  public openScannerOverlay(): void {
-    this._revealAndPost('openScannerOverlay');
   }
 
   /** Reveal the first live panel and post a message to it. */
@@ -733,6 +715,36 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   }
 
   /**
+   * Add entries to the user's active label set on behalf of a satellite page
+   * (the Cheat Scanner). Uses the cached active set, else the first user set,
+   * else creates a "Scanner" set. Broadcasts the result like the Label Manager's
+   * own addEntry action. Returns the set the entries went into.
+   */
+  public async addLabelEntries(entries: LabelManagerEntry[]): Promise<string> {
+    if (!this.socketClient?.isConnected()) { throw new Error('Not connected to CodeDesigner server.'); }
+    const ctx = this._labelManagerCtx();
+    if (!ctx) { throw new Error('No workspace folder is open. Open a folder in VS Code to use the Label Manager.'); }
+    const { workspaceDir, gameDiscId } = ctx;
+
+    const sets = await this.socketClient.getLabelSets(workspaceDir, gameDiscId);
+    let setName = (this._activeSetName && this._activeSetName !== 'Built-in' && sets.includes(this._activeSetName))
+      ? this._activeSetName
+      : sets.find(s => s !== 'Built-in');
+    if (!setName) {
+      setName = 'Scanner';
+      await this.socketClient.createLabelSet(workspaceDir, gameDiscId, setName);
+    }
+    let set = await this.socketClient.setActiveLabelSet(workspaceDir, gameDiscId, setName);
+    this._activeSetName = setName;
+    for (const entry of entries) {
+      set = await this.socketClient.addLabelEntry(workspaceDir, gameDiscId, setName, entry);
+    }
+    this._broadcastLabelSet(set);
+    await this.refreshStructLabels();
+    return setName;
+  }
+
+  /**
    * Returns the path to the per-game labels.json file, or null if the game
    * name or workspace root is not set.
    */
@@ -1135,22 +1147,6 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       } else if (message.type === "search") {
         await this.handleSearch(webviewPanel, message.query, message.mode,
           DisasmEditorProvider.BASE_ADDRESS, fileData.length, undefined, fileData);
-      } else if (message.type === "scanStrings") {
-        await this.handleFileScan(
-          'strings',
-          webviewPanel,
-          fileData,
-          DisasmEditorProvider.BASE_ADDRESS,
-          message.startIndex as number | undefined,
-        );
-      } else if (message.type === "scanFunctions") {
-        await this.handleFileScan('functions', webviewPanel, fileData, DisasmEditorProvider.BASE_ADDRESS);
-      } else if (message.type === "scanPointers") {
-        await this.handleFileScan('pointers', webviewPanel, fileData, DisasmEditorProvider.BASE_ADDRESS);
-      } else if (message.type === "scanFloats") {
-        await this.handleFileScan('floats', webviewPanel, fileData, DisasmEditorProvider.BASE_ADDRESS);
-      } else if (message.type === "scanIntegers") {
-        await this.handleFileScan('integers', webviewPanel, fileData, DisasmEditorProvider.BASE_ADDRESS);
       } else if (message.type === "getSymbols") {
         await this.handleGetSymbols(webviewPanel, fileData, DisasmEditorProvider.BASE_ADDRESS);
       } else if (message.type === "addLabel") {
@@ -1194,21 +1190,6 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             webviewPanel.webview.postMessage({ type: 'assembleInstrResult', hexBytes: null });
           }
         }
-      } else if (message.type === "convertCheat") {
-        if (this.socketClient?.isConnected()) {
-          try {
-            const result = await this.socketClient.convertCheat(
-              message.codes as string,
-              message.direction as 'toRaw' | 'toEngine',
-              message.format as string | undefined);
-            webviewPanel.webview.postMessage({ type: 'convertCheatResult', result });
-          } catch (err: unknown) {
-            const errMsg = err instanceof Error ? err.message : String(err);
-            webviewPanel.webview.postMessage({ type: 'convertCheatResult', error: errMsg });
-          }
-        } else {
-          webviewPanel.webview.postMessage({ type: 'convertCheatResult', error: 'Not connected to emulator server' });
-        }
       } else if (message.type === 'browseMc') {
         await this._handleBrowseMc(webviewPanel.webview);
       } else if (message.type === 'newMc') {
@@ -1233,8 +1214,6 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         await this._handleHddListFiles(webviewPanel.webview, message.hddPath as string ?? '', message.partitionId as string ?? '');
       } else if (message.type === 'hddDelete') {
         await this._handleHddDelete(webviewPanel.webview, message.hddPath as string ?? '', message.partitionId as string ?? '');
-      } else if (message.type === 'scanValue') {
-        await this._handleScanValue(webviewPanel.webview, message);
       } else if (message.type === 'getStructs') {
         await this._handleGetStructs(webviewPanel.webview);
       } else if (message.type === 'addStruct') {
@@ -1380,6 +1359,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 }
             } else if (message.type === 'labelManagerAction') {
                 await this._handleLabelManagerAction(panel.webview, message.action as any);
+            } else if (message.type === 'openCheatScanner') {
+                this.onOpenCheatScanner?.();
             } else if (message.type === 'bootstrapError') {
                 getOutputChannel().error('[LabelManager] Bootstrap error: ' + message.error);
             }
@@ -1483,7 +1464,6 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         panel.onDidDispose(() => {
             this._livePanels = this._livePanels.filter(p => p !== panel);
             this._livePanelInfo = this._livePanelInfo.filter(info => info.panel !== panel);
-            this._panelScanCache.delete(panel);
         });
 
         // Pause/resume the webview's live-refresh timers based on panel
@@ -1719,18 +1699,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             } else if (message.type === 'search') {
                 await this.handleSearch(panel, message.query, message.mode,
                     baseAddress, totalBytes, region);
-            } else if (message.type === 'scanStrings') {
-                await this.handleLiveScan('strings', panel, region, baseAddress, totalBytes, message.startIndex as number | undefined);
-            } else if (message.type === 'scanFunctions') {
-                await this.handleLiveScan('functions', panel, region, baseAddress, totalBytes);
-            } else if (message.type === 'scanPointers') {
-                await this.handleLiveScan('pointers', panel, region, baseAddress, totalBytes);
-            } else if (message.type === 'scanFloats') {
-                await this.handleLiveScan('floats', panel, region, baseAddress, totalBytes);
-            } else if (message.type === 'scanIntegers') {
-                await this.handleLiveScan('integers', panel, region, baseAddress, totalBytes);
             } else if (message.type === 'getSymbols') {
-                // Live mode: labels from backend; strings/functions are loaded on-demand via scan buttons
+                // Live mode: labels from backend only (memory scans live on the Cheat Scanner page)
                 await this.handleGetSymbols(panel, undefined, baseAddress);
             } else if (message.type === 'addLabel') {
                 await this.handleAddLabel(panel, message.address, message.labelName, message.comment);
@@ -1997,17 +1967,6 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                     p.webview.postMessage({ type: 'hintLevel', level });
                     p.webview.postMessage({ type: 'reloadPage' });
                 }
-            } else if (message.type === 'convertCheat') {
-                try {
-                    const result = await this.socketClient!.convertCheat(
-                        message.codes as string,
-                        message.direction as 'toRaw' | 'toEngine',
-                        message.format as string | undefined);
-                    panel.webview.postMessage({ type: 'convertCheatResult', result });
-                } catch (err: unknown) {
-                    const errMsg = err instanceof Error ? err.message : String(err);
-                    panel.webview.postMessage({ type: 'convertCheatResult', error: errMsg });
-                }
             } else if (message.type === 'browseMc') {
                 await this._handleBrowseMc(panel.webview);
             } else if (message.type === 'newMc') {
@@ -2032,8 +1991,6 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 await this._handleHddListFiles(panel.webview, message.hddPath as string ?? '', message.partitionId as string ?? '');
             } else if (message.type === 'hddDelete') {
                 await this._handleHddDelete(panel.webview, message.hddPath as string ?? '', message.partitionId as string ?? '');
-            } else if (message.type === 'scanValue') {
-                await this._handleScanValue(panel.webview, message);
             } else if (message.type === 'getStructs') {
                 await this._handleGetStructs(panel.webview);
             } else if (message.type === 'addStruct') {
@@ -2941,189 +2898,10 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   }
 
   /**
-   * Scan a live memory region for strings, functions, pointers, floats, or
-   * integers using the C# backend.
-   * Results are cached per panel; subsequent scans always re-fetch fresh data
-   * and update the cache so the webview can restore them after a page reload.
-   * Posts the corresponding `*Updated` message to the webview.
-   */
-  private async handleLiveScan(
-    kind: 'strings' | 'functions' | 'pointers' | 'floats' | 'integers',
-    panel: vscode.WebviewPanel,
-    region: string,
-    baseAddress: number,
-    totalBytes: number,
-    refreshStartIndex?: number,
-  ): Promise<void> {
-    if (!this.socketClient?.isConnected()) { return; }
-    try {
-      const cache = this._panelScanCache.get(panel) ?? {};
-      if (kind === 'strings') {
-        const strings = await this.socketClient.scanLiveStrings(baseAddress, totalBytes, region);
-        cache.strings = strings;
-        this._panelScanCache.set(panel, cache);
-        panel.webview.postMessage({ type: 'stringsUpdated', strings });
-        if (refreshStartIndex !== undefined) {
-          await this.sendLiveDisasmPage(panel, region, baseAddress, totalBytes, refreshStartIndex);
-        }
-      } else if (kind === 'functions') {
-        const functions = await this.socketClient.scanLiveFunctions(baseAddress, totalBytes, region);
-        cache.functions = functions;
-        this._panelScanCache.set(panel, cache);
-        panel.webview.postMessage({ type: 'functionsUpdated', functions });
-      } else if (kind === 'pointers') {
-        const pointers = await this.socketClient.scanLivePointers(baseAddress, totalBytes, region);
-        cache.pointers = pointers;
-        this._panelScanCache.set(panel, cache);
-        panel.webview.postMessage({ type: 'pointersUpdated', pointers });
-      } else if (kind === 'floats') {
-        const floats = await this.socketClient.scanLiveFloats(baseAddress, totalBytes, region);
-        cache.floats = floats;
-        this._panelScanCache.set(panel, cache);
-        panel.webview.postMessage({ type: 'floatsUpdated', floats });
-      } else {
-        const integers = await this.socketClient.scanLiveIntegers(baseAddress, totalBytes, region);
-        cache.integers = integers;
-        this._panelScanCache.set(panel, cache);
-        panel.webview.postMessage({ type: 'integersUpdated', integers });
-      }
-    } catch (err: any) {
-      console.error(`[SYMBOLS] LiveScan(${kind}) failed: ${err?.message ?? err}`);
-      // Send empty result so the webview re-enables the scan button
-      if (kind === 'strings') {
-        panel.webview.postMessage({ type: 'stringsUpdated', strings: [] });
-      } else if (kind === 'functions') {
-        panel.webview.postMessage({ type: 'functionsUpdated', functions: [] });
-      } else if (kind === 'pointers') {
-        panel.webview.postMessage({ type: 'pointersUpdated', pointers: [] });
-      } else if (kind === 'floats') {
-        panel.webview.postMessage({ type: 'floatsUpdated', floats: [] });
-      } else {
-        panel.webview.postMessage({ type: 'integersUpdated', integers: [] });
-      }
-    }
-  }
-
-  /**
-   * Scan file binary data for strings, functions, pointers, floats, or integers
-   * using the C# backend.
-   * Results are cached per panel; subsequent scans always re-fetch fresh data
-   * and update the cache.
-   * Posts the corresponding `*Updated` message to the webview.
-   */
-  private async handleFileScan(
-    kind: 'strings' | 'functions' | 'pointers' | 'floats' | 'integers',
-    panel: vscode.WebviewPanel,
-    fileData: Buffer,
-    baseAddress: number,
-    refreshStartIndex?: number,
-  ): Promise<void> {
-    if (!this.socketClient?.isConnected()) { return; }
-    try {
-      const cache = this._panelScanCache.get(panel) ?? {};
-      if (kind === 'strings') {
-        const strings = await this.socketClient.getStrings(fileData, baseAddress);
-        cache.strings = strings;
-        this._panelScanCache.set(panel, cache);
-        panel.webview.postMessage({ type: 'stringsUpdated', strings });
-        if (refreshStartIndex !== undefined) {
-          await this.sendDisasmPage(panel, fileData, refreshStartIndex);
-        }
-      } else if (kind === 'functions') {
-        const functions = await this.socketClient.getFunctions(fileData, baseAddress);
-        cache.functions = functions;
-        this._panelScanCache.set(panel, cache);
-        panel.webview.postMessage({ type: 'functionsUpdated', functions });
-      } else if (kind === 'pointers') {
-        const pointers = await this.socketClient.getPointers(fileData, baseAddress);
-        cache.pointers = pointers;
-        this._panelScanCache.set(panel, cache);
-        panel.webview.postMessage({ type: 'pointersUpdated', pointers });
-      } else if (kind === 'floats') {
-        const floats = await this.socketClient.getFloats(fileData, baseAddress);
-        cache.floats = floats;
-        this._panelScanCache.set(panel, cache);
-        panel.webview.postMessage({ type: 'floatsUpdated', floats });
-      } else {
-        const integers = await this.socketClient.getIntegers(fileData, baseAddress);
-        cache.integers = integers;
-        this._panelScanCache.set(panel, cache);
-        panel.webview.postMessage({ type: 'integersUpdated', integers });
-      }
-    } catch (err: any) {
-      console.error(`[SYMBOLS] FileScan(${kind}) failed: ${err?.message ?? err}`);
-      if (kind === 'strings') {
-        panel.webview.postMessage({ type: 'stringsUpdated', strings: [] });
-      } else if (kind === 'functions') {
-        panel.webview.postMessage({ type: 'functionsUpdated', functions: [] });
-      } else if (kind === 'pointers') {
-        panel.webview.postMessage({ type: 'pointersUpdated', pointers: [] });
-      } else if (kind === 'floats') {
-        panel.webview.postMessage({ type: 'floatsUpdated', floats: [] });
-      } else {
-        panel.webview.postMessage({ type: 'integersUpdated', integers: [] });
-      }
-    }
-  }
-
-  private async _formatStringScanResults(strings: StringEntry[]): Promise<void> {
-    if (!this.socketClient?.isConnected() || strings.length === 0) { return; }
-
-    const gameId = this._currentGameSerial || undefined;
-    const overrides: Array<{ address: number; length: number; kind: DataFormatKind }> = [];
-    for (const entry of strings) {
-      const address = this._parseAddressString(entry.address);
-      if (address === undefined) { continue; }
-
-      const length = Math.max(1, Buffer.byteLength(entry.value ?? '', 'ascii') + 1);
-      overrides.push({ address, length, kind: 'byte' });
-    }
-
-    if (overrides.length === 0) { return; }
-
-    try {
-      await this.socketClient.setDataFormats(overrides, gameId);
-      return;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.warn(`[SYMBOLS] Bulk string formatting failed, falling back to per-entry saves: ${msg}`);
-    }
-
-    let failures = 0;
-    for (const override of overrides) {
-      try {
-        await this.socketClient.setDataFormat(override.address, override.length, override.kind, gameId);
-      } catch (err) {
-        failures++;
-        if (failures === 1) {
-          const msg = err instanceof Error ? err.message : String(err);
-          console.warn(`[SYMBOLS] Failed to format string scan result at 0x${override.address.toString(16)}: ${msg}`);
-        }
-      }
-    }
-
-    if (failures > 0) {
-      vscode.window.showWarningMessage(
-        `Formatted ${overrides.length - failures} string scan result(s); ${failures} could not be saved.`
-      );
-    }
-  }
-
-  private _parseAddressString(address: string): number | undefined {
-    const text = address.trim();
-    if (!text) { return undefined; }
-    const hex = text.startsWith('0x') || text.startsWith('0X') ? text.slice(2) : text;
-    const parsed = Number.parseInt(hex, 16);
-    return Number.isFinite(parsed) ? (parsed >>> 0) : undefined;
-  }
-
-  /**
    * Collect labels, strings, and functions from the backend and post them
    * back to the webview as a single `symbols` message.
    * For live panels that have no backing fileData, pass `undefined`; in that
    * case strings and functions are returned empty.
-   * Any previously cached scan results (pointers, floats, integers) are replayed
-   * so the webview restores its state without requiring a re-scan.
    */
   private async handleGetSymbols(
     panel: vscode.WebviewPanel,
@@ -3154,17 +2932,6 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     }
 
     panel.webview.postMessage({ type: 'symbols', labels, strings, functions });
-
-    // Replay any cached scanner results (pointers, floats, integers) so the
-    // webview restores its previous scan state without requiring a re-scan.
-    const cache = this._panelScanCache.get(panel);
-    if (cache) {
-      if (cache.strings   !== undefined) { panel.webview.postMessage({ type: 'stringsUpdated',   strings:   cache.strings   }); }
-      if (cache.functions !== undefined) { panel.webview.postMessage({ type: 'functionsUpdated', functions: cache.functions }); }
-      if (cache.pointers  !== undefined) { panel.webview.postMessage({ type: 'pointersUpdated',  pointers:  cache.pointers  }); }
-      if (cache.floats    !== undefined) { panel.webview.postMessage({ type: 'floatsUpdated',    floats:    cache.floats    }); }
-      if (cache.integers  !== undefined) { panel.webview.postMessage({ type: 'integersUpdated',  integers:  cache.integers  }); }
-    }
   }
 
   /**
@@ -3857,36 +3624,6 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     }
   }
 
-  // ── Memory Value Scanner ──────────────────────────────────────────────────
-
-  /**
-   * Perform a SCANVALUE request and post the results back to the webview.
-   * Handles both full-range scans and filter (refine) scans.
-   */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async _handleScanValue(webview: vscode.Webview, message: any): Promise<void> {
-    if (!this.socketClient?.isConnected()) {
-      webview.postMessage({ type: 'scanValueResult', error: 'Not connected to emulator server' });
-      return;
-    }
-    try {
-      const { results: entries, message: serverMsg } = await this.socketClient.scanValue(
-        message.startAddress as number,
-        message.endAddress   as number,
-        message.value        as string,
-        message.comparison   as string,
-        message.dataType     as string,
-        message.region       as string,
-        message.previousAddresses as number[] | undefined,
-      );
-      webview.postMessage({ type: 'scanValueResult', entries, serverMessage: serverMsg });
-    } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      getOutputChannel().error('[Scanner] ' + errMsg);
-      webview.postMessage({ type: 'scanValueResult', error: errMsg });
-    }
-  }
-
   /** Fetch all struct definitions and post back to webview. */
   private async _handleGetStructs(webview: vscode.Webview): Promise<void> {
     if (!this.socketClient?.isConnected()) {
@@ -4039,7 +3776,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   /** Dispatch a LabelManagerAction received from the webview. */
   private async _handleLabelManagerAction(
     webview: vscode.Webview,
-    action: { type: string; setName?: string; newSetName?: string; activeSetName?: string; entry?: LabelManagerEntry; address?: string; json?: string; parentAddress?: string; offset?: number; addresses?: string[]; entries?: Array<{ address: string; entryType?: string; valueType?: string }>; members?: Array<{ parentAddress: string; offset: number; path: string; entryType?: string; valueType?: string }>; scannerKind?: string },
+    action: { type: string; setName?: string; newSetName?: string; activeSetName?: string; entry?: LabelManagerEntry; address?: string; json?: string; parentAddress?: string; offset?: number; addresses?: string[]; entries?: Array<{ address: string; entryType?: string; valueType?: string }>; members?: Array<{ parentAddress: string; offset: number; path: string; entryType?: string; valueType?: string }> },
   ): Promise<void> {
     // Handle memory-read actions before connectivity/context checks — they fail
     // silently rather than surfacing an error banner.
@@ -4386,69 +4123,6 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
           webview.postMessage({ type: 'labelManagerExport', json, setName: action.setName });
           break;
         }
-        case 'runScanner': {
-          const kind = action.scannerKind as string;
-          // Default to EE RAM region for label manager scans.
-          const region = 'ee';
-          const baseAddress = 0x00000000;
-          const totalBytes = 32 * 1024 * 1024; // 32 MB EE RAM
-          try {
-            let entries: LabelManagerEntry[] = [];
-            if (kind === 'strings') {
-              const results = await this.socketClient.scanLiveStrings(baseAddress, totalBytes, region);
-              entries = results.map(r => ({
-                address: r.address,
-                name: r.value.length > 40 ? r.value.substring(0, 40) + '…' : r.value,
-                comment: r.value.length > 40 ? r.value : undefined,
-                type: 'String' as const,
-              }));
-            } else if (kind === 'functions') {
-              const results = await this.socketClient.scanLiveFunctions(baseAddress, totalBytes, region);
-              entries = results.map(r => ({
-                address: r.address,
-                name: r.label || `func_${r.address}`,
-                type: 'Function' as const,
-              }));
-            } else if (kind === 'pointers') {
-              const results = await this.socketClient.scanLivePointers(baseAddress, totalBytes, region);
-              entries = results.map(r => ({
-                address: r.address,
-                name: `ptr → ${r.pointsTo}`,
-                comment: `Points to ${r.pointsTo}`,
-                type: 'Pointer' as const,
-              }));
-            } else if (kind === 'floats') {
-              const results = await this.socketClient.scanLiveFloats(baseAddress, totalBytes, region);
-              entries = results.map(r => ({
-                address: r.address,
-                name: `${r.value}`,
-                comment: `raw: ${r.raw}`,
-                type: 'Float' as const,
-              }));
-            } else if (kind === 'hexValues') {
-              const results = await this.socketClient.scanLiveIntegers(baseAddress, totalBytes, region);
-              entries = results.map(r => ({
-                address: r.address,
-                name: r.hex,
-                comment: `dec: ${r.value}`,
-                type: 'Hex' as const,
-              }));
-            }
-            webview.postMessage({ type: 'labelManagerScanResults', scannerKind: kind, entries });
-          } catch (scanErr: unknown) {
-            const scanErrMsg = scanErr instanceof Error ? scanErr.message : String(scanErr);
-            webview.postMessage({ type: 'labelManagerScanResults', scannerKind: kind, entries: [] });
-            webview.postMessage({ type: 'labelManagerError', message: `Scan failed: ${scanErrMsg}` });
-          }
-          break;
-        }
-        case 'clearScanResults':
-          // Nothing to do server-side; the UI already cleared its state.
-          break;
-        case 'resolveStrings':
-          // Legacy: re-route to the scanner for strings.
-          await this._handleLabelManagerAction(webview, { type: 'runScanner', scannerKind: 'strings' });
-          break;
         default:
           webview.postMessage({ type: 'labelManagerError', message: `Unknown action: ${action.type}` });
       }

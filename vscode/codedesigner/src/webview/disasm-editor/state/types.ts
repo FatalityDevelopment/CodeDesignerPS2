@@ -212,10 +212,6 @@ export interface EditOverlayState {
   comment: string;
 }
 
-export interface ConverterOverlayState {
-  visible: boolean;
-}
-
 // ── PINE Watchpoints ──────────────────────────────────────────────────────────
 
 export interface PineWatchInfo {

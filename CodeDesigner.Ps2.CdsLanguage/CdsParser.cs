@@ -73,6 +73,10 @@ namespace CodeDesigner.Ps2.CdsLanguage
         private static readonly Regex HexCodeRegex =
             new(@"^hexcode\s+(\S+)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+        // Raw cheat code pair: "20123456 000003E8" (8 hex digits, whitespace, 8 hex digits)
+        private static readonly Regex RawCodeRegex =
+            new(@"^([0-9a-f]{8})\s+([0-9a-f]{8})$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
         private static readonly Regex SetRegRegex =
             new(@"^setreg\s+\$?(\w+)\s*,\s*(\S+)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
@@ -478,6 +482,21 @@ namespace CodeDesigner.Ps2.CdsLanguage
                     AddDiagnostic(CdsDiagnosticSeverity.Error, lineNumber,
                         $"invalid address: {err}", trimmed, addrMatch.Groups[1].Value, "CDS0014");
                 }
+                return;
+            }
+
+            // ---- Raw cheat code pair (passed through to the code list) ----
+            var rawMatch = RawCodeRegex.Match(trimmed);
+            if (rawMatch.Success)
+            {
+                current.Add(new RawCodeSyntaxItem
+                {
+                    LineNumber = lineNumber,
+                    LineText   = trimmed,
+                    CodeWord   = Convert.ToUInt32(rawMatch.Groups[1].Value, 16),
+                    ValueWord  = Convert.ToUInt32(rawMatch.Groups[2].Value, 16),
+                });
+                // Not a word at the current address — does not advance the address counter
                 return;
             }
 
@@ -1092,6 +1111,7 @@ namespace CodeDesigner.Ps2.CdsLanguage
         private static uint MeasureLine(string t)
         {
             if (IncludeRegex.IsMatch(t)) return 0;
+            if (RawCodeRegex.IsMatch(t)) return 0;
             if (HexCodeRegex.IsMatch(t)) return 4;
             if (SetRegRegex.IsMatch(t)) return 8;
 

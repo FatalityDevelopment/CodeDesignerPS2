@@ -97,8 +97,6 @@ export interface TreeRow {
 type LabelSortColumn = 'type' | 'address' | 'live' | 'name' | 'comment';
 type LabelSortDirection = 'asc' | 'desc';
 
-export type ScannerKind = 'functions' | 'pointers' | 'strings' | 'floats' | 'hexValues';
-
 export type LabelManagerAction =
   | { type: 'setActive';         setName: string }
   | { type: 'createSet';         setName: string }
@@ -108,7 +106,6 @@ export type LabelManagerAction =
   | { type: 'deleteEntry';       setName: string; address: string }
   | { type: 'importSet';         setName: string; json: string }
   | { type: 'exportSet';         setName: string }
-  | { type: 'resolveStrings' }
   | { type: 'resolveLinkedList'; address: string; nextOffset: number }
   | { type: 'refresh';           activeSetName?: string }
   /** Navigate to the given absolute address (handled locally by the host component). */
@@ -118,11 +115,7 @@ export type LabelManagerAction =
   /** Poll live values at each address (handled by provider). String entries read as null-terminated strings. */
   | { type: 'readLiveValues';    setName?: string; entries: { address: string; entryType?: LabelType; valueType?: string }[] }
   /** Poll live values at resolved member addresses (handled by provider). */
-  | { type: 'readMemberLiveValues'; setName?: string; members: { parentAddress: string; offset: number; path: string; entryType?: LabelType; valueType?: string }[] }
-  /** Run a memory scanner and display results as entries in the tree. */
-  | { type: 'runScanner';        scannerKind: ScannerKind }
-  /** Clear scanner results. */
-  | { type: 'clearScanResults' };
+  | { type: 'readMemberLiveValues'; setName?: string; members: { parentAddress: string; offset: number; path: string; entryType?: LabelType; valueType?: string }[] };
 
 const TYPE_BADGE: Record<string, string> = {
   Address:  '[Addr]',
@@ -286,53 +279,6 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
       </label>
     </div>
 
-    <!-- Scanner row (own row so buttons don't cramp on narrow widths) -->
-    <div id="lm-scanner-row">
-      <span class="lm-scanner-label">Scan memory for</span>
-      <div class="lm-scanner-grid">
-        <button class="lm-scan-btn" [class.lm-scan-active]="activeScannerKind() === 'functions'"
-                [disabled]="scannerStatus() === 'scanning'"
-                title="Scan memory for function entry points"
-                (click)="onRunScanner('functions')">
-          <app-icon name="workflow" [size]="13" />
-          <span>Functions</span>
-        </button>
-        <button class="lm-scan-btn" [class.lm-scan-active]="activeScannerKind() === 'pointers'"
-                [disabled]="scannerStatus() === 'scanning'"
-                title="Scan memory for pointer values"
-                (click)="onRunScanner('pointers')">
-          <app-icon name="link" [size]="13" />
-          <span>Pointers</span>
-        </button>
-        <button class="lm-scan-btn" [class.lm-scan-active]="activeScannerKind() === 'strings'"
-                [disabled]="scannerStatus() === 'scanning'"
-                title="Scan memory for null-terminated strings"
-                (click)="onRunScanner('strings')">
-          <app-icon name="bookopen" [size]="13" />
-          <span>Strings</span>
-        </button>
-        <button class="lm-scan-btn" [class.lm-scan-active]="activeScannerKind() === 'floats'"
-                [disabled]="scannerStatus() === 'scanning'"
-                title="Scan memory for IEEE-754 float values"
-                (click)="onRunScanner('floats')">
-          <app-icon name="sparkles" [size]="13" />
-          <span>Floats</span>
-        </button>
-        <button class="lm-scan-btn" [class.lm-scan-active]="activeScannerKind() === 'hexValues'"
-                [disabled]="scannerStatus() === 'scanning'"
-                title="Scan memory for non-zero hex values (integers)"
-                (click)="onRunScanner('hexValues')">
-          <app-icon name="database" [size]="13" />
-          <span>Hex</span>
-        </button>
-      </div>
-      @if (scanResultEntries().length > 0) {
-        <button class="lm-tool-btn lm-danger-btn" title="Clear scan results" (click)="onClearScanResults()">
-          <app-icon name="x" [size]="12" /> Clear
-        </button>
-      }
-    </div>
-
     <!-- Filter / type-filter row -->
     <div id="lm-filter-row">
       <input id="lm-filter"
@@ -382,21 +328,12 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
       </div>
     }
 
-    <!-- Scanning progress indicator -->
-    @if (scannerStatus() === 'scanning') {
-      <div class="lm-scanning-bar">
-        <div class="lm-scanning-bar-inner"></div>
-        <span class="lm-scanning-text">Scanning {{ activeScannerKind() }}… this may take a moment</span>
-      </div>
-    }
-
     <!-- Table -->
     <div id="lm-table-wrap">
       <table id="lm-table">
         <thead>
           <tr>
             <th class="lm-col-vis" title="Toggle all visibility">
-              @if (!isScannerView()) {
               <button class="lm-vis-btn lm-vis-all-btn"
                       [class.lm-is-hidden]="!allVisible()"
                       [disabled]="activeSetIsBuiltIn() || filteredEntries().length === 0"
@@ -404,7 +341,6 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
                       (click)="onToggleAllVisibility()">
                 <app-icon [name]="allVisible() ? 'eye' : 'ban'" [size]="14" />
               </button>
-              }
             </th>
             <th class="lm-col-expand"></th>
             <th class="lm-col-type">
@@ -444,7 +380,6 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
                   [class.lm-hidden-row]="row.entry!.hidden"
                   [class.lm-row-system]="activeSetIsSystem()">
                 <td class="lm-col-vis">
-                  @if (!isScannerView()) {
                   <button class="lm-vis-btn"
                           [class.lm-is-hidden]="row.entry!.hidden"
                           [title]="row.entry!.hidden ? 'Hidden — click to show' : 'Visible — click to hide'"
@@ -452,7 +387,6 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
                           (click)="onToggleVisibility(row.entry!)">
                     <app-icon [name]="row.entry!.hidden ? 'ban' : 'eye'" [size]="13" />
                   </button>
-                  }
                 </td>
                 <td class="lm-col-expand">
                   @if (row.expandable) {
@@ -506,7 +440,6 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
                   [class.lm-hidden-row]="row.entry.hidden"
                   [class.lm-row-system]="activeSetIsSystem()">
                 <td class="lm-col-vis">
-                  @if (!isScannerView()) {
                   <button class="lm-vis-btn"
                           [class.lm-is-hidden]="row.entry.hidden"
                           [title]="row.entry.hidden ? 'Hidden — click to show' : 'Visible — click to hide'"
@@ -514,7 +447,6 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
                           (click)="onToggleChildVisibility(row.entry)">
                     <app-icon [name]="row.entry.hidden ? 'ban' : 'eye'" [size]="13" />
                   </button>
-                  }
                 </td>
                 <td class="lm-col-expand lm-member-tree-indent">
                   @for (hasLine of row.ancestorLines; track $index) {
@@ -919,14 +851,6 @@ export class LabelManagerOverlayComponent {
    */
   readonly livePollingEnabled = signal(false);
 
-  // ── Scanner state ──────────────────────────────────────────────────────────
-  /** Which scanner is currently active/running. */
-  readonly activeScannerKind = signal<ScannerKind | null>(null);
-  /** 'idle', 'scanning', or 'done'. */
-  readonly scannerStatus = signal<'idle' | 'scanning' | 'done'>('idle');
-  /** Scanner results converted to LabelManagerEntry items. */
-  readonly scanResultEntries = signal<LabelManagerEntry[]>([]);
-
   // ── Pagination state ─────────────────────────────────────────────────────────
   /** Current page index (0-based). */
   readonly currentPage = signal(0);
@@ -966,15 +890,8 @@ export class LabelManagerOverlayComponent {
     return this.setSummaries().find(s => s.setName === this.activeSetName())?.isSystem ?? false;
   });
 
-  /** True when scanner results are being displayed instead of a label set. */
-  readonly isScannerView = computed(() => this.scanResultEntries().length > 0);
-
   readonly filteredEntries = computed(() => {
-    const scanEntries = this.scanResultEntries();
-    // When scanner results are present, show only scan results (not the label set).
-    const entries = scanEntries.length > 0
-      ? scanEntries
-      : (this.currentSet()?.entries ?? []);
+    const entries = this.currentSet()?.entries ?? [];
     const f  = this.filterText().trim().toLowerCase();
     const tf = this.typeFilter().trim();
     return entries.filter(e => {
@@ -1011,11 +928,8 @@ export class LabelManagerOverlayComponent {
     return hasName && this.editAddress().trim() !== '';
   });
 
-  /** Total entry count: scan results when scanning, otherwise label set entries. */
-  readonly totalEntryCount = computed(() => {
-    const scan = this.scanResultEntries();
-    return scan.length > 0 ? scan.length : (this.currentSet()?.entries?.length ?? 0);
-  });
+  /** Total entry count of the active label set. */
+  readonly totalEntryCount = computed(() => this.currentSet()?.entries?.length ?? 0);
 
   /** True when all filtered visible entries have hidden=false (or undefined). */
   readonly allVisible = computed(() => {
@@ -1028,13 +942,9 @@ export class LabelManagerOverlayComponent {
     this.filteredEntries().some(e => e.dynamic),
   );
 
-  /** Root entries to poll: entries with dynamic===true from the active set OR scanner results. */
+  /** Root entries to poll: entries with dynamic===true from the active set. */
   private readonly _dynamicAddresses = computed(() => {
-    const scanEntries = this.scanResultEntries();
-    const source = scanEntries.length > 0
-      ? scanEntries
-      : (this.currentSet()?.entries ?? []);
-    return source
+    return (this.currentSet()?.entries ?? [])
       .filter(e => !e.parentAddress && e.dynamic)
       .map(e => ({ address: e.address, entryType: e.type ?? 'Address' as LabelType, valueType: e.valueType }));
   });
@@ -1233,64 +1143,6 @@ export class LabelManagerOverlayComponent {
     if (!isError) {
       setTimeout(() => { if (this.statusMsg() === msg) { this.statusMsg.set(''); } }, 3000);
     }
-  }
-
-  // ── Scanner public API ───────────────────────────────────────────────────────
-
-  /** Called by the toolbar scan buttons. */
-  onRunScanner(kind: ScannerKind): void {
-    // Stop any active polling to avoid socket FIFO conflicts during the scan.
-    this._stopPolling();
-    // Collapse the bottom editor so the scan-result table gets the full
-    // vertical room — otherwise a previously opened edit panel can squeeze
-    // the table down to its min-height.
-    this.editFormOpen.set(false);
-    this.activeScannerKind.set(kind);
-    this.scannerStatus.set('scanning');
-    this.scanResultEntries.set([]);
-    this.currentPage.set(0);
-    this.action$.emit({ type: 'runScanner', scannerKind: kind });
-  }
-
-  /** Clear scanner results from the view. */
-  onClearScanResults(): void {
-    this.activeScannerKind.set(null);
-    this.scannerStatus.set('idle');
-    this.scanResultEntries.set([]);
-    this.currentPage.set(0);
-    this.action$.emit({ type: 'clearScanResults' });
-  }
-
-  /**
-   * Called by the host when scanner results arrive from the provider.
-   * Converts raw scanner entries into LabelManagerEntry format for the tree.
-   */
-  setScanResults(kind: ScannerKind, entries: LabelManagerEntry[]): void {
-    console.log('[LabelManager] setScanResults', kind, 'received', entries.length, 'entries; sample:', entries[0]);
-    this.activeScannerKind.set(kind);
-    this.scannerStatus.set('done');
-    // Keep the editor collapsed so the result table always has room.
-    this.editFormOpen.set(false);
-    this.scanResultEntries.set(entries);
-    this.currentPage.set(0);
-    // Move off any active type filter so scan entries are not filtered out
-    // by a leftover type selection from a prior interaction.
-    this.typeFilter.set('');
-    this.filterText.set('');
-    const count = entries.length;
-    this.showStatus(`Scan complete: ${count} ${kind} found.`);
-    // Restart polling if the user had live polling enabled before the scan.
-    if (this.livePollingEnabled()) {
-      this._updatePolling();
-    }
-    // Defer one frame so OnPush can see the signal updates and re-run the
-    // table computed; logs the resolved filteredEntries length to confirm.
-    queueMicrotask(() => {
-      console.log('[LabelManager] post-scan filteredEntries=', this.filteredEntries().length,
-        'treeRows=', this.treeRows().length,
-        'activeSet=', this.activeSetName(),
-        'isBuiltIn=', this.activeSetIsBuiltIn());
-    });
   }
 
   // ── Pagination ──────────────────────────────────────────────────────────────
@@ -1566,24 +1418,17 @@ export class LabelManagerOverlayComponent {
     // Use undefined (not false) so the field is omitted from the JSON payload when disabled,
     // matching the WhenWritingDefault serialisation convention on the C# side.
     const updated: LabelManagerEntry = { ...entry, dynamic: entry.dynamic ? undefined : true };
-    if (this.isScannerView()) {
-      // Scanner entries are ephemeral — update only the local scan results signal.
-      this.scanResultEntries.update(entries =>
-        entries.map(e => e.address === entry.address ? updated : e),
-      );
-    } else {
-      // Optimistic local update so the toggle feels instant.
-      const set = this.currentSet();
-      if (set) {
-        this.currentSet.set({
-          ...set,
-          entries: set.entries.map(e => e.address === entry.address ? updated : e),
-        });
-      }
-      // Persist only for user (non-built-in) sets.
-      if (!this.activeSetIsBuiltIn()) {
-        this.action$.emit({ type: 'addEntry', setName: this.activeSetName(), entry: updated });
-      }
+    // Optimistic local update so the toggle feels instant.
+    const set = this.currentSet();
+    if (set) {
+      this.currentSet.set({
+        ...set,
+        entries: set.entries.map(e => e.address === entry.address ? updated : e),
+      });
+    }
+    // Persist only for user (non-built-in) sets.
+    if (!this.activeSetIsBuiltIn()) {
+      this.action$.emit({ type: 'addEntry', setName: this.activeSetName(), entry: updated });
     }
     // Start or stop polling based on whether any dynamic entries remain.
     this._updatePolling();

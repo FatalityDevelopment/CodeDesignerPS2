@@ -4,6 +4,7 @@ import { SocketClient, type LabelEntry } from '../../socketClient';
 import type { DisasmEditorProvider } from '../disasmEditor/disasmEditorProvider';
 import { getNonce, getWebviewErrorHandlerScript } from '../../utils/nonce';
 import { applyCodeDesignerPanelIcon } from '../../utils/webviewPanel';
+import { findCheatArchiveRoot } from '../../utils/cheatArchive';
 
 /**
  * Provider for the PS2 Cheats editor standalone webview tab.
@@ -17,13 +18,22 @@ export class CheatsEditorProvider {
     private _currentGameId: number | undefined;
     private _pendingGameTitle: string | undefined;
 
+    /**
+     * The game being played (serial + title), set by DisasmPanelProvider. Used to
+     * pre-select that game when the editor opens without an explicit title.
+     */
+    public getCurrentGame?: () => Promise<{ serial?: string; title?: string }>;
+
+    /** A synced CheatCodeArchive clone to import from when no workspace checkout exists. */
+    public archiveCloneRoot?: () => Promise<string | undefined>;
+
     constructor(
         private readonly extensionUri: vscode.Uri,
         private readonly socketClient: SocketClient,
         private readonly disasmEditorProvider?: DisasmEditorProvider,
     ) {}
 
-    /** Open (or reveal) the cheats editor, optionally pre-selecting a game by title. */
+    /** Open (or reveal) the cheats editor, pre-selecting `gameTitle` or else the game being played. */
     public open(gameTitle?: string): void {
         this._pendingGameTitle = gameTitle;
 
@@ -31,6 +41,8 @@ export class CheatsEditorProvider {
             this._panel.reveal(vscode.ViewColumn.One);
             if (gameTitle) {
                 this._panel.webview.postMessage({ type: 'initGameTitle', title: gameTitle });
+            } else {
+                void this._postCurrentGame(this._panel.webview);
             }
             return;
         }
@@ -64,6 +76,8 @@ export class CheatsEditorProvider {
                 await this._sendGames(webview);
                 if (this._pendingGameTitle) {
                     webview.postMessage({ type: 'initGameTitle', title: this._pendingGameTitle });
+                } else {
+                    await this._postCurrentGame(webview);
                 }
                 break;
             case 'selectGame':
@@ -107,6 +121,29 @@ export class CheatsEditorProvider {
     }
 
     // ── Handlers ──────────────────────────────────────────────────────────────
+
+    /**
+     * Pre-select the game being played: its archive game id (looked up by serial)
+     * when the archive has it, otherwise its title is put in the game search box.
+     */
+    private async _postCurrentGame(webview: vscode.Webview): Promise<void> {
+        if (!this.getCurrentGame) { return; }
+        try {
+            const game = await this.getCurrentGame();
+            let gameId: number | null = null;
+            let title = game.title ?? '';
+            if (game.serial && this.socketClient.isConnected()) {
+                const found = await this.socketClient.getGameCheats(game.serial);
+                gameId = found.gameId;
+                title = found.gameTitle || title;
+            }
+            if (gameId !== null || title) {
+                webview.postMessage({ type: 'initGame', gameId, title, serial: game.serial ?? '' });
+            }
+        } catch (err: unknown) {
+            getOutputChannel().warn(`[CheatsEditor] Could not resolve the current game: ${err instanceof Error ? err.message : err}`);
+        }
+    }
 
     private async _sendGames(webview: vscode.Webview): Promise<void> {
         try {
@@ -237,20 +274,7 @@ export class CheatsEditorProvider {
     }
 
     private async _findDefaultArchiveRoot(): Promise<string | undefined> {
-        const candidates: vscode.Uri[] = [];
-        for (const folder of vscode.workspace.workspaceFolders ?? []) {
-            candidates.push(vscode.Uri.joinPath(folder.uri, 'CheatCodeArchive'));
-        }
-        candidates.push(vscode.Uri.joinPath(this.extensionUri, '..', '..', 'CheatCodeArchive'));
-
-        for (const candidate of candidates) {
-            try {
-                const dbFolder = vscode.Uri.joinPath(candidate, 'Database');
-                const stat = await vscode.workspace.fs.stat(dbFolder);
-                if (stat.type & vscode.FileType.Directory) { return candidate.fsPath; }
-            } catch { /* keep looking */ }
-        }
-        return undefined;
+        return (await findCheatArchiveRoot(this.extensionUri)) ?? (await this.archiveCloneRoot?.());
     }
 
     private async _sendCover(webview: vscode.Webview, serial: string | undefined): Promise<void> {

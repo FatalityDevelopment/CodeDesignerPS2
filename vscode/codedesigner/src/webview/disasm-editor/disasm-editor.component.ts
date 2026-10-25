@@ -25,10 +25,8 @@ import { ContextMenuComponent, ContextMenuData } from './components/context-menu
 import { DebugPanelComponent } from './components/debug-panel.component';
 import { BottomPanelComponent, BottomTab } from './components/bottom-panel.component';
 import { EditOverlayComponent, EditOverlayOpenData, EditOverlaySaveEvent, EditOverlayRefsRequest } from './components/edit-overlay.component';
-import { ConverterOverlayComponent, ConvertRequest, ConvertResult } from './components/converter-overlay.component';
 import { MemoryCardOverlayComponent, McListResult, McActionResult } from './components/memory-card-overlay.component';
 import { HddOverlayComponent, HddListResult, HddActionResult } from './components/hdd-overlay.component';
-import { ScannerOverlayComponent, ScanRequest, ScanResult } from './components/scanner-overlay.component';
 import { StructOffsetOverlayComponent, StructEntryData, AddStructEvent, AddStructMemberEvent } from './components/struct-offset-overlay.component';
 import { IconComponent } from '../shared/icon.component';
 import { toPhysAddr } from './utils/address.utils';
@@ -37,7 +35,7 @@ import './disasm-editor.css';
 @Component({
   selector: 'app-disasm-editor',
   standalone: true,
-  imports: [HexViewComponent, SearchPanelComponent, AddressInputPanelComponent, VirtualGridComponent, ContextMenuComponent, DebugPanelComponent, BottomPanelComponent, EditOverlayComponent, ConverterOverlayComponent, MemoryCardOverlayComponent, HddOverlayComponent, ScannerOverlayComponent, StructOffsetOverlayComponent, IconComponent],
+  imports: [HexViewComponent, SearchPanelComponent, AddressInputPanelComponent, VirtualGridComponent, ContextMenuComponent, DebugPanelComponent, BottomPanelComponent, EditOverlayComponent, MemoryCardOverlayComponent, HddOverlayComponent, StructOffsetOverlayComponent, IconComponent],
   providers: [DisasmEditorService],
   encapsulation: ViewEncapsulation.None,
   templateUrl: './disasm-editor.component.html'
@@ -198,13 +196,6 @@ export class DisasmEditorComponent implements AfterViewInit {
   private readonly editOverlayRef = viewChild<EditOverlayComponent>('editOverlayComp');
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // Converter Overlay State (Phase 10)
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  /** Reference to converter overlay component */
-  private readonly converterOverlayRef = viewChild<ConverterOverlayComponent>('converterOverlayComp');
-
-  // ═══════════════════════════════════════════════════════════════════════════
   // Memory Card Overlay State
   // ═══════════════════════════════════════════════════════════════════════════
 
@@ -217,13 +208,6 @@ export class DisasmEditorComponent implements AfterViewInit {
 
   /** Reference to HDD overlay component */
   private readonly hddOverlayRef = viewChild<HddOverlayComponent>('hddOverlayComp');
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // Scanner Overlay State
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  /** Reference to scanner overlay component */
-  private readonly scannerOverlayRef = viewChild<ScannerOverlayComponent>('scannerOverlayComp');
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Struct Offset Overlay State
@@ -566,18 +550,6 @@ export class DisasmEditorComponent implements AfterViewInit {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // Converter Overlay Event Handlers (Phase 10)
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  protected onConverterOverlayClose(): void {
-    this.signals.panels.converterOverlay.set(false);
-  }
-
-  protected onConvertCheat(event: ConvertRequest): void {
-    this.vscode.postMessage({ type: 'convertCheat', codes: event.codes, direction: event.direction, format: event.format });
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════════
   // Memory Card Overlay Event Handlers
   // ═══════════════════════════════════════════════════════════════════════════
 
@@ -631,34 +603,6 @@ export class DisasmEditorComponent implements AfterViewInit {
 
   protected onHddDelete(event: { hddPath: string; partitionId: string }): void {
     this.vscode.postMessage({ type: 'hddDelete', hddPath: event.hddPath, partitionId: event.partitionId });
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // Scanner Overlay Event Handlers
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  protected onScannerOverlayClose(): void {
-    this.signals.panels.scannerOverlay.set(false);
-  }
-
-  protected onScanValue(event: ScanRequest): void {
-    this.vscode.postMessage({
-      type:              'scanValue',
-      value:             event.value,
-      comparison:        event.comparison,
-      dataType:          event.dataType,
-      startAddress:      event.startAddress,
-      endAddress:        event.endAddress,
-      region:            event.region,
-      previousAddresses: event.previousAddresses,
-    });
-  }
-
-  protected onScannerNavigate(address: string): void {
-    const addr = parseInt(address, 16);
-    if (!isNaN(addr)) {
-      this.gotoRuntime.navigate?.(addr);
-    }
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -1767,23 +1711,6 @@ export class DisasmEditorComponent implements AfterViewInit {
     }
   }
 
-  private openConverterOverlay(): void {
-    this.zone.run(() => {
-      this.converterOverlayRef()?.open();
-      this.signals.panels.converterOverlay.set(true);
-    });
-  }
-
-  private handleConverterOverlayMessage(data: Record<string, unknown>): void {
-    if (data['type'] !== 'convertCheatResult') { return; }
-    this.zone.run(() => {
-      this.converterOverlayRef()?.setResult({
-        result: data['result'] as string | undefined,
-        error: data['error'] as string | undefined,
-      });
-    });
-  }
-
   private openMemoryCardOverlay(): void {
     this.zone.run(() => {
       this.mcOverlayRef()?.open();
@@ -1872,10 +1799,6 @@ export class DisasmEditorComponent implements AfterViewInit {
       this.zone.run(() => this.openStructOverlay());
       return;
     }
-    if (data['type'] === 'openConverterOverlay') {
-      this.zone.run(() => this.openConverterOverlay());
-      return;
-    }
     if (data['type'] === 'openMemoryCardOverlay') {
       this.zone.run(() => this.openMemoryCardOverlay());
       return;
@@ -1884,19 +1807,13 @@ export class DisasmEditorComponent implements AfterViewInit {
       this.zone.run(() => this.openHddOverlay());
       return;
     }
-    if (data['type'] === 'openScannerOverlay') {
-      this.zone.run(() => this.openScannerOverlay());
-      return;
-    }
     if (data['type'] === 'pineWatches') {
       this.handlePineWatchesMessage(data);
       return;
     }
     this.handleEditOverlayMessage(data);
-    this.handleConverterOverlayMessage(data);
     this.handleMemoryCardMessage(data);
     this.handleHddMessage(data);
-    this.handleScannerMessage(data);
     this.handleStructMessage(data);
   }
 
@@ -1905,24 +1822,6 @@ export class DisasmEditorComponent implements AfterViewInit {
     this.zone.run(() => {
       this.svc.state.pineWatches = watches;
       this.debugPanelWatches.set([...watches]);
-    });
-  }
-
-  private openScannerOverlay(): void {
-    this.zone.run(() => {
-      this.scannerOverlayRef()?.open();
-      this.signals.panels.scannerOverlay.set(true);
-    });
-  }
-
-  private handleScannerMessage(data: Record<string, unknown>): void {
-    if (data['type'] !== 'scanValueResult') { return; }
-    this.zone.run(() => {
-      this.scannerOverlayRef()?.setResult({
-        entries:       data['entries']       as ScanResult['entries'] | undefined,
-        error:         data['error']         as string | undefined,
-        serverMessage: data['serverMessage'] as string | undefined,
-      });
     });
   }
 

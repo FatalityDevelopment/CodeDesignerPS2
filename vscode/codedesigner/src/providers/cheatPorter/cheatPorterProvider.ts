@@ -10,7 +10,7 @@ import { SnapshotDataDelegate } from '../snapshotManager/snapshotManagerProvider
 import { applyCodeDesignerPanelIcon } from '../../utils/webviewPanel';
 import { EeRamSource, readLiveEeRam, resolveEeDumpFile } from '../../utils/eeRamSource';
 
-/** The current game's cheats, resolved by DisasmPanelProvider (DB first, then the YAML archive). */
+/** The current game's cheats from the cheat archive (a list the user picks), resolved by DisasmPanelProvider. */
 export type GameCheatsLoader = () => Promise<Array<{ name: string; codes: string[] }>>;
 
 /**

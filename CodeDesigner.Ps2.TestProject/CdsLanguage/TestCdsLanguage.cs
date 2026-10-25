@@ -1864,5 +1864,52 @@ nop
             var entries = CdsCompiler.GetCheatTableEntries(items);
             Assert.AreEqual(1, entries.Count);
         }
+
+        // ── Raw cheat code lines / CompileToCodes ─────────────────────────────
+
+        [TestMethod]
+        public void RawCode_ParsesAndDoesNotAdvanceAddress()
+        {
+            var parser = new CdsParser();
+            var items = parser.Parse("address $00100000\n20123456 000003E8\nnop\nlabel:\nnop\nj :label\nnop");
+            Assert.AreEqual(0, parser.Diagnostics.Count(d => d.Severity == CdsDiagnosticSeverity.Error));
+            var raw = items.OfType<RawCodeSyntaxItem>().Single();
+            Assert.AreEqual(0x20123456u, raw.CodeWord);
+            Assert.AreEqual(0x000003E8u, raw.ValueWord);
+            // nop at 0x00100000, label at 0x00100004 — the raw line takes no space.
+            var pairs = CdsCompiler.Compile(items);
+            Assert.AreEqual(0x00100000u, pairs[0].Address);
+            Assert.AreEqual(4, pairs.Count, "raw codes are not memory words");
+        }
+
+        [TestMethod]
+        public void CompileToCodes_MixesAssemblyRawAndFreezeInOrder()
+        {
+            var codes = CdsCompiler.CompileToCodes(Parse(
+                "20123456 000003E8\naddress $80100000\naddiu v0, zero, 1\nfreeze byte $20347A50 = 63\n0A000000 00000001"));
+            CollectionAssert.AreEqual(
+                new[] { "20123456 000003E8", "20100000 24020001", "00347A50 00000063", "0A000000 00000001" },
+                codes.Select(c => c.ToString()).ToArray());
+            Assert.AreEqual(3, codes[1].LineNumber);
+        }
+
+        [TestMethod]
+        public void CompileToCodes_CondBecomesTwoChainedMultiLineConditionals()
+        {
+            var codes = CdsCompiler.CompileToCodes(Parse(
+                "cond mem[$00200100] == 00010002\n  freeze word $00200020 = CAFEF00D\nendcond"));
+            CollectionAssert.AreEqual(
+                new[] { "E0020002 00200100", "E0010001 00200102", "20200020 CAFEF00D" },
+                codes.Select(c => c.ToString()).ToArray());
+        }
+
+        [TestMethod]
+        public void CompileToCodes_TimerBecomesBCode()
+        {
+            var codes = CdsCompiler.CompileToCodes(Parse(
+                "timer 30\n  freeze half $00200010 = 0001\n  freeze half $00200012 = 0002\nendtimer"));
+            Assert.AreEqual("B0000002 0000001E", codes[0].ToString());
+            Assert.AreEqual(3, codes.Count);
+        }
     }
 }

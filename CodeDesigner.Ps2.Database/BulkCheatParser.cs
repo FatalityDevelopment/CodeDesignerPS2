@@ -62,11 +62,14 @@ public class BulkCheatParser
 
     private readonly CodeDesignerDbContext _db;
     private readonly string _archiveRoot;
+    /// <summary>Normalised serial (e.g. "SCUS-97275") to import only that game's files; null imports everything.</summary>
+    private readonly string? _serialFilter;
 
-    public BulkCheatParser(CodeDesignerDbContext db, string archiveRoot)
+    public BulkCheatParser(CodeDesignerDbContext db, string archiveRoot, string? serialFilter = null)
     {
         _db = db;
         _archiveRoot = archiveRoot;
+        _serialFilter = string.IsNullOrWhiteSpace(serialFilter) ? null : NormalizeSerial(serialFilter);
     }
 
     /// <summary>
@@ -83,6 +86,14 @@ public class BulkCheatParser
         foreach (var filePath in Directory.EnumerateFiles(dbRoot, "*.txt", SearchOption.AllDirectories))
         {
             ct.ThrowIfCancellationRequested();
+            // With a serial filter, skip files whose name carries a different serial
+            // without parsing them (names without one are checked by their header).
+            if (_serialFilter != null)
+            {
+                var nameSerial = Serial.Match(Path.GetFileName(filePath));
+                if (nameSerial.Success && !string.Equals(NormalizeSerial(nameSerial.Groups["serial"].Value), _serialFilter, StringComparison.OrdinalIgnoreCase))
+                    continue;
+            }
             result.FilesProcessed++;
             pendingCheatLists.Clear();
 
@@ -93,6 +104,7 @@ public class BulkCheatParser
                     caches.RegionCache, caches.GameCache,
                     caches.DiscsBySerial, caches.DiscsByRegion,
                     caches.CheatListCache, pendingCheatLists,
+                    caches.GamesBySerial,
                     ct);
 
                 if (pendingCheatLists.Count == 0)
@@ -131,10 +143,16 @@ public class BulkCheatParser
 
         var discsBySerial = new Dictionary<string, GameDisc>(StringComparer.OrdinalIgnoreCase);
         var discsByRegion = new Dictionary<string, GameDisc>(StringComparer.OrdinalIgnoreCase);
-        foreach (var disc in await _db.GameDiscs.Include(d => d.Game).Include(d => d.GameRegion).ToListAsync(ct))
+        var gamesBySerial = new Dictionary<string, Game>(StringComparer.OrdinalIgnoreCase);
+        foreach (var disc in await _db.GameDiscs.Include(d => d.Game).Include(d => d.GameRegion).OrderBy(d => d.GameId).ToListAsync(ct))
         {
             if (disc.Serial != null)
+            {
                 discsBySerial[$"{disc.Game.Title}||{disc.Serial}"] = disc;
+                // The oldest game with the serial wins — that's the one the user works with
+                // (created by the label manager / cheats editor before any import).
+                gamesBySerial.TryAdd(disc.Serial, disc.Game);
+            }
             discsByRegion[$"{disc.Game.Title}||{disc.GameRegion.Name}"] = disc;
         }
 
@@ -145,7 +163,7 @@ public class BulkCheatParser
             .GroupBy(cl => $"{cl.Game!.Title}||{cl.Title}", StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
 
-        return new ImportCaches(regionCache, gameCache, discsBySerial, discsByRegion, cheatListCache);
+        return new ImportCaches(regionCache, gameCache, discsBySerial, discsByRegion, cheatListCache, gamesBySerial);
     }
 
     private static string ResolveDatabaseRoot(string archiveRoot)
@@ -167,10 +185,13 @@ public class BulkCheatParser
         Dictionary<string, GameDisc> discsByRegion,
         Dictionary<string, CheatList> cheatListCache,
         Dictionary<string, CheatList> pendingCheatLists,
+        Dictionary<string, Game> gamesBySerial,
         CancellationToken ct)
     {
         var parsed = ParseFile(filePath);
         if (string.IsNullOrWhiteSpace(parsed.Name) || parsed.Cheats.Count == 0)
+            return;
+        if (_serialFilter != null && !string.Equals(parsed.Serial, _serialFilter, StringComparison.OrdinalIgnoreCase))
             return;
 
         var regionName = Truncate(ResolveRegionName(parsed.RegionHint ?? RegionFromFilename(Path.GetFileName(filePath)), parsed.Serial), 64);
@@ -181,18 +202,43 @@ public class BulkCheatParser
             return r;
         });
 
+        // Attach to the game that already owns a disc with this serial (the one the cheats
+        // editor shows), so imported lists sit next to the user's own lists; only games
+        // without a known disc are matched or created by the file's title.
         var gameTitle = CleanTitle(parsed.Name!);
-        var game = GetOrCreate(gameCache, gameTitle, () =>
+        Game game;
+        if (!string.IsNullOrWhiteSpace(parsed.Serial) && gamesBySerial.TryGetValue(parsed.Serial, out var owner))
         {
-            var g = new Game { Title = gameTitle };
-            _db.Games.Add(g);
-            return g;
-        });
+            game = owner;
+        }
+        else
+        {
+            game = GetOrCreate(gameCache, gameTitle, () =>
+            {
+                var g = new Game { Title = gameTitle };
+                _db.Games.Add(g);
+                return g;
+            });
+            if (!string.IsNullOrWhiteSpace(parsed.Serial))
+                gamesBySerial[parsed.Serial] = game;
+        }
 
         var disc = ResolveDisc(game, region, parsed.Serial, parsed.Hash, discsBySerial, discsByRegion);
         var source = SourceFor(dbRoot, filePath);
         var listTitle = BuildListTitle(source, game.Title, regionName);
         var listKey = $"{game.Title}||{listTitle}";
+
+        // A list imported before this rule lives under a title-named duplicate game:
+        // move it onto the serial's game instead of importing a second copy.
+        var legacyKey = $"{gameTitle}||{BuildListTitle(source, gameTitle, regionName)}";
+        if (!string.Equals(game.Title, gameTitle, StringComparison.OrdinalIgnoreCase)
+            && !pendingCheatLists.ContainsKey(listKey)
+            && !cheatListCache.ContainsKey(listKey)
+            && cheatListCache.Remove(legacyKey, out var legacyList))
+        {
+            legacyList.Title = listTitle;
+            cheatListCache[listKey] = legacyList;
+        }
 
         CheatList cheatList;
         if (pendingCheatLists.TryGetValue(listKey, out var pendingList))
@@ -649,7 +695,8 @@ public class BulkCheatParser
         Dictionary<string, Game> GameCache,
         Dictionary<string, GameDisc> DiscsBySerial,
         Dictionary<string, GameDisc> DiscsByRegion,
-        Dictionary<string, CheatList> CheatListCache);
+        Dictionary<string, CheatList> CheatListCache,
+        Dictionary<string, Game> GamesBySerial);
 
     private sealed class ParsedFile
     {

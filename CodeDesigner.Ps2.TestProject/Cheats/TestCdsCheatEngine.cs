@@ -1,14 +1,19 @@
 using CodeDesigner.Ps2.CheatEngine;
+using CodeDesigner.Ps2.EmulatorCore;
 
 namespace CodeDesigner.Ps2.TestProject
 {
     /// <summary>
     /// Tests for <see cref="CdsCheatEngine"/> — the assembly-level persistent cheat engine
     /// that hooks into the game loop and continuously re-applies cheat values.
+    /// The "Run_" tests execute the injected engine on the EE interpreter.
     /// </summary>
     [TestClass]
     public class TestCdsCheatEngine
     {
+        private const uint Hook      = 0x00100000;
+        private const uint TableBase = 0x000C0000 + CdsCheatEngine.CheatTableOffset;
+
         // ── Mock IByteEditor backed by a simple byte array ──────────────────
 
         private sealed class MockByteEditor : IByteEditor
@@ -39,17 +44,77 @@ namespace CodeDesigner.Ps2.TestProject
                 => BitConverter.GetBytes(word).CopyTo(_ram, (int)addr);
         }
 
+        /// <summary>IByteEditor over the interpreter's main RAM.</summary>
+        private sealed class EmulatorRamEditor : IByteEditor
+        {
+            private readonly PS2Emulator _emu;
+            public EmulatorRamEditor(PS2Emulator emu) => _emu = emu;
+            public byte[] Read(int address, int byteLength)
+            {
+                var buf = new byte[byteLength];
+                for (int i = 0; i < byteLength; i++) buf[i] = _emu.Bus.ReadByte((uint)(address + i));
+                return buf;
+            }
+            public byte[] Read(string addressHex, int byteLength) => Read(Convert.ToInt32(addressHex, 16), byteLength);
+            public void Write(int address, byte[] data)
+            {
+                for (int i = 0; i < data.Length; i++) _emu.Bus.WriteByte((uint)(address + i), data[i]);
+            }
+            public void Write(string addressHex, byte[] data) => Write(Convert.ToInt32(addressHex, 16), data);
+        }
+
         // ── Helpers ─────────────────────────────────────────────────────────
 
         private static MockByteEditor CreateEditor()
         {
             var editor = new MockByteEditor();
-            // Place a recognisable "original instruction" at the hook point.
-            // e.g. addiu v0, zero, 1  →  0x24020001
-            editor.WriteWord(0x00100000, 0x24020001);
-            // And a second instruction at hook+4
-            editor.WriteWord(0x00100004, 0x00000000); // nop
+            // A recognisable "original instruction" pair at the hook point.
+            editor.WriteWord(Hook, 0x24020001);     // addiu v0, zero, 1
+            editor.WriteWord(Hook + 4, 0x00000000); // nop
             return editor;
+        }
+
+        private static EngineEntry Row(MockByteEditor editor, int index)
+        {
+            uint a = TableBase + (uint)(index * CdsCheatEngine.EntrySize);
+            return new EngineEntry(editor.ReadWord(a), editor.ReadWord(a + 4), editor.ReadWord(a + 8), editor.ReadWord(a + 12));
+        }
+
+        /// <summary>
+        /// Interpreter fixture: a "game loop" at <see cref="Hook"/> that counts its passes in
+        /// t5 (addiu t5, t5, 1; nop; j Hook; nop). The interpreter has no TLB, so the engine is
+        /// built with memory base 0 and code addresses hit RAM directly.
+        /// </summary>
+        private sealed class Machine
+        {
+            public readonly PS2Emulator Emu = new();
+            public readonly CdsCheatEngine Engine;
+
+            public Machine()
+            {
+                Emu.LoadProgram(Hook, [0x25AD0001u, 0x00000000u, CdsCheatEngine.EncodeJ(Hook), 0x00000000u]);
+                Emu.Cpu.PC = Hook;
+                Emu.Cpu.RegsLo[29] = 0x01F00000; // sp
+                Engine = new CdsCheatEngine(new EmulatorRamEditor(Emu), 0x000C0000, memoryBase: 0);
+            }
+
+            public uint Passes => (uint)Emu.Cpu.RegsLo[13];
+
+            /// <summary>Step until the loop has completed <paramref name="frames"/> more passes.</summary>
+            public void RunFrames(uint frames)
+            {
+                uint target = Passes + frames;
+                for (int guard = 0; Passes < target; guard++)
+                {
+                    if (guard > 2_000_000) Assert.Fail("Engine did not return to the game loop.");
+                    Emu.Step();
+                }
+            }
+
+            public uint Word(uint a) => Emu.Bus.ReadWord(a);
+            public ushort Half(uint a) => (ushort)(Emu.Bus.ReadByte(a) | (Emu.Bus.ReadByte(a + 1) << 8));
+            public byte Byte(uint a) => Emu.Bus.ReadByte(a);
+            public void SetWord(uint a, uint v) => Emu.Bus.WriteWord(a, v);
         }
 
         // ────────────────────────────────────────────────────────────────────
@@ -59,8 +124,7 @@ namespace CodeDesigner.Ps2.TestProject
         [TestMethod]
         public void Constructor_SetsDefaults()
         {
-            var editor = new MockByteEditor();
-            var engine = new CdsCheatEngine(editor);
+            var engine = new CdsCheatEngine(new MockByteEditor());
             Assert.AreEqual(0x000C0000u, engine.EngineBase);
             Assert.IsFalse(engine.IsInjected);
         }
@@ -68,8 +132,7 @@ namespace CodeDesigner.Ps2.TestProject
         [TestMethod]
         public void Constructor_CustomBase()
         {
-            var editor = new MockByteEditor();
-            var engine = new CdsCheatEngine(editor, 0x00200000);
+            var engine = new CdsCheatEngine(new MockByteEditor(), 0x00200000);
             Assert.AreEqual(0x00200000u, engine.EngineBase);
         }
 
@@ -81,57 +144,53 @@ namespace CodeDesigner.Ps2.TestProject
         }
 
         // ────────────────────────────────────────────────────────────────────
-        //  Inject / Remove
+        //  Inject / Remove / table layout
         // ────────────────────────────────────────────────────────────────────
 
         [TestMethod]
-        public void Inject_WritesEngineCode_AndHooksTarget()
+        public void Inject_HooksTargetWithJumpAndNop()
         {
             var editor = CreateEditor();
             var engine = new CdsCheatEngine(editor);
 
-            string cheats = "#Infinite Health\n20123456 000003E8";
-            engine.Inject(0x00100000, cheats);
+            engine.Inject(Hook, "#Infinite Health\n20123456 000003E8");
 
             Assert.IsTrue(engine.IsInjected);
-            Assert.AreEqual(0x00100000u, engine.HookAddress);
-
-            // The hook address should now contain a J instruction to the engine base.
-            uint hookInstr = editor.ReadWord(0x00100000);
-            uint expectedJ = 0x08000000 | ((0x000C0000 >> 2) & 0x03FFFFFF);
-            Assert.AreEqual(expectedJ, hookInstr, $"Expected J 0x000C0000 (0x{expectedJ:X8}), got 0x{hookInstr:X8}");
-
-            // Delay slot should be NOP
-            uint delaySlot = editor.ReadWord(0x00100004);
-            Assert.AreEqual(0x00000000u, delaySlot);
+            Assert.AreEqual(Hook, engine.HookAddress);
+            Assert.AreEqual(CdsCheatEngine.EncodeJ(0x000C0000), editor.ReadWord(Hook));
+            Assert.AreEqual(0u, editor.ReadWord(Hook + 4));
         }
 
         [TestMethod]
-        public void Inject_WritesCheatTable()
+        public void Inject_WritesTableRowAndEndRow()
         {
             var editor = CreateEditor();
             var engine = new CdsCheatEngine(editor);
 
-            // 32-bit write of 0x000003E8 to address 0x123456
-            string cheats = "20123456 000003E8";
-            engine.Inject(0x00100000, cheats);
+            engine.Inject(Hook, "20123456 000003E8");
 
-            // Cheat table is at engine base + 0x0300
-            uint tableBase = 0x000C0000 + 0x0300;
-            uint entry0Word0 = editor.ReadWord(tableBase);
-            uint entry0Word1 = editor.ReadWord(tableBase + 4);
+            Assert.AreEqual(new EngineEntry(EngineOp.Write32, 0x20123456, 0x3E8, 0), Row(editor, 0));
+            Assert.AreEqual(new EngineEntry(0, 0, 0, 0), Row(editor, 1));
+        }
 
-            // Word0 should be type(0x20) << 24 | address(0x123456)
-            Assert.AreEqual(0x20123456u, entry0Word0,
-                $"Expected 0x20123456, got 0x{entry0Word0:X8}");
-            Assert.AreEqual(0x000003E8u, entry0Word1,
-                $"Expected 0x000003E8, got 0x{entry0Word1:X8}");
+        [TestMethod]
+        public void Inject_EmbedsOriginalInstructionsAndReturnJump()
+        {
+            var editor = CreateEditor();
+            var engine = new CdsCheatEngine(editor);
+            engine.Inject(Hook, "20123456 000003E8");
 
-            // End marker after the entry
-            uint endWord0 = editor.ReadWord(tableBase + 8);
-            uint endWord1 = editor.ReadWord(tableBase + 12);
-            Assert.AreEqual(0xFFFFFFFFu, endWord0);
-            Assert.AreEqual(0xFFFFFFFFu, endWord1);
+            // The engine code must contain: original pair, then `j hook+8`.
+            bool found = false;
+            for (uint a = 0x000C0000; a < 0x000C0000 + CdsCheatEngine.DataOffset; a += 4)
+            {
+                if (editor.ReadWord(a) == 0x24020001 && editor.ReadWord(a + 8) == CdsCheatEngine.EncodeJ(Hook + 8))
+                {
+                    found = true;
+                    break;
+                }
+            }
+            Assert.IsTrue(found, "original instructions + return jump not found inside the engine code area");
         }
 
         [TestMethod]
@@ -140,15 +199,12 @@ namespace CodeDesigner.Ps2.TestProject
             var editor = CreateEditor();
             var engine = new CdsCheatEngine(editor);
 
-            uint origInstr = editor.ReadWord(0x00100000);
-            engine.Inject(0x00100000, "20123456 000003E8");
+            engine.Inject(Hook, "20123456 000003E8");
             engine.Remove();
 
             Assert.IsFalse(engine.IsInjected);
-            // Original instruction should be restored
-            uint restored = editor.ReadWord(0x00100000);
-            Assert.AreEqual(origInstr, restored,
-                $"Expected original instruction 0x{origInstr:X8}, got 0x{restored:X8}");
+            Assert.AreEqual(0x24020001u, editor.ReadWord(Hook));
+            Assert.AreEqual(0u, editor.ReadWord(Hook + 4));
         }
 
         [TestMethod]
@@ -157,128 +213,15 @@ namespace CodeDesigner.Ps2.TestProject
         {
             var editor = CreateEditor();
             var engine = new CdsCheatEngine(editor);
-
-            engine.Inject(0x00100000, "20123456 000003E8");
-            engine.Inject(0x00100000, "20123456 000003E8"); // should throw
+            engine.Inject(Hook, "20123456 000003E8");
+            engine.Inject(Hook, "20123456 000003E8");
         }
 
         [TestMethod]
         public void Remove_WhenNotInjected_IsNoop()
         {
-            var editor = new MockByteEditor();
-            var engine = new CdsCheatEngine(editor);
-            engine.Remove(); // should not throw
+            new CdsCheatEngine(new MockByteEditor()).Remove();
         }
-
-        // ────────────────────────────────────────────────────────────────────
-        //  UpdateCheatTable
-        // ────────────────────────────────────────────────────────────────────
-
-        [TestMethod]
-        public void UpdateCheatTable_ChangesValues()
-        {
-            var editor = CreateEditor();
-            var engine = new CdsCheatEngine(editor);
-
-            engine.Inject(0x00100000, "20123456 000003E8");
-
-            // Update with different cheat
-            engine.UpdateCheatTable("20AABBCC 0000FFFF");
-
-            uint tableBase = 0x000C0000 + 0x0300;
-            uint entry0Word0 = editor.ReadWord(tableBase);
-            uint entry0Word1 = editor.ReadWord(tableBase + 4);
-
-            Assert.AreEqual(0x20AABBCCu, entry0Word0);
-            Assert.AreEqual(0x0000FFFFu, entry0Word1);
-        }
-
-        [TestMethod]
-        [ExpectedException(typeof(InvalidOperationException))]
-        public void UpdateCheatTable_WhenNotInjected_Throws()
-        {
-            var editor = new MockByteEditor();
-            var engine = new CdsCheatEngine(editor);
-            engine.UpdateCheatTable("20123456 000003E8");
-        }
-
-        // ────────────────────────────────────────────────────────────────────
-        //  Multiple cheat entries
-        // ────────────────────────────────────────────────────────────────────
-
-        [TestMethod]
-        public void Inject_MultipleEntries_AllPresent()
-        {
-            var editor = CreateEditor();
-            var engine = new CdsCheatEngine(editor);
-
-            string cheats = "20123456 000003E8\n20ABCDEF 0000002A";
-            engine.Inject(0x00100000, cheats);
-
-            uint tableBase = 0x000C0000 + 0x0300;
-
-            // First entry
-            Assert.AreEqual(0x20123456u, editor.ReadWord(tableBase));
-            Assert.AreEqual(0x000003E8u, editor.ReadWord(tableBase + 4));
-
-            // Second entry
-            Assert.AreEqual(0x20ABCDEFu, editor.ReadWord(tableBase + 8));
-            Assert.AreEqual(0x0000002Au, editor.ReadWord(tableBase + 12));
-
-            // End marker
-            Assert.AreEqual(0xFFFFFFFFu, editor.ReadWord(tableBase + 16));
-            Assert.AreEqual(0xFFFFFFFFu, editor.ReadWord(tableBase + 20));
-        }
-
-        // ────────────────────────────────────────────────────────────────────
-        //  GenerateSource
-        // ────────────────────────────────────────────────────────────────────
-
-        [TestMethod]
-        public void GenerateSource_ReturnsValidCds()
-        {
-            var editor = new MockByteEditor();
-            var engine = new CdsCheatEngine(editor);
-
-            string source = engine.GenerateSource("20123456 000003E8");
-            Assert.IsNotNull(source);
-
-            // Should contain engine code and the cheat entry
-            StringAssert.Contains(source, "scope CheatEngine");
-            StringAssert.Contains(source, "20123456");
-            StringAssert.Contains(source, "000003E8");
-            // Should contain end marker
-            StringAssert.Contains(source, "FFFFFFFF");
-        }
-
-        // ────────────────────────────────────────────────────────────────────
-        //  Engine code is non-empty
-        // ────────────────────────────────────────────────────────────────────
-
-        [TestMethod]
-        public void Inject_WritesNonZeroEngineCode()
-        {
-            var editor = CreateEditor();
-            var engine = new CdsCheatEngine(editor);
-
-            engine.Inject(0x00100000, "20123456 000003E8");
-
-            // Check that engine code area has instructions (not all zeros)
-            bool hasCode = false;
-            for (uint addr = 0x000C0000; addr < 0x000C0100; addr += 4)
-            {
-                if (editor.ReadWord(addr) != 0)
-                {
-                    hasCode = true;
-                    break;
-                }
-            }
-            Assert.IsTrue(hasCode, "Engine code area should contain non-zero instructions.");
-        }
-
-        // ────────────────────────────────────────────────────────────────────
-        //  Inject + Remove + Re-inject cycle
-        // ────────────────────────────────────────────────────────────────────
 
         [TestMethod]
         public void InjectRemoveReinject_WorksCorrectly()
@@ -286,174 +229,261 @@ namespace CodeDesigner.Ps2.TestProject
             var editor = CreateEditor();
             var engine = new CdsCheatEngine(editor);
 
-            engine.Inject(0x00100000, "20123456 000003E8");
-            Assert.IsTrue(engine.IsInjected);
-
+            engine.Inject(Hook, "20123456 000003E8");
             engine.Remove();
+            engine.Inject(Hook, "20AABBCC 0000FFFF");
+
+            Assert.IsTrue(engine.IsInjected);
+            Assert.AreEqual(0x20AABBCCu, Row(editor, 0).Address);
+        }
+
+        [TestMethod]
+        public void UpdateCheatTable_ReplacesRows()
+        {
+            var editor = CreateEditor();
+            var engine = new CdsCheatEngine(editor);
+
+            engine.Inject(Hook, "20123456 000003E8\n20123460 00000001");
+            engine.UpdateCheatTable("10AABBCC 0000FFFF");
+
+            Assert.AreEqual(new EngineEntry(EngineOp.Write16, 0x20AABBCC, 0xFFFF, 0), Row(editor, 0));
+            Assert.AreEqual(0u, Row(editor, 1).Control);
+        }
+
+        [TestMethod]
+        [ExpectedException(typeof(InvalidOperationException))]
+        public void UpdateCheatTable_WhenNotInjected_Throws()
+        {
+            new CdsCheatEngine(new MockByteEditor()).UpdateCheatTable("20123456 000003E8");
+        }
+
+        [TestMethod]
+        public void GenerateSource_ContainsEngineAndRows()
+        {
+            string source = new CdsCheatEngine(new MockByteEditor()).GenerateSource("20123456 000003E8");
+            StringAssert.Contains(source, "scope CheatEngine");
+            StringAssert.Contains(source, "hexcode $20123456");
+            StringAssert.Contains(source, "hexcode $000003E8");
+        }
+
+        // ────────────────────────────────────────────────────────────────────
+        //  Hook validation
+        // ────────────────────────────────────────────────────────────────────
+
+        [TestMethod]
+        public void Inject_BranchAtHook_Throws()
+        {
+            var editor = CreateEditor();
+            editor.WriteWord(Hook, 0x1040FFFF); // beq v0, zero, -1
+            var engine = new CdsCheatEngine(editor);
+            Assert.ThrowsException<InvalidOperationException>(() => engine.Inject(Hook, "20123456 000003E8"));
             Assert.IsFalse(engine.IsInjected);
-
-            // Re-inject with different cheats
-            engine.Inject(0x00100000, "20AABBCC 0000FFFF");
-            Assert.IsTrue(engine.IsInjected);
-
-            uint tableBase = 0x000C0000 + 0x0300;
-            Assert.AreEqual(0x20AABBCCu, editor.ReadWord(tableBase));
-        }
-
-        // ────────────────────────────────────────────────────────────────────
-        //  InjectFromCds / UpdateCheatTableFromCds
-        // ────────────────────────────────────────────────────────────────────
-
-        [TestMethod]
-        public void InjectFromCds_FreezeWord_WritesCorrectTableEntry()
-        {
-            var editor = CreateEditor();
-            var engine = new CdsCheatEngine(editor);
-
-            engine.InjectFromCds(0x00100000, "freeze word $00123456 = 000003E8");
-
-            uint tableBase = 0x000C0000 + 0x0300;
-            // Type 0x20 (word), lower 24 bits of address = 0x123456
-            Assert.AreEqual(0x20123456u, editor.ReadWord(tableBase));
-            Assert.AreEqual(0x000003E8u, editor.ReadWord(tableBase + 4));
-            // End marker
-            Assert.AreEqual(0xFFFFFFFFu, editor.ReadWord(tableBase + 8));
         }
 
         [TestMethod]
-        public void InjectFromCds_FreezeByte_WritesCorrectTableEntry()
+        public void Inject_JrRaHook_IsAllowed()
         {
             var editor = CreateEditor();
+            editor.WriteWord(Hook, 0x03E00008); // jr ra
+            editor.WriteWord(Hook + 4, 0x27BD0010); // addiu sp, sp, 16 (delay slot)
             var engine = new CdsCheatEngine(editor);
-
-            engine.InjectFromCds(0x00100000, "freeze byte $00AABBCC = 63");
-
-            uint tableBase = 0x000C0000 + 0x0300;
-            // Type 0x00 (byte), lower 24 bits = 0xAABBCC
-            Assert.AreEqual(0x00AABBCCu, editor.ReadWord(tableBase));
-            Assert.AreEqual(0x00000063u, editor.ReadWord(tableBase + 4));
-        }
-
-        [TestMethod]
-        public void InjectFromCds_FreezeHalf_WritesCorrectTableEntry()
-        {
-            var editor = CreateEditor();
-            var engine = new CdsCheatEngine(editor);
-
-            engine.InjectFromCds(0x00100000, "freeze half $00AABBCC = 03E7");
-
-            uint tableBase = 0x000C0000 + 0x0300;
-            // Type 0x10 (half), lower 24 bits = 0xAABBCC
-            Assert.AreEqual(0x10AABBCCu, editor.ReadWord(tableBase));
-            Assert.AreEqual(0x000003E7u, editor.ReadWord(tableBase + 4));
-        }
-
-        [TestMethod]
-        public void InjectFromCds_CondBlock_WritesConditionAndBodyEntries()
-        {
-            var editor = CreateEditor();
-            var engine = new CdsCheatEngine(editor);
-
-            var cds = @"
-cond mem[$00010000] == 0001
-  freeze word $00123456 = FFFFFFFF
-endcond";
-
-            engine.InjectFromCds(0x00100000, cds);
-
-            uint tableBase = 0x000C0000 + 0x0300;
-            // Condition entry: type 0xC0, lower 24 bits of 0x00010000 = 0x010000
-            Assert.AreEqual(0xC0010000u, editor.ReadWord(tableBase));
-            Assert.AreEqual(0x00000001u, editor.ReadWord(tableBase + 4));
-            // Body entry: type 0x20, addr 0x123456, value 0xFFFFFFFF
-            Assert.AreEqual(0x20123456u, editor.ReadWord(tableBase + 8));
-            Assert.AreEqual(0xFFFFFFFFu, editor.ReadWord(tableBase + 12));
-            // End marker
-            Assert.AreEqual(0xFFFFFFFFu, editor.ReadWord(tableBase + 16));
-        }
-
-        [TestMethod]
-        public void InjectFromCds_TimerBlock_WritesTimerAndBodyEntries()
-        {
-            var editor = CreateEditor();
-            var engine = new CdsCheatEngine(editor);
-
-            var cds = @"
-timer 60
-  freeze word $00123456 = FFFFFFFF
-endtimer";
-
-            engine.InjectFromCds(0x00100000, cds);
-
-            uint tableBase = 0x000C0000 + 0x0300;
-            Assert.AreEqual(0xB0000001u, editor.ReadWord(tableBase));
-            Assert.AreEqual(60u, editor.ReadWord(tableBase + 4));
-            Assert.AreEqual(0x20123456u, editor.ReadWord(tableBase + 8));
-            Assert.AreEqual(0xFFFFFFFFu, editor.ReadWord(tableBase + 12));
-            Assert.AreEqual(0xFFFFFFFFu, editor.ReadWord(tableBase + 16));
-        }
-
-        [TestMethod]
-        public void InjectFromCds_SetsIsInjected()
-        {
-            var editor = CreateEditor();
-            var engine = new CdsCheatEngine(editor);
-
-            engine.InjectFromCds(0x00100000, "freeze word $00123456 = 03E8");
+            engine.Inject(Hook, "20123456 000003E8");
             Assert.IsTrue(engine.IsInjected);
         }
 
         [TestMethod]
-        [ExpectedException(typeof(InvalidOperationException))]
-        public void InjectFromCds_WhenAlreadyInjected_Throws()
+        public void Inject_UnsupportedCode_ThrowsWithLine()
         {
-            var editor = CreateEditor();
-            var engine = new CdsCheatEngine(editor);
+            var engine = new CdsCheatEngine(CreateEditor());
+            var ex = Assert.ThrowsException<InvalidOperationException>(() => engine.Inject(Hook, "50123456 00000010\n00200000 00000000"));
+            StringAssert.Contains(ex.Message, "line 1");
+        }
 
-            engine.InjectFromCds(0x00100000, "freeze word $00123456 = 03E8");
-            engine.InjectFromCds(0x00100000, "freeze word $00123456 = 00FF");
+        // ────────────────────────────────────────────────────────────────────
+        //  Translator
+        // ────────────────────────────────────────────────────────────────────
+
+        [TestMethod]
+        public void Translate_ConditionalSkipCountsCoverWholeCodes()
+        {
+            // D guards the next line; E guards 2 lines, one of which is a 2-line serial code.
+            var t = RawCodeTranslator.Translate(
+                "D0100000 00000001\n" +
+                "20100004 00000002\n" +
+                "E0020005 00100008\n" +
+                "4010000C 00020001\n" +
+                "00000001 00000000\n" +
+                "00100010 000000FF", 0);
+
+            Assert.IsTrue(t.IsValid, string.Join("; ", t.Errors));
+            Assert.AreEqual(5, t.Entries.Count);
+            Assert.AreEqual(1u, t.Entries[0].Control >> 16, "D skips 1 row");
+            Assert.AreEqual(1u, t.Entries[2].Control >> 16, "E covering the 2 serial lines skips its 1 row");
         }
 
         [TestMethod]
-        public void UpdateCheatTableFromCds_ChangesValues()
+        public void Translate_MasterCodesAreIgnoredWithWarning()
         {
-            var editor = CreateEditor();
-            var engine = new CdsCheatEngine(editor);
-
-            engine.InjectFromCds(0x00100000, "freeze word $00123456 = 000003E8");
-
-            // Update with a different freeze
-            engine.UpdateCheatTableFromCds("freeze half $00AABBCC = 0001");
-
-            uint tableBase = 0x000C0000 + 0x0300;
-            Assert.AreEqual(0x10AABBCCu, editor.ReadWord(tableBase));
-            Assert.AreEqual(0x00000001u, editor.ReadWord(tableBase + 4));
-            Assert.AreEqual(0xFFFFFFFFu, editor.ReadWord(tableBase + 8));
+            var t = RawCodeTranslator.Translate("F0100008 001003E8\n20100000 00000001", 0);
+            Assert.IsTrue(t.IsValid);
+            Assert.AreEqual(1, t.Entries.Count);
+            Assert.AreEqual(1, t.Warnings.Count);
         }
 
         [TestMethod]
-        [ExpectedException(typeof(InvalidOperationException))]
-        public void UpdateCheatTableFromCds_WhenNotInjected_Throws()
+        public void BuildImage_CodeFitsBeforeDataArea()
         {
-            var editor = new MockByteEditor();
-            var engine = new CdsCheatEngine(editor);
-            engine.UpdateCheatTableFromCds("freeze word $00123456 = 03E8");
+            var image = CdsCheatEngine.BuildImage(new List<EngineEntry>(), 0x000C0000, Hook, 0x24020001, 0);
+            // Find the return jump: it must sit inside the code area.
+            int at = -1;
+            for (int o = 0; o + 4 <= CdsCheatEngine.DataOffset; o += 4)
+                if (BitConverter.ToUInt32(image, o) == CdsCheatEngine.EncodeJ(Hook + 8)) { at = o; break; }
+            Assert.IsTrue(at > 0, "return jump not found before the data area");
+            Assert.AreEqual(CdsCheatEngine.CheatTableOffset + CdsCheatEngine.EntrySize, image.Length);
+        }
+
+        // ────────────────────────────────────────────────────────────────────
+        //  Execution on the EE interpreter
+        // ────────────────────────────────────────────────────────────────────
+
+        [TestMethod]
+        public void Run_ConstantWrites_HoldAgainstTheGame()
+        {
+            var m = new Machine();
+            m.Engine.Inject(Hook, "20200000 DEADBEEF\n10200010 00001234\n00200020 000000AB");
+
+            m.RunFrames(2);
+            Assert.AreEqual(0xDEADBEEFu, m.Word(0x00200000));
+            Assert.AreEqual((ushort)0x1234, m.Half(0x00200010));
+            Assert.AreEqual((byte)0xAB, m.Byte(0x00200020));
+
+            // The "game" overwrites the value; the next frame puts it back.
+            m.SetWord(0x00200000, 0);
+            m.RunFrames(1);
+            Assert.AreEqual(0xDEADBEEFu, m.Word(0x00200000));
         }
 
         [TestMethod]
-        public void InjectFromCds_ThenUpdateViaGameShark_Works()
+        public void Run_ReplaysHookedInstructionsAndPreservesRegisters()
         {
-            // InjectFromCds should set up the engine so that
-            // UpdateCheatTable (GameShark) also works afterwards.
-            var editor = CreateEditor();
-            var engine = new CdsCheatEngine(editor);
+            var m = new Machine();
+            var cpu = m.Emu.Cpu;
+            // Registers the engine uses internally, with distinctive 128-bit contents.
+            int[] regs = [1, 2, 3, 8, 9, 10, 11, 12, 16];
+            foreach (int r in regs)
+            {
+                cpu.RegsLo[r] = 0x1111_0000_0000_0000UL | (ulong)r;
+                cpu.RegsHi[r] = 0x2222_0000_0000_0000UL | (ulong)r;
+            }
+            cpu.HI = 0x0123_4567_89AB_CDEFUL;
+            cpu.LO = 0x0FED_CBA9_8765_4321UL;
+            m.Engine.Inject(Hook, "B0000001 00000002\n20200000 00000001");
 
-            engine.InjectFromCds(0x00100000, "freeze word $00123456 = 000003E8");
-            engine.UpdateCheatTable("20AABBCC 0000FFFF");
+            m.RunFrames(5);
 
-            uint tableBase = 0x000C0000 + 0x0300;
-            Assert.AreEqual(0x20AABBCCu, editor.ReadWord(tableBase));
-            Assert.AreEqual(0x0000FFFFu, editor.ReadWord(tableBase + 4));
+            Assert.AreEqual(5u, m.Passes, "addiu t5 at the hook point must still run every pass");
+            foreach (int r in regs)
+            {
+                Assert.AreEqual(0x1111_0000_0000_0000UL | (ulong)r, cpu.RegsLo[r], $"r{r} low");
+                Assert.AreEqual(0x2222_0000_0000_0000UL | (ulong)r, cpu.RegsHi[r], $"r{r} high");
+            }
+            Assert.AreEqual(0x0123_4567_89AB_CDEFUL, cpu.HI);
+            Assert.AreEqual(0x0FED_CBA9_8765_4321UL, cpu.LO);
+            Assert.AreEqual(0x01F00000UL, cpu.RegsLo[29], "sp");
+        }
+
+        [TestMethod]
+        public void Run_IncrementAndDecrement()
+        {
+            var m = new Machine();
+            m.SetWord(0x00200000, 100);
+            m.SetWord(0x00200010, 100);
+            m.Engine.Inject(Hook, "30000005 00200000\n30500000 00200010\n00000003 00000000");
+
+            m.RunFrames(4);
+            Assert.AreEqual((byte)(100 + 4 * 5), m.Byte(0x00200000));
+            Assert.AreEqual(100u - 4 * 3, m.Word(0x00200010));
+        }
+
+        [TestMethod]
+        public void Run_SerialWrite()
+        {
+            var m = new Machine();
+            m.Engine.Inject(Hook, "40200000 00030002\n00000010 00000001");
+            m.RunFrames(1);
+            Assert.AreEqual(0x10u, m.Word(0x00200000));
+            Assert.AreEqual(0x11u, m.Word(0x00200008));
+            Assert.AreEqual(0x12u, m.Word(0x00200010));
+            Assert.AreEqual(0u, m.Word(0x00200018));
+        }
+
+        [TestMethod]
+        public void Run_ConditionalsGateTheirLines()
+        {
+            var m = new Machine();
+            m.SetWord(0x00200100, 0x0001);
+            m.Engine.Inject(Hook,
+                "Met\nD0200100 00000001\n20200000 00000011\n\n" +
+                "Not met\nD0200100 00000002\n20200004 00000022\n\n" +
+                "Multi\nE0020000 00200102\n20200008 00000033\n2020000C 00000044\n20200010 00000055\n\n" +
+                "Stop\nC0200100 00000005\n20200014 00000066\n20200018 00000077");
+
+            m.RunFrames(1);
+            Assert.AreEqual(0x11u, m.Word(0x00200000), "D equal → next line runs");
+            Assert.AreEqual(0u,    m.Word(0x00200004), "D not equal → next line skipped");
+            Assert.AreEqual(0x33u, m.Word(0x00200008), "E (high half == 0) → its 2 lines run");
+            Assert.AreEqual(0x44u, m.Word(0x0020000C));
+            Assert.AreEqual(0x55u, m.Word(0x00200010), "line after the E block always runs");
+            Assert.AreEqual(0u,    m.Word(0x00200014), "C false → rest of the cheat skipped");
+            Assert.AreEqual(0u,    m.Word(0x00200018));
+        }
+
+        [TestMethod]
+        public void Run_TimerRunsEveryNthFrame()
+        {
+            var m = new Machine();
+            m.SetWord(0x00200000, 0);
+            m.Engine.Inject(Hook, "B0000001 00000003\n30400000 00200000\n00000001 00000000");
+            m.RunFrames(9);
+            Assert.AreEqual(3u, m.Word(0x00200000), "increment guarded by a 3-frame timer runs 3 times in 9 frames");
+        }
+
+        [TestMethod]
+        public void Run_CdsSource_FreezeCondAndAssembly()
+        {
+            var m = new Machine();
+            m.SetWord(0x00200100, 0x00010002);
+            m.Engine.InjectFromCds(Hook, @"
+// raw code, freeze and an assembled word in one source
+20200000 00000001
+freeze half $00200010 = 0BAD
+cond mem[$00200100] == 00010002
+  freeze word $00200020 = CAFEF00D
+endcond
+cond mem[$00200100] == 00010003
+  freeze word $00200024 = BAADF00D
+endcond
+address $00200030
+  addiu v0, zero, 1
+");
+            m.RunFrames(1);
+            Assert.AreEqual(1u, m.Word(0x00200000));
+            Assert.AreEqual((ushort)0x0BAD, m.Half(0x00200010));
+            Assert.AreEqual(0xCAFEF00Du, m.Word(0x00200020), "32-bit cond met");
+            Assert.AreEqual(0u, m.Word(0x00200024), "32-bit cond not met (high half differs)");
+            Assert.AreEqual(0x24020001u, m.Word(0x00200030), "assembled instruction written");
+        }
+
+        [TestMethod]
+        public void Run_RemoveStopsTheEngine()
+        {
+            var m = new Machine();
+            m.Engine.Inject(Hook, "20200000 00000001");
+            m.RunFrames(1);
+            m.Engine.Remove();
+            m.SetWord(0x00200000, 0);
+            m.RunFrames(2);
+            Assert.AreEqual(0u, m.Word(0x00200000));
         }
     }
 }

@@ -1,0 +1,194 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   Cheat Converter — encrypt / decrypt cheat device codes.
+   Chrome follows the Cheat Porter conventions (rounded bordered cards,
+   uppercase section titles, VS Code theme vars).
+   ══════════════════════════════════════════════════════════════════════════ */
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--vscode-editor-background, #1e1e1e);
+  color: var(--vscode-foreground, #d4d4d4);
+}
+
+:root {
+  --cc-border: var(--vscode-panel-border, #313131);
+  --cc-muted:  var(--vscode-descriptionForeground, #8f8f8f);
+  --cc-mono:   var(--vscode-editor-font-family, Consolas, 'Courier New', monospace);
+  --cc-ok:     var(--vscode-testing-iconPassed, #73c991);
+  --cc-warn:   var(--vscode-editorWarning-foreground, #cca700);
+  --cc-err:    var(--vscode-errorForeground, #f48771);
+  --cc-link:   var(--vscode-textLink-foreground, #9cdcfe);
+}
+
+.cc-outer {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ── Options bar ─────────────────────────────────────────────────────────── */
+.cc-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 10px 12px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--cc-border);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+  flex-shrink: 0;
+}
+.cc-format { display: flex; align-items: center; gap: 6px; flex: 1 1 320px; min-width: 0; }
+.cc-format .cc-select { flex: 1; max-width: 460px; }
+.cc-conn-warn { font-size: 11px; color: var(--cc-warn); }
+
+.cc-field-label,
+.cc-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--cc-muted);
+  white-space: nowrap;
+}
+.cc-count { font-size: 11px; color: var(--cc-muted); white-space: nowrap; }
+
+.cc-select {
+  background: var(--vscode-input-background, #3c3c3c);
+  color: var(--vscode-input-foreground, #d4d4d4);
+  border: 1px solid var(--vscode-input-border, #3c3c3c);
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+  min-width: 0;
+}
+.cc-select:focus { border-color: var(--vscode-focusBorder, #0078d4); }
+
+.cc-seg {
+  display: inline-flex;
+  border: 1px solid var(--cc-border);
+  border-radius: 6px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.cc-seg button {
+  border: none;
+  border-right: 1px solid var(--cc-border);
+  background: transparent;
+  color: var(--cc-muted);
+  padding: 3px 10px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.cc-seg button:last-child { border-right: none; }
+.cc-seg button:hover { background: rgba(255, 255, 255, 0.05); color: var(--vscode-foreground, #d4d4d4); }
+.cc-seg button.cc-seg-on {
+  background: var(--vscode-button-secondaryBackground, #2f2f30);
+  color: var(--vscode-foreground, #d4d4d4);
+  font-weight: 600;
+}
+
+.cc-primary-btn {
+  height: 26px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: var(--vscode-button-background, #0e639c);
+  color: var(--vscode-button-foreground, #fff);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.cc-primary-btn:hover:not(:disabled) { background: var(--vscode-button-hoverBackground, #1177bb); }
+.cc-primary-btn:disabled { opacity: 0.5; cursor: default; }
+
+.lm-tool-btn { display: inline-flex; align-items: center; gap: 4px; }
+
+.cc-status {
+  margin: 8px 12px 0;
+  padding: 5px 10px;
+  border: 1px solid var(--cc-border);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--cc-ok);
+  flex-shrink: 0;
+}
+.cc-status.cc-status-error { color: var(--cc-err); border-color: rgba(244, 135, 113, 0.4); }
+
+/* ── Input / output ──────────────────────────────────────────────────────── */
+.cc-body {
+  display: flex;
+  align-items: stretch;
+  flex: 1;
+  min-height: 0;
+  gap: 8px;
+  padding: 10px 12px 12px;
+}
+@media (max-width: 700px) {
+  .cc-body { flex-direction: column; }
+  .cc-swap { align-self: center; transform: rotate(90deg); }
+}
+
+.cc-card {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid var(--cc-border);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+  overflow: hidden;
+}
+.cc-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 22px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--cc-border);
+  background: var(--vscode-sideBar-background, #252526);
+  flex-shrink: 0;
+}
+.cc-head-actions { display: inline-flex; gap: 6px; margin-left: auto; }
+
+.cc-textarea {
+  flex: 1;
+  min-height: 0;
+  resize: none;
+  border: none;
+  outline: none;
+  padding: 8px 10px;
+  background: transparent;
+  color: var(--vscode-editor-foreground, #d4d4d4);
+  font-family: var(--cc-mono);
+  font-size: var(--vscode-editor-font-size, 12px);
+  line-height: 1.5;
+}
+.cc-output { color: var(--cc-link); }
+
+.cc-swap {
+  align-self: center;
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--cc-border);
+  border-radius: 6px;
+  background: var(--vscode-button-secondaryBackground, #2f2f30);
+  color: var(--vscode-button-secondaryForeground, #d4d4d4);
+  cursor: pointer;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+.cc-swap:hover:not(:disabled) { background: var(--vscode-button-secondaryHoverBackground, #3a3a3b); }
+.cc-swap:disabled { opacity: 0.4; cursor: default; }

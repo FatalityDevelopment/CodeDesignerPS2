@@ -174,27 +174,16 @@ namespace CodeDesigner.Ps2.Bridge.Services
                     });
                 }
 
-                // Walk the compiled (address, word) pairs and format as GameShark codes
-                var compiled = CdsCompiler.Compile(items);
-                // Build a lookup from item LineNumber/LineText using the item tree
-                // so we can annotate each code with the originating source line.
-                var lineByAddress = BuildLineAnnotations(items);
-
-                foreach (var (addr, word) in compiled)
+                // Ordered raw code list: assembled words as 32-bit writes, raw code
+                // lines verbatim, freeze/cond/timer as their code forms.
+                foreach (var code in CdsCompiler.CompileToCodes(items))
                 {
-                    string lineText = string.Empty;
-                    int? lineNum = null;
-                    if (lineByAddress.TryGetValue(addr, out var annotation))
-                    {
-                        lineText = annotation.lineText;
-                        lineNum  = annotation.lineNumber;
-                    }
                     results.Add(new InstructionResult
                     {
                         Success    = true,
-                        Assembly   = lineText,
-                        Hex        = FormatGameSharkCode(addr, word),
-                        LineNumber = lineNum
+                        Assembly   = code.LineText,
+                        Hex        = code.ToString(),
+                        LineNumber = code.LineNumber > 0 ? code.LineNumber : null
                     });
                 }
 
@@ -353,10 +342,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 }
 
                 // ── Build GameShark codes and apply them ─────────────────────────────
-                var compiled   = CdsCompiler.Compile(items);
-                var codeLines  = new List<string>(compiled.Count);
-                foreach (var (addr, word) in compiled)
-                    codeLines.Add(FormatGameSharkCode(addr, word));
+                var codeLines  = CdsCompiler.CompileToCodes(items).Select(c => c.ToString()).ToList();
 
                 var cheatText = string.Join('\n', codeLines);
 
@@ -560,65 +546,6 @@ namespace CodeDesigner.Ps2.Bridge.Services
                     $"Watchpoint range overflow: physStart=0x{physStart:X8} + size={size} exceeds physical address space");
             uint physEnd   = physStart + size;
             _ctx.PineClient.AddWatch(cpu: 0, physStart, physEnd, (byte)cond);
-        }
-
-        /// <summary>
-        /// Build a flat dictionary mapping compiled output address → (lineNumber, lineText)
-        /// by walking the syntax item tree recursively.  When multiple items map to the same
-        /// address (shouldn't happen but is safe), the first one wins.
-        /// </summary>
-        private static Dictionary<uint, (int lineNumber, string lineText)> BuildLineAnnotations(
-            IEnumerable<CdsSyntaxItem> items)
-        {
-            var dict = new Dictionary<uint, (int, string)>();
-            CollectAnnotations(items, dict);
-            return dict;
-
-            static void CollectAnnotations(
-                IEnumerable<CdsSyntaxItem> src,
-                Dictionary<uint, (int, string)> d)
-            {
-                foreach (var item in src)
-                {
-                    switch (item)
-                    {
-                        case OperationSyntaxItem op:
-                            d.TryAdd(op.Address, (op.LineNumber, op.LineText));
-                            break;
-
-                        case HexCodeSyntaxItem hex:
-                            d.TryAdd(hex.Address, (hex.LineNumber, hex.LineText));
-                            break;
-
-                        case SetRegSyntaxItem sr:
-                            d.TryAdd(sr.LuiOp.Address, (sr.LineNumber, sr.LineText));
-                            d.TryAdd(sr.OriOp.Address, (sr.LineNumber, sr.LineText));
-                            break;
-
-                        case MemorySyntaxItem mem:
-                            foreach (var op in mem.Operations)
-                                d.TryAdd(op.Address, (mem.LineNumber, mem.LineText));
-                            break;
-
-                        case LoadMemorySyntaxItem load:
-                            d.TryAdd(load.Operation.Address, (load.LineNumber, load.LineText));
-                            break;
-
-                        case StoreMemorySyntaxItem store:
-                            d.TryAdd(store.Operation.Address, (store.LineNumber, store.LineText));
-                            break;
-
-                        case StringSyntaxItem str:
-                            foreach (var w in str.Words)
-                                d.TryAdd(w.Address, (str.LineNumber, str.LineText));
-                            break;
-
-                        case ScopeSyntaxItem scope:
-                            CollectAnnotations(scope.Body, d);
-                            break;
-                    }
-                }
-            }
         }
 
         /// <summary>
@@ -1282,14 +1209,6 @@ namespace CodeDesigner.Ps2.Bridge.Services
             {
                 return Responses.Error($"Disassemble error: {ex.Message}");
             }
-        }
-
-        /// <summary>Format a (address, word) pair as a GameShark type-2 code.</summary>
-        private static string FormatGameSharkCode(uint address, uint value)
-        {
-            // Type-2 prefix (0x20000000) ORed with the low 28 bits of the target address.
-            uint codeAddr = 0x20000000u | (address & 0x0FFFFFFFu);
-            return $"{codeAddr:X8} {value:X8}";
         }
 
         // ─── Data-format helpers ───────────────────────────────────────────────

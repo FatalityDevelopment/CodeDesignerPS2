@@ -26,6 +26,95 @@ namespace CodeDesigner.Ps2.CdsLanguage
         }
 
         /// <summary>
+        /// Compile the syntax-item tree into an ordered list of raw cheat code pairs
+        /// (the "cheat list" form shown to users, sent with APPLYCHEATS and fed to the
+        /// cheat engine):
+        /// <list type="bullet">
+        ///   <item>assembled words become 32-bit writes (<c>2AAAAAAA VVVVVVVV</c>);</item>
+        ///   <item>raw code lines (<see cref="RawCodeSyntaxItem"/>) pass through unchanged;</item>
+        ///   <item><c>freeze</c> becomes an 8/16/32-bit write code;</item>
+        ///   <item><c>cond mem[$A] == V</c> becomes two chained 16-bit multi-line
+        ///         conditionals (<c>E0nnVVVV 0AAAAAAA</c>) covering the low and high halves;</item>
+        ///   <item><c>timer N</c> becomes a CodeDesigner engine timer code
+        ///         (<c>Bnnnnnnn IIIIIIII</c>: n guarded lines, every I frames).</item>
+        /// </list>
+        /// Codes keep source order so a mixed listing reads top to bottom.
+        /// </summary>
+        public static List<CdsCode> CompileToCodes(IEnumerable<CdsSyntaxItem> items)
+        {
+            var result = new List<CdsCode>();
+            CollectCodes(items, result);
+            return result;
+        }
+
+        private static void CollectCodes(IEnumerable<CdsSyntaxItem> items, List<CdsCode> result)
+        {
+            var words = new List<(uint, uint)>();
+            foreach (var item in items)
+            {
+                switch (item)
+                {
+                    case RawCodeSyntaxItem raw:
+                        result.Add(new CdsCode(raw.CodeWord, raw.ValueWord, raw.LineNumber, raw.LineText));
+                        break;
+
+                    case FreezeSyntaxItem fr:
+                    {
+                        (uint type, uint mask) = fr.FreezeType switch
+                        {
+                            CdsFreezeType.Byte => (0x0u, 0xFFu),
+                            CdsFreezeType.Half => (0x1u, 0xFFFFu),
+                            _                  => (0x2u, 0xFFFFFFFFu),
+                        };
+                        result.Add(new CdsCode((type << 28) | (fr.Address & RawAddressMask), fr.Value & mask, fr.LineNumber, fr.LineText));
+                        break;
+                    }
+
+                    case CondSyntaxItem cd:
+                    {
+                        var body = new List<CdsCode>();
+                        CollectCodes(cd.Body, body);
+                        if (body.Count + 1 > 0xFF)
+                            throw new InvalidOperationException(
+                                $"cond block on line {cd.LineNumber} guards {body.Count} codes; at most 254 fit in a multi-line conditional.");
+                        uint addr = cd.Address & RawAddressMask;
+                        // Low half first: on mismatch it skips the high-half check plus the body.
+                        result.Add(new CdsCode(0xE0000000u | ((uint)(body.Count + 1) << 16) | (cd.ConditionValue & 0xFFFF),
+                                               addr, cd.LineNumber, cd.LineText));
+                        result.Add(new CdsCode(0xE0000000u | ((uint)body.Count << 16) | (cd.ConditionValue >> 16),
+                                               (addr + 2) & RawAddressMask, cd.LineNumber, cd.LineText));
+                        result.AddRange(body);
+                        break;
+                    }
+
+                    case TimerSyntaxItem timer:
+                    {
+                        var body = new List<CdsCode>();
+                        CollectCodes(timer.Body, body);
+                        result.Add(new CdsCode(0xB0000000u | ((uint)body.Count & 0x0FFFFFFF), timer.IntervalFrames,
+                                               timer.LineNumber, timer.LineText));
+                        result.AddRange(body);
+                        break;
+                    }
+
+                    case ScopeSyntaxItem scope:
+                        CollectCodes(scope.Body, result);
+                        break;
+
+                    default:
+                        words.Clear();
+                        Collect(new[] { item }, words);
+                        foreach (var (address, word) in words)
+                            result.Add(new CdsCode(0x20000000u | (address & 0x0FFFFFFFu), word, item.LineNumber, item.LineText));
+                        break;
+                }
+            }
+        }
+
+        /// <summary>Address bits a raw code carries for EE RAM (32 MB).</summary>
+        private const uint RawAddressMask = 0x01FFFFFF;
+
+        /// <summary>
         /// Extract all <em>sidecar</em> items from the syntax tree.
         /// Sidecar items (<see cref="AssertSyntaxItem"/>, <see cref="BreakpointSyntaxItem"/>,
         /// <see cref="WatchpointSyntaxItem"/>, <see cref="LogSyntaxItem"/>) do not emit MIPS code but carry instructions

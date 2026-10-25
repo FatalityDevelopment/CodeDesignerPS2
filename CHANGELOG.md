@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Cheats
+- **Cheat List** page: a cheat-device style manager per game. Tick cheats (raw codes or CDS), compile, **Send** once or through the cheat engine, and **Save .bin** as raw code pairs or a cheat-engine image. Hook/base settings and engine status sit in the bottom bar.
+- The sidebar's Cheats and CDS tabs are merged. The cheat source box takes raw codes and CDS together, with Compile, Send (Once / Engine), Save .bin and Add to list. **Use .cds file** keeps the old CDS tab's compile + Add Patch. The Tools **Cheats** button moved here.
+- Cheats come from the cheat archive (the cheat archive editor's lists) only — the CheatCodeArchive YAML loader is gone. The Cheats tab has a **List** picker for the game's cheat lists (remembered per game) and **Import from repository** when the game has none. The Cheat List page shows a list picked from a dropdown (e.g. r0001 / r0004), creates lists, imports from the repository, and **Save to list** writes edits back. Cheat Porter "Game cheats" works without PCSX2 and asks which list to use.
+- Repository imports attach to the game that already owns the disc's serial (so they appear with your own lists) instead of creating a duplicate game, move lists imported under such duplicates, and can import a single game (`CHEATEDITOR_IMPORT` with `GameSerial`).
+- The Cheats editor opens on the game being played.
+- CheatCodeArchive: the generated `consoles/` YAML + README tree and its generator scripts/workflow are removed; the `Database/*.CMP.txt` text files are the source, imported with the Cheats editor's Refresh/Import.
+- **Cheat Scanner** and **Cheat Converter** are standalone pages. The scanner adds Cheat Engine-style first/next scans and the strings/functions/pointers/floats/integers scans that were in the Label Manager.
+- CDS: raw code lines (`20123456 000003E8`) are valid source and pass through in order. `freeze`, `cond` and `timer` compile to codes (`cond` → chained `E0` conditionals, `timer` → `B` engine code).
+- Cheat engine reworked and tested on the EE interpreter: 16-byte table rows; full 25-bit addresses; 3/4/B/C/D/E code types; all used registers (128-bit, plus HI/LO) preserved; returns through a patched `j` instead of clobbering `v0`; hook points with branches are rejected. New Bridge commands `CHEATENGINESTATUS` and `BUILDCHEATENGINE`.
+
 ### Controller (joker maker)
 - **Build code** and **Play** modes. Build code toggles buttons into a combo without touching the game; Play sends held buttons and sticks to PCSX2 and releases them when you switch mode or close the page.
 - The joker address is found from the running game's cheats: D/E compare lines are ranked by address, the stored polarity (pressed = 0 or 1) is detected, and the combos already in use are listed and can be loaded. A custom address and a byte-swap option cover other games.

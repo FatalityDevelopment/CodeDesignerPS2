@@ -223,6 +223,11 @@ namespace CodeDesigner.Ps2.Bridge
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public List<SnapshotInfo>? Snapshots { get; set; }
 
+        // CDS cheat engine (INJECT / UPDATE / REMOVE / STATUS / BUILD)
+        /// <summary>Engine state; BUILDCHEATENGINE also returns the image (base64) in <see cref="Data"/>.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public CheatEngineInfo? CheatEngineState { get; set; }
+
         // GETGAMECHEATS results
         /// <summary>List of cheat entries returned by GETGAMECHEATS.</summary>
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
@@ -233,6 +238,15 @@ namespace CodeDesigner.Ps2.Bridge
         /// <summary>Cheat list title returned alongside cheats by GETGAMECHEATS.</summary>
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public string? CheatListTitle { get; set; }
+        /// <summary>GETGAMECHEATS: id of the cheat list whose cheats were returned.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public int? SelectedCheatListId { get; set; }
+        /// <summary>GETGAMECHEATS: archive game id (for the cheats editor).</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public int? ArchiveGameId { get; set; }
+        /// <summary>GETGAMECHEATS: every cheat list for the disc and its game, so a client can pick one.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public List<GameCheatListInfo>? GameCheatLists { get; set; }
 
         // QUERYDB results
         /// <summary>
@@ -442,6 +456,62 @@ namespace CodeDesigner.Ps2.Bridge
 
         [System.Text.Json.Serialization.JsonPropertyName("codes")]
         public List<string> Codes { get; set; } = [];
+
+        /// <summary>Section (folder) the cheat belongs to in its list.</summary>
+        [System.Text.Json.Serialization.JsonPropertyName("section")]
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? Section { get; set; }
+    }
+
+    /// <summary>One cheat list available for a game, returned by GETGAMECHEATS.</summary>
+    public class GameCheatListInfo
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("id")]
+        public int Id { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("title")]
+        public string Title { get; set; } = string.Empty;
+
+        [System.Text.Json.Serialization.JsonPropertyName("cheatCount")]
+        public int CheatCount { get; set; }
+
+        /// <summary>True when the list belongs to this exact disc (serial) rather than the game as a whole.</summary>
+        [System.Text.Json.Serialization.JsonPropertyName("forDisc")]
+        public bool ForDisc { get; set; }
+    }
+
+    /// <summary>Wire payload describing the CDS cheat engine (see <c>CdsCheatEngine</c>).</summary>
+    public class CheatEngineInfo
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("injected")]
+        public bool Injected { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("engineBase")]
+        public uint EngineBase { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("hookAddress")]
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public uint? HookAddress { get; set; }
+
+        /// <summary>Table rows written (or built).</summary>
+        [System.Text.Json.Serialization.JsonPropertyName("entries")]
+        public int Entries { get; set; }
+
+        /// <summary>Bytes occupied from <see cref="EngineBase"/> (code + data + table).</summary>
+        [System.Text.Json.Serialization.JsonPropertyName("imageSize")]
+        public int ImageSize { get; set; }
+
+        /// <summary>BUILDCHEATENGINE: the <c>j engine</c> word to place at the hook address.</summary>
+        [System.Text.Json.Serialization.JsonPropertyName("hookWord")]
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public uint? HookWord { get; set; }
+
+        /// <summary>BUILDCHEATENGINE: whether the hooked instructions were read live and embedded.</summary>
+        [System.Text.Json.Serialization.JsonPropertyName("hookEmbedded")]
+        public bool HookEmbedded { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("warnings")]
+        public List<string> Warnings { get; set; } = [];
     }
 
     /// <summary>Wire payload for a pad state snapshot returned by PADGETSTATE.</summary>

@@ -15,6 +15,11 @@ import { SnapshotManagerProvider, SnapshotDataDelegate } from '../snapshotManage
 import { DebugCommandsProvider } from '../debugCommands/debugCommandsProvider';
 import { DiffViewerProvider } from '../diffViewer/diffViewerProvider';
 import { CheatPorterProvider } from '../cheatPorter/cheatPorterProvider';
+import { CheatScannerProvider } from '../cheatScanner/cheatScannerProvider';
+import { CheatConverterProvider } from '../cheatConverter/cheatConverterProvider';
+import { CheatListProvider, CheatListGame } from '../cheatList/cheatListProvider';
+import { CheatListService, CheatListStore, CheatListItem, SendMode, BinaryKind, parseCheatText, newCheatId } from '../cheatList/cheatListService';
+import { findCheatArchiveRoot } from '../../utils/cheatArchive';
 import { MemoryRegion } from '../../shared/memoryRegions';
 import { JokerMakerProvider } from '../jokerMaker/jokerMakerProvider';
 import { CompatBrowserProvider } from '../compatBrowser/compatBrowserProvider';
@@ -186,13 +191,15 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private _pendingRunMode: 'emulator' | 'pcsx2' | null = null;
     /** True when the current connection is through the PCSX2 PINE bridge. */
     private _bridgeMode: boolean = false;
-    /** Archive cheats fetched from CheatCodeArchive for the current PCSX2 game. */
+    /** Cheats of the selected cheat-archive list for the current PCSX2 game. */
     private _archiveCheats: ArchiveCheat[] = [];
-    /** Cheat type string reported by the archive YAML (e.g. "CodeBreaker"). */
+    /** Title of the selected cheat list (e.g. "GSHI", "CodeBreaker"). */
     private _archiveCheatType: string = '';
     /** Serial + title the archive cheats were fetched for. */
     private _archiveSerial: string = '';
     private _archiveGame: string = '';
+    /** Serial read from the selected disc's SYSTEM.CNF (cached per path; no PCSX2 needed). */
+    private _selectedDiscSerial: { path: string; serial: string } | undefined;
     private _activeCdsFilePath: string = '';
     private _activeCdsContent: string = '';
     /** Sidecar commands (assert/breakpoint/watchpoint) from the most recent successful CDS compilation. */
@@ -308,7 +315,27 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         this._snapshotManagerProvider = new SnapshotManagerProvider(_extensionUri, delegate);
         this._diffViewerProvider      = new DiffViewerProvider(_extensionUri, delegate, socketClient);
         this._cheatPorterProvider     = new CheatPorterProvider(
-            _extensionUri, delegate, socketClient, () => this.getGameCheatsForPorter());
+            _extensionUri, delegate, socketClient, async () => (await this.getGameCheatsForCheatList()) ?? []);
+        this._cheatScannerProvider    = new CheatScannerProvider(_extensionUri, socketClient, editorProvider);
+        this._cheatConverterProvider  = new CheatConverterProvider(_extensionUri, socketClient);
+        this._cheatListService        = new CheatListService(socketClient, async () => this.getPointerLabels ? this.getPointerLabels() : []);
+        this._cheatListStore          = new CheatListStore(() => this._globalStoragePath);
+        this._cheatListProvider       = new CheatListProvider(_extensionUri, socketClient, this._cheatListService, this._cheatListStore, {
+            getGame:        () => this.cheatListGame(),
+            getSerial:        async () => (await this.getCurrentGameForCheats()).serial,
+            importRepository: serial => this.importCheatRepository(serial),
+            onListChanged:    () => { if (this._bridgeMode) { void this.handleFetchArchiveCheats(); } },
+            openTool:       tool => {
+                switch (tool) {
+                    case 'scanner':   this._cheatScannerProvider.open(); break;
+                    case 'converter': this._cheatConverterProvider.open(); break;
+                    case 'porter':    this._cheatPorterProvider.open(); break;
+                    case 'editor':    void vscode.commands.executeCommand('codedesigner.openCheatsEditor'); break;
+                }
+            },
+        });
+        // The Label Manager's memory scans now live on the Cheat Scanner page.
+        editorProvider.onOpenCheatScanner = () => this._cheatScannerProvider.open();
     }
 
     private readonly _mcpProgressReportEditorProvider: McpProgressReportEditorProvider;
@@ -319,6 +346,11 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private readonly _snapshotManagerProvider: SnapshotManagerProvider;
     private readonly _diffViewerProvider: DiffViewerProvider;
     private readonly _cheatPorterProvider: CheatPorterProvider;
+    private readonly _cheatScannerProvider: CheatScannerProvider;
+    private readonly _cheatConverterProvider: CheatConverterProvider;
+    private readonly _cheatListService: CheatListService;
+    private readonly _cheatListStore: CheatListStore;
+    private readonly _cheatListProvider: CheatListProvider;
 
     // Register the provider with VS Code
     public register(context: vscode.ExtensionContext) {
@@ -330,12 +362,6 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         // resolveWebviewView is called — e.g. when the socket auto-connects
         // at startup before the sidebar becomes visible.
         this.loadEmuSettings();
-
-        // Sync the CheatCodeArchive repo in the background so cheats are
-        // available without blocking the UI.
-        this._syncArchiveRepo().catch(err =>
-            getOutputChannel().warn(`CheatCodeArchive sync: ${err?.message ?? err}`)
-        );
 
         // Create the diagnostic collection for CDS compilation errors.
         // Adding it to context.subscriptions ensures it is disposed (and all
@@ -532,12 +558,31 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 case 'gameChanged':
                     await this.handleGameChanged(msg.gamePath ?? '');
                     this.saveUserPreferences();
+                    this._cheatListProvider.refresh();
                     break;
                 case 'applyCheats':
                     await this.handleApplyCheats(msg.cheatText ?? '');
                     break;
+                // ── Cheats tab: CDS cheat source → compile / send / save / list ──
+                case 'openCheatList':
+                    this._cheatListProvider.open();
+                    break;
+                case 'cheatsCompile':
+                case 'cheatsSend':
+                case 'cheatsSaveBin':
+                    await this.handleCheatsAction(msg.command, msg.source ?? '', msg.mode as SendMode, msg.kind as BinaryKind);
+                    break;
+                case 'cheatsAddToList':
+                    this.handleCheatsAddToList(msg.source ?? '');
+                    break;
                 case 'fetchArchiveCheats':
                     await this.handleFetchArchiveCheats();
+                    break;
+                case 'selectArchiveCheatList':
+                    await this.handleFetchArchiveCheats(msg.cheatListId as number);
+                    break;
+                case 'importCheatArchive':
+                    await this.handleImportCheatArchive();
                     break;
                 case 'toggleArchiveCheat':
                     await this.handleToggleArchiveCheat(msg.index as number, msg.enabled as boolean);
@@ -730,15 +775,15 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                     break;
                 // ── Cheat Code Converter ──────────────────────────────────
                 case 'openConverter':
-                    this.editorProvider.openConverterOverlay();
+                    this._cheatConverterProvider.open();
                     break;
                 // ── Cheat Code Porter ─────────────────────────────────────
                 case 'openPorter':
                     this._cheatPorterProvider.open();
                     break;
-                // ── Memory Scanner ────────────────────────────────────────
+                // ── Cheat Scanner ─────────────────────────────────────────
                 case 'openScanner':
-                    this.editorProvider.openScannerOverlay();
+                    this._cheatScannerProvider.open();
                     break;
                 // ── Follow-AI mode toggle ─────────────────────────────────
                 case 'toggleFollowAi': {
@@ -3421,6 +3466,164 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         }
     }
 
+    /**
+     * The game the Cheat List and Cheats tab work on. Keyed by the selected game first
+     * so the saved list doesn't move when the serial is resolved later (e.g. once PCSX2
+     * attaches); the serial is the key only when no game file is selected.
+     */
+    private cheatListGame(): CheatListGame {
+        const name = this.selectedGameName || this._currentGameSerial || '';
+        return { key: this.selectedGameName || this._currentGameSerial || 'no-game', name };
+    }
+
+    /**
+     * Cheats from the cheat archive for the Cheat List's "Game cheats" import and the
+     * Cheat Porter. Works without PCSX2 (the serial comes from the selected disc). When
+     * the game has several cheat lists, the user picks one; returns null on cancel.
+     */
+    private async getGameCheatsForCheatList(): Promise<Array<{ name: string; codes: string[] }> | null> {
+        if (!this.socketClient.isConnected()) { throw new Error('Not connected to the CodeDesigner bridge.'); }
+
+        const game = await this.getCurrentGameForCheats();
+        const serial = game.serial ?? '';
+        if (!serial) {
+            throw new Error(this.selectedGamePath
+                ? `Could not read the serial from ${path.basename(this.selectedGamePath)}.`
+                : 'Select a game in the Emulator tab first.');
+        }
+
+        const doc = this._cheatListStore.load(this.cheatListGame().key);
+        let result = await this.socketClient.getGameCheats(serial, doc.archiveCheatListId);
+        if (result.lists.length === 0) {
+            throw new Error(`The cheat archive has no cheat lists for ${serial}. Create one in the cheat archive editor, ` +
+                'or use "Import from repository" in the Cheats tab to import the game\'s cheats from the cheat repository.');
+        }
+        if (result.lists.length > 1) {
+            const pick = await vscode.window.showQuickPick(
+                result.lists.map(l => ({
+                    label:       l.title,
+                    description: `${l.cheatCount} cheat${l.cheatCount === 1 ? '' : 's'}${l.forDisc ? '' : ' · whole game'}`,
+                    picked:      l.id === result.cheatListId,
+                    id:          l.id,
+                })),
+                { title: `Cheat list for ${result.gameTitle ?? game.title ?? serial}`, placeHolder: 'Pick the cheat list to import' },
+            );
+            if (!pick) { return null; }
+            if (pick.id !== result.cheatListId) { result = await this.socketClient.getGameCheats(serial, pick.id); }
+        }
+        return result.cheats.map(c => ({ name: c.name, codes: c.codes }));
+    }
+
+    /**
+     * The game being played, for cheat features: the PCSX2 game when the bridge runs
+     * PCSX2, otherwise the selected disc (serial read from its SYSTEM.CNF, cached).
+     */
+    public async getCurrentGameForCheats(): Promise<{ serial?: string; title?: string }> {
+        if (this._bridgeMode && this.socketClient.isConnected()) {
+            try {
+                const info = await this.socketClient.getPcsx2GameInfo();
+                const serial = (info.ID ?? '').replace(/\0/g, '').trim();
+                const title  = (info.Title ?? '').replace(/\0/g, '').trim();
+                if (serial) { return { serial: serial.toUpperCase(), title: title || this.selectedGameName }; }
+            } catch { /* fall back to the selected disc */ }
+        }
+        if (this._currentGameSerial) { return { serial: this._currentGameSerial, title: this.selectedGameName }; }
+        if (!this.selectedGamePath) { return {}; }
+        if (this._selectedDiscSerial?.path !== this.selectedGamePath) {
+            const serial = await this._resolveSerialForGamePath(this.resolvePath(this.selectedGamePath));
+            if (!serial) { return { title: this.selectedGameName }; }
+            this._selectedDiscSerial = { path: this.selectedGamePath, serial };
+        }
+        return { serial: this._selectedDiscSerial.serial, title: this.selectedGameName };
+    }
+
+    /** A synced CheatCodeArchive clone (cloned on first use) for importing its text files. */
+    public async getArchiveCloneRoot(): Promise<string | undefined> {
+        if (!this._globalStoragePath) { return undefined; }
+        await this._syncArchiveRepo();
+        const root = path.join(this._globalStoragePath, 'CheatCodeArchive');
+        return fs.existsSync(path.join(root, 'Database')) ? root : undefined;
+    }
+
+    /**
+     * Import one game's cheats from the cheat repository (CheatCodeArchive `Database/`
+     * text files) into cheat lists in the cheat archive, attached to the game that owns
+     * the serial. Uses the workspace checkout, else the extension's synced clone.
+     */
+    private async importCheatRepository(serial: string): Promise<string> {
+        const root = (await findCheatArchiveRoot(this._extensionUri)) ?? (await this.getArchiveCloneRoot());
+        if (!root) { throw new Error('No cheat repository (CheatCodeArchive with a Database folder) was found.'); }
+        const message = await vscode.window.withProgress(
+            { location: vscode.ProgressLocation.Notification, title: `Importing ${serial} from the cheat repository…` },
+            () => this.socketClient.cheatEditorImport(root, serial));
+        getOutputChannel().info(`[Cheats] ${message}`);
+        return message;
+    }
+
+    /** Sidebar "Import from repository": import the running game's cheats, then reload. */
+    private async handleImportCheatArchive(): Promise<void> {
+        try {
+            this.webview?.postMessage({ command: 'archiveCheatsLoading' });
+            const serial = (await this.getCurrentGameForCheats()).serial;
+            if (!serial) { throw new Error('No game serial available (is a game running?).'); }
+            await this.importCheatRepository(serial);
+            await this.handleFetchArchiveCheats();
+            this._cheatListProvider.refresh();
+        } catch (err: any) {
+            this.webview?.postMessage({ command: 'archiveCheatsError', error: `Import failed: ${err?.message ?? err}` });
+        }
+    }
+
+    /**
+     * Cheats tab Compile / Send / Save .bin: the textarea is CDS cheat source (raw codes,
+     * assembly, freeze/cond/timer; `#Name` lines separate cheats). Shares the engine hook
+     * settings with the Cheat List page and asks for a hook address when none is saved.
+     */
+    private async handleCheatsAction(command: string, source: string, mode: SendMode, kind: BinaryKind): Promise<void> {
+        const post = (result: Record<string, unknown>) => this.webview?.postMessage({ command: 'cheatsResult', action: command, ...result });
+        try {
+            const items: CheatListItem[] = parseCheatText(source).map(c => ({ id: newCheatId(), name: c.name, enabled: true, source: c.source }));
+            const compiled = await this._cheatListService.compile(items);
+            const errors = compiled.cheats.flatMap(c => c.errors.map(e => `${c.name} line ${e.line}: ${e.message}`));
+            post({ success: errors.length === 0, phase: 'compiled', codes: compiled.text, errors });
+            if (command === 'cheatsCompile' || errors.length > 0) { return; }
+
+            const game = this.cheatListGame();
+            const doc = this._cheatListStore.load(game.key);
+            const needsHook = (command === 'cheatsSend' && mode === 'engine') || (command === 'cheatsSaveBin' && kind === 'engine');
+            if (needsHook && doc.hookAddress === undefined) {
+                const text = await vscode.window.showInputBox({
+                    title: 'Cheat engine hook address',
+                    prompt: 'An instruction pair that runs every frame (no branches, or jr ra + its delay slot). Saved for this game.',
+                    placeHolder: '0012A4F0',
+                    validateInput: v => /^\s*(0x)?[0-9a-f]{1,8}\s*$/i.test(v) ? undefined : 'Enter a hex address',
+                });
+                if (text === undefined) { post({ success: false, phase: 'done', message: 'Cancelled — no hook address.' }); return; }
+                doc.hookAddress = parseInt(text.trim().replace(/^0x/i, ''), 16) >>> 0;
+                this._cheatListStore.update(game.key, { hookAddress: doc.hookAddress });
+            }
+
+            const message = command === 'cheatsSend'
+                ? await this._cheatListService.send(compiled, mode, doc)
+                : await this._cheatListService.saveBinary(compiled, kind, doc, game.name);
+            if (message) { post({ success: true, phase: 'done', message }); }
+            if (command === 'cheatsSend' && mode === 'engine') { this._cheatListProvider.refresh(); }
+        } catch (err: any) {
+            const message = err?.message ?? String(err);
+            getOutputChannel().error(`[Cheats] ${message}`);
+            post({ success: false, phase: 'done', message });
+        }
+    }
+
+    /** Hand the Cheats tab source to the Cheat List page's open list (unsaved until Save to list). */
+    private handleCheatsAddToList(source: string): void {
+        const added = parseCheatText(source).map(c => ({ id: newCheatId(), name: c.name, enabled: true, source: c.source }));
+        if (added.length === 0) { return; }
+        this._cheatListProvider.addCheats(added);
+        this.webview?.postMessage({ command: 'cheatsResult', action: 'cheatsAddToList', success: true, phase: 'done',
+            message: `Added ${added.length} cheat(s) to the Cheat List — Save to list there to keep them.` });
+    }
+
     // ── Archive cheat constants ───────────────────────────────────────────────
     /** Code-type byte for GameShark/CodeBreaker Joker (conditional) addresses. */
     private static readonly CHEAT_TYPE_JOKER   = 0xD0;
@@ -3506,18 +3709,6 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     }
 
     /**
-     * The current game's archive cheats for the Cheat Porter, fetched on demand
-     * when the Cheats tab has not loaded them yet.
-     */
-    private async getGameCheatsForPorter(): Promise<Array<{ name: string; codes: string[] }>> {
-        if (this._archiveCheats.length === 0) {
-            if (!this._bridgeMode) { throw new Error('Game cheats need the PCSX2 bridge.'); }
-            await this.handleFetchArchiveCheats();
-        }
-        return this._archiveCheats.map(c => ({ name: c.name, codes: c.codes }));
-    }
-
-    /**
      * The running game's archive cheats for the Controller page's joker
      * detection. Re-fetches when the game in PCSX2 changed since the last load.
      */
@@ -3537,10 +3728,11 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     }
 
     /**
-     * Fetch archive cheats from CheatCodeArchive for the currently running PCSX2
-     * game, then broadcast them to the webview and update the label overlays.
+     * Load the running PCSX2 game's cheats from the cheat archive (database), from
+     * `cheatListId` or else the list chosen for this game before, then broadcast
+     * them with the game's available lists and update the label overlays.
      */
-    private async handleFetchArchiveCheats(): Promise<void> {
+    private async handleFetchArchiveCheats(cheatListId?: number): Promise<void> {
         if (!this._bridgeMode) { return; }
 
         const out = getOutputChannel();
@@ -3571,65 +3763,41 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         this._archiveGame   = gameTitle;
 
         try {
-            // ── 1. Try the database first ──────────────────────────────────────
-            let dbResult: Awaited<ReturnType<typeof this.socketClient.getGameCheats>> | null = null;
-            try {
-                dbResult = await this.socketClient.getGameCheats(serial);
-            } catch (dbErr: any) {
-                out.warn(`Archive cheats: DB query failed — ${dbErr?.message ?? dbErr}`);
+            // The list chosen for this game is remembered with its Cheat List document.
+            const gameKey = this.cheatListGame().key;
+            const doc = this._cheatListStore.load(gameKey);
+            const result = await this.socketClient.getGameCheats(serial, cheatListId ?? doc.archiveCheatListId);
+            if (cheatListId !== undefined && result.cheatListId === cheatListId) {
+                this._cheatListStore.update(gameKey, { archiveCheatListId: cheatListId });
+                // The Cheat List page shows the same list.
+                this._cheatListProvider.refresh();
             }
 
-            if (dbResult && dbResult.cheats.length > 0) {
-                const displayTitle = dbResult.gameTitle || gameTitle;
-                this._archiveCheats = dbResult.cheats.map(c => ({
-                    name:    c.name,
-                    author:  c.author,
-                    notes:   c.notes,
-                    codes:   c.codes,
-                    enabled: false,
-                }));
-                this._archiveCheatType = dbResult.cheatListTitle ?? '';
-                this._archiveGame      = displayTitle;
+            const displayTitle = result.gameTitle || gameTitle;
+            this._archiveCheats = result.cheats.map(c => ({
+                name:    c.name,
+                author:  c.author,
+                notes:   c.notes,
+                codes:   c.codes,
+                enabled: false,
+            }));
+            this._archiveCheatType = result.cheatListTitle ?? '';
+            this._archiveGame      = displayTitle;
 
-                out.info(`Archive cheats: loaded ${this._archiveCheats.length} cheats from database for "${displayTitle}".`);
-                this.webview?.postMessage({
-                    command:   'archiveCheatsLoaded',
-                    cheats:    this._archiveCheats,
-                    game:      displayTitle,
-                    serial,
-                    cheatType: this._archiveCheatType,
-                });
-
-                this.editorProvider.setArchiveLabels(this._buildArchiveLabels());
-                return;
-            }
-
-            // ── 2. Fall back to local YAML archive ────────────────────────────
-            out.info(`Archive cheats: no DB results for "${serial}", trying local YAML archive…`);
-            const result = await this._fetchArchiveForSerial(serial);
-            if (!result) {
-                out.warn(`Archive cheats: no entry found for serial "${serial}".`);
-                this._archiveCheats    = [];
-                this._archiveCheatType = '';
-                this.webview?.postMessage({ command: 'archiveCheatsLoaded', cheats: [], game: gameTitle, serial });
-                return;
-            }
-
-            this._archiveCheats    = result.cheats;
-            this._archiveCheatType = result.cheatType;
-            this._archiveGame      = result.game || gameTitle;
-
-            out.info(`Archive cheats: loaded ${result.cheats.length} cheats from YAML for "${result.game}".`);
+            out.info(result.lists.length > 0
+                ? `Archive cheats: loaded ${this._archiveCheats.length} cheats from "${this._archiveCheatType}" for "${displayTitle}".`
+                : `Archive cheats: the cheat archive has no lists for "${serial}".`);
             this.webview?.postMessage({
-                command:   'archiveCheatsLoaded',
-                cheats:    this._archiveCheats,
-                game:      result.game || gameTitle,
+                command:     'archiveCheatsLoaded',
+                cheats:      this._archiveCheats,
+                game:        displayTitle,
                 serial,
-                cheatType: result.cheatType,
+                cheatType:   this._archiveCheatType,
+                lists:       result.lists,
+                cheatListId: result.cheatListId,
             });
 
-            // Broadcast labels for all archive cheats immediately — labels are
-            // always shown regardless of whether the cheat is toggled on.
+            // Labels are shown for every archive cheat, whether or not it is toggled on.
             this.editorProvider.setArchiveLabels(this._buildArchiveLabels());
         } catch (err: any) {
             out.error(`Archive cheats fetch error: ${err?.message ?? err}`);
@@ -3729,8 +3897,10 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     /**
      * Clone TylerDev888/CheatCodeArchive (branch: main) into the extension's
      * global storage the first time it is called; on subsequent calls it pulls
-     * the latest changes.  Returns the shared in-flight promise if a sync is
-     * already running so concurrent callers do not start duplicate operations.
+     * the latest changes. Used as the import source for the cheat archive when
+     * no CheatCodeArchive checkout is open in the workspace. Returns the shared
+     * in-flight promise if a sync is already running so concurrent callers do
+     * not start duplicate operations.
      */
     private _syncArchiveRepo(): Promise<void> {
         if (this._archiveSyncPromise) {
@@ -3762,119 +3932,6 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         });
 
         return this._archiveSyncPromise;
-    }
-
-    /**
-     * Recursively walk `dir` looking for a `cheats.yaml` file that contains
-     * the given PS2 serial as an exact token (not a substring of a longer
-     * serial).  Returns the full path of the first match, or null if none found.
-     */
-    private async _findCheatFile(dir: string, serial: string): Promise<string | null> {
-        // Build a pattern that matches the serial only as a standalone value —
-        // not as a prefix/suffix of a longer serial like 'SLUS-123456'.
-        const escapedSerial = serial.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const serialRe = new RegExp(`(?<![A-Z0-9-])${escapedSerial}(?![A-Z0-9-])`, 'i');
-
-        let entries: fs.Dirent[];
-        try {
-            entries = await fs.promises.readdir(dir, { withFileTypes: true });
-        } catch {
-            return null;
-        }
-
-        for (const entry of entries) {
-            // Skip hidden directories (e.g. .git)
-            if (entry.name.startsWith('.')) { continue; }
-
-            const full = path.join(dir, entry.name);
-            if (entry.isDirectory()) {
-                const sub = await this._findCheatFile(full, serial);
-                if (sub) { return sub; }
-            } else if (entry.name === 'cheats.yaml') {
-                try {
-                    const content = await fs.promises.readFile(full, 'utf-8');
-                    if (serialRe.test(content)) { return full; }
-                } catch {
-                    /* skip unreadable files */
-                }
-            }
-        }
-        return null;
-    }
-
-    /**
-     * Fetch the cheats.yaml from the local CheatCodeArchive clone for the given
-     * PS2 serial.  If the archive has not been cloned yet it is cloned now.
-     * Returns null when no matching file is found.
-     */
-    private async _fetchArchiveForSerial(serial: string): Promise<{
-        game: string; cheatType: string; cheats: ArchiveCheat[];
-    } | null> {
-        const archiveDir = path.join(this._globalStoragePath, 'CheatCodeArchive');
-
-        // Clone on demand if the background sync hasn't finished yet (or failed).
-        if (!fs.existsSync(path.join(archiveDir, '.git'))) {
-            await this._syncArchiveRepo();
-        }
-
-        const yamlPath = await this._findCheatFile(archiveDir, serial);
-        if (!yamlPath) { return null; }
-
-        const yaml = await fs.promises.readFile(yamlPath, 'utf-8');
-        return DisasmPanelProvider._parseArchiveYaml(yaml);
-    }
-
-    /**
-     * Minimal YAML parser for the specific structure used by CheatCodeArchive.
-     * Handles the top-level scalar fields and the `cheats` list.
-     */
-    private static _parseArchiveYaml(yaml: string): {
-        game: string; cheatType: string; cheats: ArchiveCheat[];
-    } {
-        const field = (key: string): string => {
-            const m = new RegExp(`^${key}:\\s*"([^"]*)"`, 'm').exec(yaml);
-            return m?.[1] ?? '';
-        };
-
-        const game      = field('game');
-        const cheatType = field('cheat_type');
-
-        // Split the cheats block into individual entries.
-        const cheatsSectionIdx = yaml.indexOf('\ncheats:');
-        if (cheatsSectionIdx === -1) {
-            return { game, cheatType, cheats: [] };
-        }
-        const cheatsSection = yaml.substring(cheatsSectionIdx);
-
-        const entryRe = /\n  - name:\s*"([^"]+)"/g;
-        const entries: Array<{ name: string; start: number }> = [];
-        let m: RegExpExecArray | null;
-        while ((m = entryRe.exec(cheatsSection)) !== null) {
-            entries.push({ name: m[1], start: m.index });
-        }
-
-        const cheats: ArchiveCheat[] = [];
-        for (let i = 0; i < entries.length; i++) {
-            const start   = entries[i].start;
-            const end     = i + 1 < entries.length ? entries[i + 1].start : cheatsSection.length;
-            const block   = cheatsSection.substring(start, end);
-
-            const author  = /\n    author:\s*"([^"]*)"/.exec(block)?.[1];
-            const notes   = /\n    notes:\s*"([^"]*)"/.exec(block)?.[1];
-
-            const codes: string[] = [];
-            const codeRe = /\n      - "([^"]+)"/g;
-            let cm: RegExpExecArray | null;
-            while ((cm = codeRe.exec(block)) !== null) {
-                codes.push(cm[1]);
-            }
-
-            if (codes.length > 0) {
-                cheats.push({ name: entries[i].name, author, notes, codes, enabled: false });
-            }
-        }
-
-        return { game, cheatType, cheats };
     }
 
     /**

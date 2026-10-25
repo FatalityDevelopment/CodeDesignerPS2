@@ -78,6 +78,9 @@ interface CommandMessage {
     MemberName?: string;
     // READMEMREGION fields
     SearchPattern?: number[];
+    // CDS cheat engine (INJECTCHEATENGINE / BUILDCHEATENGINE)
+    HookAddress?: number;
+    EngineBase?: number;
     // PINEADDWATCH / PINEREMOVEWATCH / PINELISTWATCHES fields
     /** CPU selector: 0 = EE, 1 = IOP, 0xFF = both. */
     CpuSel?: number;
@@ -611,6 +614,11 @@ interface CommandResponse {
     // GETGAMECHEATS results
     GameCheats?: GameCheatInfo[];
     GameTitle?: string;
+    SelectedCheatListId?: number;
+    ArchiveGameId?: number;
+    GameCheatLists?: GameCheatListInfo[];
+    // CDS cheat engine (INJECT / UPDATE / REMOVE / STATUS / BUILD CHEATENGINE)
+    CheatEngineState?: CheatEngineInfo;
     // COMPAT_LIST results
     CompatGames?: CompatGameInfo[];
     // COMPAT_DETAILS result
@@ -650,10 +658,39 @@ interface CommandResponse {
  * A single cheat entry returned by GETGAMECHEATS.
  */
 export interface GameCheatInfo {
-    name:    string;
-    author?: string;
-    notes?:  string;
-    codes:   string[];
+    name:     string;
+    author?:  string;
+    notes?:   string;
+    codes:    string[];
+    /** Section (folder) within its cheat list. */
+    section?: string;
+}
+
+/** One of a game's cheat lists in the cheat archive (GETGAMECHEATS). */
+export interface GameCheatListInfo {
+    id:         number;
+    title:      string;
+    cheatCount: number;
+    /** The list belongs to this exact disc (serial) rather than the game as a whole. */
+    forDisc:    boolean;
+}
+
+/**
+ * State of the bridge's CDS cheat engine (CheatEngineInfo in CommandResponse.cs).
+ */
+export interface CheatEngineInfo {
+    injected:     boolean;
+    engineBase:   number;
+    hookAddress?: number;
+    /** Table rows written or built. */
+    entries:      number;
+    /** Bytes occupied from engineBase (code + data + table). */
+    imageSize:    number;
+    /** BUILDCHEATENGINE: the `j engine` word to place at the hook address. */
+    hookWord?:    number;
+    /** BUILDCHEATENGINE: whether the hooked instructions were read live and embedded. */
+    hookEmbedded?: boolean;
+    warnings:     string[];
 }
 
 /**
@@ -1966,6 +2003,7 @@ export class SocketClient {
      * @param end            - Exclusive end virtual EE address (must be > start).
      * @param searchPattern  - Optional byte pattern to search for.
      * @param region         - "ee" (default) or "iop".
+     * @param timeoutMs      - Socket timeout; raise it for multi-megabyte reads.
      * @returns              - Hex-string of all bytes and list of absolute match addresses.
      */
     public async readMemoryRegion(
@@ -1973,6 +2011,7 @@ export class SocketClient {
         end: number,
         searchPattern?: number[],
         region: string = 'ee',
+        timeoutMs: number = 10000,
     ): Promise<{ bytes: string; matches: number[] }> {
         const command: CommandMessage = {
             Command: 'READMEMREGION',
@@ -1981,7 +2020,7 @@ export class SocketClient {
             SearchPattern: searchPattern,
             Region: region,
         };
-        const response = await this.sendCommand(command);
+        const response = await this.sendCommand(command, timeoutMs);
         if (!response.Success) {
             throw new Error(response.Error || 'ReadMemRegion failed');
         }
@@ -1989,6 +2028,29 @@ export class SocketClient {
             bytes:   response.Data ?? '',
             matches: response.MatchAddresses ?? [],
         };
+    }
+
+    /**
+     * Search live memory for a byte pattern without transferring the bytes (SCANPATTERN).
+     * @param start    Inclusive start address.
+     * @param end      Exclusive end address (max 32 MB span).
+     * @param pattern  Byte values 0–255; -1 is a wildcard.
+     * @param region   "ee" (default) or "iop".
+     * @returns        Absolute addresses of every match.
+     */
+    public async scanPattern(start: number, end: number, pattern: number[], region: string = 'ee'): Promise<number[]> {
+        const command: CommandMessage = {
+            Command:       'SCANPATTERN',
+            Address:       start,
+            EndAddress:    end,
+            SearchPattern: pattern,
+            Region:        region,
+        };
+        const response = await this.sendCommand(command, 120000);
+        if (!response.Success) {
+            throw new Error(response.Error || 'ScanPattern failed');
+        }
+        return response.MatchAddresses ?? [];
     }
 
     // ── PINE hardware watchpoints ──────────────────────────────────────────────
@@ -3085,19 +3147,88 @@ export class SocketClient {
     }
 
     /**
-     * GETGAMECHEATS — fetch cheat entries for a game by its PS2 serial from the database.
-     * Returns the list of cheats and the game/list titles; returns an empty array when
-     * no cheats are found for the given serial.
-     * @param serial  PS2 disc serial, e.g. "SCUS-97275".
+     * INJECTCHEATENGINE — write the persistent cheat engine and hook it at `hookAddress`
+     * so `cheatText` (raw codes) is re-applied every time the hook runs. A previous
+     * injection is removed first.
      */
-    public async getGameCheats(serial: string): Promise<{
+    public async injectCheatEngine(cheatText: string, hookAddress: number, engineBase?: number): Promise<CheatEngineInfo> {
+        const response = await this.sendCommand({
+            Command:     'INJECTCHEATENGINE',
+            Data:        cheatText,
+            HookAddress: hookAddress >>> 0,
+            EngineBase:  engineBase !== undefined ? engineBase >>> 0 : undefined,
+        }, 60000);
+        if (!response.Success || !response.CheatEngineState) {
+            throw new Error(response.Error || 'InjectCheatEngine failed');
+        }
+        return response.CheatEngineState;
+    }
+
+    /** UPDATECHEATENGINE — replace the injected engine's table without re-hooking. */
+    public async updateCheatEngine(cheatText: string): Promise<CheatEngineInfo> {
+        const response = await this.sendCommand({ Command: 'UPDATECHEATENGINE', Data: cheatText }, 60000);
+        if (!response.Success || !response.CheatEngineState) {
+            throw new Error(response.Error || 'UpdateCheatEngine failed');
+        }
+        return response.CheatEngineState;
+    }
+
+    /** REMOVECHEATENGINE — restore the hooked instructions. */
+    public async removeCheatEngine(): Promise<CheatEngineInfo> {
+        const response = await this.sendCommand({ Command: 'REMOVECHEATENGINE' });
+        if (!response.Success || !response.CheatEngineState) {
+            throw new Error(response.Error || 'RemoveCheatEngine failed');
+        }
+        return response.CheatEngineState;
+    }
+
+    /** CHEATENGINESTATUS — whether the engine is injected, and where. */
+    public async cheatEngineStatus(): Promise<CheatEngineInfo> {
+        const response = await this.sendCommand({ Command: 'CHEATENGINESTATUS' });
+        if (!response.Success || !response.CheatEngineState) {
+            throw new Error(response.Error || 'CheatEngineStatus failed');
+        }
+        return response.CheatEngineState;
+    }
+
+    /**
+     * BUILDCHEATENGINE — build the engine image (code + data + table) for export
+     * without writing memory. With `hookAddress` and a live backend, the hooked
+     * instructions are embedded.
+     */
+    public async buildCheatEngine(cheatText: string, hookAddress?: number, engineBase?: number): Promise<{ image: Buffer; info: CheatEngineInfo }> {
+        const response = await this.sendCommand({
+            Command:     'BUILDCHEATENGINE',
+            Data:        cheatText,
+            HookAddress: hookAddress !== undefined ? hookAddress >>> 0 : undefined,
+            EngineBase:  engineBase !== undefined ? engineBase >>> 0 : undefined,
+        }, 60000);
+        if (!response.Success || !response.CheatEngineState || !response.Data) {
+            throw new Error(response.Error || 'BuildCheatEngine failed');
+        }
+        return { image: Buffer.from(response.Data, 'base64'), info: response.CheatEngineState };
+    }
+
+    /**
+     * GETGAMECHEATS — the cheat archive's cheats for a game by its PS2 serial.
+     * Returns every cheat list for the disc and its game, plus the cheats of
+     * `cheatListId` (or of the first non-empty list). Empty when the archive has
+     * nothing for the serial.
+     * @param serial       PS2 disc serial, e.g. "SCUS-97275".
+     * @param cheatListId  Which of the game's cheat lists to return.
+     */
+    public async getGameCheats(serial: string, cheatListId?: number): Promise<{
         cheats: GameCheatInfo[];
         gameTitle: string | null;
         cheatListTitle: string | null;
+        cheatListId: number | null;
+        gameId: number | null;
+        lists: GameCheatListInfo[];
     }> {
         const response = await this.sendCommand({
-            Command:    'GETGAMECHEATS',
-            GameSerial: serial,
+            Command:     'GETGAMECHEATS',
+            GameSerial:  serial,
+            CheatListId: cheatListId,
         });
         if (!response.Success) {
             throw new Error(response.Error || 'GETGAMECHEATS failed');
@@ -3106,6 +3237,9 @@ export class SocketClient {
             cheats:         (response.GameCheats ?? []) as GameCheatInfo[],
             gameTitle:      response.GameTitle      ?? null,
             cheatListTitle: response.CheatListTitle ?? null,
+            cheatListId:    response.SelectedCheatListId ?? null,
+            gameId:         response.ArchiveGameId ?? null,
+            lists:          response.GameCheatLists ?? [],
         };
     }
 
@@ -4251,10 +4385,13 @@ export class SocketClient {
         if (!response.Success) { throw new Error(response.Error || 'CHEATEDITOR_DELETE failed'); }
     }
 
-    /** CHEATEDITOR_IMPORT — runs the bulk cheat importer against an archive folder. */
-    public async cheatEditorImport(archiveRoot: string): Promise<string> {
+    /**
+     * CHEATEDITOR_IMPORT — imports the cheat repository's text files into cheat lists.
+     * With `gameSerial`, only that game's files are imported.
+     */
+    public async cheatEditorImport(archiveRoot: string, gameSerial?: string): Promise<string> {
         const response = await this.sendCommand(
-            { Command: 'CHEATEDITOR_IMPORT', FilePath: archiveRoot }, 3600000);
+            { Command: 'CHEATEDITOR_IMPORT', FilePath: archiveRoot, GameSerial: gameSerial }, 3600000);
         if (!response.Success) { throw new Error(response.Error || 'CHEATEDITOR_IMPORT failed'); }
         return response.Message ?? 'Import complete.';
     }

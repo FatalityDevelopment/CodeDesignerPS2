@@ -32,7 +32,7 @@ The sidebar has four tabs, plus an MCP button that starts the AI server. Pause, 
 | **Connection** | Emulator, BIOS and disc paths; **Run** / **Kill**. |
 | **Actions** | **Restart**, **Import** (load a binary patch), **Snapshot**, **Preview**, **Docs**, **Archive** (cheat archive). |
 | **Network** | **Start Servers** (the SOCOM II online servers), **Packets**, **Config** (server `config.json`), **Debug** (script commands). |
-| **Tools** | AI, Labels, Mem Card, HDD, Snapshots, Diff, Porter, Games, Cheats. |
+| **Tools** | AI, Labels, Mem Card, HDD, Snapshots, Diff, Porter, Games. |
 | **Assets** | Viewer, Models, Maps, Animations. |
 | **Agents / Orchestration** | The AI agent personas and plans, with the lead agent and the active plan. |
 | **Memories** | Progress reports saved by AI sessions. |
@@ -42,11 +42,9 @@ Below these are the navigation history and the label list.
 
 ### Cheats tab
 
-Known codes for the running game, pulled from the database or the CheatCodeArchive, each with a toggle; **Apply All Enabled** writes them. A text box takes your own GameShark codes (**Update** applies them). **Cheat Tools** opens the Converter, the Memory Scanner and the [Cheat Porter](#cheat-porter). See [Cheat Engine](cheat-engine.md).
+**Cheat Tools** opens the Cheat List page, the cheat archive editor, the Cheat Scanner, the Converter and the [Cheat Porter](#cheat-porter). The running game's cheats from the chosen cheat archive list (**List** dropdown) each have a toggle; **Apply All Enabled** writes them, and **Import from repository** imports the game's cheats from the cheat repository when it has no lists.
 
-### CDS tab
-
-Compiles the open `.cds` file and shows the generated GameShark codes. **Add Cheat** sends them to the Cheats tab and **Add Patch** writes the patch. `.cds` files also get syntax highlighting, snippets and a compile button in the editor title bar, with output in the *CodeDesigner - CDS Compiler* channel. See [CDS Language](cds-language.md).
+The **cheat source** box takes raw codes and [CDS](cds-language.md) together. **Compile** shows the resulting codes, **Send** writes them once or through the cheat engine, **Save .bin** writes a raw code-pair or cheat-engine binary, and **Add to list** copies them into the Cheat List. **Use .cds file** compiles the open `.cds` file (with **Add Patch** for its sidecars), replacing the old CDS tab. `.cds` files also get syntax highlighting, snippets and a compile button in the editor title bar, with output in the *CodeDesigner - CDS Compiler* channel. See [Cheat Engine](cheat-engine.md).
 
 ### Recompile tab
 
@@ -93,6 +91,10 @@ Runs your own script commands from `Mods/debug-commands.json` (a local, untracke
 ---
 
 ## Cheats and patching
+
+### Cheat List
+
+A cheat-device style view of one of the game's cheat archive lists (picked from a dropdown; the same lists the cheat archive editor edits): tick cheats — raw codes or CDS — then compile and send them once or through the cheat engine (hook, base and status in the bottom bar), or save a raw code-pair or engine-image `.bin`. **Save to list** writes edits back to the list. See [Cheat Engine](cheat-engine.md#the-cheat-list-page).
 
 ### Cheats editor
 

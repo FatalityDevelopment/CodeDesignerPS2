@@ -8,14 +8,13 @@ The compiler lives in `CodeDesigner.Ps2.CdsLanguage` (`CdsPreprocessor` → `Cds
 
 ---
 
-## The CDS tab
+## Compiling CDS
 
-The **CDS** tab in the CodeDesigner sidebar is where you compile your `.cds` files:
+CDS compiles in three places:
 
-1. Open a `.cds` file in VS Code (or create a new one with the `.cds` extension).
-2. Write your script.
-3. Click **Compile** — the generated GameShark codes appear in the output box.
-4. Click **Add Patch** to apply the codes to the running emulator, or **Add Cheat** to copy them to the Cheats tab.
+- **A `.cds` file** — open it in VS Code and use the editor's Run action, or **Use .cds file** in the sidebar's Cheats tab. The generated codes appear in the tab with **Add Patch** (apply them to the running emulator, installing the file's sidecars) and **To source**.
+- **The Cheats tab's cheat source** box — CDS and raw codes together, `#Name` lines separating cheats. See [Cheat Engine](cheat-engine.md#cheat-source).
+- **The Cheat List page** — each cheat is its own CDS source. See [Cheat Engine](cheat-engine.md#the-cheat-list-page).
 
 Errors and warnings are reported per line with a stable code (`CDS0014`, …) so they show up in the Problems panel. A line with an error never aborts the compile: the line is skipped (or assembled as a zero word) and the rest of the file is still checked.
 
@@ -100,6 +99,14 @@ hexcode $DEADBEEF
 ```
 
 Emits a raw 32-bit word at the current address.
+
+### Raw codes
+
+```cds
+20123456 000003E8
+```
+
+A line of two 8-digit hex words is a raw cheat code. It passes through to the output unchanged, in source order, and takes no address space (the current address does not move), so raw codes and assembly can be mixed freely. Use `hexcode` instead when you mean a word at the current address.
 
 ### `string`
 
@@ -209,7 +216,7 @@ cond mem[$80001234] == 1
 endcond
 ```
 
-Wraps freeze entries in an equality test on a 32-bit word (`cond $80001234 == 1` is accepted as well). Only `==` is supported by the engine.
+Wraps freeze entries in an equality test on a 32-bit word (`cond $80001234 == 1` is accepted as well). Only `==` is supported. It compiles to two chained 16-bit multi-line conditionals (`E0nnVVVV 0AAAAAAA`), so up to 254 guarded codes fit in one block.
 
 ### `timer` / `endtimer`
 
@@ -219,7 +226,7 @@ timer 60
 endtimer
 ```
 
-Runs the guarded entries once every N frames.
+Runs the guarded entries once every N frames. It compiles to a CodeDesigner engine code `Bnnnnnnn IIIIIIII` (the next n codes every I frames), so it only takes effect through the cheat engine.
 
 ---
 

@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Text;
-using CodeDesigner.Ps2.CheatEngine.Enums;
 using CodeDesigner.Ps2.CdsLanguage;
 
 namespace CodeDesigner.Ps2.CheatEngine
@@ -11,42 +11,60 @@ namespace CodeDesigner.Ps2.CheatEngine
     /// <summary>
     /// Injects a persistent MIPS cheat-engine routine into PS2 EE RAM and hooks
     /// it into the game's execution path.  Unlike <see cref="CheatEngine"/>, which
-    /// performs one-shot memory writes that the CPU can immediately overwrite,
-    /// this engine runs every frame from inside the game loop, continuously
-    /// re-applying cheat values — the same approach used by classic GameShark /
-    /// Action Replay hardware.
+    /// performs one-shot memory writes that the game can immediately overwrite,
+    /// this engine runs every time the hook fires (normally once per frame),
+    /// re-applying cheat values — the same approach as GameShark / Action Replay
+    /// hardware.
     ///
     /// <para><b>Workflow:</b></para>
     /// <list type="number">
-    ///   <item>Call <see cref="Inject"/> with the cheats and hook address.</item>
-    ///   <item>The engine is compiled from the embedded CDS template, written
-    ///         into RAM, and hooked via a <c>j</c> instruction at the hook point.</item>
-    ///   <item>Call <see cref="UpdateCheatTable"/> to change cheats without re-hooking.</item>
-    ///   <item>Call <see cref="Remove"/> to unhook and restore the original code.</item>
+    ///   <item>Raw codes are translated into engine rows by <see cref="RawCodeTranslator"/>
+    ///         (CDS source is first compiled with <see cref="CdsCompiler.CompileToCodes"/>).</item>
+    ///   <item>The engine image (code + data + table, see cds/cheatengine.cds) is built for
+    ///         <see cref="EngineBase"/> and written into RAM.</item>
+    ///   <item>The two instructions at the hook point are copied into the engine and
+    ///         replaced by <c>j engine; nop</c>. The engine replays them and jumps back
+    ///         to hook + 8.</item>
+    ///   <item><see cref="UpdateCheatTable"/> swaps the table without re-hooking;
+    ///         <see cref="Remove"/> restores the hook point.</item>
     /// </list>
+    ///
+    /// <para><b>Hook point:</b> any pair of instructions that runs every frame and contains
+    /// no branch or jump — except <c>jr ra</c> followed by its delay slot, which is also
+    /// safe (function epilogues make good hooks). PC-relative branches and linking jumps
+    /// cannot be relocated into the engine and are rejected.</para>
     ///
     /// <para><b>Memory layout</b> (offsets from <see cref="EngineBase"/>):</para>
     /// <list type="table">
     ///   <item><term><c>+0x0000</c></term><description>Engine code</description></item>
-    ///   <item><term><c>+0x0200</c></term><description>Engine data (original instructions, return address)</description></item>
-    ///   <item><term><c>+0x0300</c></term><description>Cheat table (8 bytes per entry + end marker)</description></item>
+    ///   <item><term><c>+0x0400</c></term><description>Engine data (original instructions, return address, frame counter)</description></item>
+    ///   <item><term><c>+0x0500</c></term><description>Table rows (16 bytes each), terminated by a zero control word</description></item>
     /// </list>
     /// </summary>
     public sealed class CdsCheatEngine
     {
         // ── Layout constants ────────────────────────────────────────────────
-        private const int DataOffset       = 0x0200;
-        private const int CheatTableOffset = 0x0300;
+        public const int DataOffset       = 0x0400;
+        public const int CheatTableOffset = 0x0500;
+        public const int EntrySize        = 16;
 
-        /// <summary>Maximum number of cheat table entries (each 8 bytes).</summary>
-        private const int MaxCheatEntries  = 128;
+        /// <summary>Maximum number of table rows.</summary>
+        public const int MaxCheatEntries  = 512;
 
-        /// <summary>Memory offset applied to cheat addresses (PS2 uncached user-space base).</summary>
-        private const uint MemoryOffset    = 0x20000000;
+        /// <summary>Bytes from <see cref="EngineBase"/> to the end of a full table (incl. end row).</summary>
+        public const int ImageSize        = CheatTableOffset + (MaxCheatEntries + 1) * EntrySize;
+
+        /// <summary>Default memory base OR'd onto code addresses (the uncached EE RAM mirror).</summary>
+        public const uint DefaultMemoryBase = 0x20000000;
+
+        private const uint MarkerOrig0  = 0xC0DE0001;
+        private const uint MarkerOrig1  = 0xC0DE0002;
+        private const uint MarkerReturn = 0xC0DE0003;
 
         // ── Instance state ──────────────────────────────────────────────────
 
         private readonly IByteEditor _byteEditor;
+        private readonly uint _memoryBase;
 
         /// <summary>Base address where the engine code is placed in EE RAM.</summary>
         public uint EngineBase { get; }
@@ -57,9 +75,18 @@ namespace CodeDesigner.Ps2.CheatEngine
         /// <summary>Whether the engine is currently injected and hooked.</summary>
         public bool IsInjected { get; private set; }
 
+        /// <summary>Warnings from the last translation (e.g. ignored master codes).</summary>
+        public IReadOnlyList<string> LastWarnings { get; private set; } = Array.Empty<string>();
+
+        /// <summary>Number of table rows written by the last inject/update.</summary>
+        public int LastEntryCount { get; private set; }
+
         // Saved original instructions so we can restore on Remove().
         private uint _origWord0;
         private uint _origWord1;
+
+        /// <summary>The two instructions the hook replaced (valid while <see cref="IsInjected"/>).</summary>
+        public (uint Word0, uint Word1) OriginalInstructions => (_origWord0, _origWord1);
 
         /// <summary>
         /// Create a new CDS cheat engine instance.
@@ -67,12 +94,16 @@ namespace CodeDesigner.Ps2.CheatEngine
         /// <param name="byteEditor">Memory backend (emulator RAM or PINE).</param>
         /// <param name="engineBase">
         /// Virtual address where the engine code will be placed.
-        /// Must point to unused EE RAM.  Default is <c>0x000C0000</c>.
+        /// Must point to <see cref="ImageSize"/> bytes of unused EE RAM.  Default is <c>0x000C0000</c>.
         /// </param>
-        public CdsCheatEngine(IByteEditor byteEditor, uint engineBase = 0x000C0000)
+        /// <param name="memoryBase">
+        /// OR'd onto code addresses; <see cref="DefaultMemoryBase"/> matches one-shot APPLYCHEATS.
+        /// </param>
+        public CdsCheatEngine(IByteEditor byteEditor, uint engineBase = 0x000C0000, uint memoryBase = DefaultMemoryBase)
         {
             _byteEditor = byteEditor ?? throw new ArgumentNullException(nameof(byteEditor));
             EngineBase  = engineBase;
+            _memoryBase = memoryBase;
         }
 
         // ────────────────────────────────────────────────────────────────────
@@ -80,158 +111,64 @@ namespace CodeDesigner.Ps2.CheatEngine
         // ────────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Compile the CDS cheat-engine template, write it into EE RAM, populate
-        /// the cheat table, and hook the game at <paramref name="hookAddress"/>.
+        /// Build and write the engine, fill the table from raw cheat codes, and hook
+        /// the game at <paramref name="hookAddress"/>.
         /// </summary>
-        /// <param name="hookAddress">
-        /// Virtual address of the instruction to replace with a <c>j engineEntry</c>.
-        /// This should be an instruction that executes every frame (e.g. inside the
-        /// VBlank handler or main loop).  The instruction at <paramref name="hookAddress"/>
-        /// and the one at <paramref name="hookAddress"/>+4 are saved and replayed
-        /// inside the engine before returning.
-        /// </param>
-        /// <param name="cheats">Cheat codes in GameShark text format.</param>
+        /// <param name="hookAddress">Address of an instruction pair that runs every frame (see the class remarks).</param>
+        /// <param name="cheats">Raw cheat codes; names and blank lines separate cheats.</param>
         public void Inject(uint hookAddress, string cheats)
         {
             if (IsInjected)
                 throw new InvalidOperationException("Engine is already injected. Call Remove() first.");
 
+            var entries = Translate(cheats);
+
+            uint word0 = ReadWord(hookAddress);
+            uint word1 = ReadWord(hookAddress + 4);
+            ValidateHook(hookAddress, word0, word1, EngineBase);
+
+            byte[] image = BuildImage(entries, EngineBase, hookAddress, word0, word1);
+            _byteEditor.Write((int)EngineBase, image);
+
+            _origWord0  = word0;
+            _origWord1  = word1;
             HookAddress = hookAddress;
 
-            // ── 1. Compile engine code ──────────────────────────────────────
-            string cdsSource = GetCdsTemplate();
-            // Rebase the template to the actual engine base address
-            cdsSource = RebaseSource(cdsSource, EngineBase);
-
-            var compiled = CompileCds(cdsSource);
-
-            // ── 2. Write compiled engine into RAM ───────────────────────────
-            foreach (var (addr, word) in compiled)
-            {
-                WriteWord(addr, word);
-            }
-
-            // ── 3. Save original instructions at the hook point ─────────────
-            _origWord0 = ReadWord(hookAddress);
-            _origWord1 = ReadWord(hookAddress + 4);
-
-            // ── 4. Patch engine: embed original instructions ────────────────
-            PatchOriginalInstructions(_origWord0, _origWord1);
-
-            // ── 5. Patch engine: set return address ─────────────────────────
-            uint returnAddr = hookAddress + 8;
-            PatchReturnAddress(returnAddr);
-
-            // ── 6. Patch engine: set cheat table base pointer ───────────────
-            PatchTableBasePointer();
-
-            // ── 7. Write cheat table ────────────────────────────────────────
-            WriteCheatTable(cheats);
-
-            // ── 8. Store metadata in engine data area ───────────────────────
-            WriteWord(EngineBase + DataOffset,     _origWord0);
-            WriteWord(EngineBase + DataOffset + 4, _origWord1);
-            WriteWord(EngineBase + DataOffset + 8, returnAddr);
-
-            // ── 9. Hook: replace instruction at hook point with j engine ────
-            uint engineEntry = EngineBase; // entry label is at offset 0
-            uint jInstr = EncodeJ(engineEntry);
-            WriteWord(hookAddress,     jInstr);
-            WriteWord(hookAddress + 4, 0x00000000); // nop in delay slot
+            // Hook: replace the instruction pair with `j engine; nop`.
+            WriteWord(hookAddress,     EncodeJ(EngineBase));
+            WriteWord(hookAddress + 4, 0x00000000);
 
             IsInjected = true;
         }
 
         /// <summary>
-        /// Update the cheat table in-place without re-hooking.
-        /// The engine continues running with the new cheat values on the next frame.
+        /// Same as <see cref="Inject"/> but from CDS source: every construct that
+        /// <see cref="CdsCompiler.CompileToCodes"/> understands (assembled code, raw code
+        /// lines, <c>freeze</c>, <c>cond</c>, <c>timer</c>) becomes engine rows.
         /// </summary>
-        /// <param name="cheats">Cheat codes in GameShark text format.</param>
+        public void InjectFromCds(uint hookAddress, string cdsSource)
+            => Inject(hookAddress, CompileCdsToCodeText(cdsSource));
+
+        /// <summary>
+        /// Replace the table in place without re-hooking. The engine picks up the new
+        /// rows on its next run.
+        /// </summary>
         public void UpdateCheatTable(string cheats)
         {
             if (!IsInjected)
                 throw new InvalidOperationException("Engine is not injected. Call Inject() first.");
 
-            WriteCheatTable(cheats);
+            var entries = Translate(cheats);
+            _byteEditor.Write((int)(EngineBase + CheatTableOffset), BuildTable(entries));
         }
 
-        /// <summary>
-        /// Compile the CDS cheat-engine template, write it into EE RAM, populate
-        /// the cheat table from a CDS source file containing <c>freeze</c> / <c>cond</c>
-        /// directives, and hook the game at <paramref name="hookAddress"/>.
-        /// </summary>
-        /// <param name="hookAddress">
-        /// Virtual address of the instruction to replace with a <c>j engineEntry</c>.
-        /// </param>
-        /// <param name="cdsSource">
-        /// CDS source text containing <c>freeze</c> and/or <c>cond</c> directives.
-        /// Example:
-        /// <code>
-        /// freeze word $20347A54 = FFFFFFFF
-        /// cond mem[$20010000] == 0001
-        ///   freeze half $20010002 = 03E7
-        /// endcond
-        /// </code>
-        /// </param>
-        public void InjectFromCds(uint hookAddress, string cdsSource)
-        {
-            if (IsInjected)
-                throw new InvalidOperationException("Engine is already injected. Call Remove() first.");
-
-            HookAddress = hookAddress;
-
-            // ── 1. Compile engine code ──────────────────────────────────────
-            string engineCds = GetCdsTemplate();
-            engineCds = RebaseSource(engineCds, EngineBase);
-            var compiled = CompileCds(engineCds);
-
-            // ── 2. Write compiled engine into RAM ───────────────────────────
-            foreach (var (addr, word) in compiled)
-                WriteWord(addr, word);
-
-            // ── 3. Save original instructions at the hook point ─────────────
-            _origWord0 = ReadWord(hookAddress);
-            _origWord1 = ReadWord(hookAddress + 4);
-
-            // ── 4. Patch engine: embed original instructions ────────────────
-            PatchOriginalInstructions(_origWord0, _origWord1);
-
-            // ── 5. Patch engine: set return address ─────────────────────────
-            uint returnAddr = hookAddress + 8;
-            PatchReturnAddress(returnAddr);
-
-            // ── 6. Patch engine: set cheat table base pointer ───────────────
-            PatchTableBasePointer();
-
-            // ── 7. Write cheat table from CDS freeze/cond items ────────────
-            WriteCheatTableFromCds(cdsSource);
-
-            // ── 8. Store metadata in engine data area ───────────────────────
-            WriteWord(EngineBase + DataOffset,     _origWord0);
-            WriteWord(EngineBase + DataOffset + 4, _origWord1);
-            WriteWord(EngineBase + DataOffset + 8, returnAddr);
-
-            // ── 9. Hook: replace instruction at hook point with j engine ────
-            uint engineEntry = EngineBase;
-            uint jInstr = EncodeJ(engineEntry);
-            WriteWord(hookAddress,     jInstr);
-            WriteWord(hookAddress + 4, 0x00000000); // nop in delay slot
-
-            IsInjected = true;
-        }
-
-        /// <summary>
-        /// Update the cheat table in-place from a CDS source text containing
-        /// <c>freeze</c> / <c>cond</c> directives, without re-hooking.
-        /// The engine picks up the new values on its next iteration.
-        /// </summary>
-        /// <param name="cdsSource">CDS source text with <c>freeze</c> / <c>cond</c> directives.</param>
+        /// <summary>CDS-source variant of <see cref="UpdateCheatTable"/>.</summary>
         public void UpdateCheatTableFromCds(string cdsSource)
         {
             if (!IsInjected)
                 throw new InvalidOperationException("Engine is not injected. Call InjectFromCds() or Inject() first.");
 
-            WriteCheatTableFromCds(cdsSource);
+            UpdateCheatTable(CompileCdsToCodeText(cdsSource));
         }
 
         /// <summary>
@@ -242,7 +179,6 @@ namespace CodeDesigner.Ps2.CheatEngine
         {
             if (!IsInjected) return;
 
-            // Restore original instructions at the hook point
             WriteWord(HookAddress,     _origWord0);
             WriteWord(HookAddress + 4, _origWord1);
 
@@ -250,42 +186,165 @@ namespace CodeDesigner.Ps2.CheatEngine
         }
 
         // ────────────────────────────────────────────────────────────────────
-        //  CDS source generation
+        //  Image building (also used to export the engine as a binary)
         // ────────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Generate the full CDS source for the engine with a specific cheat table
-        /// embedded.  Useful for inspection or manual compilation.
+        /// Build the engine image — code, data and table — as the bytes to place at
+        /// <paramref name="engineBase"/>. When <paramref name="hookAddress"/> is given,
+        /// the original hook instructions and the return jump are embedded; otherwise
+        /// they are left as nops and the image must be patched before it is hooked.
         /// </summary>
-        /// <param name="cheats">Cheat codes in GameShark text format.</param>
-        /// <returns>Complete CDS source text.</returns>
+        public static byte[] BuildImage(IReadOnlyList<EngineEntry> entries, uint engineBase,
+                                        uint? hookAddress = null, uint origWord0 = 0, uint origWord1 = 0)
+        {
+            if (entries.Count > MaxCheatEntries)
+                throw new InvalidOperationException(
+                    $"Too many engine rows ({entries.Count}). Maximum is {MaxCheatEntries}.");
+
+            var image = new byte[CheatTableOffset + (entries.Count + 1) * EntrySize];
+
+            uint returnJump = hookAddress.HasValue ? EncodeJ(hookAddress.Value + 8) : 0;
+            uint word0 = hookAddress.HasValue ? origWord0 : 0;
+            uint word1 = hookAddress.HasValue ? origWord1 : 0;
+
+            bool sawMarkers = false;
+            foreach (var (addr, word) in CompileEngine(engineBase))
+            {
+                uint offset = addr - engineBase;
+                if (offset + 4 > CheatTableOffset)
+                    throw new InvalidOperationException(
+                        $"Engine code at 0x{addr:X8} overflows the code/data area (base 0x{engineBase:X8}).");
+                uint value = word switch
+                {
+                    MarkerOrig0  => word0,
+                    MarkerOrig1  => word1,
+                    MarkerReturn => returnJump,
+                    _            => word,
+                };
+                sawMarkers |= word == MarkerReturn;
+                BitConverter.GetBytes(value).CopyTo(image, (int)offset);
+            }
+            if (!sawMarkers)
+                throw new InvalidOperationException("Engine template is missing its hook placeholders.");
+
+            // Data area: original words + return address for Remove()/inspection.
+            BitConverter.GetBytes(word0).CopyTo(image, DataOffset);
+            BitConverter.GetBytes(word1).CopyTo(image, DataOffset + 4);
+            BitConverter.GetBytes(hookAddress.HasValue ? hookAddress.Value + 8 : 0u).CopyTo(image, DataOffset + 8);
+
+            BuildTable(entries).CopyTo(image, CheatTableOffset);
+            return image;
+        }
+
+        /// <summary>Encode table rows plus the end row.</summary>
+        public static byte[] BuildTable(IReadOnlyList<EngineEntry> entries)
+        {
+            if (entries.Count > MaxCheatEntries)
+                throw new InvalidOperationException(
+                    $"Too many engine rows ({entries.Count}). Maximum is {MaxCheatEntries}.");
+
+            var table = new byte[(entries.Count + 1) * EntrySize];
+            for (int i = 0; i < entries.Count; i++)
+            {
+                int o = i * EntrySize;
+                BitConverter.GetBytes(entries[i].Control).CopyTo(table, o);
+                BitConverter.GetBytes(entries[i].Address).CopyTo(table, o + 4);
+                BitConverter.GetBytes(entries[i].Value).CopyTo(table, o + 8);
+                BitConverter.GetBytes(entries[i].Extra).CopyTo(table, o + 12);
+            }
+            // End row is all zeroes (control word 0 = end).
+            return table;
+        }
+
+        /// <summary>
+        /// Throw when the instruction pair at the hook point cannot be relocated into
+        /// the engine (branches, linking jumps, or an existing engine hook).
+        /// </summary>
+        public static void ValidateHook(uint hookAddress, uint word0, uint word1, uint engineBase)
+        {
+            if (word0 == EncodeJ(engineBase))
+                throw new InvalidOperationException(
+                    $"0x{hookAddress:X8} already jumps to the cheat engine. Remove it first.");
+
+            const uint JrRa = 0x03E00008;
+            if (word0 == JrRa)
+            {
+                if (IsControlTransfer(word1))
+                    throw new InvalidOperationException(
+                        $"The delay slot of jr ra at 0x{hookAddress:X8} is itself a branch/jump; pick another hook.");
+                return;
+            }
+            if (IsControlTransfer(word0) || IsControlTransfer(word1))
+                throw new InvalidOperationException(
+                    $"The instructions at 0x{hookAddress:X8} (0x{word0:X8} 0x{word1:X8}) include a branch or jump " +
+                    "that cannot run from inside the engine. Hook two plain instructions, or a 'jr ra' + delay slot.");
+        }
+
+        /// <summary>
+        /// Generate the full CDS source for the engine with a specific table embedded
+        /// (as hexcode rows). Useful for inspection or manual compilation.
+        /// </summary>
         public string GenerateSource(string cheats)
         {
-            string cdsSource = GetCdsTemplate();
-            cdsSource = RebaseSource(cdsSource, EngineBase);
-
-            // Append cheat table entries
-            var tableEntries = BuildCheatTableEntries(cheats);
-            var sb = new StringBuilder(cdsSource);
+            var entries = Translate(cheats);
+            var sb = new StringBuilder(GetEngineSource(EngineBase));
             sb.AppendLine();
             sb.AppendLine($"address ${(EngineBase + CheatTableOffset):X8}");
             sb.AppendLine("scope GeneratedCheatTable {");
-            foreach (var (addr, val) in tableEntries)
-            {
-                sb.AppendLine($"    hexcode ${addr:X8}");
-                sb.AppendLine($"    hexcode ${val:X8}");
-            }
-            // End marker
-            sb.AppendLine("    hexcode $FFFFFFFF");
-            sb.AppendLine("    hexcode $FFFFFFFF");
+            foreach (var e in entries)
+                sb.AppendLine($"    hexcode ${e.Control:X8}\n    hexcode ${e.Address:X8}\n    hexcode ${e.Value:X8}\n    hexcode ${e.Extra:X8}");
+            sb.AppendLine("    hexcode $00000000\n    hexcode $00000000\n    hexcode $00000000\n    hexcode $00000000");
             sb.AppendLine("}");
-
             return sb.ToString();
+        }
+
+        /// <summary>Compile CDS source into the raw code text the translator consumes.</summary>
+        public static string CompileCdsToCodeText(string cdsSource)
+        {
+            var parser = new CdsParser();
+            var items  = parser.Parse(cdsSource ?? string.Empty);
+            var errors = parser.Diagnostics.Where(d => d.Severity == CdsDiagnosticSeverity.Error).ToList();
+            if (errors.Count > 0)
+                throw new InvalidOperationException(
+                    "CDS errors: " + string.Join("; ", errors.Select(d => $"line {d.LineNumber}: {d.Message}")));
+            return string.Join("\n", CdsCompiler.CompileToCodes(items).Select(c => c.ToString()));
         }
 
         // ────────────────────────────────────────────────────────────────────
         //  Internal helpers
         // ────────────────────────────────────────────────────────────────────
+
+        private List<EngineEntry> Translate(string cheats)
+        {
+            var translation = RawCodeTranslator.Translate(cheats, _memoryBase);
+            if (!translation.IsValid)
+                throw new InvalidOperationException("Cheat codes not supported by the engine: " + string.Join("; ", translation.Errors));
+            LastWarnings   = translation.Warnings;
+            LastEntryCount = translation.Entries.Count;
+            return translation.Entries;
+        }
+
+        private static string GetEngineSource(uint engineBase)
+        {
+            uint table = engineBase + CheatTableOffset;
+            return GetCdsTemplate()
+                .Replace("{{BASE}}",     engineBase.ToString("X8"))
+                .Replace("{{DATA}}",     (engineBase + DataOffset).ToString("X8"))
+                .Replace("{{TABLE_HI}}", (table >> 16).ToString("X4"))
+                .Replace("{{TABLE_LO}}", (table & 0xFFFF).ToString("X4"));
+        }
+
+        private static List<(uint Address, uint Word)> CompileEngine(uint engineBase)
+        {
+            var parser = new CdsParser();
+            var items  = parser.Parse(GetEngineSource(engineBase));
+            var errors = parser.Diagnostics.Where(d => d.Severity == CdsDiagnosticSeverity.Error).ToList();
+            if (errors.Count > 0)
+                throw new InvalidOperationException(
+                    "Engine template failed to compile: " + string.Join("; ", errors.Select(d => $"line {d.LineNumber}: {d.Message}")));
+            return CdsCompiler.Compile(items);
+        }
 
         /// <summary>Load the CDS template from the embedded resource.</summary>
         private static string GetCdsTemplate()
@@ -302,247 +361,30 @@ namespace CodeDesigner.Ps2.CheatEngine
             return reader.ReadToEnd();
         }
 
-        /// <summary>
-        /// Rewrite all <c>address $000C????</c> directives in the template to use
-        /// the actual engine base address.
-        /// </summary>
-        private static string RebaseSource(string source, uint engineBase)
+        /// <summary>True for branches, jumps and ERET — anything that changes the PC.</summary>
+        private static bool IsControlTransfer(uint word)
         {
-            // The template uses 0x000C0000 as a placeholder base.
-            // Replace the three address directives for code, data, and table sections.
-            const uint templateBase = 0x000C0000;
-
-            source = source.Replace(
-                $"address ${templateBase:X8}",
-                $"address ${engineBase:X8}");
-            source = source.Replace(
-                $"address ${(templateBase + DataOffset):X8}",
-                $"address ${(engineBase + DataOffset):X8}");
-            source = source.Replace(
-                $"address ${(templateBase + CheatTableOffset):X8}",
-                $"address ${(engineBase + CheatTableOffset):X8}");
-
-            return source;
+            uint op = word >> 26;
+            if (op is 0x02 or 0x03) return true;                          // j / jal
+            if (op is >= 0x04 and <= 0x07) return true;                   // beq bne blez bgtz
+            if (op is >= 0x14 and <= 0x17) return true;                   // beql bnel blezl bgtzl
+            if (op == 0x01) return true;                                  // REGIMM (bltz, bgez, bal …)
+            if (op == 0x00 && (word & 0x3F) is 0x08 or 0x09) return true; // jr / jalr
+            if (op is >= 0x10 and <= 0x12 && ((word >> 21) & 0x1F) == 0x08) return true; // bc0/bc1/bc2
+            if (word == 0x42000018) return true;                          // eret
+            return false;
         }
-
-        /// <summary>Compile CDS source into (address, word) pairs.</summary>
-        private static List<(uint Address, uint Word)> CompileCds(string source)
-        {
-            var parser = new CdsParser();
-            var items  = parser.Parse(source);
-            return CdsCompiler.Compile(items);
-        }
-
-        /// <summary>
-        /// Build cheat table entry pairs from GameShark-format text.
-        /// Each entry is two 32-bit words: (type+address, value).
-        /// </summary>
-        private static List<(uint TypeAddr, uint Value)> BuildCheatTableEntries(string cheats)
-        {
-            var entries = new List<(uint, uint)>();
-            if (string.IsNullOrWhiteSpace(cheats)) return entries;
-
-            var cheatList = new CheatList(cheats);
-            var blocks = cheatList.Parse();
-
-            foreach (var block in blocks)
-            {
-                foreach (var cheat in block.Cheats)
-                {
-                    // Reconstruct the raw GameShark word: type_byte << 24 | 24-bit address
-                    uint typeAddr = ((uint)cheat.CheatType << 24) | ((uint)cheat.Address & 0x00FFFFFF);
-
-                    // Data is stored as little-endian byte[4]; convert back to uint (big-endian decode)
-                    uint value = 0;
-                    if (cheat.Data.Length >= 4)
-                    {
-                        value = (uint)(cheat.Data[3] << 24 | cheat.Data[2] << 16 |
-                                       cheat.Data[1] << 8  | cheat.Data[0]);
-                    }
-                    else if (cheat.Data.Length >= 2)
-                    {
-                        value = (uint)(cheat.Data[1] << 8 | cheat.Data[0]);
-                    }
-                    else if (cheat.Data.Length >= 1)
-                    {
-                        value = cheat.Data[0];
-                    }
-
-                    entries.Add((typeAddr, value));
-                }
-            }
-
-            return entries;
-        }
-
-        /// <summary>
-        /// Write cheat table entries into the engine's table area in RAM.
-        /// </summary>
-        private void WriteCheatTable(string cheats)
-        {
-            var entries = BuildCheatTableEntries(cheats);
-            WriteCheatTableEntries(entries);
-        }
-
-        /// <summary>
-        /// Parse CDS source for <c>freeze</c> / <c>cond</c> directives and write the
-        /// resulting cheat-table entries into the engine's table area in RAM.
-        /// </summary>
-        private void WriteCheatTableFromCds(string cdsSource)
-        {
-            var parser = new CdsParser();
-            var items  = parser.Parse(cdsSource ?? string.Empty);
-            var entries = CdsCompiler.GetCheatTableEntries(items);
-            WriteCheatTableEntries(entries);
-        }
-
-        /// <summary>
-        /// Write a pre-built list of cheat-table entries into the engine's table area in RAM.
-        /// </summary>
-        private void WriteCheatTableEntries(List<(uint TypeAddr, uint Value)> entries)
-        {
-            if (entries.Count > MaxCheatEntries)
-                throw new InvalidOperationException(
-                    $"Too many cheat entries ({entries.Count}). Maximum is {MaxCheatEntries}.");
-
-            uint tableBase = EngineBase + CheatTableOffset;
-
-            for (int i = 0; i < entries.Count; i++)
-            {
-                WriteWord(tableBase + (uint)(i * 8),     entries[i].TypeAddr);
-                WriteWord(tableBase + (uint)(i * 8) + 4, entries[i].Value);
-            }
-
-            // Write end marker after last entry
-            uint endOffset = tableBase + (uint)(entries.Count * 8);
-            WriteWord(endOffset,     0xFFFFFFFF);
-            WriteWord(endOffset + 4, 0xFFFFFFFF);
-        }
-
-        /// <summary>
-        /// Patch the engine code to embed the two original instructions from the
-        /// hook point, so they execute inside the engine before returning.
-        /// </summary>
-        /// <remarks>
-        /// The CDS template has two <c>nop</c> placeholders at the "origInstr0" and
-        /// "origInstr1" labels.  We locate them by scanning the compiled output for
-        /// the known pattern: they are at a fixed offset from the engine entry.
-        /// Instead of scanning, we write directly to the data area and also patch
-        /// the code in-place.
-        /// </remarks>
-        private void PatchOriginalInstructions(uint word0, uint word1)
-        {
-            // Scan the entire code section for the nop-nop-lui_v0-ori_v0 pattern.
-            // The engine code may not fill the full DataOffset region, so we must
-            // start from EngineBase rather than scanning backwards from DataOffset.
-            uint patchAddr0 = 0;
-
-            for (uint addr = EngineBase; addr < EngineBase + DataOffset - 20; addr += 4)
-            {
-                uint w0 = ReadWord(addr);
-                uint w1 = ReadWord(addr + 4);
-                uint w2 = ReadWord(addr + 8);
-                uint w3 = ReadWord(addr + 12);
-
-                // Pattern: nop, nop, lui v0 (0x3C020000), ori v0 (0x34420000)
-                if (w0 == 0x00000000 && w1 == 0x00000000 &&
-                    (w2 & 0xFFFF0000) == 0x3C020000 &&
-                    (w3 & 0xFFFF0000) == 0x34420000)
-                {
-                    patchAddr0 = addr;
-                    break;
-                }
-            }
-
-            if (patchAddr0 == 0)
-                throw new InvalidOperationException(
-                    "Could not locate origInstr placeholders in compiled engine code.");
-
-            WriteWord(patchAddr0,     word0);
-            WriteWord(patchAddr0 + 4, word1);
-        }
-
-        /// <summary>
-        /// Patch the engine's return-address load sequence (lui v0 + ori v0) to
-        /// point to <paramref name="returnAddr"/>.
-        /// </summary>
-        private void PatchReturnAddress(uint returnAddr)
-        {
-            ushort upper = (ushort)(returnAddr >> 16);
-            ushort lower = (ushort)(returnAddr & 0xFFFF);
-
-            // Scan for lui v0 (0x3C02xxxx) + ori v0, v0 (0x3442xxxx) in the code section
-            for (uint addr = EngineBase; addr < EngineBase + DataOffset - 8; addr += 4)
-            {
-                uint w0 = ReadWord(addr);
-                uint w1 = ReadWord(addr + 4);
-
-                if ((w0 & 0xFFFF0000) == 0x3C020000 &&
-                    (w1 & 0xFFFF0000) == 0x34420000)
-                {
-                    WriteWord(addr,     0x3C020000 | (uint)upper);   // lui v0, upper
-                    WriteWord(addr + 4, 0x34420000 | (uint)lower);   // ori v0, v0, lower
-                    return;
-                }
-            }
-
-            throw new InvalidOperationException(
-                "Could not locate return-address load sequence in compiled engine code.");
-        }
-
-        /// <summary>
-        /// Patch the cheat table base pointer (lui s0 + ori s0) in the engine code
-        /// to point to the actual table address.
-        /// </summary>
-        private void PatchTableBasePointer()
-        {
-            uint tableAddr = EngineBase + CheatTableOffset;
-            ushort upper = (ushort)(tableAddr >> 16);
-            ushort lower = (ushort)(tableAddr & 0xFFFF);
-
-            // Scan for lui s0 (0x3C10xxxx) + ori s0, s0 (0x3610xxxx) in the code section
-            for (uint addr = EngineBase; addr < EngineBase + DataOffset - 8; addr += 4)
-            {
-                uint w0 = ReadWord(addr);
-                uint w1 = ReadWord(addr + 4);
-
-                if ((w0 & 0xFFFF0000) == 0x3C100000 &&
-                    (w1 & 0xFFFF0000) == 0x36100000)
-                {
-                    WriteWord(addr,     0x3C100000 | (uint)upper);   // lui s0, upper
-                    WriteWord(addr + 4, 0x36100000 | (uint)lower);   // ori s0, s0, lower
-                    return;
-                }
-            }
-
-            throw new InvalidOperationException(
-                "Could not locate table-base-pointer load sequence in compiled engine code.");
-        }
-
-        // ── MIPS encoding helpers ───────────────────────────────────────────
 
         /// <summary>Encode a MIPS <c>j target</c> instruction.</summary>
-        private static uint EncodeJ(uint targetAddress)
-        {
-            // J-type: opcode 0x02, 26-bit word address
-            uint wordAddr = (targetAddress >> 2) & 0x03FFFFFF;
-            return 0x08000000 | wordAddr;
-        }
+        public static uint EncodeJ(uint targetAddress)
+            => 0x08000000 | ((targetAddress >> 2) & 0x03FFFFFF);
 
         // ── Memory I/O wrappers ─────────────────────────────────────────────
 
         private void WriteWord(uint address, uint word)
-        {
-            byte[] data = BitConverter.GetBytes(word);
-            // PS2 is little-endian; BitConverter on LE hosts matches.
-            // On BE hosts we'd need to reverse — but .NET on PS2 tooling is always LE.
-            _byteEditor.Write((int)address, data);
-        }
+            => _byteEditor.Write((int)address, BitConverter.GetBytes(word));
 
         private uint ReadWord(uint address)
-        {
-            byte[] data = _byteEditor.Read((int)address, 4);
-            return BitConverter.ToUInt32(data, 0);
-        }
+            => BitConverter.ToUInt32(_byteEditor.Read((int)address, 4), 0);
     }
 }

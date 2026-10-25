@@ -12,8 +12,6 @@ import {
   LabelManagerOverlayComponent,
   LabelManagerAction,
   LabelSetPayload,
-  LabelManagerEntry,
-  ScannerKind,
 } from '../disasm-editor/components/label-manager-overlay.component';
 import './label-manager-page.css';
 import '../disasm-editor/disasm-editor.css';
@@ -32,7 +30,7 @@ import '../disasm-editor/disasm-editor.css';
   standalone: true,
   imports: [LabelManagerOverlayComponent, PageHeaderComponent],
   encapsulation: ViewEncapsulation.None,
-  template: `<div class="lm-page-shell"><app-page-header icon="tag" title="Labels" subtitle="Label manager" /><app-label-manager-overlay #lmComp (action$)="onAction($event)" (close$)="onClose()" /></div>`,
+  template: `<div class="lm-page-shell"><app-page-header icon="tag" title="Labels" subtitle="Label manager"><button page-header-actions class="lm-tool-btn" title="Scan memory for strings, functions, pointers, floats and integers in the Cheat Scanner" (click)="openScanner()">Scan memory…</button></app-page-header><app-label-manager-overlay #lmComp (action$)="onAction($event)" (close$)="onClose()" /></div>`,
 })
 export class LabelManagerPageComponent implements AfterViewInit {
   private readonly lmRef = viewChild.required<LabelManagerOverlayComponent>('lmComp');
@@ -75,12 +73,6 @@ export class LabelManagerPageComponent implements AfterViewInit {
           case 'labelManagerExport':
             this._handleExport(data['json'] as string, data['setName'] as string);
             break;
-          case 'labelManagerScanResults':
-            lm.setScanResults(
-              data['scannerKind'] as ScannerKind,
-              (data['entries'] as LabelManagerEntry[]) ?? [],
-            );
-            break;
           case 'prefillAddress':
             lm.openWithAddress(data['address'] as string);
             break;
@@ -95,6 +87,11 @@ export class LabelManagerPageComponent implements AfterViewInit {
   /** Route label manager actions to the extension host. */
   onAction(action: LabelManagerAction): void {
     this.vscode.postMessage({ type: 'labelManagerAction', action });
+  }
+
+  /** Memory scans moved to the Cheat Scanner page; open it from here. */
+  openScanner(): void {
+    this.vscode.postMessage({ type: 'openCheatScanner' });
   }
 
   /** In page (tab) mode we never close; if the overlay somehow calls close(), reopen it. */
