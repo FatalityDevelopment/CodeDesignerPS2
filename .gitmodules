@@ -1,6 +1,6 @@
 [submodule "pcsx2"]
 	path = pcsx2
-	url = https://github.com/TylerDev888/pcsx2
+	url = https://github.com/FatalityDevelopment/pcsx2
 [submodule "CheatCodeArchive"]
 	path = CheatCodeArchive
-	url = https://github.com/TylerDev888/CheatCodeArchive
+	url = https://github.com/FatalityDevelopment/CheatCodeArchive
