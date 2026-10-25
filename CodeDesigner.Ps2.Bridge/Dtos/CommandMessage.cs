@@ -418,6 +418,39 @@ namespace CodeDesigner.Ps2.Bridge
         /// probes that need a stable 4-byte instruction grid.
         /// </summary>
         public bool? SkipDataFormatOverrides { get; set; }
+
+        // ── Weapon-generation fields (ZIPPER_LIST_WEAPONS, ZIPPER_GET_WEAPON_TEMPLATE,
+        //    ZIPPER_WRITE_WEAPON, ZIPPER_WEAPON_TEXTURE_PNG) ─────────────────
+        /// <summary>Name of the source weapon entry inside the archive.</summary>
+        public string? WeaponName { get; set; }
+        /// <summary>Name to give the new weapon entry inside the archive.</summary>
+        public string? WeaponNewName { get; set; }
+        /// <summary>Base64 model bytes (.mdl payload) to add as a new entry.</summary>
+        public string? WeaponModelData { get; set; }
+        /// <summary>Base64 texture bytes (.tif payload) to add as a new entry.</summary>
+        public string? WeaponTextureData { get; set; }
+        /// <summary>Base64 palette bytes (CLUT) to add as a new entry; optional.</summary>
+        public string? WeaponPaletteData { get; set; }
+        /// <summary>Optional explicit texture-entry name when adding a sibling .tif.</summary>
+        public string? WeaponTextureEntryName { get; set; }
+        /// <summary>Optional explicit palette-entry name when adding a sibling palette.</summary>
+        public string? WeaponPaletteEntryName { get; set; }
+        /// <summary>Path to a PNG/JPG image used as the new texture source.</summary>
+        public string? WeaponImagePath { get; set; }
+        /// <summary>Optional inline base64 PNG bytes (alternative to WeaponImagePath).</summary>
+        public string? WeaponImageData { get; set; }
+        /// <summary>Optional JSON for mesh edits (vertex transform + per-chunk texture rebind).</summary>
+        public string? WeaponMeshEditsJson { get; set; }
+
+        // ── Asset sessions (ASSET_*): the editing surface shared by the editor webviews and the MCP tools ──
+        /// <summary>Session id returned by ASSET_OPEN.</summary>
+        public string? AssetSession { get; set; }
+        /// <summary>Root archive leaf inside the package (e.g. "M51_MDL.ZED").</summary>
+        public string? AssetArchive { get; set; }
+        /// <summary>Asset name: a model record, a .tif, a scene path.</summary>
+        public string? AssetName { get; set; }
+        /// <summary>Command-specific JSON arguments (filters, edit operations, save options).</summary>
+        public string? AssetJson { get; set; }
     }
 
     /// <summary>

@@ -401,6 +401,33 @@ const NET_POLL_MS = 30000;
         }
       </div>
 
+      <!-- ── Assets ───────────────────────────────────────────────────────── -->
+      <div class="acc-section">
+        <button class="acc-header" (click)="assetsOpen.set(!assetsOpen())">
+          <app-icon class="acc-chevron" [name]="assetsOpen() ? 'chevrondown' : 'chevronright'" [size]="13" />
+          <app-icon class="acc-ico" name="database" [size]="14" />
+          <span class="acc-title">Assets</span>
+        </button>
+        @if (assetsOpen()) {
+          <div class="acc-body">
+            <div class="btn-grid">
+              <button (click)="openZipperClick.emit()"
+                      title="Open the asset viewer: browse .ZDB / .ZAR / .ZED packages and preview their files">
+                <app-icon name="database" [size]="14" /><span>Viewer</span>
+              </button>
+              <button (click)="openAssetEditorClick.emit('model')"
+                      title="Open the Model Editor: models, textures and characters of a package">
+                <app-icon name="library" [size]="14" /><span>Models</span>
+              </button>
+              <button (click)="openAssetEditorClick.emit('animation')"
+                      title="Open the Animation Editor: character animations and weapon firing effects">
+                <app-icon name="repeat" [size]="14" /><span>Animations</span>
+              </button>
+            </div>
+          </div>
+        }
+      </div>
+
       <!-- ── Agents ───────────────────────────────────────────────────────── -->
       <div class="acc-section">
         <button class="acc-header" (click)="toggleAgents()">
@@ -685,6 +712,9 @@ export class SettingsTabComponent implements OnDestroy {
   readonly openCompatBrowserClick = output<void>();
   readonly openMemoryCardClick   = output<void>();
   readonly openHddClick          = output<void>();
+  readonly openZipperClick       = output<void>();
+  /** An asset editor from the Assets section: 'model' | 'animation'. */
+  readonly openAssetEditorClick  = output<'model' | 'animation'>();
   readonly openMemoryViewClick = output<string>();
   readonly openDnsMappingClick   = output<void>();
   readonly openNetConfigClick    = output<void>();
@@ -726,6 +756,7 @@ export class SettingsTabComponent implements OnDestroy {
   readonly agentsOpen  = signal(false);
   readonly orchOpen    = signal(false);
   readonly toolsOpen   = signal(false);
+  readonly assetsOpen  = signal(false);
 
   /** Multi-agent mode is on when any orchestration plan is active. */
   readonly multiAgentMode = computed(() => this.orchestrations().some(o => o.isActive));

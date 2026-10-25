@@ -364,6 +364,7 @@ export class WelcomeProvider {
             { id: 'codedesigner.recompile',             label: 'Recompile',        subtitle: 'ELF → C++ source',        icon: 'workflow' },
             { id: 'codedesigner.openMemoryCardBrowser', label: 'Memory Card',      subtitle: '.ps2 / .mcd / .mc2',      icon: 'save' },
             { id: 'codedesigner.openHddBrowser',        label: 'HDD Browser',      subtitle: 'Partition images',        icon: 'harddrive' },
+            { id: 'codedesigner.openZipperWorkbench',   label: 'Asset Viewer',     subtitle: 'ZDB / ZAR / ZED packages', icon: 'database' },
             { id: 'codedesigner.openStructureVisualizer', label: 'Structures',     subtitle: 'Vtables + call graphs',   icon: 'gitcompare' },
             { id: 'codedesigner.openCompatBrowser',     label: 'PS2 Compatibility', subtitle: 'Game library + status',  icon: 'disc3' },
             { id: 'codedesigner.openGsFrameViewer',     label: 'Preview',          subtitle: 'Live PCSX2 display',      icon: 'monitor' },

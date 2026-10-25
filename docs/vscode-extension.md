@@ -114,6 +114,18 @@ Moves cheat codes from one game version's EE RAM to another's. Pick the **From**
 
 ---
 
+## Assets
+
+The **Assets** section opens the Zipper asset tools for SOCOM II (full) and SOCOM: Combined Assault (read-only):
+
+- **Viewer** — browse `.ZDB` / `.ZAR` / `.ZED` packages and preview their files.
+- **Models** — models, textures and characters of a package.
+- **Animations** — character animations and weapon firing effects.
+
+Every edit is a Bridge command with a matching MCP tool. See [Asset editing](asset-editing.md) and the [Zipper model format](zipper-model-format.md).
+
+---
+
 ## Media
 
 - **Mem Card** — browse PS2 memory cards (`.ps2`, `.mcd`, `.mc2`) with animated save icons; create a new card, and import, export or delete saves. See [Memory Card Manager](memory-card-manager.md).
@@ -150,6 +162,7 @@ All commands are under **CodeDesigner:** in the command palette. The main ones:
 | `Open Preview (Live PCSX2 Display)` | Preview |
 | `Open Controller` | Controller |
 | `Open PS2 Cheats Editor` | Cheats editor |
+| `Open Asset Viewer (Zipper)`, `Open Model Editor`, `Open Animation Editor` | Asset tools |
 | `Open PS2 Memory Card Browser`, `Open PS2 HDD Browser` | Media browsers |
 | `Open PS2 Game Compatibility` | Games |
 | `Open Structure Visualizer` | Structure |

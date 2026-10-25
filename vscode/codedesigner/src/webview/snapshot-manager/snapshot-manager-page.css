@@ -1,5 +1,6 @@
-/* Snapshot Manager — sidebar list + content with screenshot preview, all
-   driven by VS Code theme vars so it matches the disasm panel. */
+/* Snapshot Manager — mirrors the zipper-workbench layout (sidebar list +
+   content with screenshot preview), all driven by VS Code theme vars so it
+   matches the disasm panel + zipper styling guide. */
 
 html,
 body {

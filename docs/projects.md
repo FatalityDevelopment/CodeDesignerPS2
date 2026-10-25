@@ -61,10 +61,11 @@ CodeDesigner.Ps2.Emulator.exe --file <game.elf|bin> [--load-address 0xN]
 
 The runtime hub. The VS Code extension, the MCP server and scripts all talk to it.
 
-- **Socket server** on TCP `8765`: newline-delimited JSON commands, dispatched to one service per feature area under `Services/` (assembly, emulator control, stepping, memory and scans, cheats, labels, data formats, snapshots and save states, cross-references, pad, network capture, GS stream, disc/card/HDD, Zipper file formats, compatibility, agents and AI activity, …). See [Socket Communication](socket-communication.md).
+- **Socket server** on TCP `8765`: newline-delimited JSON commands, dispatched to one service per feature area under `Services/` (assembly, emulator control, stepping, memory and scans, cheats, labels, data formats, snapshots and save states, cross-references, pad, network capture, GS stream, disc/card/HDD, assets, compatibility, agents and AI activity, …). See [Socket Communication](socket-communication.md).
 - **PINE client** for PCSX2, including the fork's debugger, pad, DEV9, GS stream, batch memory and audio opcodes.
 - **GS stream forwarder** on `8766`, which feeds the Preview window.
 - **Code analysis**: cross-reference index, function boundary and data table detection, comment hints.
+- **Asset sessions** for the Zipper editors (`ZipperAssetService`).
 
 Also runs the static recompiler (`--recompile`). See [Console App](console-app.md) for the command line.
 
@@ -122,7 +123,7 @@ The SOCOM II online stack, verified on real hardware: DNAS, MUIS, MAS, MLS (lobb
 
 ## CodeDesigner.AI
 
-The MCP server (`CodeDesigner.AI.exe`): 217 tools in 11 domains, filtered by profile and risk, plus session state, multi-agent coordination over the database, MCP resources and prompts. `CodeDesigner.AI.Abstractions` holds the dependency-free contracts (`ToolProfile`, `ToolDomain`, `ToolRisk`, coordinators). Building it deploys to `%LOCALAPPDATA%\CodeDesigner\AI\`. See [MCP Server](mcp-server.md).
+The MCP server (`CodeDesigner.AI.exe`): 242 tools in 11 domains, filtered by profile and risk, plus session state, multi-agent coordination over the database, MCP resources and prompts. `CodeDesigner.AI.Abstractions` holds the dependency-free contracts (`ToolProfile`, `ToolDomain`, `ToolRisk`, coordinators). Building it deploys to `%LOCALAPPDATA%\CodeDesigner\AI\`. See [MCP Server](mcp-server.md).
 
 ## CodeDesigner.Ps2.DiscordBot
 

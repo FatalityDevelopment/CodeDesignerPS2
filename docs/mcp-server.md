@@ -2,9 +2,9 @@
 
 # MCP Server — User Guide
 
-`CodeDesigner.AI` is CodeDesigner's MCP (Model Context Protocol) server. It gives AI assistants such as Claude, GitHub Copilot or any other MCP client the same toolset a human has in VS Code: emulator control, memory and disassembly, breakpoints, labels, CDS patches, cheats, controller input, packet capture, disc/card/HDD images, and Zipper file formats.
+`CodeDesigner.AI` is CodeDesigner's MCP (Model Context Protocol) server. It gives AI assistants such as Claude, GitHub Copilot or any other MCP client the same toolset a human has in VS Code: emulator control, memory and disassembly, breakpoints, labels, CDS patches, cheats, controller input, packet capture, disc/card/HDD images, and the Zipper asset editors.
 
-It exposes **217 tools** in 11 domains. A **profile** picks which domains and how much risk a client sees, so a small session doesn't pay for the whole tool list.
+It exposes **242 tools** in 11 domains. A **profile** picks which domains and how much risk a client sees, so a small session doesn't pay for the whole tool list.
 
 > The older `CodeDesigner.Ps2.McpServer` project has been removed. `CodeDesigner.AI` is the only MCP server.
 
@@ -85,11 +85,11 @@ There are three ways to run it:
 | `packets` | Core + Network, Labels | network | 64 |
 | `live-debug` | Core + Memory, Debug | memory | 67 |
 | `cheats` | Core + Memory, Patching, Cheats | memory | 76 |
-| `media` | Core + Media, Labels | disk | 76 |
+| `media` | Core + Media, Labels | disk | 101 |
 | `re` | Core + Memory, Debug, Labels, Pcsx2, Pad | memory | 133 |
 | `pcsx2` | Core + Pcsx2, Memory, Debug, Labels, Pad | memory | 133 |
 | `patching` | Core + Memory, Debug, Labels, Patching, Cheats, Pcsx2 | memory | 152 |
-| `admin` / `all` | everything | dangerous | 217 |
+| `admin` / `all` | everything | dangerous | 242 |
 
 A session can widen itself without relaunching: `cd_enable_domain` adds a domain (within the launch risk cap) and the client receives `tools/list_changed`. `cd_list_domains` shows what is on.
 
@@ -354,12 +354,31 @@ DEV9 packet capture and injection, Medius decoding and message building.
 | `net_recv_capture` | read-only | Drain captured packets from the DEV9 queue. Returns metadata table (no/time/dir/src/dst/proto/len/info). |
 | `net_set_filter` | read-only | Set the capture filter (none / protocol / port / IPv4). Applied in addition to direction filter. |
 
-### Media (23)
+### Media (48)
 
-Disc, memory card and HDD images; Zipper file formats; GS frames; compatibility list; recompiler.
+Disc, memory card and HDD images; the Zipper asset editors; weapon authoring; GS frames; compatibility list; recompiler.
 
 | Tool | Risk | Description |
 |------|------|-------------|
+| `assets_animation` | read-only | One animation clip's tracks: per bone (names match the character skeleton from assets_model_mesh) its kind and positions [[x,y,z]] (local translation, units) and rotations [[x,y,z,w]] (local unit quaternions under the skeleton parent), one entry when static or one per sample (frames + 1, evenly over the duration). Extra bones rifle / pistol / launcher / weapon sit under the hand (weapon attachment). |
+| `assets_close` | read-only | Close an asset session, discarding unsaved edits. |
+| `assets_describe_model` | read-only | Describe one model: visuals (N<node>_<visual>), chunks (texture, vertex/triangle counts, vertex colours), each texture (size, format, palette id, transparency, alpha test) and its GEO definition node (transform, bounds, position unit, children). Use before retexture / tintVertexColors edits. |
+| `assets_edit` | database | Apply one edit to a session (undoable, not written to disk until assets_save). opJson is an object with "op":\n- moveClutter {clutterIndex, position?, yaw?, scale?, matrix?}\n- addClutter {model, position, yaw?, scale?} (model = a prop such as oaktree_near, bush2_near)\n- deleteClutter {clutterIndex}\n- moveInstance {geoIndex, position?, yaw?, scale?, matrix?} (world space; scene defaults to the map scene)\n- duplicateInstance {geoIndex, position?, yaw?, scale?, name?}\n- deleteInstance {geoIndex}\n- replaceTexture {texture, pngBase64 \| imagePath, namespace?} (resampled to the texture's size)\n- retexture {archive, model, from, to, visual?} (point a model's sections at another .tif)\n- tintVertexColors {archive, model, multiply:[r,g,b], add?:[r,g,b], visual?, texture?, alpha?}\n- transformVertices {archive, model, translate?:[x,y,z], rotate?:[x,y,z] degrees, scale?: n \| [x,y,z], pivot?, chunks?:[geometryOffset], vertices?:{geometryOffset:[i...]}, matrix?} (model space; default pivot = centre of the affected vertices)\n- setVertices {archive, model, geometryOffset, vertices:[{i, position?, uv?, color?:[r,g,b,a 0..255, 128=1.0], normal?}]} or {archive, model, chunks:[{geometryOffset, vertices:[...]}]} (model space, as assets_model_mesh returns)\n- batch {label?, ops:[{op...}, ...]} (several edits as one undo step; answers each op's result)\n- movePoint {name, position:[x,y,z]} (an AIMAPS point; snaps to its AI grid cell)\n- addAnimation {name, from?: clip (default seal_stand), fromSource?, frames?, duration?, after?} (a new package clip copied from any clip, optionally resampled to `frames` intervals / given a duration in s; answers {result, name})\n- deleteAnimation {name} / renameAnimation {name, newName} (package clips only)\n- setAnimation {name, frames?, duration?, bones?:[{name, positions?:[[x,y,z]], rotations?:[[x,y,z,w]]}]} (replace tracks: 1 key = static or one per sample, as assets_animation returns; frames resamples first)\n- setAnimationKey {name, bone, frame \| allFrames:true, rotation?:[x,y,z,w], position?:[x,y,z]} (one key; a static track becomes animated)\n- addClutter answers {result, newClutterIndex}; duplicateInstance answers {result, newGeoIndex}\n- deleteFaces {archive, model, faces:{geometryOffset:[triangle...]}} (unused vertices and emptied chunks go too)\n- duplicateFaces {archive, model, faces:{...}, translate?, rotate?, scale?, matrix?} (copies into new chunks)\n- addMesh {archive, model, visual:"N000_000", texture:"x.tif", replace?, and one of: obj:"<OBJ text>" (Y up, yUp?, scale?, offset?) \| primitive:{kind:"cube"\|"plane", size, center:[x,y,z]} \| mesh:{positions:[[x,y,z]], triangles:[[a,b,c]], normals?, uvs?, colors?}} (model space; a new texture gets its own section). Topology ops answer {result, newChunks} with the new chunks' indices in assets_model_mesh order.\nPositions are map units [x, y, z] (y is height; the ground is around y = -100..300 depending on map; read nearby instances with assets_map_scene first). yaw is degrees about Y; omitted parts keep current values. Indices come from assets_map_scene and shift after add/delete, so re-read before chaining. |
+| `assets_effect` | read-only | One ZANIM effect script fully decoded: names, node refs (its objects: models, model nodes, lights), and per track (tracks run in parallel) the instructions with official names, nesting depth, whether they are IF / ELSEIF conditions, decoded fields (e.g. WAIT frames/seconds, RANDOM_WEIGHT weight, OBJECT_ROTATE_STATE object/reference/euler, OBJECT_MOTION_FROM_TO duration + scaleStart/End/Rate, LIGHT colour/range/time, CALL_ANIMATION animation) and raw words. Objects: self = the effect's object, owner = what started it (a weapon's firepoint). |
+| `assets_effects` | read-only | Every ZANIM effect script in the package's CZANIM.ZAR (muzzle flashes, shells, smoke, explosions, sounds, camera shakes ...): name, its tracks, the effects it calls (CALL_ANIMATION), the package models it uses and the opcodes it contains (official names from the game's opcode table). |
+| `assets_export` | disk | Convert a model to the other game. From a SOCOM 3 / Combined Assault session: a character, weapon, vehicle or prop becomes a SOCOM II pack <outputDir>/<pack>/<PACK>.CDB (+ its ZEDs; the same bytes as the in-game-confirmed Mods/SOCOMCA converters), optionally with CA clips retargeted into its MOTION_S.ZAR. Templates come from SOCOM II's RUN folder (socom2Run, else found on any drive). Answers {path, pack, model, kind, library, triangles, textures, palettes, clips, warnings, open:{archive, name}} - open the path with assets_open to see it. From a SOCOM II session: the model as a SOCOM 3 / CA package. From a GTA: San Andreas session: a ped (with clips as '<source>/<name>', e.g. ped.ifp/WALK_civi, retargeted onto alg_UN01), weapon, vehicle or object becomes a SOCOM II pack (geometry encoded from triangles; vehicles as static props). |
+| `assets_list_animations` | read-only | Character animation clips: the package's own MOTION_S.ZAR (editable) and the shared RUN/MOTION_P.ZAR (read-only; copy one in with assets_edit addAnimation {from}). Each: name, source, editable, duration (s), frames (intervals; samples = frames + 1), fps, bones. |
+| `assets_list_models` | read-only | List models in a session: archive, name, kind (prop, weapon, character, world, sky, library), visual count. Filter by kind, name substring or archive (M51_MDL.ZED). |
+| `assets_map_points` | read-only | The map's named points from AIMAPS.MPS (player / hostage starts, waypoints) with world X / Z and the AI grid. Move one with assets_edit movePoint. |
+| `assets_map_scene` | read-only | List what the map places: kind (model = worldmodel, reference = a placed prop/turret/vehicle/sky, clutter = trees/bushes/grass/rocks from CLUTTER.ZAR), model, position, scale, matrix, and the geoIndex / clutterIndex that edit ops take. Filter by kind or name/path substring; limit defaults to 500. |
+| `assets_model_mesh` | read-only | The editable mesh of a model in model space, the geometry the Model Editor shows: per chunk its geometryOffset (the id setVertices / transformVertices take), visual, texture, vertex/triangle counts, unit and placement. With arrays=true also base64 float32 positions/uvs/normals, RGBA colours (128 = 1.0) and uint32 triangles. Skinned characters (MESH_* in CLIB_MDL) come in bind pose (Y up, feet at 0) with a skeleton [{name, matrixId, parent, local, world}] and per vertex skinInfluences slots: skinBones int32 (skeleton index, -1 unused), skinWeights, skinPositions / skinNormals (bone-local); their vertices are view-only for now. |
+| `assets_open` | read-only | Open a SOCOM II map package (G:\\RUN\\M51.ZDB, or a folder with its unpacked files) as an asset session, or join the session already open on it. Returns the session id and a summary (models by kind, changed archives). Start here before any other assets_* tool. |
+| `assets_save` | disk | Write a session's changed archives. mode=zdb writes the package to outputPath (default: over the source, keeping a one-time .bak); mode=pack writes a memory-card pack <NAME>.CDB (packName must start with 'm', max 7 characters) to outputPath and, with folderCard (a PCSX2 folder memory card), installs it as BASCUS-97275<NAME>/<NAME>.CDB. Prefer writing a copy (outputPath) over the retail file. |
+| `assets_sessions` | read-only | List open asset sessions (including ones a person opened in an editor) with revision and unsaved archives. |
+| `assets_texture` | read-only | Decode a texture (.tif) with the palette the game binds (TEX0.CBP) and return its info plus a base64 PNG with real alpha. |
+| `assets_undo` | database | Undo the last edit in a session (or redo with redo=true). |
+| `assets_weapon_fx` | read-only | What firing a weapon plays: its zweapon.rdr record (all scalar fields) and the CZANIM.ZAR effect tree from FireAnimName: each effect's names, the package models it uses (muzzle_flash_* / bullet_shell_* in EFFE_MDL), textures, tracks (target + instructions: opcode, block depth, words as floats) and the effects it spawns (opcode 0x2D). Weapon models carry firepoint / firepoint_shell / aimpoint locators (assets_model_mesh locators) where these spawn. |
+| `assets_weapons` | read-only | Weapons whose model is in the package (RUN/ZWEAPON.ZAR zweapon.rdr): internal name, model, the ZANIM effect played when fired (fireAnimName, e.g. muzzle_m4) and fireWait (s between shots). |
 | `compat_cover` | read-only | Check whether cover art exists for a disc serial (fetches/caches it; the binary image itself is not returned). |
 | `compat_details` | read-only | Get the compatibility details for one game by serial and/or title. |
 | `compat_list` | read-only | List every game disc that carries a PCSX2 compatibility status, by title. |
@@ -383,6 +402,12 @@ Disc, memory card and HDD images; Zipper file formats; GS frames; compatibility 
 | `mc_list` | read-only | List all save-game directories on a PS2 memory card image. |
 | `mc_read_file` | read-only | Read the raw bytes of a file inside a memory card save directory (base64). |
 | `recompile_elf` | disk | Extract a named ELF from a disc image and statically recompile it to C++ source. |
+| `weapons_create` | disk | End-to-end orchestrator: pick a template, regenerate its texture from a user image (file path OR base64 for chat-attached images) and optionally tweak the mesh, then add the result as new entries (model + texture, plus palette if indexed) alongside the template inside the archive. Originals are untouched. |
+| `weapons_describe_template` | read-only | Get a structured DTO for one template weapon: per-chunk vertex/triangle/scale data, vertex bounds, texture metadata, and a short explainer of the .mdl/.tif binary layout. |
+| `weapons_encode_model` | read-only | Re-encode a template weapon's .mdl with optional per-chunk vertex transforms and texture-name rebinds. Returns base64 model bytes. Use to preview mesh edits before weapons_create. Edits JSON shape: { "perChunk": [{ "chunkIndex": 0, "transform": { "scaleX": 1.2, "translateY": 100 }, "newTextureName": "new.tif" }] }. |
+| `weapons_encode_texture` | read-only | Resample a PNG image into the chosen template weapon's TIM format (matching dimensions, bpp, CLUT layout) and return the encoded .tif bytes as base64. Provide EITHER imagePath OR imageBase64 — for an image attached in chat, base64-encode it and pass via imageBase64. Use before weapons_create to preview the texture without committing. |
+| `weapons_list` | read-only | List every weapon entry in a ZED archive with vertex/triangle counts and bound texture names. Use when picking a template that visually resembles a target image. |
+| `weapons_thumbnail` | read-only | Render a template weapon's bound texture as a base64 PNG. Use to visually compare templates against a user-supplied weapon image. |
 
 ### Admin (26)
 

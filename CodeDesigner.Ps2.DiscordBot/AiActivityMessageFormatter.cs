@@ -76,6 +76,7 @@ public static class AiActivityMessageFormatter
         ("snapshot", "📸", "Snapshots"),
         ("get_snapshots", "📸", "Snapshots"),
         ("load_snapshot", "📸", "Snapshots"),
+        ("weapons_", "🔫", "Weapons"),
         ("cd_", "🤖", "Agents"),
         ("compat_", "📋", "Compatibility"),
         ("progress_", "📝", "Progress"),

@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Offline harness for the Zipper webviews: serves the built webview bundle and answers its bridge requests by
+       calling the bridge's own Zipper handlers. References the Debug bridge build so it never triggers the
+       Multiplayer project's deploy step. Build CodeDesigner.Ps2.Bridge (Debug) first. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <BridgeBin>$(MSBuildThisFileDirectory)..\..\..\..\CodeDesigner.Ps2.Bridge\bin\Debug\net8.0</BridgeBin>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="CodeDesigner.Ps2.Bridge"><HintPath>$(BridgeBin)\CodeDesigner.Ps2.Bridge.dll</HintPath></Reference>
+    <Reference Include="CodeDesigner.Ps2.FileFormats"><HintPath>$(BridgeBin)\CodeDesigner.Ps2.FileFormats.dll</HintPath></Reference>
+    <None Include="$(BridgeBin)\*.dll" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+    <None Include="index.html" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>
