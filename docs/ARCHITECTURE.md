@@ -25,7 +25,7 @@ and **MCP servers** (AI agents). They all front the same engine and database.
                  │                            ▼                           │
                  │            ┌───────────────────────────────┐          │
                  │            │  MCP server                    │◄─────────┘
-                 │            │  CodeDesigner.AI               │  (242 tools, profile-driven)
+                 │            │  CodeDesigner.AI               │  (217 tools, profile-driven)
                  │            │                                │
                  │            └───────┬───────────────┬───────┘
                  │                    │ socket         │ EF Core (direct)
@@ -101,7 +101,7 @@ the assembly, and the active **profile** filters what is exposed:
   `--dangerous-tools false`.
 
 The point is **token economy**: a client only ever sees the tools its profile allows
-(`lite` is 18 tools, `core` 25, `re` 133, `all` 242; `--list-tools` prints any profile). Profiles can also be
+(`lite` is 18 tools, `core` 25, `re` 133, `all` 217; `--list-tools` prints any profile). Profiles can also be
 **widened at runtime** with `cd_enable_domain`, which mutates the live tool collection
 and fires `tools/list_changed`.
 

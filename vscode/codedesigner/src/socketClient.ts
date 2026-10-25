@@ -216,21 +216,6 @@ interface CommandMessage {
     DataFormatOverrides?: Array<Omit<DataFormatOverrideInfo, 'id'>>;
     /** DISASSEMBLE-only: ignore persisted data-format overrides for stable 4-byte page probes. */
     SkipDataFormatOverrides?: boolean;
-    // Asset sessions (ASSET_*), shared with the assets_* MCP tools.
-    AssetSession?: string;
-    AssetArchive?: string;
-    AssetName?: string;
-    AssetJson?: string;
-}
-
-/** Fields an asset editor may send with an ASSET_* command. */
-export interface AssetCommand {
-    Command: string;
-    InputPath?: string;
-    AssetSession?: string;
-    AssetArchive?: string;
-    AssetName?: string;
-    AssetJson?: string;
 }
 
 /**
@@ -3483,7 +3468,7 @@ export class SocketClient {
         return response.Data ?? '';
     }
 
-    // FileFormats / Zipper workbench
+    // FileFormats / Zipper
 
     public async zipperInspect(inputPath: string): Promise<ZipperInspectResult> {
         const response = await this.sendCommand({ Command: 'ZIPPER_INSPECT', InputPath: inputPath }, 30_000);
@@ -3628,29 +3613,6 @@ export class SocketClient {
             throw new Error(response.Error || 'ZIPPER_RELEASE_PRELOAD failed');
         }
         return JSON.parse(response.Data ?? '{}') as ZipperOperationResult;
-    }
-
-    /**
-     * Runs one ASSET_* command (asset sessions: the editing surface shared by the editor webviews and the
-     * assets_* MCP tools) and returns its parsed Data. Other commands are refused so an editor webview can't
-     * reach the rest of the bridge through this.
-     */
-    public async assetCommand(command: AssetCommand, timeoutMs: number = 60_000): Promise<unknown> {
-        if (!/^ASSET_[A-Z_]+$/.test(command.Command)) {
-            throw new Error(`Not an asset command: ${command.Command}`);
-        }
-        const response = await this.sendCommand({
-            Command: command.Command,
-            InputPath: command.InputPath,
-            AssetSession: command.AssetSession,
-            AssetArchive: command.AssetArchive,
-            AssetName: command.AssetName,
-            AssetJson: command.AssetJson,
-        }, timeoutMs);
-        if (!response.Success) {
-            throw new Error(response.Error || `${command.Command} failed`);
-        }
-        return JSON.parse(response.Data ?? 'null');
     }
 
     public async zipperReadAllNodes(inputPath: string): Promise<Array<{ index: number; name: string; type: number; data: string }>> {

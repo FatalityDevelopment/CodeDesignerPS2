@@ -21,12 +21,12 @@ CodeDesigner assembles and disassembles the Emotion Engine (MIPS R5900), debugs 
 | **CDS language** | A patch scripting language that compiles to MIPS, GameShark codes or a frame-loop cheat table. |
 | **Cheats** | Cheat lists and the CheatCodeArchive, format conversion, a cheat porter between game versions, a frame-loop cheat engine and a joker (button activator) code builder. |
 | **Memory tools** | Memory Diff, PCSX2 save states, scanners, labels, pointer structs and structure diagrams. |
-| **Assets** | Viewer, Model, Map and Animation editors for SOCOM II (and SOCOM: Combined Assault, read-only). |
+| **Assets** | Moved out to the standalone Map Builder. The Zipper FileFormats codec (ZDB, ZAR, ZED, MPS, RDR) stays here. |
 | **Network** | DEV9 packet capture with every Medius / DME / SOCOM II message labelled, plus packet building and injection. |
 | **Online** | SOCOM II online servers (DNAS, Medius, DME, NAT, patch download), verified on real hardware. |
 | **Media** | Memory card, HDD image, ISO and the PCSX2 compatibility list. |
 | **Recompiler** | Static ELF → C++ translation. |
-| **AI** | `CodeDesigner.AI`, an MCP server with 242 tools and profiles for Claude, Copilot and other clients; an AI chat and agent panel in VS Code. |
+| **AI** | `CodeDesigner.AI`, an MCP server with 217 tools and profiles for Claude, Copilot and other clients; an AI chat and agent panel in VS Code. |
 
 ## How it fits together
 

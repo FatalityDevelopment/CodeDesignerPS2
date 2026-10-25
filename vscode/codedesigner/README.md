@@ -1,6 +1,6 @@
 # CodeDesigner for VS Code
 
-PS2 reverse engineering and modding inside VS Code: a live Emotion Engine disassembler, PCSX2 debugging, CDS patches, cheats, asset editors, packet capture and an AI agent panel. The extension is the front end for the CodeDesigner backend, which it starts and talks to over a local socket (`localhost:8765`).
+PS2 reverse engineering and modding inside VS Code: a live Emotion Engine disassembler, PCSX2 debugging, CDS patches, cheats, packet capture and an AI agent panel. The extension is the front end for the CodeDesigner backend, which it starts and talks to over a local socket (`localhost:8765`).
 
 ---
 
@@ -11,7 +11,6 @@ PS2 reverse engineering and modding inside VS Code: a live Emotion Engine disass
 - **Cheats** — the game's known codes from the CheatCodeArchive, a cheats editor, converter, scanner, **Cheat Porter** and a **joker code builder**.
 - **CDS** — syntax highlighting, snippets and a compiler for Code Designer Script patches.
 - **Memory tools** — Memory Diff (GitHub-style), Snapshots, Label Manager, Structure diagrams, struct offset calculator.
-- **Assets** — Viewer, Model, Map and Animation editors for SOCOM II and SOCOM: Combined Assault packages.
 - **Network** — start the SOCOM II online servers; the Packet Viewer captures, labels, builds and injects PS2 traffic.
 - **Media** — memory card and HDD browsers, the PCSX2 compatibility list, an ELF → C++ recompiler.
 - **AI** — start the `CodeDesigner.AI` MCP server, chat with Claude, Codex, Copilot or a local model, and manage agents, plans and memories.

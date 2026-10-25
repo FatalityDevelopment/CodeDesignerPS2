@@ -15,11 +15,10 @@ Guides for using CodeDesigner, and references for working on it. New here? Read 
 | [Cheat Porter](cheat-porter.md) | Moving codes between game versions |
 | [Cheat Converter](cheat-converter.md) | Cheat code formats and conversion |
 | [Labels](labels.md) | Label sets, typed labels, pointer structs and live resolution |
-| [Asset editing](asset-editing.md) | SOCOM II / CA asset sessions: Model, Map and Animation editors, and their MCP tools |
 | [Memory Card Manager](memory-card-manager.md) | PS2 memory card images |
 | [HDD Manager](hdd-manager.md) | PS2 HDD images: APA partitions and PFS files |
 | [Recompiler](recompiler.md) | Static ELF → C++ recompilation |
-| [MCP Server](mcp-server.md) | `CodeDesigner.AI`: setup, profiles and all 242 tools |
+| [MCP Server](mcp-server.md) | `CodeDesigner.AI`: setup, profiles and all 217 tools |
 | [Multiplayer Servers](multiplayer-servers.md) | SOCOM II online servers: DNAS, Medius, DME, NAT, patch download, configuration |
 
 ## PCSX2

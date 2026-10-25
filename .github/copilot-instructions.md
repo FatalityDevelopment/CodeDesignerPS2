@@ -9,7 +9,7 @@ The `website/obj/` path contains literal backslashes that break Windows. A CI ch
 
 ## Project Overview
 
-CodeDesigner is a toolset for the **Sony PlayStation 2**: an assembler, disassembler and execution engine for the Emotion Engine (MIPS R5900, verified against [PCSX2](https://pcsx2.net/)), a socket bridge to PCSX2 and a built-in emulator, a VS Code extension, the CDS patch language, cheat tools, game asset editors, SOCOM II online servers and an MCP server for AI clients. See `docs/projects.md` and `docs/ARCHITECTURE.md`.
+CodeDesigner is a toolset for the **Sony PlayStation 2**: an assembler, disassembler and execution engine for the Emotion Engine (MIPS R5900, verified against [PCSX2](https://pcsx2.net/)), a socket bridge to PCSX2 and a built-in emulator, a VS Code extension, the CDS patch language, cheat tools, SOCOM II online servers and an MCP server for AI clients. See `docs/projects.md` and `docs/ARCHITECTURE.md`.
 
 ## Repository Structure
 

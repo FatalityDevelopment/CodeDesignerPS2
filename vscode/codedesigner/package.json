@@ -88,26 +88,6 @@
         "icon": "$(database)"
       },
       {
-        "command": "codedesigner.openZipperWorkbench",
-        "title": "CodeDesigner: Open Asset Viewer (Zipper)",
-        "icon": "$(archive)"
-      },
-      {
-        "command": "codedesigner.openModelEditor",
-        "title": "CodeDesigner: Open Model Editor",
-        "icon": "$(symbol-structure)"
-      },
-      {
-        "command": "codedesigner.openMapEditor",
-        "title": "CodeDesigner: Open Map Editor",
-        "icon": "$(globe)"
-      },
-      {
-        "command": "codedesigner.openAnimationEditor",
-        "title": "CodeDesigner: Open Animation Editor",
-        "icon": "$(play)"
-      },
-      {
         "command": "codedesigner.openCheatsEditor",
         "title": "CodeDesigner: Open PS2 Cheats Editor"
       },
@@ -192,11 +172,6 @@
           "group": "navigation"
         },
         {
-          "command": "codedesigner.openZipperWorkbench",
-          "when": "view == disasm.disasmPanel",
-          "group": "navigation"
-        },
-        {
           "command": "codedesigner.openAgentActivity",
           "when": "view == disasm.disasmPanel",
           "group": "navigation"
@@ -248,26 +223,6 @@
         {
           "command": "codedesigner.openHddBrowser",
           "when": "resourceExtname == .raw || resourceExtname == .hdd || resourceExtname == .img",
-          "group": "navigation"
-        },
-        {
-          "command": "codedesigner.openZipperWorkbench",
-          "when": "resourceExtname == .zdb || resourceExtname == .cdb || resourceExtname == .zar || resourceExtname == .zed || resourceFilename =~ /^SaveGame/",
-          "group": "navigation"
-        },
-        {
-          "command": "codedesigner.openModelEditor",
-          "when": "resourceExtname == .zdb || resourceExtname == .ZDB || resourceExtname == .cdb || resourceExtname == .CDB || resourceExtname == .zed || resourceExtname == .ZED || resourceExtname == .zar || resourceExtname == .ZAR || resourceExtname == .iso || resourceExtname == .ISO || resourceExtname == .img || resourceExtname == .IMG",
-          "group": "navigation"
-        },
-        {
-          "command": "codedesigner.openMapEditor",
-          "when": "resourceExtname == .zdb || resourceExtname == .ZDB || resourceExtname == .cdb || resourceExtname == .CDB || resourceExtname == .zed || resourceExtname == .ZED || resourceExtname == .zar || resourceExtname == .ZAR",
-          "group": "navigation"
-        },
-        {
-          "command": "codedesigner.openAnimationEditor",
-          "when": "resourceExtname == .zdb || resourceExtname == .ZDB || resourceExtname == .cdb || resourceExtname == .CDB || resourceExtname == .zed || resourceExtname == .ZED || resourceExtname == .zar || resourceExtname == .ZAR || resourceExtname == .iso || resourceExtname == .ISO || resourceExtname == .img || resourceExtname == .IMG",
           "group": "navigation"
         }
       ]

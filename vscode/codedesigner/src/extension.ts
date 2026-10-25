@@ -11,8 +11,6 @@ import { CheatsEditorProvider } from './providers/cheatsEditor/cheatsEditorProvi
 import { StructureVisualizerProvider } from './providers/structureVisualizer/structureVisualizerProvider';
 import { MemoryCardBrowserProvider } from './providers/memoryCardBrowser/memoryCardBrowserProvider';
 import { HddBrowserProvider } from './providers/hddBrowser/hddBrowserProvider';
-import { ZipperWorkbenchProvider } from './providers/zipperWorkbench/zipperWorkbenchProvider';
-import { ANIMATION_EDITOR_PAGE, MAP_EDITOR_PAGE, ModelEditorProvider } from './providers/modelEditor/modelEditorProvider';
 import { WelcomeProvider, WelcomeDataDelegate } from './providers/welcome/welcomeProvider';
 import { SocketClient } from './socketClient';
 import { registerWebviewDevReload } from './utils/devReload';
@@ -22,7 +20,6 @@ let outputChannel: vscode.LogOutputChannel;
 let debugOutputChannel: vscode.LogOutputChannel;
 let cdsCompilerOutputChannel: vscode.LogOutputChannel;
 let padStateChannel: vscode.OutputChannel;
-let zdbChannel: vscode.OutputChannel;
 
 /**
  * Get the socket client instance
@@ -60,15 +57,6 @@ export function getPadStateChannel(): vscode.OutputChannel {
     return padStateChannel;
 }
 
-/**
- * Get the ZDB channel - receives debug logs from the zipper workbench webview
- * (file loaded, decoded N textures, material reports, RDR / MPS dumps, etc.).
- * Mirrors the on-page log pane the HTML reference viewers print to.
- */
-export function getZdbChannel(): vscode.OutputChannel {
-    return zdbChannel;
-}
-
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
@@ -95,12 +83,6 @@ export function activate(context: vscode.ExtensionContext) {
 	// don't drown out the main extension log.
 	padStateChannel = vscode.window.createOutputChannel('Code Designer PadState');
 	context.subscriptions.push(padStateChannel);
-
-	// Zipper workbench debug stream — file-loaded summaries, decode warnings,
-	// material / GEO / RDR dump reports. Mirrors the on-page log pane in the
-	// HTML reference viewers so users can correlate webview state with logs.
-	zdbChannel = vscode.window.createOutputChannel('Code Designer ZDB');
-	context.subscriptions.push(zdbChannel);
 
 	// Initialize socket client
 	socketClient = new SocketClient('localhost', 8765);
@@ -432,49 +414,6 @@ export function activate(context: vscode.ExtensionContext) {
 	);
 	socketClient.onConnected(()    => welcomeProvider.notifyStatusChanged());
 	socketClient.onDisconnected(() => welcomeProvider.notifyStatusChanged());
-
-	// Standalone FileFormats/Zipper workbench for ZDB/ZAR/ZED containers,
-	// SOCOM II saves, and APACHE00.ZDB patch builds.
-	const zipperWorkbenchProvider = new ZipperWorkbenchProvider(context.extensionUri, socketClient);
-	const openZipperWorkbenchCommand = vscode.commands.registerCommand(
-		'codedesigner.openZipperWorkbench',
-		(uri?: vscode.Uri) => {
-			const filePath = uri?.fsPath ?? vscode.window.activeTextEditor?.document.uri.fsPath;
-			zipperWorkbenchProvider.open(filePath);
-		},
-	);
-	context.subscriptions.push(openZipperWorkbenchCommand);
-
-	// Model Editor: SOCOM II models and textures through bridge asset sessions
-	// (the same ASSET_* commands the assets_* MCP tools use).
-	const modelEditorProvider = new ModelEditorProvider(context.extensionUri, socketClient);
-	context.subscriptions.push(vscode.commands.registerCommand(
-		'codedesigner.openModelEditor',
-		(target?: vscode.Uri | string, model?: { archive: string; name: string }) => {
-			const filePath = typeof target === 'string' ? target : target?.fsPath ?? vscode.window.activeTextEditor?.document.uri.fsPath;
-			modelEditorProvider.open(filePath, model);
-		},
-	));
-
-	// Map Editor: the composed map (props, clutter, AIMAPS points) on the same asset sessions.
-	const mapEditorProvider = new ModelEditorProvider(context.extensionUri, socketClient, MAP_EDITOR_PAGE);
-	context.subscriptions.push(vscode.commands.registerCommand(
-		'codedesigner.openMapEditor',
-		(target?: vscode.Uri | string) => {
-			const filePath = typeof target === 'string' ? target : target?.fsPath ?? vscode.window.activeTextEditor?.document.uri.fsPath;
-			mapEditorProvider.open(filePath);
-		},
-	));
-
-	// Animation Editor: character clips (package MOTION_S.ZAR + shared MOTION_P.ZAR) played on the package's characters.
-	const animationEditorProvider = new ModelEditorProvider(context.extensionUri, socketClient, ANIMATION_EDITOR_PAGE);
-	context.subscriptions.push(vscode.commands.registerCommand(
-		'codedesigner.openAnimationEditor',
-		(target?: vscode.Uri | string) => {
-			const filePath = typeof target === 'string' ? target : target?.fsPath ?? vscode.window.activeTextEditor?.document.uri.fsPath;
-			animationEditorProvider.open(filePath);
-		},
-	));
 
 	// ── Structure Visualizer ────────────────────────────────────────────────
 	// Standalone webview that renders Mermaid diagrams of a game's structure:
