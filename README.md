@@ -10,7 +10,7 @@
 
 ---
 
-CodeDesigner assembles and disassembles the Emotion Engine (MIPS R5900), debugs games live in its own PCSX2 fork or its built-in emulator, builds and ports cheats, edits game assets and runs online servers. An MCP server gives AI assistants the same tools, so a person and an assistant can work on the same game at the same time.
+CodeDesigner assembles and disassembles the Emotion Engine (MIPS R5900), debugs games live in its own PCSX2 fork or PX86, builds and ports cheats, edits game assets and runs online servers. An MCP server gives AI assistants the same tools, so a person and an assistant can work on the same game at the same time.
 
 ## What it does
 
