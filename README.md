@@ -1,4 +1,8 @@
 <p align="center">
+  The installer is outdated, MsSql express local db is needed. 
+</p>
+
+<p align="center">
   <img src="docs/images/codedesigner-logo.png" alt="CodeDesigner" width="260">
 </p>
 
