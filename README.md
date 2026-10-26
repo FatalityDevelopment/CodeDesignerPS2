@@ -10,7 +10,7 @@
 
 ---
 
-CodeDesigner assembles and disassembles the Emotion Engine (MIPS R5900), debugs games live in its own PCSX2 fork or PX86, builds and ports cheats, edits game assets and runs online servers. An MCP server gives AI assistants the same tools, so a person and an assistant can work on the same game at the same time.
+CodeDesigner assembles and disassembles the Emotion Engine (MIPS R5900), debugs games live in its own PCSX2 fork or PX86, builds and ports cheats, edits game assets and runs online servers. An MCP server gives AI assistants the same tools, so a person and an assistant can work on the same game at the same time. The client can watch the AI work by turning on AI mode.
 
 ## What it does
 
@@ -38,6 +38,122 @@ VS Code extension ──JSON lines :8765──▶ CodeDesigner.Ps2.Bridge ──
 ```
 
 The Bridge is the runtime hub: the extension, the MCP server and scripts all talk to it. See [Architecture](docs/ARCHITECTURE.md) and [Projects](docs/projects.md).
+
+## Features
+
+
+<img src="docs/images/rm_ (3).png" alt="CodeDesigner" width="650">
+
+## Ps2 debugger
+
+![alt text](image-2.png)
+<img src="docs/images/rm_ (2).png" alt="CodeDesigner" width="650">
+
+![alt text](image-3.png)
+
+
+## Multiplayer + DNAS server with debug api / patch server
+A full socom 2 multiplayer server that replicates identical production behavior.
+Deploy a local instance and debug it. (moving to pimps new Dnas server)
+
+
+![alt text](image-1.png)
+
+<img src="docs/images/rm_ (4).png" alt="CodeDesigner" width="650">
+
+<img src="docs/images/rm_ (5).png" alt="CodeDesigner" width="650">
+
+## Ps2 packet debugger
+1. Packet dissect
+2. Packet Injection
+3. Packet Capture
+
+<img src="docs/images/rm_ (6).png" alt="CodeDesigner" width="650">
+
+## Labels
+1. Object mapping 
+2. live 
+3. hide | show 
+4. label lists 
+5. full mapping of the ps2
+
+<img src="docs/images/rm_ (7).png" alt="CodeDesigner" width="650">
+<img src="docs/images/rm_ (8).png" alt="CodeDesigner" width="650">
+
+## Cheat Engine / Cheat list
+1. raw codes
+2. code designer source code (now can include raw codes)
+3. Pc cheat engine for program macros
+4. asm cheat engine injected and hooked for repeated writes
+
+<img src="docs/images/rm_ (9).png" alt="CodeDesigner" width="650">
+
+## Cheat List Manager(Archive)
+1. includes all ps2 games
+2. cheats provided by gshi Skiller / old code archives
+
+<img src="docs/images/rm_ (10).png" alt="CodeDesigner" width="650">
+
+## Cheat Scanner
+provides many ways to search
+
+<img src="docs/images/rm_ (11).png" alt="CodeDesigner" width="650">
+
+## Cheat Converter
+convert cheats between cheat engine formats
+
+<img src="docs/images/rm_ (12).png" alt="CodeDesigner" width="650">
+
+## Cheat Porter
+Trys to auto port codes between versions of a game. i.e r0001 -> r0004 | s2 -> ca
+Can also be used to port codes between libraries.
+
+<img src="docs/images/rm_ (13).png" alt="CodeDesigner" width="650">
+
+## Memory Diff
+
+1. dump (save state) => dump
+2. dump (save state) => emulator memory
+
+<img src="docs/images/rm_ (14).png" alt="CodeDesigner" width="650">
+<img src="docs/images/rm_ (15).png" alt="CodeDesigner" width="650">
+<img src="docs/images/rm_ (16).png" alt="CodeDesigner" width="650">
+
+## Memory card
+<img src="docs/images/rm_ (17).png" alt="CodeDesigner" width="650">
+
+## HDD
+<img src="docs/images/rm_ (18).png" alt="CodeDesigner" width="650">
+
+## Game library and compatibility 
+<img src="docs/images/rm_ (19).png" alt="CodeDesigner" width="650">
+
+### AI Control Panel
+
+This is for detailed work only
+1. Handles memory / skills / agent orchastration / agent profiles
+2. The AI has access to roughly 300 different tools covering the entire complexity of code desginer
+3. designed for low token consumption (use default mode for most tasks)
+4. AI can document memory using the label system
+5. AI cam update the clients screen live for the disassembler editor / map editor
+
+<img src="docs/images/rm_ (20).png" alt="CodeDesigner" width="650">
+<img src="docs/images/rm_ (1).png" alt="CodeDesigner" width="650">
+
+## Asset editor / Map builder / asset converter (s2/s3/sca/gta:sa)
+See the SocomMapBuilder repo for more information and screenshots
+
+1. This is a full on map builder that allows you to create maps/weapons/characters/animations and props. 
+
+2. AI has full control of the editors and can generate maps/weapons/characters/animations and props (see the ray gun picture)
+
+3. Can convert assets between games s2 -> ca | ca -> s2 | gta -> s2
+
+4. Generates new packages (cdb/zdb)
+  a. Used to create new map packages
+  b. Creating Dlc from the memory card or hard drive
+
+![alt text](image.png)
 
 ## Quick start
 
