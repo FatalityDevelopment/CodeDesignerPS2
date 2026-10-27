@@ -149,4 +149,51 @@
         <Setter Property="Margin" Value="0,2" />
     </Style>
 
+    <!-- ── Install-mode card (RadioButton) ────────────────────────────── -->
+    <Style x:Key="ModeCard" TargetType="RadioButton">
+        <Setter Property="Foreground" Value="{StaticResource FgPrimaryBrush}" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RadioButton">
+                    <Border x:Name="card"
+                            Background="{StaticResource BgSecondaryBrush}"
+                            BorderBrush="{StaticResource BorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="4"
+                            Padding="14,10">
+                        <ContentPresenter />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="card" Property="Background" Value="{StaticResource BgHeaderBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="card" Property="BorderBrush" Value="{StaticResource AccentTealBrush}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- ── Option checkbox ────────────────────────────────────────────── -->
+    <Style x:Key="OptionCheck" TargetType="CheckBox">
+        <Setter Property="Foreground" Value="{StaticResource FgSecondaryBrush}" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Margin" Value="0,3" />
+    </Style>
+
+    <!-- ── Path text box ──────────────────────────────────────────────── -->
+    <Style x:Key="PathBox" TargetType="TextBox">
+        <Setter Property="Background" Value="{StaticResource BgInputBrush}" />
+        <Setter Property="Foreground" Value="{StaticResource FgPrimaryBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+        <Setter Property="CaretBrush" Value="{StaticResource FgPrimaryBrush}" />
+        <Setter Property="FontFamily" Value="Cascadia Code, Consolas, monospace" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Padding" Value="4,3" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+
 </ResourceDictionary>

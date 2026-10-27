@@ -1,3 +1,4 @@
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using CodeDesigner.Ps2.Installer.Services;
@@ -8,8 +9,12 @@ public partial class ProgressPage : UserControl
 {
     private readonly ScriptRunner _runner = new();
     private CancellationTokenSource? _cts;
+    private StreamWriter? _log;
 
-    /// <summary>Raised when all scripts complete (success or failure).</summary>
+    /// <summary>Where the full log of this run is written.</summary>
+    public static string LogPath { get; } = Path.Combine(Path.GetTempPath(), "CodeDesignerSetup", "install.log");
+
+    /// <summary>Raised when all steps complete (success or failure).</summary>
     public event Action<IReadOnlyList<ScriptRunner.ScriptResult>>? Completed;
 
     public ProgressPage()
@@ -17,47 +22,47 @@ public partial class ProgressPage : UserControl
         InitializeComponent();
     }
 
-    /// <summary>Starts running the provided scripts.</summary>
-    public async void RunScripts(IReadOnlyList<ScriptRunner.ScriptInfo> scripts)
+    /// <summary>Starts running the provided steps.</summary>
+    public async void RunSteps(IReadOnlyList<InstallStep> steps)
     {
         _cts = new CancellationTokenSource();
         LogBox.Clear();
         ProgressBar.Value = 0;
         ProgressLabel.Text = "0%";
 
-        _runner.OutputReceived += OnOutput;
-        _runner.ScriptStarted += OnScriptStarted;
-        _runner.ScriptCompleted += OnScriptCompleted;
+        Directory.CreateDirectory(Path.GetDirectoryName(LogPath)!);
+        _log = new StreamWriter(LogPath, append: false) { AutoFlush = true };
 
-        int total = scripts.Count;
+        int total = steps.Count;
         int completed = 0;
 
-        void OnScriptStartedLocal(string name, int index, int count)
+        void OnStarted(string title, int index, int count)
         {
-            Dispatcher.Invoke(() =>
-            {
-                StatusLabel.Text = $"Running {name}  ({index}/{count})";
-            });
+            Dispatcher.Invoke(() => StatusLabel.Text = $"{title}  ({index}/{count})");
         }
 
-        void OnScriptCompletedLocal(ScriptRunner.ScriptResult result)
+        void OnCompleted(ScriptRunner.ScriptResult result)
         {
             completed++;
+            string marker = result.Success ? "✓" : "✗";
             Dispatcher.Invoke(() =>
             {
+                AppendLog($"{marker} {result.Title} exited with code {result.ExitCode}");
                 double pct = (double)completed / total * 100;
                 ProgressBar.Value = pct;
                 ProgressLabel.Text = $"{pct:F0}%";
             });
         }
 
-        _runner.ScriptStarted += OnScriptStartedLocal;
-        _runner.ScriptCompleted += OnScriptCompletedLocal;
+        _runner.OutputReceived += OnOutput;
+        _runner.ScriptStarted += OnStarted;
+        _runner.ScriptCompleted += OnCompleted;
 
         IReadOnlyList<ScriptRunner.ScriptResult> results;
         try
         {
-            results = await _runner.RunAllAsync(scripts, continueOnError: false, _cts.Token);
+            var scriptDir = ScriptRunner.ExtractScripts();
+            results = await _runner.RunAllAsync(scriptDir, steps, continueOnError: false, _cts.Token);
         }
         catch (OperationCanceledException)
         {
@@ -72,12 +77,12 @@ public partial class ProgressPage : UserControl
         finally
         {
             _runner.OutputReceived -= OnOutput;
-            _runner.ScriptStarted -= OnScriptStarted;
-            _runner.ScriptStarted -= OnScriptStartedLocal;
-            _runner.ScriptCompleted -= OnScriptCompleted;
-            _runner.ScriptCompleted -= OnScriptCompletedLocal;
+            _runner.ScriptStarted -= OnStarted;
+            _runner.ScriptCompleted -= OnCompleted;
         }
 
+        _log.Dispose();
+        _log = null;
         CancelButton.IsEnabled = false;
         Completed?.Invoke(results);
     }
@@ -85,18 +90,6 @@ public partial class ProgressPage : UserControl
     private void OnOutput(string line)
     {
         Dispatcher.Invoke(() => AppendLog(line));
-    }
-
-    private void OnScriptStarted(string name, int index, int count)
-    {
-        // handled by local handler above
-    }
-
-    private void OnScriptCompleted(ScriptRunner.ScriptResult result)
-    {
-        string marker = result.Success ? "✓" : "✗";
-        Dispatcher.Invoke(() =>
-            AppendLog($"{marker} {result.FileName} exited with code {result.ExitCode}"));
     }
 
     private void CancelButton_Click(object sender, RoutedEventArgs e)
@@ -108,6 +101,7 @@ public partial class ProgressPage : UserControl
 
     private void AppendLog(string text)
     {
+        _log?.WriteLine(text);
         LogBox.AppendText(text + Environment.NewLine);
         LogBox.ScrollToEnd();
     }

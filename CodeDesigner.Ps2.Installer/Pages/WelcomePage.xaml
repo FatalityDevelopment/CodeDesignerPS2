@@ -10,104 +10,102 @@
         </Grid.RowDefinitions>
 
         <!-- ── Hero area ──────────────────────────────────────────── -->
-        <StackPanel Grid.Row="0" HorizontalAlignment="Center" Margin="0,20,0,0">
-
-            <!-- Dragon-circle logo placeholder using the teal accent -->
-            <Border Width="100" Height="100"
-                    CornerRadius="50"
-                    Background="{StaticResource BgSecondaryBrush}"
-                    BorderBrush="{StaticResource AccentTealBrush}"
-                    BorderThickness="2"
-                    HorizontalAlignment="Center"
-                    Margin="0,0,0,18">
-                <TextBlock Text="⬡"
-                           FontSize="48"
-                           Foreground="{StaticResource AccentTealBrush}"
-                           HorizontalAlignment="Center"
-                           VerticalAlignment="Center" />
-            </Border>
-
+        <StackPanel Grid.Row="0" HorizontalAlignment="Center" Margin="0,18,0,14">
             <TextBlock Text="CodeDesigner"
-                       FontSize="28"
+                       FontSize="26"
                        FontWeight="Bold"
                        Foreground="{StaticResource FgPrimaryBrush}"
                        HorizontalAlignment="Center" />
 
             <TextBlock Text="PlayStation 2 Debugger &amp; Toolkit"
-                       FontSize="14"
+                       FontSize="13"
                        Foreground="{StaticResource AccentTealBrush}"
                        HorizontalAlignment="Center"
                        Margin="0,4,0,0" />
-
-            <TextBlock Text="VS Code Extension"
-                       FontSize="12"
-                       Foreground="{StaticResource FgMutedBrush}"
-                       HorizontalAlignment="Center"
-                       Margin="0,2,0,24" />
         </StackPanel>
 
-        <!-- ── Description ────────────────────────────────────────── -->
-        <StackPanel Grid.Row="1" Margin="40,0" VerticalAlignment="Top">
+        <!-- ── Mode + options ─────────────────────────────────────── -->
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <StackPanel Margin="40,0">
 
-            <TextBlock TextWrapping="Wrap"
-                       FontSize="13"
-                       Foreground="{StaticResource FgSecondaryBrush}"
-                       Margin="0,0,0,16">
-                This installer will set up CodeDesigner on your system by
-                running a series of configuration scripts. The following
-                tasks will be performed:
-            </TextBlock>
+                <RadioButton x:Name="UserModeCard"
+                             GroupName="Mode"
+                             Style="{StaticResource ModeCard}"
+                             IsChecked="True"
+                             Checked="Mode_Checked"
+                             Margin="0,0,0,8">
+                    <StackPanel>
+                        <TextBlock Text="Install CodeDesigner" FontSize="14" FontWeight="SemiBold"
+                                   Foreground="{StaticResource FgPrimaryBrush}" />
+                        <TextBlock x:Name="UserModeDetail" TextWrapping="Wrap" FontSize="12" Margin="0,3,0,0"
+                                   Foreground="{StaticResource FgMutedBrush}"
+                                   Text="Download the latest release and set it up. No source code or compilers needed." />
+                    </StackPanel>
+                </RadioButton>
 
-            <StackPanel Margin="10,0,0,0">
-                <TextBlock Style="{StaticResource StepLabel}">
-                    <Run Text="•" Foreground="{StaticResource AccentTealBrush}" />
-                    <Run Text="  Configure workspace and emulator settings" />
-                </TextBlock>
-                <TextBlock Style="{StaticResource StepLabel}">
-                    <Run Text="•" Foreground="{StaticResource AccentTealBrush}" />
-                    <Run Text="  Install the VS Code extension" />
-                </TextBlock>
-                <TextBlock Style="{StaticResource StepLabel}">
-                    <Run Text="•" Foreground="{StaticResource AccentTealBrush}" />
-                    <Run Text="  Set up required dependencies" />
-                </TextBlock>
+                <RadioButton x:Name="DevModeCard"
+                             GroupName="Mode"
+                             Style="{StaticResource ModeCard}"
+                             Checked="Mode_Checked">
+                    <StackPanel>
+                        <TextBlock Text="Developer setup" FontSize="14" FontWeight="SemiBold"
+                                   Foreground="{StaticResource FgPrimaryBrush}" />
+                        <TextBlock TextWrapping="Wrap" FontSize="12" Margin="0,3,0,0"
+                                   Foreground="{StaticResource FgMutedBrush}"
+                                   Text="Install the .NET 8 SDK, Node.js and Git, clone the repository with its submodules and build everything from source." />
+                    </StackPanel>
+                </RadioButton>
+
+                <!-- Developer-only: where to clone -->
+                <StackPanel x:Name="RepoPanel" Visibility="Collapsed" Margin="0,14,0,0">
+                    <TextBlock Text="Repository folder" FontSize="12"
+                               Foreground="{StaticResource FgSecondaryBrush}" Margin="0,0,0,4" />
+                    <DockPanel>
+                        <Button DockPanel.Dock="Right"
+                                Content="Browse…"
+                                Style="{StaticResource SecondaryButton}"
+                                Padding="12,4"
+                                Margin="6,0,0,0"
+                                Click="BrowseButton_Click" />
+                        <TextBox x:Name="RepoDirBox" Style="{StaticResource PathBox}" />
+                    </DockPanel>
+                    <TextBlock FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0"
+                               Foreground="{StaticResource FgMutedBrush}"
+                               Text="An existing checkout is reused (its submodules are updated); otherwise the folder must be empty or new." />
+                </StackPanel>
+
+                <!-- Options -->
+                <TextBlock Text="Options" FontSize="12" Margin="0,16,0,4"
+                           Foreground="{StaticResource FgSecondaryBrush}" />
+                <CheckBox x:Name="PrereqCheck" Style="{StaticResource OptionCheck}" IsChecked="True"
+                          Content="Install missing prerequisites (winget, SQL Server LocalDB)" />
+                <CheckBox x:Name="Pcsx2Check" Style="{StaticResource OptionCheck}" IsChecked="True"
+                          Content="PCSX2 (CodeDesigner fork, prebuilt)" />
+                <CheckBox x:Name="ArchiveCheck" Style="{StaticResource OptionCheck}" IsChecked="True"
+                          Content="Cheat code archive (imported into the database)" />
+                <CheckBox x:Name="ExtensionCheck" Style="{StaticResource OptionCheck}" IsChecked="True"
+                          Content="Install the VS Code extension" />
+
+                <TextBlock FontSize="11" TextWrapping="Wrap" Margin="0,12,0,12"
+                           Foreground="{StaticResource FgMutedBrush}"
+                           Text="Windows may ask for administrator approval while prerequisites install. Your PS2 BIOS and games are configured afterwards in the extension's Settings tab." />
             </StackPanel>
-
-            <!-- Discovered scripts list -->
-            <TextBlock x:Name="ScriptCountLabel"
-                       Text=""
-                       FontSize="12"
-                       Foreground="{StaticResource FgMutedBrush}"
-                       Margin="0,24,0,4" />
-
-            <ListBox x:Name="ScriptListBox"
-                     MaxHeight="120"
-                     Background="{StaticResource BgSecondaryBrush}"
-                     Foreground="{StaticResource FgMutedBrush}"
-                     BorderBrush="{StaticResource BorderBrush}"
-                     BorderThickness="1"
-                     FontFamily="Cascadia Code, Consolas, monospace"
-                     FontSize="12"
-                     Padding="4"
-                     Visibility="Collapsed" />
-        </StackPanel>
+        </ScrollViewer>
 
         <!-- ── Bottom bar ─────────────────────────────────────────── -->
         <Border Grid.Row="2"
                 BorderBrush="{StaticResource BorderBrush}"
                 BorderThickness="0,1,0,0"
-                Padding="0,16,0,0"
-                Margin="0,16,0,0">
+                Padding="0,16,0,16">
             <DockPanel LastChildFill="False" Margin="40,0">
                 <Button x:Name="StartButton"
                         DockPanel.Dock="Right"
-                        Content="Start"
+                        Content="Install"
                         Style="{StaticResource PrimaryButton}"
-                        IsEnabled="False"
                         Click="StartButton_Click" />
 
-                <TextBlock DockPanel.Dock="Left"
-                           Text="v1.0"
+                <TextBlock x:Name="VersionLabel"
+                           DockPanel.Dock="Left"
                            FontSize="11"
                            Foreground="{StaticResource FgMutedBrush}"
                            VerticalAlignment="Center" />

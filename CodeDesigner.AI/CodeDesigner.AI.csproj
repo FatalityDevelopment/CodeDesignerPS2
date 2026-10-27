@@ -27,6 +27,8 @@
       <_LocalAppData Condition="'$(LOCALAPPDATA)' != ''">$(LOCALAPPDATA)</_LocalAppData>
       <_LocalAppData Condition="'$(LOCALAPPDATA)' == '' AND '$(HOME)' != ''">$(HOME)/.local/share</_LocalAppData>
       <_InstallDir Condition="'$(_LocalAppData)' != ''">$(_LocalAppData)/CodeDesigner/AI</_InstallDir>
+      <!-- -p:CodeDesignerInstallDir=<dir> deploys somewhere else (the release packaging stages into a temp dir). -->
+      <_InstallDir Condition="'$(CodeDesignerInstallDir)' != ''">$(CodeDesignerInstallDir)/AI</_InstallDir>
     </PropertyGroup>
     <MakeDir Directories="$(_InstallDir)" Condition="'$(_InstallDir)' != ''" />
     <ItemGroup Condition="'$(_InstallDir)' != ''">

@@ -3,6 +3,8 @@ name: Build
 on:
   push:
     branches: [master, main]
+    # A v* tag also publishes a GitHub release (the `release` job) that CodeDesignerInstaller.exe installs.
+    tags: ['v*']
   pull_request:
     branches: [master, main]
   workflow_dispatch:
@@ -55,28 +57,17 @@ jobs:
       - name: Run tests
         run: dotnet test CodeDesigner.Ps2.TestProject/CodeDesigner.Ps2.TestProject.csproj -c Release --no-build --no-restore --verbosity normal
 
-      - name: Publish .NET projects
-        shell: bash
-        run: |
-          # Publish all C# projects except the test project
-          for proj in $(find . -name "*.csproj" -not -path "*/bin/*" -not -path "*/obj/*" -not -path "*/CodeDesigner.Ps2.TestProject/*"); do
-            name=$(basename "$(dirname "$proj")")
-            echo "::group::Publishing $name"
-            dotnet publish "$proj" -c Release -o "publish/$name" --no-build
-            echo "::endgroup::"
-          done
-
-      - name: Build VSCode Extension
-        working-directory: vscode/codedesigner
-        run: |
-          npm ci
-          npx @vscode/vsce package --out ../../publish/codedesigner.vsix
+      # Same assets the release publishes: CodeDesigner.zip, CheatCodeArchive.zip, codedesigner.vsix and
+      # CodeDesignerInstaller.exe (pinned to the tag on tag builds, "latest" otherwise).
+      - name: Package release assets
+        shell: pwsh
+        run: ./tools/scripts/Build-Release.ps1 -OutputDir dist -Version '${{ github.ref_type == 'tag' && github.ref_name || '' }}'
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: CodeDesigner
-          path: publish/
+          path: dist/
 
   build-pcsx2:
     name: Build PCSX2
@@ -157,3 +148,35 @@ jobs:
             !pcsx2/bin/**/*.ipdb
             !pcsx2/bin/**/*.pdb
             !pcsx2/bin/**/*.lib
+
+  release:
+    name: Publish release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, build-pcsx2]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download CodeDesigner assets
+        uses: actions/download-artifact@v4
+        with:
+          name: CodeDesigner
+          path: assets
+
+      - name: Download PCSX2
+        uses: actions/download-artifact@v4
+        with:
+          name: PCSX2
+          path: pcsx2-bin
+
+      # Install-Release.ps1 extracts PCSX2.zip into %LOCALAPPDATA%\CodeDesigner\pcsx2\.
+      - name: Zip PCSX2
+        run: cd pcsx2-bin && zip -qr ../assets/PCSX2.zip .
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" assets/* --repo "${{ github.repository }}" \
+            --title "CodeDesigner ${{ github.ref_name }}" --generate-notes --verify-tag
