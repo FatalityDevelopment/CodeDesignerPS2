@@ -9,19 +9,29 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <!-- ── Hero area ──────────────────────────────────────────── -->
-        <StackPanel Grid.Row="0" HorizontalAlignment="Center" Margin="0,18,0,14">
-            <TextBlock Text="CodeDesigner"
-                       FontSize="26"
-                       FontWeight="Bold"
-                       Foreground="{StaticResource FgPrimaryBrush}"
-                       HorizontalAlignment="Center" />
-
-            <TextBlock Text="PlayStation 2 Debugger &amp; Toolkit"
-                       FontSize="13"
-                       Foreground="{StaticResource AccentTealBrush}"
-                       HorizontalAlignment="Center"
-                       Margin="0,4,0,0" />
+        <!-- ── Hero area (mirrors the extension's welcome page) ───── -->
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="40,18,40,16">
+            <Border Width="64" Height="64"
+                    CornerRadius="6"
+                    Background="{StaticResource BgSecondaryBrush}"
+                    BorderBrush="{StaticResource BorderBrush}"
+                    BorderThickness="1"
+                    Padding="4"
+                    Margin="0,0,14,0">
+                <Image Source="/Resources/codedesigner-logo-256.png"
+                       RenderOptions.BitmapScalingMode="HighQuality" />
+            </Border>
+            <StackPanel VerticalAlignment="Center">
+                <TextBlock Text="CodeDesigner"
+                           FontSize="24"
+                           FontWeight="Bold"
+                           Foreground="{StaticResource FgPrimaryBrush}" />
+                <TextBlock Text="PLAYSTATION 2 DEBUGGER &amp; TOOLKIT FOR VS CODE"
+                           FontSize="11"
+                           FontWeight="SemiBold"
+                           Foreground="{StaticResource FgMutedBrush}"
+                           Margin="0,3,0,0" />
+            </StackPanel>
         </StackPanel>
 
         <!-- ── Mode + options ─────────────────────────────────────── -->

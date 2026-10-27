@@ -21,7 +21,7 @@
             <TextBlock x:Name="StatusLabel"
                        Text="Preparing…"
                        FontSize="13"
-                       Foreground="{StaticResource AccentTealBrush}"
+                       Foreground="{StaticResource AccentBrush}"
                        Margin="0,6,0,0" />
         </StackPanel>
 

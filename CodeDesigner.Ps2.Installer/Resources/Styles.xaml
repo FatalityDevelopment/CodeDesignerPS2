@@ -1,20 +1,20 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
-    <!-- ── Color palette (matches VSCode extension dark theme) ────────── -->
+    <!-- ── Color palette (vscode/codedesigner webviews: welcome-page.css) ── -->
     <Color x:Key="BgPrimary">#FF1e1e1e</Color>
     <Color x:Key="BgSecondary">#FF252526</Color>
     <Color x:Key="BgHeader">#FF2d2d30</Color>
     <Color x:Key="BgInput">#FF3c3c3c</Color>
     <Color x:Key="BgHover">#FF505050</Color>
-    <Color x:Key="BorderDefault">#FF3e3e42</Color>
+    <Color x:Key="BorderDefault">#FF313131</Color>
     <Color x:Key="FgPrimary">#FFd4d4d4</Color>
     <Color x:Key="FgSecondary">#FFcccccc</Color>
-    <Color x:Key="FgMuted">#FF858585</Color>
-    <Color x:Key="AccentTeal">#FF00b4d8</Color>
-    <Color x:Key="AccentTealDark">#FF008fa7</Color>
-    <Color x:Key="AccentBlue">#FF007acc</Color>
-    <Color x:Key="SuccessGreen">#FF4ec9b0</Color>
+    <Color x:Key="FgMuted">#FF8f8f8f</Color>
+    <Color x:Key="Accent">#FF3794ff</Color>
+    <Color x:Key="ButtonBg">#FF0e639c</Color>
+    <Color x:Key="ButtonHover">#FF1177bb</Color>
+    <Color x:Key="SuccessGreen">#FF5cff6d</Color>
     <Color x:Key="ErrorRed">#FFf48771</Color>
     <Color x:Key="WarningYellow">#FFdcdcaa</Color>
 
@@ -28,16 +28,16 @@
     <SolidColorBrush x:Key="FgPrimaryBrush"    Color="{StaticResource FgPrimary}" />
     <SolidColorBrush x:Key="FgSecondaryBrush"  Color="{StaticResource FgSecondary}" />
     <SolidColorBrush x:Key="FgMutedBrush"      Color="{StaticResource FgMuted}" />
-    <SolidColorBrush x:Key="AccentTealBrush"   Color="{StaticResource AccentTeal}" />
-    <SolidColorBrush x:Key="AccentTealDarkBrush" Color="{StaticResource AccentTealDark}" />
-    <SolidColorBrush x:Key="AccentBlueBrush"   Color="{StaticResource AccentBlue}" />
+    <SolidColorBrush x:Key="AccentBrush"       Color="{StaticResource Accent}" />
+    <SolidColorBrush x:Key="ButtonBrush"       Color="{StaticResource ButtonBg}" />
+    <SolidColorBrush x:Key="ButtonHoverBrush"  Color="{StaticResource ButtonHover}" />
     <SolidColorBrush x:Key="SuccessGreenBrush" Color="{StaticResource SuccessGreen}" />
     <SolidColorBrush x:Key="ErrorRedBrush"     Color="{StaticResource ErrorRed}" />
     <SolidColorBrush x:Key="WarningYellowBrush" Color="{StaticResource WarningYellow}" />
 
     <!-- ── Primary Button ─────────────────────────────────────────────── -->
     <Style x:Key="PrimaryButton" TargetType="Button">
-        <Setter Property="Background" Value="{StaticResource AccentTealBrush}" />
+        <Setter Property="Background" Value="{StaticResource ButtonBrush}" />
         <Setter Property="Foreground" Value="White" />
         <Setter Property="FontSize" Value="14" />
         <Setter Property="FontWeight" Value="SemiBold" />
@@ -58,7 +58,7 @@
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
                             <Setter TargetName="border" Property="Background"
-                                    Value="{StaticResource AccentTealDarkBrush}" />
+                                    Value="{StaticResource ButtonHoverBrush}" />
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter TargetName="border" Property="Opacity" Value="0.4" />
@@ -108,7 +108,7 @@
     <Style x:Key="InstallerProgressBar" TargetType="ProgressBar">
         <Setter Property="Height" Value="6" />
         <Setter Property="Background" Value="{StaticResource BgInputBrush}" />
-        <Setter Property="Foreground" Value="{StaticResource AccentTealBrush}" />
+        <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
         <Setter Property="BorderThickness" Value="0" />
         <Setter Property="Template">
             <Setter.Value>
@@ -169,7 +169,7 @@
                             <Setter TargetName="card" Property="Background" Value="{StaticResource BgHeaderBrush}" />
                         </Trigger>
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="card" Property="BorderBrush" Value="{StaticResource AccentTealBrush}" />
+                            <Setter TargetName="card" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>

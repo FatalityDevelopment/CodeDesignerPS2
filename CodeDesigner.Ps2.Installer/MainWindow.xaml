@@ -2,6 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="CodeDesigner — Installer"
+        Icon="Resources/codedesigner.ico"
         Width="620" Height="640"
         MinWidth="500" MinHeight="450"
         Background="{StaticResource BgPrimaryBrush}"
@@ -21,12 +22,12 @@
                 BorderThickness="0,0,0,1"
                 Padding="20,10">
             <DockPanel>
-                <TextBlock DockPanel.Dock="Left"
-                           Text="⬡"
-                           FontSize="22"
-                           Foreground="{StaticResource AccentTealBrush}"
-                           VerticalAlignment="Center"
-                           Margin="0,0,10,0" />
+                <Image DockPanel.Dock="Left"
+                       Source="Resources/codedesigner-logo-256.png"
+                       Width="28" Height="28"
+                       RenderOptions.BitmapScalingMode="HighQuality"
+                       VerticalAlignment="Center"
+                       Margin="0,0,10,0" />
 
                 <TextBlock DockPanel.Dock="Left"
                            Text="CodeDesigner Setup"
@@ -41,7 +42,7 @@
                             VerticalAlignment="Center"
                             HorizontalAlignment="Right">
                     <TextBlock x:Name="Step1Dot" Text="●" FontSize="10"
-                               Foreground="{StaticResource AccentTealBrush}"
+                               Foreground="{StaticResource AccentBrush}"
                                Margin="0,0,6,0" />
                     <TextBlock x:Name="Step2Dot" Text="●" FontSize="10"
                                Foreground="{StaticResource FgMutedBrush}"

@@ -11,7 +11,14 @@
     <AssemblyTitle>CodeDesigner Installer</AssemblyTitle>
     <Product>CodeDesigner</Product>
     <Description>CodeDesigner PS2 Toolkit Installer</Description>
+    <ApplicationIcon>Resources\codedesigner.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <!-- Logo images: generated from docs/images/codedesigner-logo.png. -->
+  <ItemGroup>
+    <Resource Include="Resources\codedesigner-logo-256.png" />
+    <Resource Include="Resources\codedesigner.ico" />
+  </ItemGroup>
 
   <!-- Release builds ship as one self-contained exe so it runs on machines without .NET:
          dotnet publish -c Release -r win-x64 -p:ReleaseTag=v1.2.3

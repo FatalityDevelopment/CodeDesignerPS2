@@ -48,7 +48,7 @@ public partial class MainWindow : Window
 
     private void SetStep(int step)
     {
-        var accent = (Brush)FindResource("AccentTealBrush");
+        var accent = (Brush)FindResource("AccentBrush");
         var muted = (Brush)FindResource("FgMutedBrush");
 
         Step1Dot.Foreground = step >= 1 ? accent : muted;
