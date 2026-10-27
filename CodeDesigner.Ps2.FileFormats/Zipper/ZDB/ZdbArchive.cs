@@ -59,6 +59,11 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.ZDB
 
         private readonly List<ZdbEntry> _entries = new List<ZdbEntry>();
 
+        // Type 2: data alignment of the loaded archive (0x800 for retail, 1 = packed straight after the
+        // headers, as new archives are) and the bytes between the headers and the first entry's data.
+        private uint _type2Alignment = 1;
+        private byte[]? _type2HeaderPadding;
+
         // ------------------------------------------------------------------
         // Factory methods
         // ------------------------------------------------------------------
@@ -581,6 +586,7 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.ZDB
 
             uint fileCount = R32(data, 0x98);
             uint cursor = 0xA0;
+            var offsets = new uint[fileCount];
 
             for (uint i = 0; i < fileCount; i++)
             {
@@ -594,6 +600,7 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.ZDB
 
                 uint entry = R32(data, cursor + 0x44);
                 uint size = R32(data, cursor + 0x48);
+                offsets[i] = entry;
                 // +0x4C..+0x57 = three zero padding words (confirmed zero in M51.ZDB)
                 uint trailingWord = R32(data, cursor + 0x58); // non-zero in real archives
 
@@ -607,6 +614,37 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.ZDB
                 });
 
                 cursor += headSize;
+            }
+
+            CaptureType2Layout(data, cursor, offsets);
+        }
+
+        /// <summary>
+        /// Retail type-2 archives (MP53.ZDB) start every entry on a 0x800 boundary, in table order, and
+        /// the file ends on one. When the loaded archive is laid out that way, remember the alignment and
+        /// the gap bytes so <see cref="SerializeType2"/> reproduces it; otherwise keep packing contiguously.
+        /// </summary>
+        private void CaptureType2Layout(byte[] data, uint headerEnd, uint[] offsets)
+        {
+            const uint Sector = 0x800;
+            _type2Alignment = 1;
+            _type2HeaderPadding = null;
+            if (_archiveType != 2 || offsets.Length == 0) return;
+
+            uint expected = AlignUp(headerEnd, Sector);
+            for (int i = 0; i < offsets.Length; i++)
+            {
+                if (offsets[i] != expected) return;
+                expected = AlignUp(offsets[i] + _entries[i].Size, Sector);
+            }
+            if (expected != data.Length) return;
+
+            _type2Alignment = Sector;
+            _type2HeaderPadding = ReadBlock(data, headerEnd, offsets[0] - headerEnd);
+            for (int i = 0; i < offsets.Length; i++)
+            {
+                uint end = offsets[i] + _entries[i].Size;
+                _entries[i].PaddingAfter = ReadBlock(data, end, AlignUp(end, Sector) - end);
             }
         }
 
@@ -673,7 +711,9 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.ZDB
         private byte[] SerializeType2()
         {
             int fileCount = _entries.Count;
-            uint dataStart = 0xA0u + (uint)(fileCount * 0x5C);
+            uint headerEnd = 0xA0u + (uint)(fileCount * 0x5C);
+            uint align = _type2Alignment;
+            uint dataStart = AlignUp(headerEnd, align);
 
             using var ms = new MemoryStream();
             using var bw = new BinaryWriter(ms);
@@ -725,12 +765,17 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.ZDB
                 bw.Write(0u);           // padding +0x54 (confirmed zero)
                 bw.Write(e.TrailingWord); // preserved @ +0x58 (non-zero in real archives)
 
-                running += e.Size;
+                running = AlignUp(running + e.Size, align);
             }
 
-            // Body
+            // Body. Gaps reuse the bytes read from the original file when they still fit (the entry and
+            // the table are unchanged), else zeros.
+            WritePadding(bw, dataStart - headerEnd, _type2HeaderPadding);
             foreach (ZdbEntry e in _entries)
+            {
                 bw.Write(e.Data);
+                WritePadding(bw, AlignUp(e.Size, align) - e.Size, e.PaddingAfter);
+            }
 
             return ms.ToArray();
         }
@@ -794,6 +839,14 @@ namespace CodeDesigner.Ps2.FileFormats.Zipper.ZDB
         }
 
         private static uint Align16(uint v) => (v + 0xFu) & ~0xFu;
+
+        private static uint AlignUp(uint v, uint align) => align <= 1 ? v : (v + align - 1) / align * align;
+
+        private static void WritePadding(BinaryWriter bw, uint length, byte[]? original)
+        {
+            if (length == 0) return;
+            bw.Write(original != null && original.Length == length ? original : new byte[length]);
+        }
 
         // ====================================================================
         // Private – path helpers

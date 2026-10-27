@@ -1,25 +1,32 @@
-/* VS Code Dark Theme - Global Styles */
+/* CodeDesigner website — same visual language as the VS Code extension's webviews
+   (vscode/codedesigner/src/webview/welcome/welcome-page.css): VS Code dark colors,
+   bordered rounded cards on a faint background, 11–12px uppercase letter-spaced
+   section headers, and the dragon logo as a watermark behind the content. */
 
 :root {
-  --bg-editor: #1e1e1e;
-  --bg-sidebar: #252526;
-  --bg-tabbar: #2d2d30;
+  --bg: #1e1e1e;
+  --bg-header: #252526;
   --bg-input: #3c3c3c;
-  --fg-text: #cccccc;
-  --fg-primary: #d4d4d4;
-  --accent-blue: #007acc;
-  --accent-button: #0e639c;
-  --accent-hover: #1177bb;
-  --success: #4ec94e;
-  --success-alt: #4caf50;
+  --bg-card: rgba(255, 255, 255, 0.018);
+  --bg-card-hover: rgba(255, 255, 255, 0.04);
+  --fg: #d4d4d4;
+  --fg-strong: #f0f0f0;
+  --fg-secondary: #cccccc;
+  --fg-muted: #8f8f8f;
+  --border: #313131;
+  --border-hover: #454545;
+  --accent: #3794ff;
+  --accent-hover: #4daafc;
+  --focus: #007fd4;
+  --btn: #0e639c;
+  --btn-hover: #1177bb;
+  --btn-secondary: #252526;
+  --btn-secondary-hover: #2f2f30;
+  --success: #5cff6d;
   --error: #f48771;
-  --error-alt: #e07070;
-  --border: #3e3e42;
-  --border-alt: #404040;
-  --input-placeholder: #858585;
-  --scrollbar-thumb: #555;
-  --font-body: system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --font-code: 'Consolas', 'Courier New', monospace;
+  --scrollbar-thumb: #4f4f4f;
+  --font-body: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-code: 'Cascadia Code', Consolas, 'Courier New', monospace;
 }
 
 *, *::before, *::after {
@@ -30,23 +37,41 @@
 
 html, body {
   height: 100%;
-  background-color: var(--bg-editor);
-  color: var(--fg-primary);
+  background-color: var(--bg);
+  color: var(--fg);
   font-family: var(--font-body);
-  font-size: 14px;
-  line-height: 1.6;
+  font-size: 13px;
+  line-height: 1.55;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Fatality Development banner behind every page, darkened toward the edges so content stays readable. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(ellipse at center, rgba(30, 30, 30, 0.35) 0%, rgba(30, 30, 30, 0.8) 75%, var(--bg) 100%),
+    url("/assets/fatality-bg.webp") center / cover no-repeat;
+  opacity: 0.55;
+  pointer-events: none;
+  z-index: 0;
+}
+
+app-root {
+  position: relative;
+  z-index: 1;
+}
+
 a {
-  color: var(--accent-blue);
+  color: var(--accent);
   text-decoration: none;
-  transition: color 0.15s ease;
 }
 
 a:hover {
   color: var(--accent-hover);
+  text-decoration: underline;
 }
 
 code, pre {
@@ -60,7 +85,7 @@ code, pre {
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--bg-editor);
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
@@ -69,48 +94,46 @@ code, pre {
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #666;
+  background: #646464;
 }
 
 /* Form Elements */
 input, textarea, select {
   background-color: var(--bg-input);
-  color: var(--fg-primary);
+  color: var(--fg);
   border: 1px solid var(--border);
   border-radius: 4px;
-  padding: 8px 12px;
+  padding: 7px 10px;
   font-family: var(--font-body);
-  font-size: 14px;
+  font-size: 13px;
   outline: none;
-  transition: border-color 0.15s ease;
+  transition: border-color 0.1s ease;
 }
 
 input:focus, textarea:focus, select:focus {
-  border-color: var(--accent-blue);
+  border-color: var(--focus);
 }
 
 input::placeholder, textarea::placeholder {
-  color: var(--input-placeholder);
+  color: var(--fg-muted);
 }
 
 button {
-  background-color: var(--accent-button);
+  background-color: var(--btn);
   color: #ffffff;
-  border: none;
+  border: 1px solid var(--btn);
   border-radius: 4px;
-  padding: 8px 16px;
+  padding: 7px 14px;
   font-family: var(--font-body);
-  font-size: 14px;
+  font-size: 12px;
+  font-weight: 600;
   cursor: pointer;
-  transition: background-color 0.15s ease;
+  transition: background-color 0.1s ease, border-color 0.1s ease;
 }
 
 button:hover {
-  background-color: var(--accent-hover);
-}
-
-button:active {
-  background-color: var(--accent-blue);
+  background-color: var(--btn-hover);
+  border-color: var(--btn-hover);
 }
 
 button:disabled {
@@ -118,31 +141,90 @@ button:disabled {
   cursor: not-allowed;
 }
 
-/* Utility Classes */
-.container {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 24px;
-}
-
-.card {
-  background-color: var(--bg-sidebar);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 20px;
-  transition: border-color 0.15s ease;
-}
-
-.card:hover {
-  border-color: var(--accent-blue);
-}
-
 h1, h2, h3, h4 {
-  color: var(--fg-primary);
+  color: var(--fg-strong);
   font-weight: 600;
 }
 
-h1 { font-size: 28px; }
-h2 { font-size: 22px; }
-h3 { font-size: 18px; }
-h4 { font-size: 16px; }
+h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.01em; }
+h2 { font-size: 18px; }
+h3 { font-size: 15px; }
+h4 { font-size: 13px; }
+
+/* ── Shared building blocks (mirror the extension's cd-* / acc-* classes) ── */
+
+.container {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 24px 28px 56px;
+}
+
+.cd-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.cd-card-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 12px;
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.cd-card-body {
+  padding: 4px 12px 12px;
+}
+
+.cd-subtitle {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+
+.cd-muted { color: var(--fg-muted); }
+
+.cd-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--btn-secondary);
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-decoration: none;
+  transition: background 0.1s, border-color 0.1s;
+}
+
+.cd-btn:hover {
+  background: var(--btn-secondary-hover);
+  border-color: var(--border-hover);
+  color: var(--fg);
+  text-decoration: none;
+}
+
+.cd-btn-primary {
+  background: var(--btn);
+  border-color: var(--btn);
+  color: #ffffff;
+}
+
+.cd-btn-primary:hover {
+  background: var(--btn-hover);
+  border-color: var(--btn-hover);
+  color: #ffffff;
+}

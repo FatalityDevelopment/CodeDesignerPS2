@@ -30,10 +30,10 @@ namespace CodeDesigner.Ps2.TestProject
         [TestMethod]
         public void BuildRevivalZdb()
         {
-            Assert.IsTrue(File.Exists(OriginalZdbPath),
-                $"Original disc ZDB not found: {OriginalZdbPath}");
-            Assert.IsTrue(File.Exists(FTScoreBinPath),
-                $"FTScore plaintext not found: {FTScoreBinPath}");
+            if (!File.Exists(OriginalZdbPath))
+                Assert.Inconclusive($"Original disc ZDB not found: {OriginalZdbPath}");
+            if (!File.Exists(FTScoreBinPath))
+                Assert.Inconclusive($"FTScore plaintext not found: {FTScoreBinPath}");
 
             ApachePatchBuilder.BuildResult result = ApachePatchBuilder.BuildAndSave(
                 OriginalZdbPath,
@@ -65,8 +65,8 @@ namespace CodeDesigner.Ps2.TestProject
         [TestMethod]
         public void DecryptDiscZSealEtc()
         {
-            Assert.IsTrue(File.Exists(OriginalZdbPath),
-                $"Original disc ZDB not found: {OriginalZdbPath}");
+            if (!File.Exists(OriginalZdbPath))
+                Assert.Inconclusive($"Original disc ZDB not found: {OriginalZdbPath}");
 
             byte[] discZdb    = File.ReadAllBytes(OriginalZdbPath);
             byte[] zsealPlain;
@@ -102,8 +102,8 @@ namespace CodeDesigner.Ps2.TestProject
         [TestMethod]
         public void DecryptDiscFtScore()
         {
-            Assert.IsTrue(File.Exists(OriginalZdbPath),
-                $"Original disc ZDB not found: {OriginalZdbPath}");
+            if (!File.Exists(OriginalZdbPath))
+                Assert.Inconclusive($"Original disc ZDB not found: {OriginalZdbPath}");
 
             byte[] discZdb   = File.ReadAllBytes(OriginalZdbPath);
             byte[] ftPlain;
@@ -177,8 +177,8 @@ namespace CodeDesigner.Ps2.TestProject
             const string PubModPath  = @"C:\Users\tholu\Desktop\revival_pubmod.bin";
             const string DnasOutPath = @"C:\Users\tholu\Desktop\SocomPatch\DNAS_revival.BIN";
 
-            Assert.IsTrue(File.Exists(DnasBinPath), $"Not found: {DnasBinPath}");
-            Assert.IsTrue(File.Exists(PubModPath),  $"Run BuildRevivalZdb first: {PubModPath}");
+            if (!File.Exists(DnasBinPath)) Assert.Inconclusive($"Not found: {DnasBinPath}");
+            if (!File.Exists(PubModPath)) Assert.Inconclusive($"Run BuildRevivalZdb first: {PubModPath}");
 
             byte[] dnasBin = File.ReadAllBytes(DnasBinPath);
             byte[] pubMod  = File.ReadAllBytes(PubModPath);

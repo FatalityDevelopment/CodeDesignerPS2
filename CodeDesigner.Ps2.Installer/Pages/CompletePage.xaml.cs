@@ -24,7 +24,7 @@ public partial class CompletePage : UserControl
         {
             // Cancelled or no scripts
             TitleLabel.Text = "Installation Cancelled";
-            DetailLabel.Text = "The installation was cancelled before completion.";
+            DetailLabel.Text = $"The installation was cancelled or could not start. The log is at {ProgressPage.LogPath}.";
             StatusIcon.Text = "—";
             StatusIcon.Foreground = FindBrush("WarningYellowBrush");
             StatusCircle.BorderBrush = FindBrush("WarningYellowBrush");
@@ -32,7 +32,7 @@ public partial class CompletePage : UserControl
         else if (allSuccess)
         {
             TitleLabel.Text = "Installation Complete!";
-            DetailLabel.Text = $"All {results.Count} script(s) ran successfully.";
+            DetailLabel.Text = "Open VS Code. The CodeDesigner icon is in the activity bar; pick your PS2 BIOS and game in its Settings tab.";
             StatusIcon.Text = "✓";
             StatusIcon.Foreground = FindBrush("SuccessGreenBrush");
             StatusCircle.BorderBrush = FindBrush("SuccessGreenBrush");
@@ -41,7 +41,7 @@ public partial class CompletePage : UserControl
         {
             int failCount = results.Count(r => !r.Success);
             TitleLabel.Text = "Installation Failed";
-            DetailLabel.Text = $"{failCount} of {results.Count} script(s) failed.";
+            DetailLabel.Text = $"{failCount} of {results.Count} step(s) failed. The full log is at {ProgressPage.LogPath}. Fix the problem it reports and run setup again.";
             StatusIcon.Text = "✗";
             StatusIcon.Foreground = FindBrush("ErrorRedBrush");
             StatusCircle.BorderBrush = FindBrush("ErrorRedBrush");
@@ -50,7 +50,7 @@ public partial class CompletePage : UserControl
         // Build summary items
         var items = results.Select(r => new SummaryItem
         {
-            FileName = r.FileName,
+            FileName = r.Title,
             Marker = r.Success ? "✓" : "✗",
             MarkerBrush = r.Success ? FindBrush("SuccessGreenBrush") : FindBrush("ErrorRedBrush")
         }).ToList();

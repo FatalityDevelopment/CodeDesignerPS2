@@ -4,6 +4,13 @@
 
 This guide covers building the C# backend, the VS Code extension and the PCSX2 fork from source, and running the tests.
 
+> **Fastest route:** run `CodeDesignerInstaller.exe` from the [latest release](https://github.com/FatalityDevelopment/CodeDesignerPS2/releases/latest) and choose **Developer setup**. It installs the prerequisites below, clones the repository, builds it and installs the extension. In an existing checkout, the same steps are scripts:
+>
+> ```powershell
+> .\CodeDesigner.Ps2.Installer\Scripts\Install-Prerequisites.ps1 -Mode Developer
+> .\CodeDesigner.Ps2.Installer\Scripts\Setup-DevEnvironment.ps1 -RepoDir .
+> ```
+
 ---
 
 ## Prerequisites
@@ -23,8 +30,8 @@ This guide covers building the C# backend, the VS Code extension and the PCSX2 f
 The repository uses submodules for the PCSX2 fork and the CheatCodeArchive:
 
 ```powershell
-git clone --recurse-submodules https://github.com/TylerDev888/CodeDesigner.git
-cd CodeDesigner
+git clone --recurse-submodules https://github.com/FatalityDevelopment/CodeDesignerPS2.git
+cd CodeDesignerPS2
 ```
 
 If you cloned without them: `git submodule update --init --recursive`.
@@ -123,7 +130,36 @@ Open `pcsx2/PCSX2_qt.sln` in Visual Studio and build `pcsx2-qt` (x64). Full inst
 
 ## CI
 
-`.github/workflows/build.yml` restores and builds the .NET projects in Release, runs `CodeDesigner.Ps2.TestProject`, publishes the projects and packages the extension as a `.vsix`.
+`.github/workflows/build.yml` restores and builds the .NET projects in Release, runs `CodeDesigner.Ps2.TestProject`, packages the release assets (below) and builds the PCSX2 fork. Every run uploads the assets as the `CodeDesigner` and `PCSX2` workflow artifacts.
+
+---
+
+## Releases
+
+Push a tag to publish a release:
+
+```powershell
+git tag v1.5.0
+git push origin v1.5.0
+```
+
+The workflow's `release` job attaches these to a GitHub release with generated notes:
+
+| Asset | Contents | Installed to |
+|---|---|---|
+| `CodeDesigner.zip` | Bridge, emulator, MCP server, database tool, AI, Multiplayer | `%LOCALAPPDATA%\CodeDesigner\` |
+| `PCSX2.zip` | The PCSX2 fork (Release AVX2) | `%LOCALAPPDATA%\CodeDesigner\pcsx2\` |
+| `CheatCodeArchive.zip` | `CheatCodeArchive/Database/` | `%LOCALAPPDATA%\CodeDesigner\CheatCodeArchive\`, then imported |
+| `codedesigner.vsix` | The VS Code extension | VS Code |
+| `CodeDesignerInstaller.exe` | Self-contained installer, pinned to the tag | |
+
+To build the same assets locally (everything except `PCSX2.zip`; pass `-Pcsx2BinDir` to include it):
+
+```powershell
+pwsh tools/scripts/Build-Release.ps1 -Version v1.5.0     # output in dist/
+```
+
+`CodeDesigner.zip` is made by the projects' own deploy targets, pointed at a staging folder with `-p:CodeDesignerInstallDir=<dir>`, so it always matches what a local `dotnet build` deploys.
 
 ---
 

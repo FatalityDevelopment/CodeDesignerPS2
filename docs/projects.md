@@ -139,7 +139,21 @@ An experimental ASP.NET Core REST API (auth, cheats, projects, research, servers
 
 ## CodeDesigner.Ps2.Installer
 
-A WPF installer that runs the PowerShell scripts in `Scripts/` to build or download CodeDesigner, install it to `%LOCALAPPDATA%\CodeDesigner\` and initialise the database.
+A WPF installer (`CodeDesignerInstaller.exe`, published self-contained so it needs no .NET on the target machine) with two modes:
+
+- **Install CodeDesigner**: prerequisites, then the GitHub release assets into `%LOCALAPPDATA%\CodeDesigner\`, then the database.
+- **Developer setup**: developer prerequisites, then clone, build, deploy and install the extension.
+
+The work is done by the PowerShell scripts in `Scripts/`, which are embedded in the exe and run non-interactively. They can also be run by hand:
+
+| Script | Does |
+|---|---|
+| `Install-Prerequisites.ps1 -Mode User\|Developer` | Installs what is missing via winget (.NET, Node.js, Git, VS Code, VC++ runtime) plus SQL Server LocalDB |
+| `Install-Release.ps1 [-Tag vX.Y.Z] [-Components ...]` | Downloads and extracts release assets, installs the `.vsix` |
+| `Initialize-Database.ps1` | Starts LocalDB, migrates and seeds the database, imports the cheat archive |
+| `Setup-DevEnvironment.ps1 -RepoDir <dir>` | Clones (or updates submodules), builds `CodeDesigner.sln`, builds and installs the extension |
+
+Release assets are produced by `tools/scripts/Build-Release.ps1`; see [Releases](building.md#releases).
 
 ## Tests
 

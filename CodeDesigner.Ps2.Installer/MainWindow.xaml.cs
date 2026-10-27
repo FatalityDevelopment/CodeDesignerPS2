@@ -27,13 +27,13 @@ public partial class MainWindow : Window
         PageHost.Content = page;
     }
 
-    private void OnInstallRequested(string folder, IReadOnlyList<ScriptRunner.ScriptInfo> scripts)
+    private void OnInstallRequested(InstallOptions options)
     {
         SetStep(2);
         var page = new ProgressPage();
         page.Completed += OnCompleted;
         PageHost.Content = page;
-        page.RunScripts(scripts);
+        page.RunSteps(InstallPlan.Build(options));
     }
 
     private void OnCompleted(IReadOnlyList<ScriptRunner.ScriptResult> results)
@@ -48,7 +48,7 @@ public partial class MainWindow : Window
 
     private void SetStep(int step)
     {
-        var accent = (Brush)FindResource("AccentTealBrush");
+        var accent = (Brush)FindResource("AccentBrush");
         var muted = (Brush)FindResource("FgMutedBrush");
 
         Step1Dot.Foreground = step >= 1 ? accent : muted;

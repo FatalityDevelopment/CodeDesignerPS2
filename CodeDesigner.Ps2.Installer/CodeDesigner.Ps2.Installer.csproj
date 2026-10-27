@@ -7,13 +7,37 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <AssemblyName>CodeDesignerInstaller</AssemblyName>
     <AssemblyTitle>CodeDesigner Installer</AssemblyTitle>
     <Product>CodeDesigner</Product>
     <Description>CodeDesigner PS2 Toolkit Installer</Description>
+    <ApplicationIcon>Resources\codedesigner.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <!-- Logo images: generated from docs/images/codedesigner-logo.png. -->
+  <ItemGroup>
+    <Resource Include="Resources\codedesigner-logo-256.png" />
+    <Resource Include="Resources\codedesigner.ico" />
+  </ItemGroup>
+
+  <!-- Release builds ship as one self-contained exe so it runs on machines without .NET:
+         dotnet publish -c Release -r win-x64 -p:ReleaseTag=v1.2.3
+       ReleaseTag pins the GitHub release the installer downloads (empty = latest). -->
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' != ''">
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <DebugType>none</DebugType>
   </PropertyGroup>
 
   <ItemGroup>
-    <Folder Include="Scripts\" />
+    <AssemblyMetadata Include="ReleaseTag" Value="$(ReleaseTag)" />
+  </ItemGroup>
+
+  <!-- The setup scripts travel inside the exe and are extracted at run time (ScriptRunner.ExtractScripts). -->
+  <ItemGroup>
+    <EmbeddedResource Include="Scripts\*.ps1;Scripts\*.psm1" LogicalName="Scripts.%(Filename)%(Extension)" />
   </ItemGroup>
 
 </Project>

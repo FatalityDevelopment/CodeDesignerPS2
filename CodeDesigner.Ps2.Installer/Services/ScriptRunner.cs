@@ -4,17 +4,16 @@ using System.IO;
 namespace CodeDesigner.Ps2.Installer.Services;
 
 /// <summary>
-/// Discovers and executes PowerShell scripts from a given folder.
-/// Scripts are run in alphabetical order so authors can prefix filenames
-/// with numbers (e.g. 01-Install.ps1, 02-Configure.ps1) to control
-/// execution order.
+/// Runs the setup scripts embedded in the installer. The scripts are extracted to a temp
+/// folder, then each <see cref="InstallStep"/> runs in its own windowless powershell.exe
+/// with stdin closed, so a script that ever prompts fails instead of hanging.
 /// </summary>
 public sealed class ScriptRunner
 {
-    public record ScriptInfo(string FilePath, string FileName);
+    private const string ResourcePrefix = "Scripts.";
 
     public record ScriptResult(
-        string FileName,
+        string Title,
         bool Success,
         int ExitCode,
         string Output,
@@ -23,55 +22,59 @@ public sealed class ScriptRunner
     /// <summary>Raised for every line of stdout/stderr produced by a running script.</summary>
     public event Action<string>? OutputReceived;
 
-    /// <summary>Raised when a script starts.</summary>
+    /// <summary>Raised when a step starts: title, 1-based index, count.</summary>
     public event Action<string, int, int>? ScriptStarted;
 
-    /// <summary>Raised when a script finishes.</summary>
+    /// <summary>Raised when a step finishes.</summary>
     public event Action<ScriptResult>? ScriptCompleted;
 
     /// <summary>
-    /// Discovers all *.ps1 files in <paramref name="folder"/> sorted
-    /// alphabetically.
+    /// Writes the embedded Scripts\* resources to a fresh temp folder and returns it.
     /// </summary>
-    public IReadOnlyList<ScriptInfo> DiscoverScripts(string folder)
+    public static string ExtractScripts()
     {
-        if (!Directory.Exists(folder))
-            return Array.Empty<ScriptInfo>();
+        var dir = Path.Combine(Path.GetTempPath(), "CodeDesignerSetup", "scripts");
+        if (Directory.Exists(dir))
+            Directory.Delete(dir, recursive: true);
+        Directory.CreateDirectory(dir);
 
-        return Directory.GetFiles(folder, "*.ps1", SearchOption.TopDirectoryOnly)
-            .OrderBy(f => Path.GetFileName(f), StringComparer.OrdinalIgnoreCase)
-            .Select(f => new ScriptInfo(f, Path.GetFileName(f)))
-            .ToList()
-            .AsReadOnly();
+        var assembly = typeof(ScriptRunner).Assembly;
+        foreach (var name in assembly.GetManifestResourceNames().Where(n => n.StartsWith(ResourcePrefix, StringComparison.Ordinal)))
+        {
+            using var source = assembly.GetManifestResourceStream(name)!;
+            using var dest = File.Create(Path.Combine(dir, name[ResourcePrefix.Length..]));
+            source.CopyTo(dest);
+        }
+        return dir;
     }
 
     /// <summary>
-    /// Runs every script in <paramref name="scripts"/> sequentially,
-    /// returning results for each one.  Execution stops on the first
-    /// failure unless <paramref name="continueOnError"/> is true.
+    /// Runs every step sequentially, returning results for each one. Execution stops on
+    /// the first failure unless <paramref name="continueOnError"/> is true.
     /// </summary>
     public async Task<IReadOnlyList<ScriptResult>> RunAllAsync(
-        IReadOnlyList<ScriptInfo> scripts,
+        string scriptDir,
+        IReadOnlyList<InstallStep> steps,
         bool continueOnError = false,
         CancellationToken cancellationToken = default)
     {
-        var results = new List<ScriptResult>(scripts.Count);
+        var results = new List<ScriptResult>(steps.Count);
 
-        for (int i = 0; i < scripts.Count; i++)
+        for (int i = 0; i < steps.Count; i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var script = scripts[i];
-            ScriptStarted?.Invoke(script.FileName, i + 1, scripts.Count);
-            OutputReceived?.Invoke($"── Running {script.FileName} ({i + 1}/{scripts.Count}) ──");
+            var step = steps[i];
+            ScriptStarted?.Invoke(step.Title, i + 1, steps.Count);
+            OutputReceived?.Invoke($"── {step.Title} ({i + 1}/{steps.Count}) ──");
 
-            var result = await RunScriptAsync(script, cancellationToken);
+            var result = await RunScriptAsync(scriptDir, step, cancellationToken);
             results.Add(result);
             ScriptCompleted?.Invoke(result);
 
             if (!result.Success && !continueOnError)
             {
-                OutputReceived?.Invoke($"✗ {script.FileName} failed (exit {result.ExitCode}). Stopping.");
+                OutputReceived?.Invoke($"✗ {step.Title} failed (exit {result.ExitCode}). Stopping.");
                 break;
             }
         }
@@ -80,7 +83,8 @@ public sealed class ScriptRunner
     }
 
     private async Task<ScriptResult> RunScriptAsync(
-        ScriptInfo script,
+        string scriptDir,
+        InstallStep step,
         CancellationToken cancellationToken)
     {
         var stdout = new System.Text.StringBuilder();
@@ -89,13 +93,17 @@ public sealed class ScriptRunner
         var psi = new ProcessStartInfo
         {
             FileName = "powershell.exe",
-            Arguments = $"-NoProfile -ExecutionPolicy Bypass -File \"{script.FilePath}\"",
             UseShellExecute = false,
             CreateNoWindow = true,
+            RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
-            WorkingDirectory = Path.GetDirectoryName(script.FilePath) ?? "."
+            WorkingDirectory = scriptDir
         };
+        foreach (var arg in new[] { "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", Path.Combine(scriptDir, step.ScriptFile) })
+            psi.ArgumentList.Add(arg);
+        foreach (var arg in step.Arguments)
+            psi.ArgumentList.Add(arg);
 
         using var process = new Process { StartInfo = psi };
 
@@ -118,13 +126,23 @@ public sealed class ScriptRunner
         };
 
         process.Start();
+        process.StandardInput.Close();
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 
-        await process.WaitForExitAsync(cancellationToken);
+        try
+        {
+            await process.WaitForExitAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            // Stop the script and whatever it launched (winget, msiexec, dotnet, git).
+            try { process.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }
+            throw;
+        }
 
         return new ScriptResult(
-            script.FileName,
+            step.Title,
             Success: process.ExitCode == 0,
             ExitCode: process.ExitCode,
             Output: stdout.ToString(),

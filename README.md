@@ -12,7 +12,7 @@
 
 CodeDesigner assembles and disassembles the Emotion Engine (MIPS R5900), debugs games live in its own PCSX2 fork or PX86, builds and ports cheats, edits game assets, and runs online servers. Its MCP server exposes many of the same capabilities to compatible AI assistants, so a developer and an assistant can work within the same reverse-engineering workflow. Enable AI mode in the client to observe supported AI actions as they happen.
 
-> **Setup note:** The installer is currently outdated. SQL Server Express LocalDB is required. For the current development setup, follow the [building guide](docs/building.md).
+> **Get started:** run `CodeDesignerInstaller.exe` from the [latest release](https://github.com/FatalityDevelopment/CodeDesignerPS2/releases/latest). See [Getting started](#getting-started).
 
 ## Contents
 
@@ -24,7 +24,7 @@ CodeDesigner assembles and disassembles the Emotion Engine (MIPS R5900), debugs 
   - [Memory, labels, and cheats](#live-labels-and-memory-mapping)
   - [AI-assisted reverse engineering](#ai-assisted-reverse-engineering-with-mcp)
   - [Asset editing and map building](#asset-editor-map-builder-and-asset-converter)
-- [Quick start](#quick-start)
+- [Getting started](#getting-started)
 - [AI assistants (MCP)](#ai-assistants-mcp)
 - [Repository layout](#repository)
 - [Documentation](#documentation)
@@ -179,7 +179,29 @@ See the [SocomMapBuilder repository](https://github.com/FatalityDevelopment/Soco
 
 ---
 
-## Quick start
+## Getting started
+
+You need Windows 10 or 11 (64-bit) and a BIOS dumped from your own PS2. Everything else is installed for you.
+
+### Install
+
+1. Download `CodeDesignerInstaller.exe` from the [latest release](https://github.com/FatalityDevelopment/CodeDesignerPS2/releases/latest).
+2. Run it, choose **Install CodeDesigner**, and click **Install**.
+
+The installer adds anything missing (.NET 8 runtime, VS Code, SQL Server LocalDB, the VC++ runtime) and skips what is already installed. It then downloads CodeDesigner, the PCSX2 fork and the cheat archive into `%LOCALAPPDATA%\CodeDesigner\`, creates the database, and installs the VS Code extension. Windows may ask for administrator approval while prerequisites install. If a step fails, the log is at `%TEMP%\CodeDesignerSetup\install.log`.
+
+### Developer setup
+
+Run the same installer and choose **Developer setup**. It installs the .NET SDK, Node.js and Git, clones this repository with its submodules, builds and deploys it, and installs the extension built from source.
+
+In a checkout you already have, run the same steps yourself:
+
+```powershell
+.\CodeDesigner.Ps2.Installer\Scripts\Install-Prerequisites.ps1 -Mode Developer
+.\CodeDesigner.Ps2.Installer\Scripts\Setup-DevEnvironment.ps1 -RepoDir .
+```
+
+Or by hand: install the .NET 8 SDK, SQL Server Express LocalDB and Node.js 20+, then:
 
 ```powershell
 git clone --recurse-submodules https://github.com/FatalityDevelopment/CodeDesignerPS2.git
@@ -189,18 +211,16 @@ dotnet build CodeDesigner.sln          # builds and deploys to %LOCALAPPDATA%\Co
 dotnet test CodeDesigner.Ps2.TestProject/
 ```
 
-**Prerequisites:** .NET 8 SDK, SQL Server Express LocalDB, and Node.js 20+. Details and platform-specific setup are in the [building guide](docs/building.md).
-
-Then open `vscode/codedesigner` in VS Code, run `npm ci`, and press **F5**. In the development host:
-
-1. Open the **CodeDesigner** sidebar.
-2. In the **Emulator** tab, pick PCSX2 (or the built-in emulator), a BIOS and a game.
-3. Click **Run**. The extension starts the emulator and the Bridge and connects.
-4. Open **EE RAM** under *Memory Region* to start disassembling.
-
-For full PCSX2 support (breakpoints, stepping, Preview, Sound), build the fork in `pcsx2/`; see [Building → PCSX2 fork](docs/building.md#build-the-pcsx2-fork).
+To work on the extension, open `vscode/codedesigner` in VS Code, run `npm ci`, and press **F5**. The [building guide](docs/building.md) covers the details, including building the PCSX2 fork.
 
 > Building deploys the Bridge, the emulator and the MCP server into `%LOCALAPPDATA%\CodeDesigner\`. If the Bridge is running, stop it first so the copy does not hit locked files.
+
+### First run
+
+1. Open the **CodeDesigner** sidebar in VS Code.
+2. In the **Emulator** tab, pick PCSX2 (or the built-in emulator), your BIOS and a game.
+3. Click **Run**. The extension starts the emulator and the Bridge and connects.
+4. Open **EE RAM** under *Memory Region* to start disassembling.
 
 ## AI assistants (MCP)
 
@@ -258,4 +278,4 @@ Start at the **[documentation index](docs/README.md)**. Good first reads:
 
 ## Continuous integration
 
-`.github/workflows/build.yml` builds every project, runs the test suite, packages the VS Code extension and builds the PCSX2 fork on each push and pull request to `master`. Another workflow rejects committed `bin/` and `obj/` folders. The checkout needs a `SUBMODULES_TOKEN` secret while `CheatCodeArchive` is private; see the comment in the workflow.
+`.github/workflows/build.yml` builds every project, runs the test suite, packages the release assets with [`tools/scripts/Build-Release.ps1`](tools/scripts/Build-Release.ps1) and builds the PCSX2 fork on each push and pull request to `master`. Pushing a `v*` tag also publishes a GitHub release with `CodeDesigner.zip`, `PCSX2.zip`, `CheatCodeArchive.zip`, `codedesigner.vsix` and `CodeDesignerInstaller.exe`; see [Releases](docs/building.md#releases). Another workflow rejects committed `bin/` and `obj/` folders.

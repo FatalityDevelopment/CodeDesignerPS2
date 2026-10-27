@@ -899,8 +899,11 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         const candidates: string[] = [];
 
         if (process.platform === 'win32') {
-            // 1. pcsx2 subfolder inside the install directory (preferred)
-            candidates.push(path.join(installDir, 'pcsx2', 'pcsx2-qt.exe'));
+            // 1. pcsx2 subfolder inside the install directory (preferred). The installer's
+            //    release build of the fork keeps its MSBuild name (Release AVX2 / Release).
+            for (const exe of ['pcsx2-qt.exe', 'pcsx2-qtx64-avx2.exe', 'pcsx2-qtx64.exe']) {
+                candidates.push(path.join(installDir, 'pcsx2', exe));
+            }
             // 2. Standard Windows installation paths
             const pf    = process.env.PROGRAMFILES         ?? 'C:\\Program Files';
             const pf86  = process.env['PROGRAMFILES(X86)'] ?? 'C:\\Program Files (x86)';

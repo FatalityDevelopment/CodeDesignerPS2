@@ -64,8 +64,8 @@ import { AuthService } from '../../services/auth.service';
     }
 
     .login-card {
-      background-color: #252526;
-      border: 1px solid #3e3e42;
+      background-color: var(--bg-card);
+      border: 1px solid var(--border);
       border-radius: 6px;
       padding: 40px;
       width: 100%;
@@ -74,13 +74,13 @@ import { AuthService } from '../../services/auth.service';
 
     .login-title {
       font-size: 24px;
-      color: #d4d4d4;
+      color: var(--fg);
       margin-bottom: 4px;
       text-align: center;
     }
 
     .login-subtitle {
-      color: #858585;
+      color: var(--fg-muted);
       font-size: 13px;
       text-align: center;
       margin-bottom: 28px;
@@ -88,8 +88,8 @@ import { AuthService } from '../../services/auth.service';
 
     .error-banner {
       background-color: rgba(240, 135, 113, 0.1);
-      border: 1px solid #f48771;
-      color: #f48771;
+      border: 1px solid var(--error);
+      color: var(--error);
       padding: 10px 14px;
       border-radius: 4px;
       font-size: 13px;
@@ -109,34 +109,34 @@ import { AuthService } from '../../services/auth.service';
     }
 
     .form-label {
-      color: #cccccc;
+      color: var(--fg-secondary);
       font-size: 13px;
       font-weight: 500;
     }
 
     .form-input {
       padding: 9px 12px;
-      background-color: #3c3c3c;
-      border: 1px solid #3e3e42;
+      background-color: var(--bg-input);
+      border: 1px solid var(--border);
       border-radius: 4px;
-      color: #d4d4d4;
+      color: var(--fg);
       font-size: 14px;
       outline: none;
       transition: border-color 0.15s ease;
     }
 
     .form-input:focus {
-      border-color: #007acc;
+      border-color: var(--accent);
     }
 
     .form-input::placeholder {
-      color: #858585;
+      color: var(--fg-muted);
     }
 
     .submit-btn {
       margin-top: 8px;
       padding: 10px;
-      background-color: #0e639c;
+      background-color: var(--btn);
       color: #ffffff;
       border: none;
       border-radius: 4px;
@@ -147,7 +147,7 @@ import { AuthService } from '../../services/auth.service';
     }
 
     .submit-btn:hover:not(:disabled) {
-      background-color: #1177bb;
+      background-color: var(--btn-hover);
     }
 
     .submit-btn:disabled {
@@ -158,17 +158,17 @@ import { AuthService } from '../../services/auth.service';
     .login-footer {
       text-align: center;
       margin-top: 24px;
-      color: #858585;
+      color: var(--fg-muted);
       font-size: 13px;
     }
 
     .link {
-      color: #007acc;
+      color: var(--accent);
       text-decoration: none;
     }
 
     .link:hover {
-      color: #1177bb;
+      color: var(--btn-hover);
     }
   `]
 })
