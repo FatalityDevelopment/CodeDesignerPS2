@@ -42,5 +42,9 @@
         // non-zero. We store both raw so Save() writes back exactly what was read.
         internal byte[]? RawNameField { get; set; }   // 0x40 bytes verbatim from file
         internal uint TrailingWord { get; set; }   // word at entry+0x58
+
+        // Type-2 retail archives align each entry's data to a 0x800 sector; the gap after the data holds
+        // leftover bytes, not zeros (MP53.ZDB). Kept so an unchanged entry is written back byte-identical.
+        internal byte[]? PaddingAfter { get; set; }
     }
 }
