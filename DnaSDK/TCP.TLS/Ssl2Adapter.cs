@@ -4,7 +4,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace CodeDesigner.Ps2.Multiplayer.Servers;
+namespace TLS;
 
 /// <summary>
 /// Converts an SSLv2-format ClientHello into a TLS 1.0 ClientHello so that
@@ -25,6 +25,7 @@ namespace CodeDesigner.Ps2.Multiplayer.Servers;
 ///     client_random field.
 ///   • The negotiated version is normalised to at minimum TLS 1.0 (0x03,0x01).
 /// </summary>
+
 internal static class Ssl2Adapter
 {
     /// <summary>
@@ -50,39 +51,42 @@ internal static class Ssl2Adapter
         if (n == 0)
             return (new PrefixedStream(Array.Empty<byte>(), inner), false, null);
 
-        if (first[0] != 0x80)
+        if ((first[0] & 0x80) == 0)
             return (new PrefixedStream(first, inner), false, null);
 
         // ── SSLv2 two-byte record header ──────────────────────────────────
         // Format when high bit is set (no-padding): ((b0 & 0x7F) << 8) | b1
-        // Since b0 == 0x80, high 7 bits == 0 → length == b1
+        // The upper seven bits of b0 contribute to the length. Do not assume b0 == 0x80.
         var second = new byte[1];
         await ReadExactAsync(inner, second, ct).ConfigureAwait(false);
         int payloadLen = ((first[0] & 0x7F) << 8) | second[0];
 
-        if (payloadLen < 9)
-            throw new InvalidDataException($"SSLv2 record too short ({payloadLen} bytes)");
+        if (payloadLen < 9 || payloadLen > 16384) throw new InvalidDataException($"Invalid SSLv2 ClientHello record length: {payloadLen}.");
 
         var payload = new byte[payloadLen];
         await ReadExactAsync(inner, payload, ct).ConfigureAwait(false);
 
         // ── SSLv2 ClientHello body ────────────────────────────────────────
-        if (payload[0] != 0x01)
-            throw new InvalidDataException(
-                $"SSLv2 message type 0x{payload[0]:X2}, expected 0x01 (CLIENT-HELLO)");
+        if (payload[0] != 0x01) throw new InvalidDataException($"SSLv2 message type 0x{payload[0]:X2}, expected 0x01 (CLIENT-HELLO)");
 
         int pos = 1;
         byte verMajor    = payload[pos++];
         byte verMinor    = payload[pos++];
-        int cipherSpecLen = (payload[pos] << 8) | payload[pos + 1]; pos += 2;
-        int sessionIdLen  = (payload[pos] << 8) | payload[pos + 1]; pos += 2;
-        int challengeLen  = (payload[pos] << 8) | payload[pos + 1]; pos += 2;
+        int cipherSpecLen = (payload[pos] << 8) | payload[pos + 1];
+        pos += 2;
+        int sessionIdLen  = (payload[pos] << 8) | payload[pos + 1];
+        pos += 2;
+        int challengeLen  = (payload[pos] << 8) | payload[pos + 1];
+        pos += 2;
+
+        if (cipherSpecLen % 3 != 0 || pos + cipherSpecLen + sessionIdLen + challengeLen != payloadLen) throw new InvalidDataException("Invalid SSLv2 ClientHello field lengths.");
+        if (challengeLen < 16 || challengeLen > 32) throw new InvalidDataException("SSLv2 challenge must contain 16 to 32 bytes.");
 
         // Extract TLS cipher suites (3-byte SSLv2 specs with b0==0x00 are TLS suites)
         var tlsCiphers = new List<ushort>(cipherSpecLen / 3);
         for (int i = 0; i < cipherSpecLen; i += 3)
         {
-            if (pos + i + 2 >= payloadLen) break;
+            // The preceding length check guarantees this access is within the record.
             byte b0 = payload[pos + i];
             byte b1 = payload[pos + i + 1];
             byte b2 = payload[pos + i + 2];
@@ -95,27 +99,22 @@ internal static class Ssl2Adapter
         // Challenge → right-aligned in 32-byte client_random
         var clientRandom = new byte[32];
         int copyLen = Math.Min(challengeLen, 32);
-        if (copyLen > 0 && pos + copyLen <= payloadLen)
-            Buffer.BlockCopy(payload, pos, clientRandom, 32 - copyLen, copyLen);
+        Buffer.BlockCopy(payload, pos, clientRandom, 32 - copyLen, copyLen);
 
-        // Fall back to known PS2 DNAS cipher suites if none were TLS-format
+        // Never invent cipher suites absent from the actual PS2 ClientHello.
         if (tlsCiphers.Count == 0)
-        {
-            tlsCiphers.Add(0x0005); // TLS_RSA_WITH_RC4_128_SHA
-            tlsCiphers.Add(0x0004); // TLS_RSA_WITH_RC4_128_MD5
-            tlsCiphers.Add(0x000A); // TLS_RSA_WITH_3DES_EDE_CBC_SHA
-        }
+            throw new InvalidDataException("The PS2 ClientHello did not advertise any TLS cipher suite.");
 
         // Do NOT inject TLS_EMPTY_RENEGOTIATION_INFO_SCSV (0x00FF).
         //
         // If SCSV is present, BouncyCastle sets secureRenegotiation=true and then
         // appends a renegotiation_info extension to the ServerHello even when
-        // DnasBcTlsServer.GetServerExtensions() returns an empty map (BC adds it
+        // LegacyTlsServer.GetServerExtensions() returns an empty map (BC adds it
         // post-call whenever secureRenegotiation=true).  The PS2 DNAS SSL library
         // is SSLv3-era and rejects the unknown extension with handshake_failure(40).
         //
         // Without SCSV, BC calls NotifySecureRenegotiation(false) on the server,
-        // which DnasBcTlsServer overrides to suppress the error.  BC then sends a
+        // which LegacyTlsServer overrides to suppress the error.  BC then sends a
         // ServerHello with no extensions; the PS2 accepts it.
 
         byte[] tlsRecord = BuildTls10ClientHello(verMajor, verMinor, clientRandom, tlsCiphers);
@@ -128,10 +127,7 @@ internal static class Ssl2Adapter
     // Private helpers
     // ─────────────────────────────────────────────────────────────────────
 
-    private static byte[] BuildTls10ClientHello(
-        byte verMajor, byte verMinor,
-        byte[] clientRandom,
-        List<ushort> ciphers)
+    private static byte[] BuildTls10ClientHello(byte verMajor, byte verMinor, byte[] clientRandom, List<ushort> ciphers)
     {
         // Normalise version to at least TLS 1.0
         if (verMajor < 3) { verMajor = 3; verMinor = 1; }
@@ -210,56 +206,3 @@ internal static class Ssl2Adapter
 /// Writes go directly to the inner stream.
 /// Used to "put back" bytes already consumed from a network stream.
 /// </summary>
-internal sealed class PrefixedStream : Stream
-{
-    private readonly byte[] _prefix;
-    private int _prefixPos;
-    private readonly Stream _inner;
-
-    internal PrefixedStream(byte[] prefix, Stream inner)
-    {
-        _prefix   = prefix;
-        _prefixPos = 0;
-        _inner    = inner;
-    }
-
-    public override bool CanRead  => true;
-    public override bool CanSeek  => false;
-    public override bool CanWrite => _inner.CanWrite;
-    public override long Length   => throw new NotSupportedException();
-    public override long Position
-    {
-        get => throw new NotSupportedException();
-        set => throw new NotSupportedException();
-    }
-
-    public override void Flush() => _inner.Flush();
-
-    public override long Seek(long offset, SeekOrigin origin)
-        => throw new NotSupportedException();
-
-    public override void SetLength(long value)
-        => throw new NotSupportedException();
-
-    public override int Read(byte[] buffer, int offset, int count)
-    {
-        int remaining = _prefix.Length - _prefixPos;
-        if (remaining > 0)
-        {
-            int take = Math.Min(count, remaining);
-            Buffer.BlockCopy(_prefix, _prefixPos, buffer, offset, take);
-            _prefixPos += take;
-            return take;
-        }
-        return _inner.Read(buffer, offset, count);
-    }
-
-    public override void Write(byte[] buffer, int offset, int count)
-        => _inner.Write(buffer, offset, count);
-
-    protected override void Dispose(bool disposing)
-    {
-        if (disposing) _inner.Dispose();
-        base.Dispose(disposing);
-    }
-}

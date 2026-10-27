@@ -28,6 +28,9 @@ param memoryInGb int = 2
 @allowed([ 'Debug', 'Information', 'Warning' ])
 param logLevel string = 'Debug'
 
+@description('Optional external DNAS server (IP or hostname). Empty = DNAS runs in this container.')
+param externalDnasServer string = ''
+
 resource acr 'Microsoft.ContainerRegistry/registries@2023-07-01' existing = {
   name: acrName
 }
@@ -55,8 +58,7 @@ var fqdn = '${dnsNameLabel}.${location}.azurecontainer.io'
 var ports = [
   { port: 53, protocol: 'UDP' }      // DNS — the PS2's primary DNS server
   { port: 80, protocol: 'TCP' }      // patch download (APACHE00.ZDB)
-  { port: 443, protocol: 'TCP' }     // DNAS HTTPS
-  { port: 10060, protocol: 'TCP' }   // DNAS plain-HTTP debug
+  { port: 443, protocol: 'TCP' }     // DNAS HTTPS (DnaSDK)
   { port: 10069, protocol: 'UDP' }   // NAT service
   { port: 10070, protocol: 'TCP' }   // DME (game worlds)
   { port: 10071, protocol: 'TCP' }   // MUIS
@@ -102,6 +104,7 @@ resource containerGroup 'Microsoft.ContainerInstance/containerGroups@2023-05-01'
             { name: 'MULTIPLAYER_LOG_FILE', value: 'none' }
             { name: 'Logging__LogLevel__Default', value: logLevel }
             { name: 'Online__DataDirectory', value: '/data' }
+            { name: 'Online__ExternalDnasServer', value: externalDnasServer }
           ]
           volumeMounts: [
             { name: 'data', mountPath: '/data' }

@@ -1,4 +1,3 @@
-using Microsoft.Extensions.Logging;
 using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Math;
@@ -8,33 +7,31 @@ using Org.BouncyCastle.Tls.Crypto.Impl.BC;
 using System.Reflection;
 using System.Security.Cryptography.X509Certificates;
 
-namespace CodeDesigner.Ps2.Multiplayer.Servers;
+namespace TLS;
 
 /// <summary>
-/// BouncyCastle-based TLS server for DNAS HTTPS connections.
+/// BouncyCastle-based TLS server for legacy HTTPS connections.
 ///
 /// Windows Schannel on modern Windows (10 22H2+) hard-blocks RC4 and SSLv3 at
-/// the kernel level regardless of registry settings. The PS2 DNAS client only
+/// the kernel level regardless of registry settings. The original PS2 client only
 /// offers TLS_RSA_WITH_RC4_128_SHA, TLS_RSA_WITH_RC4_128_MD5 and
 /// TLS_RSA_WITH_3DES_EDE_CBC_SHA — none of which Schannel will negotiate.
 ///
 /// BouncyCastle implements TLS entirely in userspace using its own crypto, so
 /// it can negotiate any cipher suite we register here.
 /// </summary>
-internal sealed class DnasBcTlsServer : DefaultTlsServer
+internal sealed class LegacyTlsServer : DefaultTlsServer
 {
     private readonly X509Certificate2 _cert;
     private readonly AsymmetricKeyParameter? _bcKey;
     private readonly X509Certificate2? _caCert;
-    private readonly ILogger _log;
+    private readonly Action<string>? _log;
 
     // SSLv2 transcript-hash fix (see NotifyOfferedCipherSuites / FixSsl2TranscriptHash).
     private readonly byte[]? _ssl2Payload;
     private readonly TlsServerProtocol? _bcProtocol;
 
-    internal DnasBcTlsServer(BcTlsCrypto crypto, X509Certificate2 cert, AsymmetricKeyParameter? bcKey,
-        X509Certificate2? caCert, ILogger log,
-        byte[]? ssl2Payload = null, TlsServerProtocol? bcProtocol = null)
+    internal LegacyTlsServer(BcTlsCrypto crypto, X509Certificate2 cert, AsymmetricKeyParameter? bcKey, X509Certificate2? caCert, Action<string>? log, byte[]? ssl2Payload = null, TlsServerProtocol? bcProtocol = null)
         : base(crypto)
     {
         _cert       = cert;
@@ -48,7 +45,7 @@ internal sealed class DnasBcTlsServer : DefaultTlsServer
     // ─────────────────────────────────────────────────────────────────────────
     // Protocol version — force TLS 1.0 only.
     //
-    // The PS2 DNAS library sends an SSLv2-format ClientHello but uses TLS 1.0
+    // The original PS2 SSL library sends an SSLv2-format ClientHello but uses TLS 1.0
     // record-layer semantics (implicit CBC IV, TLS 1.0 PRF).  It may advertise
     // a high version (e.g. TLS 1.2 cipher suites like 0x0066) in the SSLv2
     // hello's version field.  If BC negotiates TLS 1.2, it expects an 8-byte
@@ -95,8 +92,7 @@ internal sealed class DnasBcTlsServer : DefaultTlsServer
         if (_ssl2Payload != null && _bcProtocol != null)
             InstallTranscriptHashProxy();
 
-        _log.LogDebug("[DNAS] PS2 offered {N} cipher suites: {Suites}", offeredSuiteData.Length,
-            string.Join(", ", offeredSuiteData.Select(s => $"0x{s:X4}")));
+        _log?.Invoke($"PS2 offered {offeredSuiteData.Length} cipher suites: {string.Join(", ", offeredSuiteData.Select(s => $"0x{s:X4}"))}");
         base.NotifyOfferedCipherSuites(offeredSuiteData);
     }
 
@@ -104,23 +100,21 @@ internal sealed class DnasBcTlsServer : DefaultTlsServer
     {
         try
         {
-            var field = typeof(TlsProtocol).GetField(
-                "m_handshakeHash", BindingFlags.NonPublic | BindingFlags.Instance);
+            var field = typeof(TlsProtocol).GetField("m_handshakeHash", BindingFlags.NonPublic | BindingFlags.Instance);
             var raw = field?.GetValue(_bcProtocol);
             if (raw is TlsHandshakeHash innerHash)
             {
                 field!.SetValue(_bcProtocol, new Ssl2TranscriptHashProxy(innerHash, _ssl2Payload!));
-                _log.LogDebug("[DNAS] SSLv2 transcript hash proxy installed ({Len} bytes)", _ssl2Payload!.Length);
+                _log?.Invoke($"SSLv2 transcript hash proxy installed ({_ssl2Payload!.Length} bytes)");
             }
             else
             {
-                _log.LogWarning("[DNAS] Could not install transcript proxy — m_handshakeHash type={Type}",
-                    raw?.GetType().FullName ?? "<null>");
+                _log?.Invoke($"WARN: Could not install transcript proxy — m_handshakeHash type={raw?.GetType().FullName ?? "<null>"}");
             }
         }
         catch (Exception ex)
         {
-            _log.LogWarning("[DNAS] InstallTranscriptHashProxy: {Msg}", ex.Message);
+            _log?.Invoke($"WARN: InstallTranscriptHashProxy: {ex.Message}");
         }
     }
 
@@ -189,22 +183,19 @@ internal sealed class DnasBcTlsServer : DefaultTlsServer
     public override int GetSelectedCipherSuite()
     {
         // Use SERVER preference order (iterate our list, pick first the client also offered).
-        // BC's default is CLIENT preference, which causes 3DES to win over RC4 because the
-        // PS2 places its DHE suites first; the server doesn't support DHE, so 3DES (4th in
-        // client list) beats RC4 (5th/6th).  3DES-CBC has subtle TLS 1.0 implicit-IV edge
-        // cases.  RC4 is a stream cipher — no IV/padding ambiguity — and is the PS2's
-        // primary cipher.  Force server preference so RC4-SHA is selected.
+        // Prefer the PS2-compatible ciphers our installed BouncyCastle release can handle.
+        // This release supports RSA/3DES here; it cannot negotiate the older RC4 suites.
         foreach (int suite in GetSupportedCipherSuites())
         {
             if (m_offeredCipherSuites != null && Array.IndexOf(m_offeredCipherSuites, suite) >= 0)
             {
-                _log.LogDebug("[DNAS] Cipher suite selected (server pref): 0x{Suite:X4}", suite);
+                _log?.Invoke($"Cipher suite selected (server pref): 0x{suite:X4}");
                 return suite;
             }
         }
         // Fall back to BC default if none of ours are offered.
         var selected = base.GetSelectedCipherSuite();
-        _log.LogDebug("[DNAS] Cipher suite selected (client pref fallback): 0x{Suite:X4}", selected);
+        _log?.Invoke($"Cipher suite selected (client pref fallback): 0x{selected:X4}");
         return selected;
     }
 
@@ -237,8 +228,7 @@ internal sealed class DnasBcTlsServer : DefaultTlsServer
         }
         catch (Exception ex)
         {
-            _log.LogError(ex, "[DNAS] GetRsaEncryptionCredentials failed (bcKey={BcKeyType})",
-                _bcKey?.GetType().Name ?? "<null>");
+            _log?.Invoke($"GetRsaEncryptionCredentials failed ({_bcKey?.GetType().Name ?? "<null>"}): {ex}");
             throw;
         }
     }
@@ -263,28 +253,28 @@ internal sealed class DnasBcTlsServer : DefaultTlsServer
         AsymmetricKeyParameter bcPrivKey;
         if (_bcKey != null)
         {
-            // BC key loaded directly from PEM — bypasses Windows CNG ExportParameters.
+            // Generated and PEM keys are supplied directly in BC form; no CNG export.
             bcPrivKey = _bcKey;
         }
         else
         {
             // Fallback: derive BC key from the .NET RSA object (requires Exportable flag).
-            var rsa       = _cert.GetRSAPrivateKey()
-                            ?? throw new InvalidOperationException("Certificate has no RSA private key");
-            var rsaParams = rsa.ExportParameters(includePrivateParameters: true);
-            bcPrivKey = new RsaPrivateCrtKeyParameters(
-                new BigInteger(1, rsaParams.Modulus!),
-                new BigInteger(1, rsaParams.Exponent!),
-                new BigInteger(1, rsaParams.D!),
-                new BigInteger(1, rsaParams.P!),
-                new BigInteger(1, rsaParams.Q!),
-                new BigInteger(1, rsaParams.DP!),
-                new BigInteger(1, rsaParams.DQ!),
-                new BigInteger(1, rsaParams.InverseQ!));
+            // Auto-generated and PEM private keys are passed directly to BC; only
+            // externally supplied PFX certificates need this fallback.
+            using var rsa = _cert.GetRSAPrivateKey() ?? throw new InvalidOperationException("TLS certificate has no RSA private key.");
+            try { bcPrivKey = FromRsaParameters(rsa.ExportParameters(includePrivateParameters: true)); }
+            catch (System.Security.Cryptography.CryptographicException ex)
+            {
+                throw new InvalidOperationException("PFX private key cannot be exported for BouncyCastle TLS. Supply an exportable PFX or an unencrypted --cert-pem/--key-pem pair.", ex);
+            }
         }
 
         // BcDefaultTlsCredentialedDecryptor is the public BC class for RSA key-exchange
         return new BcDefaultTlsCredentialedDecryptor((BcTlsCrypto)m_context.Crypto, certChain, bcPrivKey);
     }
-}
 
+    // Export a newly generated .NET key before passing its certificate to Windows.
+    // Prevents Windows X509/CNG key-provider restrictions during TLS handshakes.
+    internal static AsymmetricKeyParameter FromRsaParameters(System.Security.Cryptography.RSAParameters key)
+        => new RsaPrivateCrtKeyParameters(new BigInteger(1, key.Modulus!), new BigInteger(1, key.Exponent!), new BigInteger(1, key.D!), new BigInteger(1, key.P!), new BigInteger(1, key.Q!), new BigInteger(1, key.DP!), new BigInteger(1, key.DQ!), new BigInteger(1, key.InverseQ!));
+}

@@ -28,7 +28,6 @@ interface MultiplayerConfigPorts {
     MlsPort?: number;
     DmePort?: number;
     NatPort?: number;
-    DnasPort?: number;
     DnasHttpsPort?: number;
     DnsDnasPort?: number;
 }
@@ -44,7 +43,6 @@ const DEFAULT_MEDIUS_PORTS: MediusPortEntry[] = [
     { port: 10075, name: 'MLS',  scert: true  },
     { port: 10070, name: 'DME',  scert: true  },
     { port: 10069, name: 'NAT',  scert: true  },
-    { port: 10060, name: 'DNAS', scert: false },
     { port: 443,   name: 'DNAS', scert: false },
     { port: 53,    name: 'DNS',  scert: false },
 ];
@@ -91,7 +89,6 @@ export function loadMediusPorts(): MediusPortEntry[] {
         { port: raw.MlsPort       ?? 10075, name: 'MLS',  scert: true  },
         { port: raw.DmePort       ?? 10070, name: 'DME',  scert: true  },
         { port: raw.NatPort       ?? 10069, name: 'NAT',  scert: true  },
-        { port: raw.DnasPort      ?? 10060, name: 'DNAS', scert: false },
         { port: raw.DnasHttpsPort ?? 443,   name: 'DNAS', scert: false },
         { port: raw.DnsDnasPort   ?? 53,    name: 'DNS',  scert: false },
     ];

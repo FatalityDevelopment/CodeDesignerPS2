@@ -19,6 +19,11 @@
     <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="8.0.1" />
   </ItemGroup>
 
+  <!-- DNAS gateway (https://github.com/FatalityDevelopment/DnaSDK), hosted in-process by Servers/DnasServer.cs. -->
+  <ItemGroup>
+    <ProjectReference Include="..\DnaSDK\DnaSDK.csproj" />
+  </ItemGroup>
+
   <ItemGroup>
     <Content Include="config.json">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
@@ -27,6 +32,10 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
     <Content Include="Certificates\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <!-- DnaSDK's optional RSA moduli (diagnostic ticket decode in <DnasRsaDirectory>/Decoded). -->
+    <Content Include="..\DnaSDK\Assets\Moduli\*.BIN" Link="Assets\Moduli\%(Filename)%(Extension)">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>
@@ -51,8 +60,10 @@
     </PropertyGroup>
     <MakeDir Directories="$(_InstallDir)" Condition="'$(_InstallDir)' != ''" />
     <ItemGroup Condition="'$(_InstallDir)' != ''">
-      <!-- Never deploy logs or runtime data: a stale bin\multiplayer.log used to overwrite the live server log. -->
-      <_DeployFiles Include="$(OutputPath)**\*" Exclude="$(OutputPath)**\*.log;$(OutputPath)data\**" />
+      <!-- Never deploy logs or runtime data: a stale bin\multiplayer.log used to overwrite the live server log.
+           Runtime data (server-data.json, bans, the patch, DNAS tickets/captures) lives in data\, which on Windows is the
+           same folder as the shipped Data\<region>\packets — so exclude only the runtime parts, keep the packets. -->
+      <_DeployFiles Include="$(OutputPath)**\*" Exclude="$(OutputPath)**\*.log;$(OutputPath)data\*;$(OutputPath)data\patch\**;$(OutputPath)data\dnas\**" />
     </ItemGroup>
     <Copy SourceFiles="@(_DeployFiles)" DestinationFiles="@(_DeployFiles->'$(_InstallDir)/%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" Condition="'$(_InstallDir)' != ''" />
     <Message Text="[CodeDesigner.Multiplayer] Deployed to $(_InstallDir)" Importance="high" Condition="'$(_InstallDir)' != ''" />

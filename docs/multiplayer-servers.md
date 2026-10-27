@@ -85,12 +85,15 @@ All settings live under the `"Online"` key in `config.json`.
 
 | Setting | Default | Description |
 |---|---|---|
-| `DnasPort` | `10060` | Plain-HTTP debug fallback (for testing without SSL) |
-| `DnasHttpsPort` | `443` | Real DNAS HTTPS listener (requires elevated privileges) |
+| `DnasHttpsPort` | `443` | DnaSDK DNAS gateway (requires elevated privileges). `0` disables DNAS |
 | `DnsDnasPort` | `53` | DNS intercept for `*.dnas.playstation.org` (requires elevated privileges) |
-| `DnasRegion` | `"us-gw"` | Response file region subfolder. Valid: `us-gw`, `eu-gw`, `gai-gw` |
-| `DnasCertPath` | `""` | TLS certificate path (defaults to `Certificates/dnas.crt`) |
-| `DnasKeyPath` | `""` | TLS private key path (defaults to `Certificates/dnas.key`) |
+| `ExternalDnasServer` | `""` | Use another DNAS server (IP or hostname) instead of the built-in one. See [Using an external DNAS server](#using-an-external-dnas-server) |
+| `DnasRegion` | `"us-gw"` | Picks the region certificate (`us-gw` → `cert-us`, `eu-gw` → `cert-eu`, `gai-gw` → `cert-jp`) and the packet region searched first |
+| `DnasCertPath` / `DnasKeyPath` | `""` | Gateway certificate/key (PEM). Default: `Certificates/dnas.crt` + `dnas.key` if present, else the `DnasRegion` cert |
+| `DnasCaPath` | `""` | Issuer certificate sent with the chain (default `Certificates/ca-cert.pem`) |
+| `DnasRsaDirectory` | `""` | DNAS ticket root (defaults to `<DataDirectory>/dnas/RSA`) |
+| `DnasCaptureDirectory` | `""` | DnaSDK packet captures (defaults to `<DataDirectory>/dnas/PacketLogs`) |
+| `DnasRepositoryUrl` | `"Data"` | Captured DNAS packets each title's RSA ticket is taken from: a local folder laid out as `<region>/packets/<lookup>_<operation>` (relative to the binary), or an HTTPS DNASrep mirror |
 
 ### Game
 
@@ -194,51 +197,51 @@ These are answered with `ServerIp`. All other queries are forwarded to `8.8.8.8`
 
 **Requires elevated privileges** (administrator on Windows, root or `iptables` redirect on Linux) to bind port 53.
 
-### HTTPS endpoint
+### HTTPS endpoint — DnaSDK
 
-`DnasServer` listens on port 443 (configurable via `DnasHttpsPort`) using BouncyCastle TLS. It is used instead of the system TLS stack because:
+`DnasServer` hosts [DnaSDK](https://github.com/FatalityDevelopment/DnaSDK) in-process on port 443 (`DnasHttpsPort`).
+The source lives in `DnaSDK/` at the repo root; its README documents the protocol in full. In short:
 
-- Modern Windows Schannel blocks RC4 and SSLv3 at the kernel level
-- The PS2 DNAS client only offers `TLS_RSA_WITH_RC4_128_SHA`, `TLS_RSA_WITH_RC4_128_MD5`, and `TLS_RSA_WITH_3DES_EDE_CBC_SHA`
-- BouncyCastle implements TLS in userspace and can negotiate these suites
+- **Transport:** BouncyCastle TLS in userspace. It accepts the PS2's SSLv2-format ClientHello, keeps the original
+  hello bytes in the handshake hash, and negotiates TLS 1.0 / RSA / 3DES. One HTTP/1.0 request per connection.
+- **Protocol:** a live six-message exchange (C1/S1, C2/S2, C3/S3). Every session gets fresh challenges, a new session
+  ID and new request-bound encryption. DnaSDK verifies the console's C2 against the challenge it actually issued.
+  Sessions persist across the client's separate TLS connections for 10 idle minutes. Nothing is replayed.
+- **Tickets:** the only archived material is the title's original 128-byte RSA-signed ticket, which the retail
+  client checks with its built-in public key. On a title's first login DnaSDK finds the captured S1 for the
+  console's C1 lookup ID in `Data/<region>/packets/<lookup>_<operation>` (the same packet files the old
+  capture-replay server used; `DnasRegion` first, then the other regions). It takes the ticket from offset `0x48`
+  and caches it at `<DnasRsaDirectory>/Signatures/<SERIAL>.BIN`.
+- **Captures:** every DNAS request and response body is written to `<DnasCaptureDirectory>`
+  (`Session<N>_Incoming_<i>.bin`, `Session<N>.log`, `Connections.log`).
 
-The server forces **TLS 1.0** because the PS2 sends an SSLv2-format ClientHello but uses TLS 1.0 record semantics.
+### Using an external DNAS server
 
-A plain-HTTP debug fallback is also available on `DnasPort` (10060) for testing without SSL.
+Set `ExternalDnasServer` to another DNAS server's IP or hostname, for example a friend's public one. In a container,
+use `Online__ExternalDnasServer`, `EXTERNAL_DNAS` with docker compose, or `-ExternalDnasServer` with the Azure script.
 
-### Request routing
-
-| Request path | Handler | Description |
-|---|---|---|
-| Path contains `"connect"` | ConnectHandler | Main authentication request, response encrypted with per-request Triple-DES keys |
-| Path contains `"others"` | OthersHandler | Secondary requests, response returned as-is |
-
-### Response encryption
-
-`connect` responses are encrypted using a custom Triple-DES CBC scheme (`DnasCrypto`), ported from the open-source [DNASrep](https://github.com/FogNo23/DNASrep) project:
-
-- **Pass A** (dynamic keys): derived from SHA1 of slices of the client request body, applied at offset `0xC8` for `0x20` bytes
-- **Pass B** (envelope keys): hardcoded constants, applied at offset `0x28` for `0x120` bytes
-
-Each 8-byte block is processed as: XOR with previous ciphertext → DES-ECB encrypt key1 → DES-ECB decrypt key2 → DES-ECB encrypt key3.
+- The built-in DnaSDK gateway does not start, so nothing listens on 443. The packets and certificates go unused.
+- The DNS responder answers `*.dnas.playstation.org` with the external server's address. A hostname is re-resolved
+  at most once a minute, and the last good address is reused if a lookup fails.
+- Medius names (`*.pdonline.scea.com`) still resolve to `ServerIp`, so consoles authenticate with the external
+  DNAS server and then play on this one.
+- The console still needs this server as its primary DNS, because that's how it finds both servers.
 
 ### DNAS certificate
 
-The server needs an SSL certificate that the PS2 DNAS client will accept. Place:
-- `Certificates/dnas.crt` — DER or PEM certificate
-- `Certificates/dnas.key` — PEM private key
+Same lookup order as before: `Certificates/dnas.crt` + `dnas.key` (PEM) if present, otherwise the community
+certificate for `DnasRegion` (`cert-us.pem`/`cert-us-key.pem`, `cert-eu…`, `cert-jp…`). `ca-cert.pem` is always
+sent as the issuer, because the PS2 rejects a chain that has only the leaf certificate. Override with
+`DnasCertPath`, `DnasKeyPath` and `DnasCaPath`.
 
-The same certificate used by DNASrep or Horizon Private Server works. Custom paths can be set in `config.json` via `DnasCertPath` and `DnasKeyPath`.
+### Local changes to DnaSDK
 
-### Response files
+Keep these when copying in a newer DnaSDK:
 
-Pre-built DNAS response blobs are stored under `Data/<DnasRegion>/`. The server selects a file using:
-
-```
-hex(gameID) + "_" + hex(qrytype[0..4])
-```
-
-These files can be extracted from a real DNAS capture or taken from existing open-source DNAS server projects.
+- `DnaSDK.csproj` targets `net8.0` (upstream uses `net10.0`) because the Bridge references the server.
+- `DnaSDK.csproj` adds an `InternalsVisibleTo` for `CodeDesigner.Ps2.Multiplayer`.
+- `DNAS.Server/DnasRepRepository.cs` reads a local packet folder as well as HTTPS, and searches a preferred region
+  first (`DnasServerConfiguration.PreferredRegion`, passed through `TicketStore`).
 
 ---
 
@@ -349,6 +352,7 @@ All game state (accounts, channels, game rooms, sessions) is kept in memory. The
 
 ## See also
 
-- [DNASrep](https://github.com/FogNo23/DNASrep) — reference DNAS server implementation
+- [DnaSDK](https://github.com/FatalityDevelopment/DnaSDK) — the DNAS implementation this server hosts
+- [DNASrep](https://github.com/FogNo23/DNASrep) — archive of original DNAS captures (ticket source)
 - [Horizon Private Server](https://github.com/Horizon-Private-Server) — full PS2 online private server infrastructure
 - [Socket Communication](socket-communication.md) — CodeDesigner's internal JSON socket protocol

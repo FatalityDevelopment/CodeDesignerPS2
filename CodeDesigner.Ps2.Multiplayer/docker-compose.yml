@@ -2,7 +2,9 @@
 # Set SERVER_IP to the address the PS2 can reach (this machine's LAN IP), and point the PS2's DNS at it.
 services:
   socom2-server:
-    build: .
+    build:
+      context: ..                                  # repo root: the server references ../DnaSDK
+      dockerfile: CodeDesigner.Ps2.Multiplayer/Dockerfile
     image: socom2-server:local
     restart: unless-stopped
     environment:
@@ -10,13 +12,15 @@ services:
       # On a LAN the console may need other names resolved too; forwarding is safe there.
       Online__DnsForwardUnknown: "true"
       Logging__LogLevel__Default: "Debug"
+      # Optional: send consoles to someone else's DNAS server (IP or hostname) instead of the built-in one,
+      # e.g. EXTERNAL_DNAS=dnas.example.org docker compose up. Empty = DNAS runs in this container.
+      Online__ExternalDnasServer: "${EXTERNAL_DNAS:-}"
     volumes:
-      - socom2-data:/data          # accounts, stats, friends, clans
+      - socom2-data:/data          # accounts, stats, clans, DNAS tickets + packet logs, patch/APACHE00.ZDB
     ports:
       - "53:53/udp"
       - "80:80/tcp"            # patch download (APACHE00.ZDB)
-      - "443:443/tcp"
-      - "10060:10060/tcp"
+      - "443:443/tcp"          # DNAS (DnaSDK) — unused when EXTERNAL_DNAS is set
       - "10069:10069/udp"
       - "10070:10070/tcp"
       - "10071:10071/tcp"
