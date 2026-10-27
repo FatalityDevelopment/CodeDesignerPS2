@@ -2,9 +2,7 @@
 # Set SERVER_IP to the address the PS2 can reach (this machine's LAN IP), and point the PS2's DNS at it.
 services:
   socom2-server:
-    build:
-      context: ..                                  # repo root: the server references ../DnaSDK
-      dockerfile: CodeDesigner.Ps2.Multiplayer/Dockerfile
+    build: .
     image: socom2-server:local
     restart: unless-stopped
     environment:
@@ -20,7 +18,7 @@ services:
     ports:
       - "53:53/udp"
       - "80:80/tcp"            # patch download (APACHE00.ZDB)
-      - "443:443/tcp"          # DNAS (DnaSDK) — unused when EXTERNAL_DNAS is set
+      - "443:443/tcp"          # DNAS — unused when EXTERNAL_DNAS is set
       - "10069:10069/udp"
       - "10070:10070/tcp"
       - "10071:10071/tcp"

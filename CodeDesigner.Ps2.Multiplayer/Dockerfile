@@ -1,17 +1,15 @@
-# PS2 Medius server (SOCOM II) — MUIS / MAS / MLS / DME / NAT / DNS / patch HTTP + DnaSDK DNAS in one container.
-# Build context: the REPO ROOT (the server references ../DnaSDK); the root .dockerignore keeps the context small.
-#   docker build -f CodeDesigner.Ps2.Multiplayer/Dockerfile -t socom2-server .
-#   az acr build -r <registry> -t socom2-server:<tag> -f CodeDesigner.Ps2.Multiplayer/Dockerfile .
+# PS2 Medius server (SOCOM II) — MUIS / MAS / MLS / DME / NAT / DNAS / DNS / patch HTTP in one container.
+# Build context: this folder (CodeDesigner.Ps2.Multiplayer).
+#   docker build -t socom2-server .
+#   az acr build -r <registry> -t socom2-server:<tag> .
 
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
-COPY CodeDesigner.Ps2.Multiplayer/CodeDesigner.Ps2.Multiplayer.csproj CodeDesigner.Ps2.Multiplayer/
-COPY DnaSDK/DnaSDK.csproj DnaSDK/
-RUN dotnet restore CodeDesigner.Ps2.Multiplayer/CodeDesigner.Ps2.Multiplayer.csproj
+COPY CodeDesigner.Ps2.Multiplayer.csproj ./
+RUN dotnet restore
 COPY . .
 # SkipInstallDeploy: don't run the desktop "copy to %LOCALAPPDATA%" step inside the image build.
-RUN dotnet publish CodeDesigner.Ps2.Multiplayer/CodeDesigner.Ps2.Multiplayer.csproj \
-    -c Release -o /app --no-restore -p:SkipInstallDeploy=true -p:UseAppHost=false
+RUN dotnet publish -c Release -o /app --no-restore -p:SkipInstallDeploy=true -p:UseAppHost=false
 
 FROM mcr.microsoft.com/dotnet/runtime:8.0
 WORKDIR /app
