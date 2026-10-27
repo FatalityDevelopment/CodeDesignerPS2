@@ -24,6 +24,7 @@ CodeDesigner assembles and disassembles the Emotion Engine (MIPS R5900), debugs 
   - [Memory, labels, and cheats](#live-labels-and-memory-mapping)
   - [AI-assisted reverse engineering](#ai-assisted-reverse-engineering-with-mcp)
   - [Asset editing and map building](#asset-editor-map-builder-and-asset-converter)
+  - [Fatality Development website](#fatality-development-website)
 - [Getting started](#getting-started)
 - [AI assistants (MCP)](#ai-assistants-mcp)
 - [Repository layout](#repository)
@@ -177,6 +178,13 @@ See the [SocomMapBuilder repository](https://github.com/FatalityDevelopment/Soco
 
 ![CodeDesigner asset editor and map builder](image.png)
 
+### Fatality Development Website
+
+The Fatality Development website lives in [`website/`](website/), an Angular app. Each project has its own page, and CodeDesigner's links straight to the installer download. **Projects** lists the organization's public repositories. **Cheats** is a searchable index of the CheatCodeArchive with a page per game. **Servers** shows live SOCOM II player counts from the multiplayer server's public `/stats` endpoint.
+
+<img src="docs/images/website-home.png" alt="Fatality Development website home page with featured projects" width="850">
+<img src="docs/images/website-codedesigner.png" alt="CodeDesigner project page on the Fatality Development website, with the installer download" width="850">
+
 ---
 
 ## Getting started
@@ -187,6 +195,8 @@ You need Windows 10 or 11 (64-bit) and a BIOS dumped from your own PS2. Everythi
 
 1. Download `CodeDesignerInstaller.exe` from the [latest release](https://github.com/FatalityDevelopment/CodeDesignerPS2/releases/latest).
 2. Run it, choose **Install CodeDesigner**, and click **Install**.
+
+<img src="docs/images/installer.png" alt="CodeDesigner installer welcome page with Install CodeDesigner and Developer setup options" width="480">
 
 The installer adds anything missing (.NET 8 runtime, VS Code, SQL Server LocalDB, the VC++ runtime) and skips what is already installed. It then downloads CodeDesigner, the PCSX2 fork and the cheat archive into `%LOCALAPPDATA%\CodeDesigner\`, creates the database, and installs the VS Code extension. Windows may ask for administrator approval while prerequisites install. If a step fails, the log is at `%TEMP%\CodeDesignerSetup\install.log`.
 

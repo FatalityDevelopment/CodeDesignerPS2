@@ -106,10 +106,15 @@ public class ScertPacket
     }
 
     /// <summary>SERVER_CONNECT_COMPLETE — signals session is fully open.</summary>
-    public static ScertPacket CreateConnectComplete() => new()
+    /// <summary>
+    /// SERVER_CONNECT_COMPLETE — [ClientCountAtConnect:2 LE] (horizon). The SOCOM II DME client (handler 0x0063E708)
+    /// stores it at ctx+0x5A and passes it with its own index (ctx+0x58, from CONNECT_ACCEPT_TCP) to its connect
+    /// callback, so on a DME it must be the world's real client count, or a joiner believes it is alone in the world.
+    /// </summary>
+    public static ScertPacket CreateConnectComplete(ushort clientCount = 1) => new()
     {
         MessageType = RT_MSG_TYPE.RT_MSG_SERVER_CONNECT_COMPLETE,
-        Payload     = BitConverter.GetBytes((ushort)0x0001),  // ARG1: ushort per Horizon
+        Payload     = BitConverter.GetBytes(clientCount),
     };
 
     /// <summary>

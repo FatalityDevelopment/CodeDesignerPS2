@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+### Installer and releases
+- **`CodeDesignerInstaller.exe`**, a self-contained setup app with the CodeDesigner logo and the extension's theme colours. **Install CodeDesigner** installs the latest (or a pinned) GitHub release. **Developer setup** clones the repository with its submodules, then builds, deploys and installs the extension from source.
+- Missing prerequisites are installed (.NET 8, VS Code, SQL Server LocalDB, VC++ runtime) and ones already present are skipped. Setup scripts are embedded and run without prompts. Cancel stops the whole install, and the run is logged to `%TEMP%\CodeDesignerSetup\install.log`.
+- CI builds `CodeDesigner.zip`, `CheatCodeArchive.zip`, `codedesigner.vsix` and the installer on every run, and publishes a GitHub release with `PCSX2.zip` on `v*` tags (`tools/scripts/Build-Release.ps1`).
+
+### Website
+- Rebranded as **Fatality Development**: dragon logo, favicon and banner background. CodeDesigner and the SOCOM Map Builder each have a project page, with Map Builder screenshots.
+- Home page with the installer download, features and screenshots, themed like the VS Code extension.
+- **Projects** lists the organization's public GitHub repositories. **Cheats** is a searchable, paged index of the CheatCodeArchive with a page per game.
+- **Servers** page shows live SOCOM II player counts, refreshed every 15 seconds.
+
+### SOCOM II online server
+- **DNAS rebuilt on DnaSDK** (the code is in `CodeDesigner.Ps2.Multiplayer/Dnas/`). It runs a live DNAS exchange for each session instead of replaying captured responses, and reuses only each title's original RSA-signed ticket. This fixes DNAS for SOCOM II r0001.
+- DNAS tickets come from the captured packet files in `Data/<region>/packets` (`DnasRepositoryUrl`, default `Data`), never from GitHub unless an HTTPS mirror is configured. The TLS certificate is picked as before (`dnas.crt`, otherwise `cert-us`/`cert-eu`/`cert-jp` for `DnasRegion`), and new settings set the CA, ticket cache and capture folders. The plain-HTTP debug port 10060 is gone.
+- **External DNAS server**: `ExternalDnasServer` (`EXTERNAL_DNAS` in docker compose, `-ExternalDnasServer` on Azure) sends consoles to another DNAS server and keeps the built-in one off. DNS answers `*.dnas.playstation.org` with that server's address, and Medius names still point at this server.
+- Fixed a second player joining a game room taking over the host's slot and freezing both consoles. The DME now reports the real client count and gives each joiner its own index.
+- Installs now include the DNAS packet folders. Previously the deploy step's `data\**` exclude also matched `Data\` on Windows.
+- Public read-only **`GET /stats`** on the patch HTTP server: universe totals, players per briefing room and live games, as JSON with CORS enabled. No names or addresses.
+- The Docker image builds from `CodeDesigner.Ps2.Multiplayer/` again. A standalone copy of the server lives in [Socom2Multiplayer](https://github.com/FatalityDevelopment/Socom2Multiplayer).
+
+### Asset formats
+- Saving a retail type-2 ZDB keeps its 0x800 sector alignment and padding bytes, so an unchanged archive is written back byte for byte.
+
+### Build and CI
+- The SOCOM II packet and object catalogs that the Bridge embeds are now tracked in git, so clean checkouts build.
+- CI skips the local-only `vscode/` dev harnesses. Tests that need retail files are marked inconclusive when the files are missing.
+
 ### Cheats
 - **Cheat List** page: a cheat-device style manager per game. Tick cheats (raw codes or CDS), compile, **Send** once or through the cheat engine, and **Save .bin** as raw code pairs or a cheat-engine image. Hook/base settings and engine status sit in the bottom bar.
 - The sidebar's Cheats and CDS tabs are merged. The cheat source box takes raw codes and CDS together, with Compile, Send (Once / Engine), Save .bin and Add to list. **Use .cds file** keeps the old CDS tab's compile + Add Patch. The Tools **Cheats** button moved here.
