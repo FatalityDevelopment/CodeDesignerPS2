@@ -46,17 +46,15 @@ html, body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Watermark logo, as the extension paints behind its webviews. */
+/* Fatality Development banner behind every page, darkened toward the edges so content stays readable. */
 body::before {
   content: "";
   position: fixed;
-  left: 50%;
-  top: 16vh;
-  width: min(60vw, 520px);
-  aspect-ratio: 1;
-  transform: translateX(-50%);
-  background: url("/assets/codedesigner-logo-512.png") center top / contain no-repeat;
-  opacity: 0.06;
+  inset: 0;
+  background:
+    radial-gradient(ellipse at center, rgba(30, 30, 30, 0.35) 0%, rgba(30, 30, 30, 0.8) 75%, var(--bg) 100%),
+    url("/assets/fatality-bg.webp") center / cover no-repeat;
+  opacity: 0.55;
   pointer-events: none;
   z-index: 0;
 }

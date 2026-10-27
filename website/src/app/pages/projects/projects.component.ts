@@ -1,6 +1,8 @@
 import { Component, OnInit, signal } from '@angular/core';
-import { DatePipe } from '@angular/common';
+import { DatePipe, NgTemplateOutlet } from '@angular/common';
+import { RouterLink } from '@angular/router';
 import { GITHUB_ORG, GithubRepo, GithubService } from '../../services/github.service';
+import { Project, projectByRepo } from './project-data';
 
 /** Colors GitHub uses for the languages these repos are written in. */
 const LANGUAGE_COLORS: Record<string, string> = {
@@ -14,9 +16,14 @@ const LANGUAGE_COLORS: Record<string, string> = {
   PowerShell: '#012456',
 };
 
+/** Logos for repos without a project page. */
+const REPO_LOGOS: Record<string, string> = {
+  pcsx2: 'assets/pcsx2-logo.svg',
+};
+
 @Component({
   selector: 'app-projects',
-  imports: [DatePipe],
+  imports: [DatePipe, NgTemplateOutlet, RouterLink],
   template: `
     <div class="container">
       <h1>Projects</h1>
@@ -36,44 +43,54 @@ const LANGUAGE_COLORS: Record<string, string> = {
       } @else {
         <div class="projects-grid">
           @for (repo of repos(); track repo.full_name) {
-            <a class="cd-card project" [href]="repo.html_url" target="_blank" rel="noopener">
-              <div class="project-head">
-                @if (repo.name === 'CodeDesignerPS2') {
-                  <img src="assets/codedesigner-logo-64.png" alt="" class="project-logo" />
-                } @else {
-                  <svg class="project-logo icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-                    <path d="M2 2.5A2.5 2.5 0 0 1 4.5 0h8.75a.75.75 0 0 1 .75.75v12.5a.75.75 0 0 1-.75.75h-2.5a.75.75 0 0 1 0-1.5h1.75v-2h-8a1 1 0 0 0-.714 1.7.75.75 0 1 1-1.072 1.05A2.495 2.495 0 0 1 2 11.5Zm10.5-1h-8a1 1 0 0 0-1 1v6.708A2.486 2.486 0 0 1 4.5 9h8ZM5 12.25a.25.25 0 0 1 .25-.25h3.5a.25.25 0 0 1 .25.25v3.25a.25.25 0 0 1-.4.2l-1.45-1.087a.249.249 0 0 0-.3 0L5.4 15.7a.25.25 0 0 1-.4-.2Z"/>
-                  </svg>
-                }
-                <div class="project-title">
-                  <h3>{{ repo.name }}</h3>
-                  <div class="badges">
-                    @if (repo.fork) { <span class="badge">Fork</span> }
-                    @if (repo.archived) { <span class="badge">Archived</span> }
-                  </div>
-                </div>
-              </div>
-
-              <p class="project-description">{{ repo.description || 'No description.' }}</p>
-
-              @if (repo.topics?.length) {
-                <div class="topics">
-                  @for (topic of repo.topics; track topic) { <span class="topic">{{ topic }}</span> }
-                </div>
-              }
-
-              <div class="project-meta">
-                @if (repo.language) {
-                  <span><i class="lang-dot" [style.background]="languageColor(repo.language)"></i>{{ repo.language }}</span>
-                }
-                <span title="Stars">★ {{ repo.stargazers_count }}</span>
-                <span title="Forks">⑂ {{ repo.forks_count }}</span>
-                <span class="updated">Updated {{ repo.pushed_at | date: 'mediumDate' }}</span>
-              </div>
-            </a>
+            @if (project(repo); as p) {
+              <a class="cd-card project" [routerLink]="['/projects', p.slug]">
+                <ng-container *ngTemplateOutlet="card; context: { $implicit: repo }" />
+              </a>
+            } @else {
+              <a class="cd-card project" [href]="repo.html_url" target="_blank" rel="noopener">
+                <ng-container *ngTemplateOutlet="card; context: { $implicit: repo }" />
+              </a>
+            }
           }
         </div>
       }
+
+      <ng-template #card let-repo>
+        <div class="project-head">
+          @if (logo(repo); as src) {
+            <img [src]="src" alt="" class="project-logo" />
+          } @else {
+            <svg class="project-logo icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+              <path d="M2 2.5A2.5 2.5 0 0 1 4.5 0h8.75a.75.75 0 0 1 .75.75v12.5a.75.75 0 0 1-.75.75h-2.5a.75.75 0 0 1 0-1.5h1.75v-2h-8a1 1 0 0 0-.714 1.7.75.75 0 1 1-1.072 1.05A2.495 2.495 0 0 1 2 11.5Zm10.5-1h-8a1 1 0 0 0-1 1v6.708A2.486 2.486 0 0 1 4.5 9h8ZM5 12.25a.25.25 0 0 1 .25-.25h3.5a.25.25 0 0 1 .25.25v3.25a.25.25 0 0 1-.4.2l-1.45-1.087a.249.249 0 0 0-.3 0L5.4 15.7a.25.25 0 0 1-.4-.2Z"/>
+            </svg>
+          }
+          <div class="project-title">
+            <h3>{{ project(repo)?.name || repo.name }}</h3>
+            <div class="badges">
+              @if (repo.fork) { <span class="badge">Fork</span> }
+              @if (repo.archived) { <span class="badge">Archived</span> }
+            </div>
+          </div>
+        </div>
+
+        <p class="project-description">{{ repo.description || 'No description.' }}</p>
+
+        @if (repo.topics?.length) {
+          <div class="topics">
+            @for (topic of repo.topics; track topic) { <span class="topic">{{ topic }}</span> }
+          </div>
+        }
+
+        <div class="project-meta">
+          @if (repo.language) {
+            <span><i class="lang-dot" [style.background]="languageColor(repo.language)"></i>{{ repo.language }}</span>
+          }
+          <span title="Stars">★ {{ repo.stargazers_count }}</span>
+          <span title="Forks">⑂ {{ repo.forks_count }}</span>
+          <span class="updated">Updated {{ repo.pushed_at | date: 'mediumDate' }}</span>
+        </div>
+      </ng-template>
     </div>
   `,
   styles: [`
@@ -219,6 +236,14 @@ export class ProjectsComponent implements OnInit {
       next: repos => this.repos.set(repos),
       error: err => this.error.set(err?.status === 403 ? 'GitHub rate limit reached, try again later' : err?.message ?? 'network error'),
     });
+  }
+
+  project(repo: GithubRepo): Project | undefined {
+    return projectByRepo(repo.name);
+  }
+
+  logo(repo: GithubRepo): string | undefined {
+    return this.project(repo)?.logo ?? REPO_LOGOS[repo.name];
   }
 
   languageColor(language: string): string {

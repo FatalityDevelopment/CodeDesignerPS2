@@ -9,8 +9,8 @@ import { AuthService } from '../services/auth.service';
     <nav class="navbar">
       <div class="nav-brand">
         <a routerLink="/" class="brand-link">
-          <img src="assets/codedesigner-logo-64.png" alt="" class="brand-icon" />
-          <span class="brand-text">CodeDesigner</span>
+          <img src="assets/fatality-logo.png" alt="" class="brand-icon" />
+          <span class="brand-text">Fatality Development</span>
         </a>
       </div>
       <div class="nav-links">
