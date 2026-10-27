@@ -38,17 +38,18 @@ jobs:
         with:
           node-version: '20'
 
+      # vscode/ holds local dev harnesses (e.g. zipper-harness references the Debug bridge build); not shipped.
       - name: Restore .NET dependencies
         shell: bash
         run: |
-          for proj in $(find . -name "*.csproj" -not -path "*/bin/*" -not -path "*/obj/*"); do
+          for proj in $(find . -name "*.csproj" -not -path "*/bin/*" -not -path "*/obj/*" -not -path "./vscode/*"); do
             dotnet restore "$proj"
           done
 
       - name: Build .NET projects
         shell: bash
         run: |
-          for proj in $(find . -name "*.csproj" -not -path "*/bin/*" -not -path "*/obj/*"); do
+          for proj in $(find . -name "*.csproj" -not -path "*/bin/*" -not -path "*/obj/*" -not -path "./vscode/*"); do
             echo "::group::Building $proj"
             dotnet build "$proj" -c Release --no-restore
             echo "::endgroup::"
