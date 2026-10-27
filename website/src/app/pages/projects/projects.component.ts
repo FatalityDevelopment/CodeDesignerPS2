@@ -1,164 +1,227 @@
-import { Component } from '@angular/core';
+import { Component, OnInit, signal } from '@angular/core';
+import { DatePipe } from '@angular/common';
+import { GITHUB_ORG, GithubRepo, GithubService } from '../../services/github.service';
+
+/** Colors GitHub uses for the languages these repos are written in. */
+const LANGUAGE_COLORS: Record<string, string> = {
+  'C#': '#178600',
+  'C++': '#f34b7d',
+  C: '#555555',
+  TypeScript: '#3178c6',
+  JavaScript: '#f1e05a',
+  Python: '#3572A5',
+  HTML: '#e34c26',
+  PowerShell: '#012456',
+};
 
 @Component({
   selector: 'app-projects',
-  imports: [],
+  imports: [DatePipe],
   template: `
-    <div class="projects-page">
-      <h1 class="page-title">Projects</h1>
-      <p class="page-subtitle">Open-source tools for the PlayStation 2</p>
+    <div class="container">
+      <h1>Projects</h1>
+      <p class="cd-subtitle page-subtitle">
+        Public repositories of <a [href]="orgUrl" target="_blank" rel="noopener">{{ org }}</a> on GitHub
+      </p>
 
-      <div class="projects-grid">
-        <div class="project-card">
-          <div class="project-image-wrapper">
-            <img src="assets/logo.png" alt="CodeDesigner" class="project-image" />
-          </div>
-          <div class="project-info">
-            <h2 class="project-name">CodeDesigner</h2>
-            <p class="project-description">
-              A complete assembler, disassembler, instruction decoder/encoder, and execution engine
-              for the Sony PlayStation 2 Emotion Engine (EE) MIPS64 architecture. Verified against
-              PCSX2 reference behaviour.
-            </p>
-            <div class="project-tags">
-              <span class="tag">PS2</span>
-              <span class="tag">MIPS</span>
-              <span class="tag">Assembler</span>
-              <span class="tag">C#</span>
-              <span class="tag">Emulator</span>
-            </div>
-            <div class="project-actions">
-              <a href="https://github.com/TylerDev888/CodeDesigner" target="_blank" rel="noopener" class="btn btn-primary">
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                  <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
-                </svg>
-                View on GitHub
-              </a>
-            </div>
+      @if (error()) {
+        <div class="cd-card notice">
+          <div class="cd-card-body">
+            Couldn't load the repositories from GitHub ({{ error() }}).
+            <a [href]="orgUrl" target="_blank" rel="noopener">Browse them on GitHub</a>.
           </div>
         </div>
-      </div>
+      } @else if (!repos()) {
+        <p class="cd-muted">Loading repositories…</p>
+      } @else {
+        <div class="projects-grid">
+          @for (repo of repos(); track repo.full_name) {
+            <a class="cd-card project" [href]="repo.html_url" target="_blank" rel="noopener">
+              <div class="project-head">
+                @if (repo.name === 'CodeDesignerPS2') {
+                  <img src="assets/codedesigner-logo-64.png" alt="" class="project-logo" />
+                } @else {
+                  <svg class="project-logo icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                    <path d="M2 2.5A2.5 2.5 0 0 1 4.5 0h8.75a.75.75 0 0 1 .75.75v12.5a.75.75 0 0 1-.75.75h-2.5a.75.75 0 0 1 0-1.5h1.75v-2h-8a1 1 0 0 0-.714 1.7.75.75 0 1 1-1.072 1.05A2.495 2.495 0 0 1 2 11.5Zm10.5-1h-8a1 1 0 0 0-1 1v6.708A2.486 2.486 0 0 1 4.5 9h8ZM5 12.25a.25.25 0 0 1 .25-.25h3.5a.25.25 0 0 1 .25.25v3.25a.25.25 0 0 1-.4.2l-1.45-1.087a.249.249 0 0 0-.3 0L5.4 15.7a.25.25 0 0 1-.4-.2Z"/>
+                  </svg>
+                }
+                <div class="project-title">
+                  <h3>{{ repo.name }}</h3>
+                  <div class="badges">
+                    @if (repo.fork) { <span class="badge">Fork</span> }
+                    @if (repo.archived) { <span class="badge">Archived</span> }
+                  </div>
+                </div>
+              </div>
+
+              <p class="project-description">{{ repo.description || 'No description.' }}</p>
+
+              @if (repo.topics?.length) {
+                <div class="topics">
+                  @for (topic of repo.topics; track topic) { <span class="topic">{{ topic }}</span> }
+                </div>
+              }
+
+              <div class="project-meta">
+                @if (repo.language) {
+                  <span><i class="lang-dot" [style.background]="languageColor(repo.language)"></i>{{ repo.language }}</span>
+                }
+                <span title="Stars">★ {{ repo.stargazers_count }}</span>
+                <span title="Forks">⑂ {{ repo.forks_count }}</span>
+                <span class="updated">Updated {{ repo.pushed_at | date: 'mediumDate' }}</span>
+              </div>
+            </a>
+          }
+        </div>
+      }
     </div>
   `,
   styles: [`
-    .projects-page {
-      padding: 32px 24px;
-      max-width: 1200px;
-      margin: 0 auto;
-    }
-
-    .page-title {
-      font-size: 28px;
-      color: #d4d4d4;
-      margin-bottom: 4px;
-    }
-
     .page-subtitle {
-      color: #858585;
-      font-size: 14px;
-      margin-bottom: 32px;
+      margin: 4px 0 20px;
+    }
+
+    .page-subtitle a {
+      text-transform: none;
+    }
+
+    .notice .cd-card-body {
+      padding: 12px;
     }
 
     .projects-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(500px, 1fr));
-      gap: 24px;
+      grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+      gap: 14px;
     }
 
-    .project-card {
-      background-color: #252526;
-      border: 1px solid #3e3e42;
-      border-radius: 6px;
-      overflow: hidden;
+    @media (max-width: 420px) {
+      .projects-grid { grid-template-columns: 1fr; }
+    }
+
+    .project {
       display: flex;
       flex-direction: column;
-      transition: border-color 0.15s ease;
+      gap: 10px;
+      padding: 14px;
+      color: var(--fg);
+      transition: border-color 0.1s, background 0.1s;
     }
 
-    .project-card:hover {
-      border-color: #007acc;
+    .project:hover {
+      border-color: var(--border-hover);
+      background: var(--bg-card-hover);
+      color: var(--fg);
+      text-decoration: none;
     }
 
-    .project-image-wrapper {
-      background-color: #1e1e1e;
+    .project-head {
       display: flex;
       align-items: center;
-      justify-content: center;
-      padding: 32px;
-      border-bottom: 1px solid #3e3e42;
+      gap: 10px;
     }
 
-    .project-image {
-      max-width: 200px;
-      max-height: 120px;
-      object-fit: contain;
+    .project-logo {
+      width: 36px;
+      height: 36px;
+      flex-shrink: 0;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.022);
+      padding: 3px;
     }
 
-    .project-info {
-      padding: 24px;
+    .project-logo.icon {
+      padding: 9px;
+      color: var(--fg-muted);
     }
 
-    .project-name {
-      font-size: 22px;
-      color: #d4d4d4;
-      margin-bottom: 12px;
+    .project-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .project-title h3 {
+      color: var(--accent);
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .badges {
+      display: flex;
+      gap: 4px;
+    }
+
+    .badge {
+      font-size: 10.5px;
+      font-weight: 600;
+      color: var(--fg-muted);
+      border: 1px solid var(--border-hover);
+      border-radius: 10px;
+      padding: 0 7px;
     }
 
     .project-description {
-      color: #cccccc;
-      font-size: 14px;
-      line-height: 1.6;
-      margin-bottom: 16px;
+      flex: 1;
+      color: var(--fg-muted);
+      font-size: 12.5px;
     }
 
-    .project-tags {
+    .topics {
       display: flex;
       flex-wrap: wrap;
-      gap: 8px;
-      margin-bottom: 20px;
+      gap: 5px;
     }
 
-    .tag {
-      background-color: #0e639c;
-      color: #ffffff;
-      padding: 3px 10px;
-      border-radius: 12px;
-      font-size: 12px;
-      font-weight: 500;
+    .topic {
+      font-size: 11px;
+      color: var(--accent);
+      background: rgba(55, 148, 255, 0.10);
+      border-radius: 10px;
+      padding: 1px 8px;
     }
 
-    .project-actions {
+    .project-meta {
       display: flex;
-      gap: 12px;
-    }
-
-    .btn {
-      display: inline-flex;
+      flex-wrap: wrap;
       align-items: center;
-      gap: 8px;
-      padding: 8px 16px;
-      border-radius: 4px;
-      font-size: 13px;
-      font-weight: 500;
-      text-decoration: none;
-      transition: background-color 0.15s ease;
+      gap: 14px;
+      font-size: 11.5px;
+      color: var(--fg-muted);
     }
 
-    .btn-primary {
-      background-color: #0e639c;
-      color: #ffffff;
+    .lang-dot {
+      display: inline-block;
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      margin-right: 5px;
+      vertical-align: -1px;
     }
 
-    .btn-primary:hover {
-      background-color: #1177bb;
-      color: #ffffff;
-    }
-
-    @media (max-width: 600px) {
-      .projects-grid {
-        grid-template-columns: 1fr;
-      }
+    .updated {
+      margin-left: auto;
     }
   `]
 })
-export class ProjectsComponent {}
+export class ProjectsComponent implements OnInit {
+  readonly org = GITHUB_ORG;
+  readonly orgUrl = `https://github.com/${GITHUB_ORG}`;
+  readonly repos = signal<GithubRepo[] | null>(null);
+  readonly error = signal('');
+
+  constructor(private github: GithubService) {}
+
+  ngOnInit(): void {
+    this.github.orgRepos().subscribe({
+      next: repos => this.repos.set(repos),
+      error: err => this.error.set(err?.status === 403 ? 'GitHub rate limit reached, try again later' : err?.message ?? 'network error'),
+    });
+  }
+
+  languageColor(language: string): string {
+    return LANGUAGE_COLORS[language] ?? '#8f8f8f';
+  }
+}

@@ -48,7 +48,7 @@ interface ServerDisplay {
 
       @if (servers().length === 0) {
         <div class="no-servers">
-          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#858585" stroke-width="1.5">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--fg-muted)" stroke-width="1.5">
             <rect x="2" y="2" width="20" height="8" rx="2" ry="2"/>
             <rect x="2" y="14" width="20" height="8" rx="2" ry="2"/>
             <line x1="6" y1="6" x2="6.01" y2="6"/>
@@ -68,12 +68,12 @@ interface ServerDisplay {
 
     .page-title {
       font-size: 28px;
-      color: #d4d4d4;
+      color: var(--fg);
       margin-bottom: 4px;
     }
 
     .page-subtitle {
-      color: #858585;
+      color: var(--fg-muted);
       font-size: 14px;
       margin-bottom: 32px;
     }
@@ -85,15 +85,15 @@ interface ServerDisplay {
     }
 
     .server-card {
-      background-color: #252526;
-      border: 1px solid #3e3e42;
+      background-color: var(--bg-card);
+      border: 1px solid var(--border);
       border-radius: 6px;
       padding: 20px;
       transition: border-color 0.15s ease;
     }
 
     .server-card:hover {
-      border-color: #007acc;
+      border-color: var(--accent);
     }
 
     .server-header {
@@ -113,16 +113,16 @@ interface ServerDisplay {
       width: 8px;
       height: 8px;
       border-radius: 50%;
-      background-color: #858585;
+      background-color: var(--fg-muted);
     }
 
     .status-dot.online {
-      background-color: #4ec94e;
+      background-color: var(--success);
       box-shadow: 0 0 6px rgba(78, 201, 78, 0.4);
     }
 
     .status-dot.offline {
-      background-color: #e07070;
+      background-color: var(--error);
     }
 
     .status-text {
@@ -133,30 +133,30 @@ interface ServerDisplay {
     }
 
     .status-text.online {
-      color: #4ec94e;
+      color: var(--success);
     }
 
     .status-text.offline {
-      color: #e07070;
+      color: var(--error);
     }
 
     .server-region {
       font-size: 12px;
-      color: #858585;
-      background-color: #3c3c3c;
+      color: var(--fg-muted);
+      background-color: var(--bg-input);
       padding: 2px 8px;
       border-radius: 3px;
     }
 
     .server-name {
       font-size: 16px;
-      color: #d4d4d4;
+      color: var(--fg);
       margin-bottom: 4px;
     }
 
     .server-game {
       font-size: 13px;
-      color: #858585;
+      color: var(--fg-muted);
       margin-bottom: 16px;
     }
 
@@ -168,27 +168,27 @@ interface ServerDisplay {
 
     .player-bar {
       height: 4px;
-      background-color: #3c3c3c;
+      background-color: var(--bg-input);
       border-radius: 2px;
       overflow: hidden;
     }
 
     .player-fill {
       height: 100%;
-      background-color: #007acc;
+      background-color: var(--accent);
       border-radius: 2px;
       transition: width 0.3s ease;
     }
 
     .player-count {
       font-size: 12px;
-      color: #858585;
+      color: var(--fg-muted);
     }
 
     .no-servers {
       text-align: center;
       padding: 48px 24px;
-      color: #858585;
+      color: var(--fg-muted);
       font-size: 14px;
     }
 

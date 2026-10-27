@@ -1,162 +1,263 @@
-import { Component, signal } from '@angular/core';
-import { FormsModule } from '@angular/forms';
+import { Component, OnInit, computed, signal } from '@angular/core';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { ARCHIVE_REPO, ArchiveEntry, GITHUB_ORG, GithubService } from '../../services/github.service';
+import { categoryLabel } from './archive-categories';
 
+const PAGE_SIZE = 50;
+
+/**
+ * Paged index of the CheatCodeArchive (github.com/FatalityDevelopment/CheatCodeArchive).
+ * Search, category and page live in the query string so Back and shared links keep their place.
+ */
 @Component({
   selector: 'app-cheats',
-  imports: [FormsModule],
+  imports: [RouterLink],
   template: `
-    <div class="cheats-page">
-      <h1 class="page-title">Cheat Database</h1>
-      <p class="page-subtitle">Search and browse cheat codes for PlayStation 2 games</p>
+    <div class="container">
+      <h1>Cheat Database</h1>
+      <p class="cd-subtitle page-subtitle">
+        Index of the <a [href]="archiveUrl" target="_blank" rel="noopener">{{ archiveRepo }}</a>
+        @if (entries()) { · {{ entries()!.length.toLocaleString() }} games }
+      </p>
 
-      <div class="search-bar">
-        <svg class="search-icon" width="16" height="16" viewBox="0 0 16 16" fill="#858585">
-          <path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z"/>
-        </svg>
-        <input
-          type="text"
-          class="search-input"
-          placeholder="Search games, cheats, codes..."
-          [(ngModel)]="searchQuery"
-        />
-      </div>
-
-      <div class="coming-soon">
-        <div class="coming-soon-icon">
-          <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#007acc" stroke-width="1.5">
-            <path d="M12 2L2 7l10 5 10-5-10-5z"/>
-            <path d="M2 17l10 5 10-5"/>
-            <path d="M2 12l10 5 10-5"/>
+      <div class="toolbar">
+        <div class="search">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+            <path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z"/>
           </svg>
+          <input type="search" placeholder="Search by game or serial (e.g. SOCOM, SCUS-97275)"
+                 [value]="query()" (input)="setQuery($any($event.target).value)" aria-label="Search games" />
         </div>
-        <h2 class="coming-soon-title">Coming Soon</h2>
-        <p class="coming-soon-text">
-          The cheat database is currently under development. Soon you'll be able to search,
-          browse, and contribute cheat codes for your favorite PS2 games.
-        </p>
+        <select [value]="category()" (change)="setCategory($any($event.target).value)" aria-label="Category">
+          <option value="">All categories</option>
+          @for (c of categories(); track c.name) {
+            <option [value]="c.name" [selected]="c.name === category()">{{ c.label }} ({{ c.count }})</option>
+          }
+        </select>
       </div>
 
-      <div class="cheats-grid">
-        <div class="cheat-placeholder">
-          <div class="placeholder-line long"></div>
-          <div class="placeholder-line medium"></div>
-          <div class="placeholder-line short"></div>
+      @if (error()) {
+        <div class="cd-card"><div class="cd-card-body notice">
+          Couldn't load the archive from GitHub ({{ error() }}).
+          <a [href]="archiveUrl" target="_blank" rel="noopener">Browse it on GitHub</a>.
+        </div></div>
+      } @else if (!entries()) {
+        <p class="cd-muted">Loading the archive index…</p>
+      } @else {
+        <div class="cd-card">
+          <table class="index">
+            <thead>
+              <tr><th>Game</th><th class="col-serial">Serial</th><th class="col-region">Region</th><th class="col-cat">Category</th></tr>
+            </thead>
+            <tbody>
+              @for (e of pageEntries(); track e.path) {
+                <tr>
+                  <td><a [routerLink]="['/cheats/game']" [queryParams]="{ path: e.path }">{{ e.title }}</a></td>
+                  <td class="col-serial mono">{{ e.serial }}</td>
+                  <td class="col-region">{{ e.region }}</td>
+                  <td class="col-cat cd-muted">{{ label(e.category) }}</td>
+                </tr>
+              } @empty {
+                <tr><td colspan="4" class="cd-muted empty">No games match “{{ query() }}”.</td></tr>
+              }
+            </tbody>
+          </table>
         </div>
-        <div class="cheat-placeholder">
-          <div class="placeholder-line long"></div>
-          <div class="placeholder-line medium"></div>
-          <div class="placeholder-line short"></div>
-        </div>
-        <div class="cheat-placeholder">
-          <div class="placeholder-line long"></div>
-          <div class="placeholder-line medium"></div>
-          <div class="placeholder-line short"></div>
-        </div>
-      </div>
+
+        @if (filtered().length > 0) {
+          <nav class="pager" aria-label="Pages">
+            <span class="cd-muted range">
+              {{ rangeStart().toLocaleString() }}–{{ rangeEnd().toLocaleString() }} of {{ filtered().length.toLocaleString() }}
+            </span>
+            <button class="cd-btn" [disabled]="page() <= 1" (click)="setPage(page() - 1)">‹ Prev</button>
+            @for (p of pageNumbers(); track $index) {
+              @if (p === 0) {
+                <span class="gap">…</span>
+              } @else {
+                <button class="cd-btn" [class.current]="p === page()" (click)="setPage(p)">{{ p }}</button>
+              }
+            }
+            <button class="cd-btn" [disabled]="page() >= pageCount()" (click)="setPage(page() + 1)">Next ›</button>
+          </nav>
+        }
+      }
     </div>
   `,
   styles: [`
-    .cheats-page {
-      padding: 32px 24px;
-      max-width: 1200px;
-      margin: 0 auto;
+    .page-subtitle { margin: 4px 0 16px; }
+    .page-subtitle a { text-transform: none; }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 12px;
     }
 
-    .page-title {
-      font-size: 28px;
-      color: #d4d4d4;
-      margin-bottom: 4px;
-    }
-
-    .page-subtitle {
-      color: #858585;
-      font-size: 14px;
-      margin-bottom: 24px;
-    }
-
-    .search-bar {
+    .search {
       position: relative;
-      margin-bottom: 32px;
+      flex: 1 1 320px;
     }
 
-    .search-icon {
+    .search svg {
       position: absolute;
-      left: 14px;
+      left: 10px;
       top: 50%;
       transform: translateY(-50%);
-      pointer-events: none;
+      color: var(--fg-muted);
     }
 
-    .search-input {
+    .search input {
       width: 100%;
-      padding: 10px 14px 10px 40px;
-      background-color: #3c3c3c;
-      border: 1px solid #3e3e42;
-      border-radius: 4px;
-      color: #d4d4d4;
-      font-size: 14px;
-      outline: none;
-      transition: border-color 0.15s ease;
+      padding-left: 30px;
     }
 
-    .search-input:focus {
-      border-color: #007acc;
+    select { flex: 0 1 280px; min-width: 0; }
+
+    .notice { padding: 12px; }
+
+    .index {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12.5px;
     }
 
-    .search-input::placeholder {
-      color: #858585;
+    .index th {
+      text-align: left;
+      padding: 8px 12px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--fg-muted);
+      border-bottom: 1px solid var(--border);
     }
 
-    .coming-soon {
-      text-align: center;
-      padding: 48px 24px;
-      margin-bottom: 32px;
+    .index td {
+      padding: 6px 12px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      vertical-align: top;
     }
 
-    .coming-soon-icon {
-      margin-bottom: 16px;
+    .index tbody tr:hover { background: var(--bg-card-hover); }
+    .index tbody tr:last-child td { border-bottom: none; }
+
+    .mono {
+      font-family: var(--font-code);
+      font-size: 12px;
+      color: #9cdcfe;
+      white-space: nowrap;
     }
 
-    .coming-soon-title {
-      font-size: 24px;
-      color: #007acc;
-      margin-bottom: 12px;
+    .col-region, .col-cat { white-space: nowrap; }
+    .empty { padding: 16px 12px; }
+
+    @media (max-width: 720px) {
+      .col-region, .col-cat { display: none; }
     }
 
-    .coming-soon-text {
-      color: #858585;
-      font-size: 14px;
-      max-width: 480px;
-      margin: 0 auto;
-      line-height: 1.6;
+    .pager {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 4px;
+      margin-top: 12px;
     }
 
-    .cheats-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-      gap: 16px;
+    .pager .range { margin-right: auto; font-size: 12px; }
+    .pager .cd-btn { min-width: 30px; justify-content: center; padding: 0 9px; }
+    .pager .cd-btn:disabled { opacity: 0.4; cursor: default; }
+    .pager .cd-btn.current {
+      background: var(--btn);
+      border-color: var(--btn);
+      color: #ffffff;
     }
-
-    .cheat-placeholder {
-      background-color: #252526;
-      border: 1px solid #3e3e42;
-      border-radius: 6px;
-      padding: 20px;
-      opacity: 0.4;
-    }
-
-    .placeholder-line {
-      height: 12px;
-      background-color: #3c3c3c;
-      border-radius: 3px;
-      margin-bottom: 12px;
-    }
-
-    .placeholder-line.long { width: 90%; }
-    .placeholder-line.medium { width: 65%; }
-    .placeholder-line.short { width: 40%; margin-bottom: 0; }
+    .pager .gap { color: var(--fg-muted); padding: 0 4px; }
   `]
 })
-export class CheatsComponent {
-  searchQuery = signal('');
+export class CheatsComponent implements OnInit {
+  readonly archiveRepo = ARCHIVE_REPO;
+  readonly archiveUrl = `https://github.com/${GITHUB_ORG}/${ARCHIVE_REPO}`;
+
+  readonly entries = signal<ArchiveEntry[] | null>(null);
+  readonly error = signal('');
+  readonly query = signal('');
+  readonly category = signal('');
+  readonly page = signal(1);
+
+  readonly categories = computed(() => {
+    const counts = new Map<string, number>();
+    for (const e of this.entries() ?? []) counts.set(e.category, (counts.get(e.category) ?? 0) + 1);
+    return [...counts.entries()]
+      .map(([name, count]) => ({ name, count, label: categoryLabel(name) }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  });
+
+  readonly filtered = computed(() => {
+    const words = this.query().toLowerCase().split(/\s+/).filter(Boolean);
+    const category = this.category();
+    return (this.entries() ?? []).filter(e => {
+      if (category && e.category !== category) return false;
+      if (!words.length) return true;
+      // Serials are written SLUS_202.65 / SLUS-20265; compare them without punctuation too.
+      const hay = `${e.title} ${e.region} ${e.serial} ${e.serial.replace(/[^a-z0-9]/gi, '')}`.toLowerCase();
+      return words.every(w => hay.includes(w) || hay.includes(w.replace(/[^a-z0-9]/g, '')));
+    });
+  });
+
+  readonly pageCount = computed(() => Math.max(1, Math.ceil(this.filtered().length / PAGE_SIZE)));
+  readonly pageEntries = computed(() => this.filtered().slice((this.page() - 1) * PAGE_SIZE, this.page() * PAGE_SIZE));
+  readonly rangeStart = computed(() => (this.page() - 1) * PAGE_SIZE + 1);
+  readonly rangeEnd = computed(() => Math.min(this.page() * PAGE_SIZE, this.filtered().length));
+
+  /** Page buttons: first, last and two either side of the current page; 0 marks a gap. */
+  readonly pageNumbers = computed(() => {
+    const count = this.pageCount();
+    const current = this.page();
+    const pages: number[] = [];
+    for (let p = 1; p <= count; p++) {
+      if (p === 1 || p === count || Math.abs(p - current) <= 2) pages.push(p);
+      else if (pages[pages.length - 1] !== 0) pages.push(0);
+    }
+    return pages;
+  });
+
+  constructor(private github: GithubService, private route: ActivatedRoute, private router: Router) {}
+
+  ngOnInit(): void {
+    this.route.queryParamMap.subscribe(params => {
+      this.query.set(params.get('q') ?? '');
+      this.category.set(params.get('cat') ?? '');
+      this.page.set(Math.max(1, Number(params.get('page')) || 1));
+    });
+    this.github.archiveIndex().subscribe({
+      next: entries => {
+        this.entries.set(entries);
+        if (this.page() > this.pageCount()) this.setPage(this.pageCount());
+      },
+      error: err => this.error.set(err?.status === 403 ? 'GitHub rate limit reached, try again later' : err?.message ?? 'network error'),
+    });
+  }
+
+  label(category: string): string {
+    return categoryLabel(category);
+  }
+
+  setQuery(q: string): void {
+    this.navigate({ q: q || null, page: null }, true);
+  }
+
+  setCategory(cat: string): void {
+    this.navigate({ cat: cat || null, page: null });
+  }
+
+  setPage(page: number): void {
+    this.navigate({ page: page > 1 ? page : null });
+    window.scrollTo?.({ top: 0 });
+    document.querySelector('.main-content')?.scrollTo({ top: 0 });
+  }
+
+  private navigate(params: Record<string, string | number | null>, replaceUrl = false): void {
+    this.router.navigate([], { relativeTo: this.route, queryParams: params, queryParamsHandling: 'merge', replaceUrl });
+  }
 }
