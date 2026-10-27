@@ -71,7 +71,7 @@ public abstract class BaseMediusTcpServer
     /// <summary>
     /// Old-proto (v108) connect hook, called after the encrypted CLIENT_CONNECT_TCP is parsed (WorldId, AppId,
     /// SessionKey, AccessKey set) and before CONNECT_ACCEPT. Return the (PlayerId, PlayerCount) to put in
-    /// CONNECT_ACCEPT_TCP, or null for the defaults.
+    /// CONNECT_ACCEPT_TCP (PlayerCount is also CONNECT_COMPLETE's ClientCountAtConnect), or null for the defaults.
     /// </summary>
     protected virtual Task<(ushort PlayerId, ushort PlayerCount)?> OnOldProtoConnectAsync(
         MediusClientState state, TcpClient tcp, CancellationToken ct)
@@ -514,7 +514,8 @@ public abstract class BaseMediusTcpServer
             if (SendCryptKeyPeerAfterGame)
                 await SendPacketAsync(tcp, ScertPacket.CreateCryptKeyPeer(state.SessionRc4Key), ct);
             await SendPacketAsync(tcp, ScertPacket.CreateConnectAcceptTcp(state.ScertId, playerId, playerCount, clientIp, state.MediusVersion), state, ct);
-            await SendPacketAsync(tcp, ScertPacket.CreateConnectComplete(), state, ct);
+            // ClientCountAtConnect = the same count as CONNECT_ACCEPT (1 unless the hook says otherwise, e.g. a DME world).
+            await SendPacketAsync(tcp, ScertPacket.CreateConnectComplete(playerCount), state, ct);
             state.IsSessionEstablished = true;
             _log.LogInformation("[{Name}] Old-proto handshake complete for {Ep}", ServerName, state.RemoteEndpoint);
             await OnOldProtoConnectCompleteAsync(state, tcp, ct);
