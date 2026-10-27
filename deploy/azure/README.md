@@ -1,6 +1,6 @@
 # SOCOM II server on Azure (test deployment)
 
-Runs `CodeDesigner.Ps2.Multiplayer` (MUIS, MAS, MLS, DME, NAT, DnaSDK DNAS, DNS) as one container on
+Runs `CodeDesigner.Ps2.Multiplayer` (MUIS, MAS, MLS, DME, NAT, DNAS, DNS) as one container on
 **Azure Container Instances**. ACI is used because the server needs public **UDP** ports (DNS 53, NAT 10069)
 next to its TCP ports on one fixed IP; Azure Container Apps can't expose UDP.
 
@@ -15,8 +15,8 @@ next to its TCP ports on one fixed IP; Azure Container Apps can't expose UDP.
 ./deploy/azure/deploy-aci.ps1 -AcrName <uniqueregistryname> -DnsNameLabel <label>
 ```
 
-The script creates the resource group and registry, builds the image from the repo root with
-`CodeDesigner.Ps2.Multiplayer/Dockerfile` (the working tree, so no commit is needed), and deploys `main.bicep`. It prints the FQDN and public IP.
+The script creates the resource group and registry, builds the image from `CodeDesigner.Ps2.Multiplayer/`
+(the working tree, so no commit is needed), and deploys `main.bicep`. It prints the FQDN and public IP.
 Re-run it to ship a new build.
 
 **On the PS2**, set **Primary DNS** to the printed public IP. Everything else follows from DNS: DNAS and
@@ -42,7 +42,7 @@ Settings come from `config.json` in the image, overridden by `Online__<Setting>`
 | `Online__DnsForwardUnknown` | `false` | Only DNAS/Medius names are answered; everything else is REFUSED, so the public DNS port isn't an open resolver. |
 | `MULTIPLAYER_LOG_FILE` | `none` | Logs go to stdout (`az container logs`), not an ever-growing file. |
 | `Logging__LogLevel__Default` | `Debug` | Full packet hex while testing; deploy with `-LogLevel Information` to quiet it. |
-| `Online__ExternalDnasServer` | empty | Set with `-ExternalDnasServer <ip-or-host>` to send consoles to another DNAS server. The built-in DnaSDK gateway then stays off, and DNS answers `*.dnas.playstation.org` with that server's address. |
+| `Online__ExternalDnasServer` | empty | Set with `-ExternalDnasServer <ip-or-host>` to send consoles to another DNAS server. The built-in DNAS gateway then stays off, and DNS answers `*.dnas.playstation.org` with that server's address. |
 
 ## Test-deployment caveats
 

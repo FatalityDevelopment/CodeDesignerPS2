@@ -85,14 +85,14 @@ All settings live under the `"Online"` key in `config.json`.
 
 | Setting | Default | Description |
 |---|---|---|
-| `DnasHttpsPort` | `443` | DnaSDK DNAS gateway (requires elevated privileges). `0` disables DNAS |
+| `DnasHttpsPort` | `443` | DNAS gateway (requires elevated privileges). `0` disables DNAS |
 | `DnsDnasPort` | `53` | DNS intercept for `*.dnas.playstation.org` (requires elevated privileges) |
 | `ExternalDnasServer` | `""` | Use another DNAS server (IP or hostname) instead of the built-in one. See [Using an external DNAS server](#using-an-external-dnas-server) |
 | `DnasRegion` | `"us-gw"` | Picks the region certificate (`us-gw` → `cert-us`, `eu-gw` → `cert-eu`, `gai-gw` → `cert-jp`) and the packet region searched first |
 | `DnasCertPath` / `DnasKeyPath` | `""` | Gateway certificate/key (PEM). Default: `Certificates/dnas.crt` + `dnas.key` if present, else the `DnasRegion` cert |
 | `DnasCaPath` | `""` | Issuer certificate sent with the chain (default `Certificates/ca-cert.pem`) |
 | `DnasRsaDirectory` | `""` | DNAS ticket root (defaults to `<DataDirectory>/dnas/RSA`) |
-| `DnasCaptureDirectory` | `""` | DnaSDK packet captures (defaults to `<DataDirectory>/dnas/PacketLogs`) |
+| `DnasCaptureDirectory` | `""` | DNAS packet captures (defaults to `<DataDirectory>/dnas/PacketLogs`) |
 | `DnasRepositoryUrl` | `"Data"` | Captured DNAS packets each title's RSA ticket is taken from: a local folder laid out as `<region>/packets/<lookup>_<operation>` (relative to the binary), or an HTTPS DNASrep mirror |
 
 ### Game
@@ -199,8 +199,9 @@ These are answered with `ServerIp`. All other queries are forwarded to `8.8.8.8`
 
 ### HTTPS endpoint — DnaSDK
 
-`DnasServer` hosts [DnaSDK](https://github.com/FatalityDevelopment/DnaSDK) in-process on port 443 (`DnasHttpsPort`).
-The source lives in `DnaSDK/` at the repo root; its README documents the protocol in full. In short:
+`DnasServer` serves DNAS on port 443 (`DnasHttpsPort`) with the code in `CodeDesigner.Ps2.Multiplayer/Dnas/`, which
+comes from [DnaSDK](https://github.com/FatalityDevelopment/DnaSDK). `Dnas/README.md` documents the protocol in full.
+In short:
 
 - **Transport:** BouncyCastle TLS in userspace. It accepts the PS2's SSLv2-format ClientHello, keeps the original
   hello bytes in the handshake hash, and negotiates TLS 1.0 / RSA / 3DES. One HTTP/1.0 request per connection.
@@ -220,7 +221,7 @@ The source lives in `DnaSDK/` at the repo root; its README documents the protoco
 Set `ExternalDnasServer` to another DNAS server's IP or hostname, for example a friend's public one. In a container,
 use `Online__ExternalDnasServer`, `EXTERNAL_DNAS` with docker compose, or `-ExternalDnasServer` with the Azure script.
 
-- The built-in DnaSDK gateway does not start, so nothing listens on 443. The packets and certificates go unused.
+- The built-in DNAS gateway does not start, so nothing listens on 443. The packets and certificates go unused.
 - The DNS responder answers `*.dnas.playstation.org` with the external server's address. A hostname is re-resolved
   at most once a minute, and the last good address is reused if a lookup fails.
 - Medius names (`*.pdonline.scea.com`) still resolve to `ServerIp`, so consoles authenticate with the external
@@ -234,14 +235,29 @@ certificate for `DnasRegion` (`cert-us.pem`/`cert-us-key.pem`, `cert-eu…`, `ce
 sent as the issuer, because the PS2 rejects a chain that has only the leaf certificate. Override with
 `DnasCertPath`, `DnasKeyPath` and `DnasCaPath`.
 
-### Local changes to DnaSDK
+### Code layout and updating from DnaSDK
 
-Keep these when copying in a newer DnaSDK:
+DnaSDK's source is part of the multiplayer project, not a separate project. Everything is in the
+`CodeDesigner.Ps2.Multiplayer.Dnas` namespace:
 
-- `DnaSDK.csproj` targets `net8.0` (upstream uses `net10.0`) because the Bridge references the server.
-- `DnaSDK.csproj` adds an `InternalsVisibleTo` for `CodeDesigner.Ps2.Multiplayer`.
-- `DNAS.Server/DnasRepRepository.cs` reads a local packet folder as well as HTTPS, and searches a preferred region
-  first (`DnasServerConfiguration.PreferredRegion`, passed through `TicketStore`).
+| `Dnas/` folder | Upstream DnaSDK folder | Contents |
+|---|---|---|
+| `Client/` | `DNAS.Client/` | Client-side proof model, used by the server's C1 validation |
+| `Cryptography/` | `DNAS.Cryptography/` | DES/3DES, RSA, native proof algorithms |
+| `Server/` | `DNAS.Server/` | Packet formats, sessions, response producers, ticket store |
+| `Transport/` | `TCP.Server/` | TLS listener, HTTP framing, packet journal |
+| `Tls/` | `TCP.TLS/` | Legacy TLS 1.0 server, SSLv2-hello adapter, certificate loading |
+| `Moduli/` | `Assets/Moduli/` | Optional RSA public moduli, copied to `Assets/Moduli` in the output |
+
+To bring in a newer DnaSDK, copy its files into the matching folders and keep these differences:
+
+- Namespaces `DNAS`, `TCP.Server` and `TLS` all become `CodeDesigner.Ps2.Multiplayer.Dnas`. The `using DNAS;`,
+  `using TCP.Server;` and `using TLS;` lines are dropped. In `Client/ClientSetup.cs`, `DNAS.Identity` becomes
+  `global::CodeDesigner.Ps2.Multiplayer.Dnas.Identity`.
+- Upstream's `Program.cs` and `TCP.Server/ServerOptions.cs` (its standalone command-line tool), `Dockerfile`,
+  and `TCP.TLS/Certificates/` aren't copied. Certificates come from `Certificates/`.
+- `Server/DnasRepRepository.cs` reads a local packet folder as well as HTTPS, and searches a preferred region first
+  (`DnasServerConfiguration.PreferredRegion`, passed through `TicketStore`).
 
 ---
 
@@ -352,7 +368,7 @@ All game state (accounts, channels, game rooms, sessions) is kept in memory. The
 
 ## See also
 
-- [DnaSDK](https://github.com/FatalityDevelopment/DnaSDK) — the DNAS implementation this server hosts
+- [DnaSDK](https://github.com/FatalityDevelopment/DnaSDK) — upstream of the DNAS code in `Dnas/`
 - [DNASrep](https://github.com/FogNo23/DNASrep) — archive of original DNAS captures (ticket source)
 - [Horizon Private Server](https://github.com/Horizon-Private-Server) — full PS2 online private server infrastructure
 - [Socket Communication](socket-communication.md) — CodeDesigner's internal JSON socket protocol
