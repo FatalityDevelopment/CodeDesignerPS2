@@ -52,18 +52,22 @@ public class MultiplayerConfig
     // ── DNAS ─────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// DNAS HTTPS server port (plain-HTTP debug fallback). The PS2 contacts the
-    /// DNAS gateway over HTTPS; the real port is DnasHttpsPort (443).
-    /// This port is kept for plain-HTTP debugging without SSL.
-    /// </summary>
-    public int DnasPort { get; set; } = 10060;
-
-    /// <summary>
     /// DNAS HTTPS server port. PS2 contacts gate1.*.dnas.playstation.org:443.
     /// Requires elevated privileges on Linux (run as root or use iptables redirect).
     /// Set to 0 to disable the HTTPS listener.
     /// </summary>
     public int DnasHttpsPort { get; set; } = 443;
+
+    /// <summary>
+    /// Use someone else's DNAS server instead of the built-in one: an IP address or hostname. When set, the built-in
+    /// DnaSDK gateway does not start and the DNS responder answers *.dnas.playstation.org with this server's address
+    /// (a hostname is re-resolved every minute), while Medius names (*.pdonline.scea.com) still point at ServerIp.
+    /// Empty = run DNAS here (default).
+    /// </summary>
+    public string ExternalDnasServer { get; set; } = "";
+
+    /// <summary>True when DNAS is handled by <see cref="ExternalDnasServer"/> rather than this process.</summary>
+    public bool UsesExternalDnas => !string.IsNullOrWhiteSpace(ExternalDnasServer);
 
     /// <summary>
     /// DNAS DNS responder port (normally 53). The DNS server intercepts
@@ -82,22 +86,40 @@ public class MultiplayerConfig
     public bool DnsForwardUnknown { get; set; } = true;
 
     /// <summary>
-    /// DNAS region sub-folder inside Data/. The server looks for response files
-    /// under Data/<DnasRegion>/. Valid values: us-gw, eu-gw, gai-gw.
+    /// DNAS region: picks the community TLS certificate (us-gw → cert-us, eu-gw → cert-eu, gai-gw → cert-jp) and is
+    /// the packet region searched first for a title's ticket. Valid values: us-gw, eu-gw, gai-gw.
     /// </summary>
     public string DnasRegion { get; set; } = "us-gw";
 
     /// <summary>
-    /// Path to the TLS certificate file (PEM or DER) for the DNAS HTTPS server.
-    /// If empty, defaults to Certificates/dnas.crt relative to the app base directory.
+    /// TLS certificate (PEM) for the DNAS HTTPS gateway. If empty, Certificates/dnas.crt is used when present,
+    /// otherwise the region certificate Certificates/cert-us|cert-eu|cert-jp.pem (see <see cref="DnasRegion"/>).
     /// </summary>
     public string DnasCertPath { get; set; } = "";
 
-    /// <summary>
-    /// Path to the TLS private-key file (PEM) for the DNAS HTTPS server.
-    /// If empty, defaults to Certificates/dnas.key relative to the app base directory.
-    /// </summary>
+    /// <summary>RSA private key (PEM) matching the certificate. If empty, Certificates/dnas.key or the region's -key.pem.</summary>
     public string DnasKeyPath { get; set; } = "";
+
+    /// <summary>Issuer certificate (PEM) sent with the gateway certificate. Empty = Certificates/ca-cert.pem.</summary>
+    public string DnasCaPath { get; set; } = "";
+
+    /// <summary>
+    /// DnaSDK ticket cache (Signatures/, Moduli/, Decoded/). Must be writable: each title's ticket is taken from its
+    /// captured S1 packet once and cached here. Empty = &lt;DataDirectory&gt;/dnas/RSA.
+    /// </summary>
+    public string DnasRsaDirectory { get; set; } = "";
+
+    /// <summary>
+    /// Where DnaSDK writes its per-session DNAS packet captures and logs. Empty = &lt;DataDirectory&gt;/dnas/PacketLogs.
+    /// </summary>
+    public string DnasCaptureDirectory { get; set; } = "";
+
+    /// <summary>
+    /// Captured DNAS packets DnaSDK takes each title's original RSA ticket from: a local directory laid out as
+    /// &lt;region&gt;/packets/&lt;lookup&gt;_&lt;operation&gt; (relative paths resolve next to the binary), or an HTTPS DNASrep
+    /// mirror. Empty = Data (the packet files shipped with this server).
+    /// </summary>
+    public string DnasRepositoryUrl { get; set; } = "";
 
     // ── NAT ───────────────────────────────────────────────────────────────────
 

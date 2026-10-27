@@ -1,7 +1,0 @@
-bin/
-obj/
-NuGet/
-*.log
-Dockerfile
-.dockerignore
-docker-compose.yml

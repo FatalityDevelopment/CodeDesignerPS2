@@ -11,6 +11,10 @@
 
 .EXAMPLE
   ./deploy/azure/deploy-aci.ps1 -AcrName socom2acr123 -DnsNameLabel socom2-test
+
+.EXAMPLE
+  # Use a friend's public DNAS server instead of the built-in one
+  ./deploy/azure/deploy-aci.ps1 -AcrName socom2acr123 -DnsNameLabel socom2-test -ExternalDnasServer dnas.example.org
 #>
 param(
     [Parameter(Mandatory)] [string] $AcrName,        # globally unique, lowercase letters/digits
@@ -18,12 +22,13 @@ param(
     [string] $ResourceGroup = 'socom2-test-rg',
     [string] $Location      = 'eastus',
     [string] $ImageTag      = $(git rev-parse --short HEAD),
-    [ValidateSet('Debug', 'Information', 'Warning')] [string] $LogLevel = 'Debug'
+    [ValidateSet('Debug', 'Information', 'Warning')] [string] $LogLevel = 'Debug',
+    [string] $ExternalDnasServer = ''                # IP/hostname of another DNAS server; empty = built-in DnaSDK
 )
 
 $ErrorActionPreference = 'Stop'
 $repoRoot   = Resolve-Path (Join-Path $PSScriptRoot '../..')
-$projectDir = Join-Path $repoRoot 'CodeDesigner.Ps2.Multiplayer'
+$dockerfile = 'CodeDesigner.Ps2.Multiplayer/Dockerfile'   # built from the repo root: the server references DnaSDK/
 
 function Invoke-Az {
     az @args
@@ -41,12 +46,13 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "==> Building socom2-server:$ImageTag in ACR (cloud build)"
-Invoke-Az acr build --registry $AcrName --image "socom2-server:$ImageTag" --image socom2-server:latest $projectDir
+Invoke-Az acr build --registry $AcrName --image "socom2-server:$ImageTag" --image socom2-server:latest --file $dockerfile $repoRoot
 
 Write-Host "==> Deploying container group"
 $out = Invoke-Az deployment group create --resource-group $ResourceGroup `
     --template-file (Join-Path $PSScriptRoot 'main.bicep') `
     --parameters acrName=$AcrName dnsNameLabel=$DnsNameLabel imageTag=$ImageTag logLevel=$LogLevel `
+        externalDnasServer=$ExternalDnasServer `
     --query properties.outputs --output json | ConvertFrom-Json
 
 Write-Host ""

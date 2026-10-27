@@ -224,7 +224,6 @@ public sealed class MediusPortMap
         new(10075, "MLS",  true),
         new(10070, "DME",  true),
         new(10069, "NAT",  true),
-        new(10060, "DNAS", false),
         new(443,   "DNAS", false),
         new(53,    "DNS",  false),
     ]);
@@ -273,7 +272,6 @@ public sealed class MediusPortMap
                 int mls  = online.TryGetProperty("MlsPort",  out p)     ? p.GetInt32() : 10075;
                 int dme  = online.TryGetProperty("DmePort",  out p)     ? p.GetInt32() : 10070;
                 int nat  = online.TryGetProperty("NatPort",  out p)     ? p.GetInt32() : 10069;
-                int dnas = online.TryGetProperty("DnasPort", out p)     ? p.GetInt32() : 10060;
                 int dnasHttps = online.TryGetProperty("DnasHttpsPort", out p) ? p.GetInt32() : 443;
                 int dnsDnas   = online.TryGetProperty("DnsDnasPort",   out p) ? p.GetInt32() : 53;
 
@@ -284,7 +282,6 @@ public sealed class MediusPortMap
                     new(mls,       "MLS",  true),
                     new(dme,       "DME",  true),
                     new(nat,       "NAT",  true),
-                    new(dnas,      "DNAS", false),
                     new(dnasHttps, "DNAS", false),
                     new(dnsDnas,   "DNS",  false),
                 ]);
