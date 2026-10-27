@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using System.Text.Json;
 using CodeDesigner.Ps2.Multiplayer.Config;
 using Microsoft.Extensions.Logging;
 
@@ -14,19 +15,28 @@ namespace CodeDesigner.Ps2.Multiplayer.Servers;
 /// on the memory card and writes the body (Content-Length bytes) verbatim. So any GET whose path ends in
 /// APACHE00.ZDB gets the configured patch file; everything else is a 404.
 ///
+/// GET /stats also answers here: public, read-only player counts (<see cref="MlsServer.PublicStats"/>) as JSON
+/// with CORS open, for the website's Servers page. It shares this port because it is the one HTTP port a
+/// deployment already exposes.
+///
 /// A raw TcpListener rather than HttpListener: binding port 80 that way needs no http.sys URL ACL on Windows.
 /// </summary>
 public class PatchHttpServer
 {
     private const string PatchName = "APACHE00.ZDB";
 
+    private const string StatsPath = "/stats";
+    private static readonly JsonSerializerOptions StatsJson = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+
     private readonly MultiplayerConfig _config;
+    private readonly MlsServer _mls;
     private readonly ILogger<PatchHttpServer> _log;
     private TcpListener? _listener;
 
-    public PatchHttpServer(MultiplayerConfig config, ILogger<PatchHttpServer> log)
+    public PatchHttpServer(MultiplayerConfig config, MlsServer mls, ILogger<PatchHttpServer> log)
     {
         _config = config;
+        _mls    = mls;
         _log    = log;
     }
 
@@ -106,9 +116,14 @@ public class PatchHttpServer
             }
             string method = parts[0].ToUpperInvariant(), target = parts[1];
             var version = parts.Length > 2 && parts[2] == "HTTP/1.0" ? "HTTP/1.0" : "HTTP/1.1";
+            var path = target.Split('?')[0];
+            if (path == StatsPath)
+            {
+                await WriteStatsAsync(stream, method, timeout.Token);
+                return;
+            }
             _log.LogInformation("[PATCH] {Remote} {Request} | {Headers}", remote, lines[0], string.Join(" | ", lines.Skip(1)));
 
-            var path = target.Split('?')[0];
             if ((method != "GET" && method != "HEAD") || !path.EndsWith("/" + PatchName, StringComparison.OrdinalIgnoreCase))
             {
                 await WriteStatusAsync(stream, 404, "Not Found", timeout.Token);
@@ -176,6 +191,30 @@ public class PatchHttpServer
         {
             _log.LogWarning("[PATCH] {Remote} transfer failed: {Error}", remote, ex.Message);
         }
+    }
+
+    /// <summary>The /stats JSON. OPTIONS answers a CORS preflight; anything but GET/HEAD/OPTIONS is a 405.</summary>
+    private async Task WriteStatsAsync(NetworkStream stream, string method, CancellationToken ct)
+    {
+        const string cors = "Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, HEAD, OPTIONS\r\n";
+        if (method == "OPTIONS")
+        {
+            await stream.WriteAsync(Encoding.ASCII.GetBytes($"HTTP/1.1 204 No Content\r\n{cors}Content-Length: 0\r\nConnection: close\r\n\r\n"), ct);
+            return;
+        }
+        if (method != "GET" && method != "HEAD")
+        {
+            await WriteStatusAsync(stream, 405, "Method Not Allowed", ct);
+            return;
+        }
+        var body = JsonSerializer.SerializeToUtf8Bytes(_mls.PublicStats(), StatsJson);
+        var header = "HTTP/1.1 200 OK\r\n" + cors +
+                     "Content-Type: application/json; charset=utf-8\r\n" +
+                     "Cache-Control: no-store\r\n" +
+                     $"Content-Length: {body.Length}\r\n" +
+                     "Connection: close\r\n\r\n";
+        await stream.WriteAsync(Encoding.ASCII.GetBytes(header), ct);
+        if (method == "GET") await stream.WriteAsync(body, ct);
     }
 
     /// <summary>Read the request line + headers (up to the blank line); null if the peer closed first.</summary>
