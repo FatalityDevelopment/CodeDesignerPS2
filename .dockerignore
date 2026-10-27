@@ -1,9 +1,0 @@
-# Docker build context is the repo root (docker compose / az acr build use CodeDesigner.Ps2.Multiplayer/Dockerfile).
-# Allowlist: only the multiplayer server and DnaSDK go into the context, not pcsx2, vscode, etc.
-*
-!CodeDesigner.Ps2.Multiplayer/
-!DnaSDK/
-**/bin/
-**/obj/
-**/NuGet/
-**/*.log

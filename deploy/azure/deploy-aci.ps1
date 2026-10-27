@@ -23,12 +23,12 @@ param(
     [string] $Location      = 'eastus',
     [string] $ImageTag      = $(git rev-parse --short HEAD),
     [ValidateSet('Debug', 'Information', 'Warning')] [string] $LogLevel = 'Debug',
-    [string] $ExternalDnasServer = ''                # IP/hostname of another DNAS server; empty = built-in DnaSDK
+    [string] $ExternalDnasServer = ''                # IP/hostname of another DNAS server; empty = built-in DNAS
 )
 
 $ErrorActionPreference = 'Stop'
 $repoRoot   = Resolve-Path (Join-Path $PSScriptRoot '../..')
-$dockerfile = 'CodeDesigner.Ps2.Multiplayer/Dockerfile'   # built from the repo root: the server references DnaSDK/
+$projectDir = Join-Path $repoRoot 'CodeDesigner.Ps2.Multiplayer'
 
 function Invoke-Az {
     az @args
@@ -46,7 +46,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "==> Building socom2-server:$ImageTag in ACR (cloud build)"
-Invoke-Az acr build --registry $AcrName --image "socom2-server:$ImageTag" --image socom2-server:latest --file $dockerfile $repoRoot
+Invoke-Az acr build --registry $AcrName --image "socom2-server:$ImageTag" --image socom2-server:latest $projectDir
 
 Write-Host "==> Deploying container group"
 $out = Invoke-Az deployment group create --resource-group $ResourceGroup `

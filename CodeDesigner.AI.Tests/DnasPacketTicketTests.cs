@@ -1,5 +1,5 @@
 using System.Buffers.Binary;
-using DNAS;
+using CodeDesigner.Ps2.Multiplayer.Dnas;
 
 namespace CodeDesigner.AI.Tests;
 
