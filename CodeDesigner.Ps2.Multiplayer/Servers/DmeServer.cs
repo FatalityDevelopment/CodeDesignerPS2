@@ -17,7 +17,8 @@ namespace CodeDesigner.Ps2.Multiplayer.Servers;
 ///   2. The client connects here with the normal SCERT handshake. Its encrypted CLIENT_CONNECT_TCP carries
 ///      the DME world id (one byte, v108 packing) and the access token.
 ///   3. Server replies CRYPTKEY_GAME, CRYPTKEY_PEER, CONNECT_ACCEPT_TCP (PlayerId = DME slot,
-///      PlayerCount), CONNECT_COMPLETE, then SERVER_APP DMEServerVersion "1.22.0140".
+///      PlayerCount), CONNECT_COMPLETE (ClientCountAtConnect = the same count), then SERVER_APP
+///      DMEServerVersion "1.22.0140".
 ///   4. RT_MSG_CLIENT_APP_* frames are relayed to the other players in the world.
 /// </summary>
 public class DmeServer : BaseMediusTcpServer
@@ -64,7 +65,9 @@ public class DmeServer : BaseMediusTcpServer
         MediusClientState state, TcpClient tcp, CancellationToken ct)
     {
         var world = state.WorldId is int id ? DmeWorld.GetById(id) : null;
-        var slot  = world?.FindByAccessKey(state.AccessKey);
+        string? ip = tcp.Client.RemoteEndPoint is System.Net.IPEndPoint ep ? ep.Address.MapToIPv4().ToString() : null;
+        var slot  = world == null ? null : BindConnection(world, state, ip,
+            (type, payload) => SendPacketAsync(tcp, new ScertPacket { MessageType = type, Payload = payload }, state, ct));
         if (world == null || slot == null)
         {
             _log.LogWarning("[DME] Connect for world {World} with unknown access key '{Key}' ({Worlds})",
@@ -72,21 +75,50 @@ public class DmeServer : BaseMediusTcpServer
             return Task.FromResult<(ushort, ushort)?>(null);
         }
 
+        var ids = ConnectIds(slot);
+        _log.LogInformation("[DME] Account {Acct} bound to {World} as player {Id} ({Count} connected)",
+            slot.AccountId, world, slot.DmeId, ids.PlayerCount);
+        return Task.FromResult<(ushort, ushort)?>(ids);
+    }
+
+    /// <summary>
+    /// Bind a DME connection to the slot MLS JoinGame reserved for its access key. Returns null for an unknown key.
+    /// The slot index (<see cref="DmeClientState.DmeId"/>) was fixed at reserve time, so the host keeps its slot.
+    /// </summary>
+    internal static DmeClientState? BindConnection(DmeWorld world, MediusClientState state, string? ip,
+        Func<RT_MSG_TYPE, byte[], Task> sender)
+    {
+        var slot = world.FindByAccessKey(state.AccessKey);
+        if (slot == null) return null;
+
         slot.IsConnected   = true;
         slot.MediusVersion = state.MediusVersion;
         slot.ScertId       = state.ScertId;
         if (state.ClientCryptKey.Length > 0) slot.PublicKey = state.ClientCryptKey;
-        if (tcp.Client.RemoteEndPoint is System.Net.IPEndPoint ep) slot.IpAddress = ep.Address.MapToIPv4().ToString();
-        slot.Sender        = (type, payload) =>
-            SendPacketAsync(tcp, new ScertPacket { MessageType = type, Payload = payload }, state, ct);
+        if (ip != null) slot.IpAddress = ip;
+        slot.Sender        = sender;
 
         state.DmeWorldId         = world.WorldId;
         state.DmeClientIndex     = slot.DmeId;
         state.IsDmeAuthenticated = true;
+        return slot;
+    }
 
-        _log.LogInformation("[DME] Account {Acct} bound to {World} as player {Id}",
-            slot.AccountId, world, slot.DmeId);
-        return Task.FromResult<(ushort, ushort)?>(((ushort)slot.DmeId, (ushort)world.ConnectedCount));
+    /// <summary>
+    /// CONNECT_ACCEPT_TCP (PlayerId, PlayerCount) for a bound slot; PlayerCount also goes out as CONNECT_COMPLETE's
+    /// ClientCountAtConnect. The SOCOM II DME client takes its own index from CONNECT_ACCEPT offset 3 (ctx+0x58,
+    /// handler near 0x0063E434) and the count from CONNECT_COMPLETE (ctx+0x5A, 0x0063E7D4), then hands both to its
+    /// connect callback. A count of 1 tells a joiner it is alone, so it sets itself up as session master and takes
+    /// the host's lobby slot. The count includes the joiner itself (its slot is already connected).
+    /// </summary>
+    internal static (ushort PlayerId, ushort PlayerCount) ConnectIds(DmeClientState slot)
+        => ((ushort)slot.DmeId, (ushort)Math.Max(1, slot.World.ConnectedCount));
+
+    /// <summary>Mark a bound slot joined (it now takes part in relaying) and tell the other players about it.</summary>
+    internal static void CompleteJoin(DmeClientState slot)
+    {
+        slot.HasJoined = true;
+        slot.World.NotifyPlayerJoined(slot);
     }
 
     protected override async Task OnOldProtoConnectCompleteAsync(MediusClientState state, TcpClient tcp, CancellationToken ct)
@@ -99,8 +131,7 @@ public class DmeServer : BaseMediusTcpServer
         Encoding.ASCII.GetBytes(RetailDmeServerVersion).CopyTo(msg, 2);
         await SendPacketAsync(tcp, ScertPacket.CreateServerApp(msg), state, ct);
 
-        slot.HasJoined = true;
-        slot.World.NotifyPlayerJoined(slot);
+        CompleteJoin(slot);
     }
 
     // ── Disconnect cleanup ────────────────────────────────────────────────────
