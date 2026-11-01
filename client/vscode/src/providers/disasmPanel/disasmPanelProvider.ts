@@ -941,7 +941,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         }
 
         // 2. Walk up from the extension install directory (handles the case where
-        //    the developer opens vscode/codedesigner directly and the repo root is
+        //    the developer opens client/vscode directly and the repo root is
         //    a few levels above).
         if (!settingsFound && this.extensionPath) {
             let dir = this.extensionPath;
@@ -3962,7 +3962,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             roots.add(folder.uri.fsPath);
         }
         // Walk up from the extension directory — the extension lives at
-        // <repo>/vscode/codedesigner/, so ancestor directories may contain
+        // <repo>/client/vscode/, so ancestor directories may contain
         // the target file (e.g. <repo>/docs/README.md).
         if (this.extensionPath) {
             let dir = this.extensionPath;

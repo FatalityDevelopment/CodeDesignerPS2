@@ -74,7 +74,7 @@ if (-not $SkipBuild) {
 if (-not $SkipExtension) {
     Write-Step 'Building the VS Code extension'
     if (-not (Test-Node20)) { throw 'Node.js 20+ was not found. Run Install-Prerequisites.ps1 -Mode Developer first.' }
-    $extDir = Join-Path $RepoDir 'vscode\codedesigner'
+    $extDir = Join-Path $RepoDir 'client\vscode'
     $vsix = Join-Path $RepoDir 'publish\codedesigner.vsix'
     New-Item -ItemType Directory -Path (Split-Path $vsix) -Force | Out-Null
 

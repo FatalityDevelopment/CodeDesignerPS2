@@ -227,7 +227,7 @@ export class WelcomeProvider {
 
     /**
      * Resolve the repository root that contains the `docs/` folder. The
-     * extension lives at <repo>/vscode/codedesigner/, so walk up from the
+     * extension lives at <repo>/client/vscode/, so walk up from the
      * extension directory looking for `docs/`.
      */
     private _resolveDocsRoot(): string | null {

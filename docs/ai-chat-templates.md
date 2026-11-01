@@ -231,7 +231,7 @@ CDS or other source the user is meant to run or insert. Includes the action row
 ```
 
 Hook lines (`@hook`, `@joker_safe`, `@break`, `@return`) and registers (`$s0`, `$t0`)
-get syntax-highlighted by the CDS grammar already in `vscode/codedesigner/syntaxes`.
+get syntax-highlighted by the CDS grammar already in `client/vscode/syntaxes`.
 
 A `code` block is normally followed by a `tool-call` of `cds.compile` so the user
 sees the byte count and instruction count without leaving the message.

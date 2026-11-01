@@ -28,8 +28,8 @@ Every project in `CodeDesigner.sln`, plus the VS Code extension and the PCSX2 fo
 | [CodeDesigner.Ps2.WebApi](#codedesignerps2webapi) | exe | REST API (experimental) |
 | [CodeDesigner.Ps2.Installer](#codedesignerps2installer) | exe (WPF) | Windows installer |
 | [CodeDesigner.Ps2.TestProject](#tests) | tests | Main test suite |
-| [vscode/codedesigner](#vscodecodedesigner) | VS Code extension | The user interface |
-| [website](#website) | Angular app | Project website |
+| [client/vscode](#clientvscode) | VS Code extension | The user interface |
+| [client/website](#clientwebsite) | Angular app | Project website |
 | [pcsx2](#pcsx2-fork) | submodule | CodeDesigner's PCSX2 fork |
 
 ---
@@ -165,13 +165,13 @@ dotnet test CodeDesigner.Ps2.TestProject/
 dotnet test CodeDesigner.AI.Tests/
 ```
 
-## vscode/codedesigner
+## client/vscode
 
 The VS Code extension: a TypeScript host with one provider per page and Angular standalone components for every webview, bundled with webpack. See [VS Code Extension](vscode-extension.md).
 
-## website
+## client/website
 
-An Angular project website (`website/`, `npm start`).
+An Angular project website (`client/website/`, `npm start`).
 
 ## pcsx2 (fork)
 

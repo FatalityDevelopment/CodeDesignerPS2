@@ -84,7 +84,7 @@ New-Zip -Source $archiveDb -Zip (Join-Path $OutputDir 'CheatCodeArchive.zip') -I
 
 if (-not $SkipExtension) {
     Write-Host '== Packaging the VS Code extension'
-    Push-Location (Join-Path $RepoRoot 'vscode\codedesigner')
+    Push-Location (Join-Path $RepoRoot 'client\vscode')
     try {
         Invoke-Checked npm @('ci', '--no-audit', '--no-fund')
         Invoke-Checked npx @('--yes', '@vscode/vsce', 'package', '--skip-license', '--out', (Join-Path $OutputDir 'codedesigner.vsix'))

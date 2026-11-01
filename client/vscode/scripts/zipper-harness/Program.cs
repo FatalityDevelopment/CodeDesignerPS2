@@ -1,7 +1,7 @@
 // Offline harness for the Zipper webviews (workbench, model editor). Serves the built webview bundle from
 // dist/webview and answers the webview's bridge requests by calling the bridge's own Zipper handlers through
 // reflection, so the page sees byte-identical payloads to the VS Code extension without VS Code or the bridge
-// process. Usage (from vscode/codedesigner, after `npx webpack --mode development`):
+// process. Usage (from client/vscode, after `npx webpack --mode development`):
 //
 //   dotnet run --project scripts/zipper-harness -- [port] [distDir]
 //

@@ -4,7 +4,7 @@
 
 **NEVER commit files under `obj/`, `bin/`, or `Debug/` directories.** These are build outputs.
 Before EVERY commit, run: `git diff --cached --name-only | grep -iE '[\\/](obj|bin)[\\/]'` — if it outputs anything, run `git reset HEAD` on those files.
-The `website/obj/` path contains literal backslashes that break Windows. A CI check will reject any PR containing these files.
+The `client/website/obj/` path contains literal backslashes that break Windows. A CI check will reject any PR containing these files.
 **Do NOT use `git add .` or `git add -A`** — always add specific files or directories excluding build outputs.
 
 ## Project Overview
@@ -30,7 +30,7 @@ CodeDesigner/
 ├── CodeDesigner.AI/ .AI.Abstractions/ .AI.Tests/   # The MCP server (CodeDesigner.AI.exe) and its tests
 ├── CodeDesigner.Ps2.DiscordBot/ .DiscordPresence/ .WebApi/ .Installer/
 ├── CodeDesigner.Ps2.TestProject/     # Main MSTest suite (~1,400 tests)
-├── vscode/codedesigner/              # VS Code extension (TypeScript host + Angular webviews)
+├── client/vscode/              # VS Code extension (TypeScript host + Angular webviews)
 ├── pcsx2/                            # CodeDesigner's PCSX2 fork (submodule)
 ├── CheatCodeArchive/                 # Cheat archive (submodule)
 ├── Mods/                             # Game mods, research notes and scripts (SOCOM2, SOCOMCA)
@@ -53,7 +53,7 @@ CodeDesigner.Ps2.Bridge.exe            # control server on :8765
 CodeDesigner.Ps2.Bridge.exe --pcsx2    # attach to a running PCSX2 over PINE
 
 # VS Code extension
-cd vscode/codedesigner && npm ci && npm run compile   # then F5 in VS Code
+cd client/vscode && npm ci && npm run compile   # then F5 in VS Code
 ```
 
 ## Key Conventions

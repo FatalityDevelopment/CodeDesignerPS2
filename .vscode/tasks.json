@@ -15,7 +15,7 @@
       "label": "build-extension",
       "type": "npm",
       "script": "build",
-      "path": "vscode/",
+      "path": "client/vscode/",
       "problemMatcher": "$ts-webpack-watch",
       "isBackground": false,
       "presentation": {
