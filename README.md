@@ -263,6 +263,7 @@ Profiles pick which tools a client sees (`lite`, `core`, `re`, `patching`, `pack
 | `CodeDesigner.Ps2.Multiplayer` | SOCOM II online servers |
 | `CodeDesigner.AI`, `.AI.Abstractions` | The MCP server and its tool framework |
 | `client/vscode` | The VS Code extension (Angular webviews) |
+| `client/cd-app` | The standalone app, in progress (React) |
 | `pcsx2/` | CodeDesigner's PCSX2 fork (submodule) |
 | `CheatCodeArchive/` | The cheat database (submodule) |
 | `docs/` | [Documentation index](docs/README.md) |

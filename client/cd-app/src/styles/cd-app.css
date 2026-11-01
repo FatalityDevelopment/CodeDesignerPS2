@@ -1,0 +1,35 @@
+/* What cd-app adds to the Map Builder chrome: the column under the activity bar, the context menu, toasts and the
+   status chip. */
+.cd-main { flex: 1; min-width: 0; height: 100%; display: flex; flex-direction: column; }
+.cd-main .mb-pages { flex: 1; min-height: 0; height: auto; }
+.cd-output { flex: 0 0 auto; font-size: 12px; }
+.cd-output.collapsed .me-bottom-tabs { border-bottom: none; }
+
+.cd-tree-chevron { flex: 0 0 12px !important; display: inline-flex; color: var(--vscode-descriptionForeground, #9d9d9d); }
+
+.cd-ctx {
+  position: fixed; z-index: 60; min-width: 190px; padding: 4px;
+  background: var(--vscode-menu-background, #252526); border: 1px solid var(--vscode-menu-border, #454545);
+  border-radius: 5px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45); font-size: 12px;
+}
+.cd-ctx-item { display: block; width: 100%; padding: 4px 8px; background: none; border: none; border-radius: 3px; color: var(--vscode-menu-foreground, #cccccc); font: inherit; text-align: left; cursor: pointer; }
+.cd-ctx-item:hover:not(:disabled) { background: var(--vscode-menu-selectionBackground, #04395e); color: var(--vscode-menu-selectionForeground, #ffffff); }
+.cd-ctx-item:disabled { opacity: 0.45; cursor: default; }
+.cd-ctx-item.danger:hover:not(:disabled) { background: var(--vscode-inputValidation-errorBackground, #5a1d1d); }
+.cd-ctx-sep { height: 1px; margin: 4px 0; background: var(--vscode-menu-separatorBackground, #454545); }
+
+.cd-toasts { position: fixed; right: 12px; bottom: 34px; z-index: 70; display: flex; flex-direction: column; gap: 6px; width: min(380px, calc(100vw - 24px)); }
+.cd-toast {
+  display: flex; align-items: flex-start; gap: 8px; padding: 8px 8px 8px 12px; font-size: 12px; line-height: 1.4;
+  background: var(--vscode-notifications-background, #252526); color: var(--vscode-notifications-foreground, #cccccc);
+  border: 1px solid var(--vscode-menu-border, #454545); border-left: 3px solid var(--vscode-editorInfo-foreground, #3794ff);
+  border-radius: 4px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+.cd-toast.warning { border-left-color: var(--vscode-editorWarning-foreground, #cca700); }
+.cd-toast.error { border-left-color: var(--vscode-errorForeground, #f48771); }
+.cd-toast-text { flex: 1; min-width: 0; word-break: break-word; }
+
+.cd-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--vscode-descriptionForeground, #9d9d9d); white-space: nowrap; }
+.cd-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--vscode-descriptionForeground, #9d9d9d); }
+.cd-dot.online { background: var(--vscode-testing-iconPassed, #73c991); }
+.cd-dot.offline { background: var(--vscode-errorForeground, #f48771); }

@@ -68,6 +68,7 @@ namespace CodeDesigner.Ps2.Bridge
         /// JSON-RPC channel.
         /// </summary>
         private readonly GSStreamForwarder _gsStreamForwarder;
+        private WebGateway? _webGateway;
 
         /// <summary>
         /// Port the GS frame fan-out listens on for binary subscribers (the
@@ -360,6 +361,7 @@ namespace CodeDesigner.Ps2.Bridge
                 new Services.EmulatorControlService(ctx),
                 new Services.DataFormatService(ctx),
                 new Services.GsStreamService(ctx, _gsStreamForwarder),
+                new Services.FileSystemService(),
             });
 
             // Seed the legacy _labels / _structs dicts from the Built-in label set up
@@ -574,6 +576,10 @@ namespace CodeDesigner.Ps2.Bridge
             // start unconditionally — it just listens; nothing flows until a
             // PineClient is attached and a subscriber connects.
             _gsStreamForwarder.Start();
+
+            // cd-app's way in. It connects back to this listener, so it starts after it.
+            _webGateway = new WebGateway(WebGateway.DefaultPort, _port, Path.Combine(AppContext.BaseDirectory, "wwwroot"));
+            _webGateway.Start();
 
             Console.WriteLine($"Socket server started on port {_port}");
             Console.WriteLine("Waiting for VSCode extension to connect...");
@@ -1166,6 +1172,8 @@ namespace CodeDesigner.Ps2.Bridge
             _isRunning = false;
             _cancellationTokenSource?.Cancel();
             _listener?.Stop();
+            _webGateway?.Dispose();
+            _webGateway = null;
             Console.WriteLine("Server stopped.");
         }
     }

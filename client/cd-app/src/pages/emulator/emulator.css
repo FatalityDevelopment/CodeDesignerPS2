@@ -1,0 +1,8 @@
+/* The Emulator page: status cards under the page header, in the shared card style. */
+.emu-page {
+  --me-border: var(--vscode-panel-border, #2f2f2f);
+  --me-muted: var(--vscode-descriptionForeground, #9d9d9d);
+  display: flex; flex-direction: column; height: 100%; font-size: 12px;
+}
+.emu-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; padding: 16px 22px; align-items: start; overflow: auto; }
+.emu-page .me-note { margin: 0; }

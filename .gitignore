@@ -407,6 +407,9 @@ client/website/obj\\Debug/
 /CodeDesigner.Ps2.CdsLanguage/StdLib/snapshots/SCUS-97275/labels/CodeDesigner labels.json
 /CodeDesigner.Ps2.CdsLanguage/StdLib/snapshots/SCUS-97275/labels/SOCOM2_r0004.json
 *.json
+!client/cd-app/package.json
+!client/cd-app/package-lock.json
+!client/cd-app/tsconfig.json
 # Embedded in CodeDesigner.Ps2.Bridge (SOCOM II packet/object catalogs) - the build needs them.
 !Mods/SOCOM2/packets/packets.json
 !Mods/SOCOM2/packets/objects.json

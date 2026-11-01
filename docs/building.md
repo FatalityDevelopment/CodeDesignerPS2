@@ -96,6 +96,24 @@ CodeDesigner.Ps2.Emulator.exe --file game.elf [--load-address 0x00100000]
 
 ---
 
+## Build cd-app
+
+The standalone app lives in `client/cd-app/` (React, TypeScript and Vite). It's early work: so far it has the Emulator and Disassembler pages, and it attaches to a Bridge and emulator you start yourself.
+
+```powershell
+cd client/cd-app
+npm ci
+npm run dev         # dev server on http://localhost:5174
+npm test
+npm run build       # production build into dist/
+```
+
+The Bridge reaches the app over `WebGateway` on `http://localhost:8771`, with one WebSocket on `/api/bridge` that it pipes to the command port. It accepts only the app's own origin, plus the dev server's in Debug builds.
+
+To have the Bridge serve the page, run `npm run build` first, then build the Bridge. It copies `dist/` into `wwwroot`, and the app is then at `http://localhost:8771`.
+
+---
+
 ## Build the VS Code extension
 
 The extension lives in `client/vscode/` (TypeScript host + Angular webviews, bundled with webpack).

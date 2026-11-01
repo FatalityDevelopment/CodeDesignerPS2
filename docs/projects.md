@@ -29,6 +29,7 @@ Every project in `CodeDesigner.sln`, plus the VS Code extension and the PCSX2 fo
 | [CodeDesigner.Ps2.Installer](#codedesignerps2installer) | exe (WPF) | Windows installer |
 | [CodeDesigner.Ps2.TestProject](#tests) | tests | Main test suite |
 | [client/vscode](#clientvscode) | VS Code extension | The user interface |
+| [client/cd-app](#clientcd-app) | React app | Standalone user interface |
 | [client/website](#clientwebsite) | Angular app | Project website |
 | [pcsx2](#pcsx2-fork) | submodule | CodeDesigner's PCSX2 fork |
 
@@ -168,6 +169,10 @@ dotnet test CodeDesigner.AI.Tests/
 ## client/vscode
 
 The VS Code extension: a TypeScript host with one provider per page and Angular standalone components for every webview, bundled with webpack. See [VS Code Extension](vscode-extension.md).
+
+## client/cd-app
+
+The standalone CodeDesigner app, an alternative to the VS Code extension: a React and Vite page with Map Builder's styling. The Bridge serves it and connects it through `WebGateway` on `http://localhost:8771`. See [Build cd-app](building.md#build-cd-app).
 
 ## client/website
 

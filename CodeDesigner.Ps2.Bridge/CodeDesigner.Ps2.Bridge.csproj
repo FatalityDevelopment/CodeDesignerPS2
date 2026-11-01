@@ -18,6 +18,11 @@
     <EmbeddedResource Include="..\Mods\SOCOM2\packets\objects.json" LogicalName="Socom2.objects.json" Link="Resources\Socom2\objects.json" />
   </ItemGroup>
 
+  <!-- The built cd-app page, served by WebGateway. Run `npm run build` in client/cd-app first. -->
+  <ItemGroup>
+    <None Include="..\client\cd-app\dist\**" Link="wwwroot\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <ItemGroup>
     <Compile Remove="Coprocessors\**" />
     <Compile Remove="Instructions\**" />
