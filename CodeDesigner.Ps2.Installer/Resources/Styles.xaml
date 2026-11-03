@@ -1,7 +1,7 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
-    <!-- ── Color palette (vscode/codedesigner webviews: welcome-page.css) ── -->
+    <!-- ── Color palette (client/vscode webviews: welcome-page.css) ── -->
     <Color x:Key="BgPrimary">#FF1e1e1e</Color>
     <Color x:Key="BgSecondary">#FF252526</Color>
     <Color x:Key="BgHeader">#FF2d2d30</Color>

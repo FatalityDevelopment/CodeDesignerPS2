@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Standalone app
+- **`client/cd-app`**, the start of a standalone CodeDesigner that doesn't need VS Code: a React app with Map Builder's look, an Output panel, and first versions of the Emulator and Disassembler pages.
+- The Bridge now serves the app and connects it on `http://localhost:8771`, accepting only the app's own origin. File dialogs use new `FS_PLACES` and `FS_LIST` commands.
+- Web projects moved into `client/`: the extension is now `client/vscode` and the website `client/website`.
+
 ### Installer and releases
 - **`CodeDesignerInstaller.exe`**, a self-contained setup app with the CodeDesigner logo and the extension's theme colours. **Install CodeDesigner** installs the latest (or a pinned) GitHub release. **Developer setup** clones the repository with its submodules, then builds, deploys and installs the extension from source.
 - Missing prerequisites are installed (.NET 8, VS Code, SQL Server LocalDB, VC++ runtime) and ones already present are skipped. Setup scripts are embedded and run without prompts. Cancel stops the whole install, and the run is logged to `%TEMP%\CodeDesignerSetup\install.log`.

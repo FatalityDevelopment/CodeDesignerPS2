@@ -2,7 +2,7 @@
 
 # VS Code Extension
 
-The extension (`vscode/codedesigner`) is CodeDesigner's user interface. It adds a **CodeDesigner** sidebar to VS Code and opens each tool as an editor tab. Everything it does goes through the Bridge (`CodeDesigner.Ps2.Bridge`, TCP `localhost:8765`), which it starts and connects to for you.
+The extension (`client/vscode`) is CodeDesigner's user interface. It adds a **CodeDesigner** sidebar to VS Code and opens each tool as an editor tab. Everything it does goes through the Bridge (`CodeDesigner.Ps2.Bridge`, TCP `localhost:8765`), which it starts and connects to for you.
 
 This page is a tour of what's there. The deeper guides are linked from each section.
 
@@ -11,7 +11,7 @@ This page is a tour of what's there. The deeper guides are linked from each sect
 ## Getting started
 
 1. Build the backend once (`dotnet build CodeDesigner.sln`; see [Building](building.md)). This deploys the Bridge, the built-in emulator and the MCP server to `%LOCALAPPDATA%\CodeDesigner\`.
-2. Open the extension: press **F5** in `vscode/codedesigner` for a development host, or install a packaged `.vsix`.
+2. Open the extension: press **F5** in `client/vscode` for a development host, or install a packaged `.vsix`.
 3. Open the **CodeDesigner** sidebar (activity bar) and the **Emulator** tab.
 4. Under **Connection**, pick PCSX2 (or the built-in emulator), a BIOS and a game, then click **Run**. The extension launches the emulator, starts the Bridge in its *CodeDesigner* terminal and attaches to it.
 
@@ -176,7 +176,7 @@ Pages without a command (Labels, Snapshots, Diff, Porter, Packets, Debug) open f
 ## Source layout
 
 ```
-vscode/codedesigner/
+client/vscode/
 ├── src/extension.ts        activation, command registration, provider wiring
 ├── src/socketClient.ts     every Bridge command (JSON over TCP :8765)
 ├── src/providers/<page>/   one provider per page (extension-host side)

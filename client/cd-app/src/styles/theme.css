@@ -1,0 +1,116 @@
+/* VS Code "Dark Modern" theme tokens. Pages read these through var(--vscode-*) with the same fallbacks the VS Code
+   webviews use, so a screen looks the same in both. Every variable the webviews reference is defined here; where
+   Map Builder left one to its fallback, the value below is that fallback, so the two apps match. */
+:root {
+  --vscode-font-family: 'Segoe UI', system-ui, sans-serif;
+  --vscode-font-size: 13px;
+  --vscode-editor-font-family: Consolas, 'Courier New', monospace;
+  --vscode-editor-font-size: 12px;
+
+  --vscode-foreground: #cccccc;
+  --vscode-descriptionForeground: #9d9d9d;
+  --vscode-disabledForeground: #6b6b6b;
+  --vscode-errorForeground: #f48771;
+  --vscode-focusBorder: #0078d4;
+  --vscode-widget-border: #2a2a2a;
+  --vscode-sash-hoverBorder: #007acc;
+  --vscode-progressBar-background: #0e70c0;
+  --vscode-scrollbarSlider-background: rgba(121, 121, 121, 0.4);
+
+  --vscode-activityBar-background: #181818;
+  --vscode-activityBar-foreground: #d7d7d7;
+  --vscode-activityBar-inactiveForeground: #868686;
+  --vscode-activityBar-activeBorder: #0078d4;
+
+  --vscode-editor-background: #1f1f1f;
+  --vscode-editor-foreground: #d4d4d4;
+  --vscode-editor-selectionBackground: #264f78;
+  --vscode-editor-selectionForeground: #ffffff;
+  --vscode-editorGroup-border: #2d2d30;
+  --vscode-editorGroupHeader-tabsBackground: #202020;
+  --vscode-editorHoverWidget-background: #252526;
+  --vscode-editorHoverWidget-border: #454545;
+  --vscode-editorHoverWidget-foreground: #d4d4d4;
+  --vscode-editorInfo-foreground: #3794ff;
+  --vscode-editorRuler-foreground: #3c3c3c;
+  --vscode-editorWarning-foreground: #cca700;
+  --vscode-editorWidget-background: #252526;
+
+  --vscode-panel-background: #1e1e1e;
+  --vscode-panel-border: #2b2b2b;
+  --vscode-sideBar-background: #181818;
+  --vscode-sideBar-border: #2d2d30;
+  --vscode-sideBar-foreground: #cccccc;
+  --vscode-sideBarTitle-foreground: #bbbbbb;
+  --vscode-titleBar-activeBackground: #181818;
+  --vscode-toolbar-hoverBackground: #2a2d2e;
+  --vscode-tree-tableColumnsBorder: #2d2d30;
+
+  --vscode-badge-background: rgba(255, 255, 255, 0.1);
+  --vscode-badge-foreground: #cccccc;
+  --vscode-button-background: #0e639c;
+  --vscode-button-border: transparent;
+  --vscode-button-foreground: #ffffff;
+  --vscode-button-hoverBackground: #1177bb;
+  --vscode-button-secondaryBackground: #252526;
+  --vscode-button-secondaryForeground: #cccccc;
+  --vscode-button-secondaryHoverBackground: #2f2f30;
+
+  --vscode-dropdown-background: #3c3c3c;
+  --vscode-dropdown-border: #3c3c3c;
+  --vscode-dropdown-foreground: #cccccc;
+  --vscode-input-background: #313131;
+  --vscode-input-border: #3c3c3c;
+  --vscode-input-foreground: #cccccc;
+  --vscode-input-placeholderForeground: #888888;
+  --vscode-inputValidation-errorBackground: #5a1d1d;
+  --vscode-inputValidation-errorBorder: #be1100;
+
+  --vscode-list-activeSelectionBackground: #04395e;
+  --vscode-list-activeSelectionForeground: #ffffff;
+  --vscode-list-hoverBackground: #2a2d2e;
+  --vscode-list-inactiveSelectionBackground: rgba(255, 255, 255, 0.03);
+
+  --vscode-menu-background: #252526;
+  --vscode-menu-border: #454545;
+  --vscode-menu-foreground: #cccccc;
+  --vscode-menu-selectionBackground: #04395e;
+  --vscode-menu-selectionForeground: #ffffff;
+  --vscode-menu-separatorBackground: #454545;
+
+  --vscode-notifications-background: #252526;
+  --vscode-notifications-foreground: #cccccc;
+
+  --vscode-statusBar-background: #181818;
+  --vscode-statusBar-foreground: #cccccc;
+  --vscode-statusBarItem-errorBackground: #c72e0f;
+
+  --vscode-textBlockQuote-background: rgba(255, 255, 255, 0.05);
+  --vscode-textCodeBlock-background: #1a1a1a;
+  --vscode-textLink-activeForeground: #4daafc;
+  --vscode-textLink-foreground: #3794ff;
+
+  --vscode-charts-blue: #75beff;
+  --vscode-charts-green: #89d185;
+  --vscode-charts-orange: #d18616;
+  --vscode-charts-purple: #b180d7;
+  --vscode-charts-yellow: #cca700;
+  --vscode-debugTokenExpression-name: #9cdcfe;
+  --vscode-diffEditor-insertedLineBackground: rgba(0, 100, 0, 0.15);
+  --vscode-diffEditor-insertedTextBackground: rgba(46, 160, 67, 0.4);
+  --vscode-diffEditor-removedLineBackground: rgba(248, 81, 73, 0.1);
+  --vscode-diffEditor-removedTextBackground: rgba(248, 81, 73, 0.4);
+  --vscode-gitDecoration-modifiedResourceForeground: #e2c08d;
+  --vscode-symbolIcon-fieldForeground: #9cdcfe;
+  --vscode-symbolIcon-stringForeground: #89d185;
+  --vscode-terminal-ansiGreen: #4ec9b0;
+  --vscode-testing-iconPassed: #73c991;
+}
+
+html, body { height: 100%; margin: 0; overflow: hidden; }
+body {
+  background: var(--vscode-editor-background);
+  color: var(--vscode-editor-foreground);
+  font-family: var(--vscode-font-family);
+  font-size: 13px;
+}

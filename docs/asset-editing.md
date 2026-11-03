@@ -14,9 +14,9 @@ Format details (chunks, chains, GEO, CLUTTER.ZAR, palettes, alpha) are in [zippe
 | Package index, GEO scene, clutter, edits, save | `CodeDesigner.Ps2.FileFormats/Zipper/Package/` (`ZipperPackage`, `PackageEdits`, `PackageSave`, `ModelMesh`, `MeshTopology`), `Zipper/Geo/` (`GeoScene`, `SceneInstances`, `ClutterFile`, `VisualPlacement`), `Zipper/Model/ModelLayout.cs`, `Zipper/ZED/ZedTree.cs` |
 | Sessions + commands | `CodeDesigner.Ps2.Bridge/Services/ZipperAssetService.cs` |
 | MCP tools | `CodeDesigner.AI/Tools/Assets/AssetTools.cs` |
-| Model Editor | `vscode/codedesigner/src/webview/model-editor/` (`editor-viewport.ts` 3D view and tools, `uv-editor.ts`, `mesh-data.ts`), `src/providers/modelEditor/` (command `codedesigner.openModelEditor`; the workbench's **Open in Model Editor** on a `*_MDL.ZED` record) |
-| Map Editor | `vscode/codedesigner/src/webview/map-editor/` (`map-viewport.ts` instanced map view, points, gizmo, place), the same provider with `MAP_EDITOR_PAGE` (command `codedesigner.openMapEditor`, also on `.zdb` in the explorer) |
-| Shared 3D core | `vscode/codedesigner/src/webview/zipper-core/viewport-core.ts` (renderer, cameras, orbit / WASD fly, gizmo, materials, grid) |
+| Model Editor | `client/vscode/src/webview/model-editor/` (`editor-viewport.ts` 3D view and tools, `uv-editor.ts`, `mesh-data.ts`), `src/providers/modelEditor/` (command `codedesigner.openModelEditor`; the workbench's **Open in Model Editor** on a `*_MDL.ZED` record) |
+| Map Editor | `client/vscode/src/webview/map-editor/` (`map-viewport.ts` instanced map view, points, gizmo, place), the same provider with `MAP_EDITOR_PAGE` (command `codedesigner.openMapEditor`, also on `.zdb` in the explorer) |
+| Shared 3D core | `client/vscode/src/webview/zipper-core/viewport-core.ts` (renderer, cameras, orbit / WASD fly, gizmo, materials, grid) |
 | Tests | `CodeDesigner.AI.Tests/ZipperPackageTests.cs` (retail packages from `G:\RUN` or `ZIPPER_RUN_DIR`) |
 
 ## Commands and tools
@@ -330,14 +330,14 @@ geometry) chunks and writes it back.
 
 ## Offline harness
 
-`vscode/codedesigner/scripts/zipper-harness` runs the webviews in a browser without VS Code or the bridge process.
+`client/vscode/scripts/zipper-harness` runs the webviews in a browser without VS Code or the bridge process.
 It serves `dist/webview` and answers webview requests with the bridge's own handlers (`/api` for the workbench's
 `ZIPPER_*` reads, `POST /bridge` for any registered Zipper command, `ASSET_*` included). Build the bridge (Debug),
 then:
 
 ```
-dotnet build vscode/codedesigner/scripts/zipper-harness
-dotnet vscode/codedesigner/scripts/zipper-harness/bin/Debug/net8.0/harness.dll 18765
+dotnet build client/vscode/scripts/zipper-harness
+dotnet client/vscode/scripts/zipper-harness/bin/Debug/net8.0/harness.dll 18765
 ```
 
 The pages to open:

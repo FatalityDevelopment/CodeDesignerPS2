@@ -180,7 +180,7 @@ See the [SocomMapBuilder repository](https://github.com/FatalityDevelopment/Soco
 
 ### Fatality Development Website
 
-The Fatality Development website lives in [`website/`](website/), an Angular app. Each project has its own page, and CodeDesigner's links straight to the installer download. **Projects** lists the organization's public repositories. **Cheats** is a searchable index of the CheatCodeArchive with a page per game. **Servers** shows live SOCOM II player counts from the multiplayer server's public `/stats` endpoint.
+The Fatality Development website lives in [`client/website/`](client/website/), an Angular app. Each project has its own page, and CodeDesigner's links straight to the installer download. **Projects** lists the organization's public repositories. **Cheats** is a searchable index of the CheatCodeArchive with a page per game. **Servers** shows live SOCOM II player counts from the multiplayer server's public `/stats` endpoint.
 
 <img src="docs/images/website-home.png" alt="Fatality Development website home page with featured projects" width="850">
 <img src="docs/images/website-codedesigner.png" alt="CodeDesigner project page on the Fatality Development website, with the installer download" width="850">
@@ -221,7 +221,7 @@ dotnet build CodeDesigner.sln          # builds and deploys to %LOCALAPPDATA%\Co
 dotnet test CodeDesigner.Ps2.TestProject/
 ```
 
-To work on the extension, open `vscode/codedesigner` in VS Code, run `npm ci`, and press **F5**. The [building guide](docs/building.md) covers the details, including building the PCSX2 fork.
+To work on the extension, open `client/vscode` in VS Code, run `npm ci`, and press **F5**. The [building guide](docs/building.md) covers the details, including building the PCSX2 fork.
 
 > Building deploys the Bridge, the emulator and the MCP server into `%LOCALAPPDATA%\CodeDesigner\`. If the Bridge is running, stop it first so the copy does not hit locked files.
 
@@ -262,7 +262,8 @@ Profiles pick which tools a client sees (`lite`, `core`, `re`, `patching`, `pack
 | `CodeDesigner.Ps2.FileFormats` | SOCOM, SOCOM CA and GTA SA asset formats |
 | `CodeDesigner.Ps2.Multiplayer` | SOCOM II online servers |
 | `CodeDesigner.AI`, `.AI.Abstractions` | The MCP server and its tool framework |
-| `vscode/codedesigner` | The VS Code extension (Angular webviews) |
+| `client/vscode` | The VS Code extension (Angular webviews) |
+| `client/cd-app` | The standalone app, in progress (React) |
 | `pcsx2/` | CodeDesigner's PCSX2 fork (submodule) |
 | `CheatCodeArchive/` | The cheat database (submodule) |
 | `docs/` | [Documentation index](docs/README.md) |

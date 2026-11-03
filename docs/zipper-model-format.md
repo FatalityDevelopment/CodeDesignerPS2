@@ -4,7 +4,7 @@ How the Zipper Workbench map editor decodes `*_MDL.ZED`, `*_TXR.ZED`, `*_PAL.ZED
 why. Every layout here was confirmed by the SOCOM II pack builders in `Mods/SOCOMCA` (`s2static.py`, `ca2s2.py`,
 `ca2s2static.py`): packs written this way load and render in the game.
 
-Decoders: `vscode/codedesigner/src/webview/zipper-workbench/zed-model-parser.ts`, `zed-texture-parser.ts`,
+Decoders: `client/vscode/src/webview/zipper-workbench/zed-model-parser.ts`, `zed-texture-parser.ts`,
 `zed-geo-parser.ts`; renderer: `zed-model-renderer.ts`. The C# ports used by the bridge and MCP tools are
 `CodeDesigner.Ps2.FileFormats/Zipper/Model/ZedModelFile.cs` (`ParseVisualChains`, `Parse(bytes, chainOffsets)`,
 `CollectChainOffsets`, `PositionUnitForFlags`) and `Zipper/Texture/ZedTextureFile.cs` (`ParseGsRegisters`,

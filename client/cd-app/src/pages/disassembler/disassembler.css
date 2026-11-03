@@ -1,0 +1,31 @@
+/* The Disassembler listing and its side panel. Everything else on the page is shared chrome. */
+.dis-address { width: 92px; font-family: var(--vscode-editor-font-family, Consolas, monospace); }
+.dis-body { display: grid; grid-template-columns: minmax(0, 1fr) 330px; min-height: 0; }
+
+.dis-list { overflow: hidden; min-height: 0; font-family: var(--vscode-editor-font-family, Consolas, monospace); font-size: 12px; user-select: text; }
+.dis-row { display: grid; grid-template-columns: 22px 80px 80px minmax(180px, 1fr) minmax(0, 1fr); align-items: center; height: 18px; padding: 0 8px; white-space: nowrap; cursor: default; }
+.dis-row > span { overflow: hidden; text-overflow: ellipsis; }
+.dis-row:hover { background: var(--vscode-list-hoverBackground, #2a2d2e); }
+.dis-row.sel { background: var(--vscode-list-activeSelectionBackground, #04395e); }
+.dis-row.pc { background: rgba(255, 204, 0, 0.14); box-shadow: inset 2px 0 0 var(--vscode-charts-yellow, #cca700); }
+.dis-head { position: sticky; top: 0; font-family: var(--vscode-font-family, 'Segoe UI', sans-serif); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--vscode-descriptionForeground, #9d9d9d); background: var(--vscode-editor-background, #1f1f1f); border-bottom: 1px solid var(--vscode-panel-border, #2b2b2b); }
+.dis-head:hover { background: var(--vscode-editor-background, #1f1f1f); }
+.dis-addr { color: var(--vscode-debugTokenExpression-name, #9cdcfe); }
+.dis-hex { color: var(--vscode-descriptionForeground, #9d9d9d); }
+.dis-comment { color: var(--vscode-charts-green, #89d185); }
+.dis-label { padding: 2px 8px 0 30px; color: var(--vscode-charts-yellow, #cca700); font-size: 12px; }
+.dis-bp { width: 11px; height: 11px; padding: 0; border: 1px solid transparent; border-radius: 50%; background: none; cursor: pointer; }
+.dis-row:hover .dis-bp { border-color: var(--vscode-descriptionForeground, #9d9d9d); }
+.dis-bp.on, .dis-row:hover .dis-bp.on { background: #e51400; border-color: #e51400; }
+
+.dis-side { display: flex; flex-direction: column; min-height: 0; background: var(--vscode-sideBar-background, #181818); border-left: 1px solid var(--vscode-panel-border, #2b2b2b); }
+.dis-side-body { flex: 1; min-height: 0; overflow: auto; padding: 8px 6px; }
+.dis-filter { box-sizing: border-box; width: calc(100% - 8px); margin: 0 4px 6px; }
+.dis-regs { display: grid; grid-template-columns: 1fr; gap: 1px; }
+.dis-reg { display: grid; grid-template-columns: 44px 1fr; align-items: center; padding: 0 6px; font-size: 12px; color: var(--vscode-descriptionForeground, #9d9d9d); }
+.dis-reg .lm-row-btn { justify-self: start; padding: 1px 4px; font-size: 12px; }
+.dis-reg .lm-mono { color: var(--vscode-debugTokenExpression-name, #9cdcfe); font-family: var(--vscode-editor-font-family, Consolas, monospace); }
+.dis-side-row { display: flex; align-items: center; gap: 4px; padding: 0 2px; border-radius: 3px; }
+.dis-side-row:hover { background: var(--vscode-list-hoverBackground, #2a2d2e); }
+.dis-side-row .lm-goto-btn { font-family: var(--vscode-editor-font-family, Consolas, monospace); }
+.dis-side-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }

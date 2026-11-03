@@ -9,7 +9,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.Ps2.TestProjec
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.Ps2.Common", "CodeDesigner.Ps2.Common\CodeDesigner.Ps2.Common.csproj", "{9E3FB743-92F2-429A-B18B-D7D09F0D2F2C}"
 EndProject
-Project("{54A90642-561A-4BB1-A94E-469ADEE60C69}") = "codedesigner", "vscode\codedesigner\codedesigner.esproj", "{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}"
+Project("{54A90642-561A-4BB1-A94E-469ADEE60C69}") = "codedesigner", "client\vscode\codedesigner.esproj", "{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.Ps2.Recompiler", "CodeDesigner.Ps2.Recompiler\CodeDesigner.Ps2.Recompiler.csproj", "{B1C2D3E4-F5A6-7890-BCDE-F01234567891}"
 EndProject
@@ -35,7 +35,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.Ps2.WebApi", "
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.Ps2.Installer", "CodeDesigner.Ps2.Installer\CodeDesigner.Ps2.Installer.csproj", "{066B1A25-100C-48BD-AA35-6086A015BC14}"
 EndProject
-Project("{54A90642-561A-4BB1-A94E-469ADEE60C69}") = "website", "website\website.esproj", "{E230967E-DF86-3AD6-88C7-A21F5EEA3A17}"
+Project("{54A90642-561A-4BB1-A94E-469ADEE60C69}") = "website", "client\website\website.esproj", "{E230967E-DF86-3AD6-88C7-A21F5EEA3A17}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Ui", "Ui", "{A23C9CC5-C770-4076-B5AF-A1E7C31E237B}"
 EndProject

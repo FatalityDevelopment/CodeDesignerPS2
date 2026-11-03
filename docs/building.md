@@ -96,12 +96,30 @@ CodeDesigner.Ps2.Emulator.exe --file game.elf [--load-address 0x00100000]
 
 ---
 
-## Build the VS Code extension
+## Build cd-app
 
-The extension lives in `vscode/codedesigner/` (TypeScript host + Angular webviews, bundled with webpack).
+The standalone app lives in `client/cd-app/` (React, TypeScript and Vite). It's early work: so far it has the Emulator and Disassembler pages, and it attaches to a Bridge and emulator you start yourself.
 
 ```powershell
-cd vscode/codedesigner
+cd client/cd-app
+npm ci
+npm run dev         # dev server on http://localhost:5174
+npm test
+npm run build       # production build into dist/
+```
+
+The Bridge reaches the app over `WebGateway` on `http://localhost:8771`, with one WebSocket on `/api/bridge` that it pipes to the command port. It accepts only the app's own origin, plus the dev server's in Debug builds.
+
+To have the Bridge serve the page, run `npm run build` first, then build the Bridge. It copies `dist/` into `wwwroot`, and the app is then at `http://localhost:8771`.
+
+---
+
+## Build the VS Code extension
+
+The extension lives in `client/vscode/` (TypeScript host + Angular webviews, bundled with webpack).
+
+```powershell
+cd client/vscode
 npm ci
 npm run compile     # development build into dist/
 npm run watch       # rebuild on change
@@ -109,7 +127,7 @@ npm run package     # production build
 npm run lint
 ```
 
-To debug it, open `vscode/codedesigner` in VS Code and press **F5**. An Extension Development Host opens with the extension loaded.
+To debug it, open `client/vscode` in VS Code and press **F5**. An Extension Development Host opens with the extension loaded.
 
 To install it into your normal VS Code:
 
@@ -170,7 +188,7 @@ pwsh tools/scripts/Build-Release.ps1 -Version v1.5.0     # output in dist/
 | Submodule errors | `git submodule update --init --recursive` |
 | Build hangs or fails in `InitialiseDatabase` | LocalDB isn't healthy. `sqllocaldb stop MSSQLLocalDB`, `sqllocaldb start MSSQLLocalDB`, then rebuild. Or build with `-p:SkipDatabaseInit=true`. |
 | Deploy step fails with "file in use" | The Bridge or emulator is running from `%LOCALAPPDATA%\CodeDesigner\`. Stop it and rebuild. |
-| npm build fails | Delete `vscode/codedesigner/node_modules` and run `npm ci` again. |
+| npm build fails | Delete `client/vscode/node_modules` and run `npm ci` again. |
 | "CodeDesigner.AI not found" in VS Code | Build `CodeDesigner.AI` so it deploys to `%LOCALAPPDATA%\CodeDesigner\AI\`. |
 | PCSX2 PINE connection refused | In PCSX2, **Settings → Advanced → Enable PINE**. The default slot is `28011`. |
 | BIOS fails to load | Use a raw PS2 BIOS dump (e.g. `SCPH-70012.bin`); compressed images aren't supported. |
