@@ -178,6 +178,29 @@ export type DirectPadButton =
     | 'l2' | 'r2' | 'l1' | 'r1' | 'triangle' | 'circle' | 'cross' | 'square'
     | 'select' | 'l3' | 'r3' | 'start' | 'up' | 'right' | 'down' | 'left';
 
+/** The network adapter (DEV9) and its traffic. */
+export interface DirectNetworkStatus {
+    attached: boolean;
+    mac: string;
+    ip: string;
+    txPackets: number;
+    rxPackets: number;
+    txBytes: number;
+    rxBytes: number;
+    capturing: boolean;
+    queued: number;
+    dropped: number;
+}
+
+/** A frame the adapter passed: sent by the PS2 (`tx`) or received. */
+export interface DirectCapturedFrame {
+    tx: boolean;
+    timestampUs: number;
+    data: Buffer;
+    /** A line per layer, as the emulator's dissector writes them. */
+    summary: string;
+}
+
 /** A code index region: main RAM or IOP RAM. */
 export type DirectRegion = 'ee' | 'iop';
 
@@ -358,4 +381,13 @@ export interface DirectEmulator {
     padRelease(port: number): Promise<void>;
     /** What clients hold on a port, and whether a controller is there. */
     padGet(port: number): Promise<{ held: DirectPadButton[]; sticks?: [number, number, number, number]; connected: boolean }>;
+
+    networkStatus(): Promise<DirectNetworkStatus>;
+    /** Starts or stops capturing (direction 0 both, 1 sent, 2 received); stopping empties the queue. */
+    setCapture(enable: boolean, direction: number, maxQueue: number): Promise<DirectNetworkStatus>;
+    /** Filter type 0 none, 1 protocol (0 all, 1 TCP, 2 UDP, 3 ICMP, 4 ARP, 5 DNS, 6 DHCP), 2 port, 3 IPv4. */
+    setCaptureFilter(type: number, protocol?: number, port?: number, ip?: string): Promise<void>;
+    takeCaptured(max: number): Promise<DirectCapturedFrame[]>;
+    /** Puts a frame on the wire: out from the PS2 (`tx`) or to it. */
+    injectFrame(frame: Buffer, tx: boolean): Promise<boolean>;
 }

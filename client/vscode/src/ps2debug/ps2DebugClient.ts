@@ -15,7 +15,8 @@ import { classifyAddress, MemoryRegion } from '../shared/memoryRegions';
 import type {
     DirectChain, DirectCompare, DirectEmulator, DirectEmulatorEvents, DirectFrame, DirectHintLevel, DirectIndexInfo, DirectLine,
     DirectPause, DirectRef, DirectScanInfo, DirectScanRequest, DirectScanResult, DirectThread, DirectModule, DirectStackFrame,
-    DirectTraceSpec, DirectTraceInfo, DirectTraceRecord, DirectPatch, DirectPadButton,
+    DirectTraceSpec, DirectTraceInfo, DirectTraceRecord, DirectPatch, DirectPadButton, DirectNetworkStatus,
+    DirectCapturedFrame,
     DirectRefKind, DirectRegion, DirectStatus, DirectSymbol, StopStream,
 } from './directEmulator';
 import protoText from './ps2debug.proto';
@@ -146,6 +147,19 @@ function traceRecordFromWire(r: TraceRecordWire): DirectTraceRecord {
         };
     }
     return { kind: 'instruction', pc: (r.instruction ?? 0) >>> 0 };
+}
+
+interface NetworkWire {
+    attached: boolean; mac: string; ip: string; txPackets: U64; rxPackets: U64; txBytes: U64; rxBytes: U64;
+    capturing: boolean; queued: number; dropped: U64;
+}
+
+function networkFromWire(n: NetworkWire): DirectNetworkStatus {
+    return {
+        attached: n.attached, mac: n.mac, ip: n.ip, txPackets: Number(n.txPackets), rxPackets: Number(n.rxPackets),
+        txBytes: Number(n.txBytes), rxBytes: Number(n.rxBytes), capturing: n.capturing, queued: n.queued,
+        dropped: Number(n.dropped),
+    };
 }
 
 interface PatchWire { name: string; enabled: boolean; rows: number; errors: string[]; warnings: string[]; applied: U64 }
@@ -293,7 +307,7 @@ export class Ps2DebugClient implements DirectEmulator {
             'grpc.max_send_message_length': MAX_MESSAGE_BYTES,
         };
         const credentials = grpc.credentials.createInsecure();
-        for (const name of ['Session', 'Execution', 'Breakpoints', 'Memory', 'Registers', 'Code', 'Media', 'Symbols', 'Index', 'Search', 'Snapshots', 'Trace', 'Os', 'Patches', 'Pads']) {
+        for (const name of ['Session', 'Execution', 'Breakpoints', 'Memory', 'Registers', 'Code', 'Media', 'Symbols', 'Index', 'Search', 'Snapshots', 'Trace', 'Os', 'Patches', 'Pads', 'Network']) {
             this.services[name] = new constructors[name](address, credentials, options) as unknown as Service;
         }
     }
@@ -822,6 +836,40 @@ export class Ps2DebugClient implements DirectEmulator {
             sticks: state.sticks ? [state.sticks.leftX, state.sticks.leftY, state.sticks.rightX, state.sticks.rightY] : undefined,
             connected: state.connected,
         };
+    }
+
+    // ── network ─────────────────────────────────────────────────────────
+
+    public async networkStatus(): Promise<DirectNetworkStatus> {
+        return networkFromWire(await this.call<NetworkWire>('Network', 'status', {}));
+    }
+
+    public async setCapture(enable: boolean, direction: number, maxQueue: number): Promise<DirectNetworkStatus> {
+        const directions = ['NET_BOTH', 'NET_TX', 'NET_RX'];
+        return networkFromWire(await this.call<NetworkWire>('Network', 'setCapture', {
+            enable, direction: directions[direction] ?? 'NET_BOTH', maxQueue,
+        }));
+    }
+
+    public async setCaptureFilter(type: number, protocol?: number, port?: number, ip?: string): Promise<void> {
+        const protocols = ['NET_ALL', 'NET_TCP', 'NET_UDP', 'NET_ICMP', 'NET_ARP', 'NET_DNS', 'NET_DHCP'];
+        const filter: Record<string, unknown> = {};
+        if (type === 1) { filter['protocol'] = protocols[protocol ?? 0] ?? 'NET_ALL'; }
+        if (type === 2) { filter['port'] = port ?? 0; }
+        if (type === 3) { filter['ip'] = ip ?? ''; }
+        await this.call<object>('Network', 'setFilter', filter);
+    }
+
+    public async takeCaptured(max: number): Promise<DirectCapturedFrame[]> {
+        const reply = await this.call<{ frames: { direction: string; timestampUs: U64; data: Buffer; summary: string }[] }>(
+            'Network', 'takeCaptured', { max },
+        );
+        return reply.frames.map(f => ({ tx: f.direction === 'NET_TX', timestampUs: Number(f.timestampUs), data: f.data, summary: f.summary }));
+    }
+
+    public async injectFrame(frame: Buffer, tx: boolean): Promise<boolean> {
+        const reply = await this.call<{ accepted: boolean }>('Network', 'inject', { direction: tx ? 'NET_TX' : 'NET_RX', frame });
+        return reply.accepted;
     }
 
     // ── index ───────────────────────────────────────────────────────────

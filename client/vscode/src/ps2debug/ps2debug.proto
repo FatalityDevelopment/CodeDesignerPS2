@@ -1398,3 +1398,104 @@ message PadState {
   // A controller is plugged in there.
   bool connected = 5;
 }
+
+// --------------------------------------------------------------- network
+
+// The expansion-bay network adapter (DEV9), when attached (`--network`):
+// its state, a capture of the frames it passes, and frames put on its
+// wire. Capture keeps frames in a queue that clients drain, as Code
+// Designer's packet viewer does.
+service Network {
+  rpc Status(Empty) returns (NetworkStatus);
+  // Starts (or stops) capturing; the queue empties when stopped.
+  rpc SetCapture(SetCaptureRequest) returns (NetworkStatus);
+  // Which frames the capture keeps.
+  rpc SetFilter(CaptureFilter) returns (Empty);
+  // Takes captured frames, oldest first.
+  rpc TakeCaptured(TakeCapturedRequest) returns (CapturedFrames);
+  // Puts a frame on the wire: towards the PS2, or out from it.
+  rpc Inject(InjectRequest) returns (InjectReply);
+}
+
+enum NetDirection {
+  // Both ways (a capture's direction only).
+  NET_BOTH = 0;
+  // Sent by the PS2.
+  NET_TX = 1;
+  // Received by the PS2.
+  NET_RX = 2;
+}
+
+message NetworkStatus {
+  // An adapter is attached (without one, the PS2 sees no network).
+  bool attached = 1;
+  string mac = 2;
+  // The PS2's address as its DHCP lease or settings give it.
+  string ip = 3;
+  uint64 tx_packets = 4;
+  uint64 rx_packets = 5;
+  uint64 tx_bytes = 6;
+  uint64 rx_bytes = 7;
+  bool capturing = 8;
+  // Frames waiting, and frames dropped with the queue full.
+  uint32 queued = 9;
+  uint64 dropped = 10;
+}
+
+message SetCaptureRequest {
+  bool enable = 1;
+  NetDirection direction = 2;
+  // Frames kept waiting at most (0: 1000).
+  uint32 max_queue = 3;
+}
+
+enum NetProtocol {
+  NET_ALL = 0;
+  NET_TCP = 1;
+  NET_UDP = 2;
+  NET_ICMP = 3;
+  NET_ARP = 4;
+  NET_DNS = 5;
+  NET_DHCP = 6;
+}
+
+message CaptureFilter {
+  // Unset: every frame.
+  oneof by {
+    NetProtocol protocol = 1;
+    // TCP or UDP to or from this port.
+    uint32 port = 2;
+    // IPv4 to or from this address (dotted quad).
+    string ip = 3;
+  }
+}
+
+message TakeCapturedRequest {
+  // At most this many (0: 100; at most 1000).
+  uint32 max = 1;
+}
+
+message CapturedFrame {
+  NetDirection direction = 1;
+  // When captured, in microseconds since the Unix epoch.
+  uint64 timestamp_us = 2;
+  // The Ethernet frame.
+  bytes data = 3;
+  // A line per layer: Ethernet, ARP or IPv4, TCP/UDP/ICMP, DHCP/DNS.
+  string summary = 4;
+}
+
+message CapturedFrames {
+  repeated CapturedFrame frames = 1;
+}
+
+message InjectRequest {
+  // NET_RX: as if received by the PS2; NET_TX: out through the adapter.
+  NetDirection direction = 1;
+  bytes frame = 2;
+}
+
+message InjectReply {
+  // False when the adapter is absent or its queue is full.
+  bool accepted = 1;
+}

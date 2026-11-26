@@ -1365,6 +1365,8 @@ export class BridgeClient {
     private direct: DirectEmulator | null = null;
     /** What this client holds on each pad of a direct emulator. */
     private directPads: { buttons: DirectPadButton[]; sticks: [number, number, number, number] }[] = [];
+    /** Packets taken from the direct emulator since capture started, for row numbers. */
+    private directCaptured = 0;
 
     private async directPadHold(
         direct: DirectEmulator, port: number, buttons: DirectPadButton[], sticks: [number, number, number, number],
@@ -5117,6 +5119,11 @@ export class BridgeClient {
 
     /** NETGETSTATUS — queries the DEV9 network adapter status. */
     public async netGetStatus(): Promise<NetStatusInfo> {
+        const direct = this.getDirect();
+        if (direct && !this.connected) {
+            const s = await direct.networkStatus();
+            return { enabled: s.attached, adapterType: s.attached ? 1 : 0, ps2Mac: s.mac.toUpperCase(), ps2IP: s.ip };
+        }
         const r = await this.sendCommand({ Command: 'NETGETSTATUS' });
         if (!r.Success) { throw new Error(r.Error || 'NETGETSTATUS failed'); }
         return r.NetStatus!;
@@ -5129,6 +5136,12 @@ export class BridgeClient {
      * @param maxQueue Maximum ring-buffer size (0 = server default of 1000).
      */
     public async netCapture(enable: boolean, direction?: number, maxQueue?: number): Promise<void> {
+        const direct = this.getDirect();
+        if (direct && !this.connected) {
+            this.directCaptured = 0;
+            await direct.setCapture(enable, direction ?? 0, maxQueue || 1000);
+            return;
+        }
         const r = await this.sendCommand({
             Command: 'NETCAPTURE',
             NetCaptureEnable: enable,
@@ -5140,6 +5153,16 @@ export class BridgeClient {
 
     /** NETRECVCAPTURE — drains captured packets from the ring buffer. */
     public async netRecvCapture(maxPackets?: number): Promise<{ packets: CapturedPacketInfo[]; parsedRows: ParsedPacketRow[] }> {
+        const direct = this.getDirect();
+        if (direct && !this.connected) {
+            const frames = await direct.takeCaptured(maxPackets ?? 0);
+            const packets = frames.map(f => ({
+                direction: f.tx ? 1 : 2, directionName: f.tx ? 'TX' : 'RX', timestampUs: f.timestampUs,
+                length: f.data.length, data: f.data.toString('base64'),
+            }));
+            const parsedRows = frames.map(f => packetRow(++this.directCaptured, f.tx, f.timestampUs, f.data.length, f.summary));
+            return { packets, parsedRows };
+        }
         const r = await this.sendCommand({
             Command: 'NETRECVCAPTURE',
             NetMaxPackets: maxPackets,
@@ -5164,6 +5187,11 @@ export class BridgeClient {
      * Returns the frame that was actually sent.
      */
     public async netInject(frameBase64: string, tx: boolean, options: NetFrameOptions = {}): Promise<{ ok: boolean; frame: string; message: string }> {
+        const direct = this.getDirect();
+        if (direct && !this.connected && !options.payload && !options.fix && !options.tcpContinue) {
+            const ok = await direct.injectFrame(Buffer.from(frameBase64, 'base64'), tx);
+            return { ok, frame: frameBase64, message: ok ? '' : 'the network adapter is not attached (start the emulator with --network)' };
+        }
         const r = await this.sendCommand({
             Command: tx ? 'NETINJECTTX' : 'NETINJECT',
             NetFrameData: frameBase64,
@@ -5241,6 +5269,14 @@ export class BridgeClient {
 
     /** NETGETSTATS — returns TX/RX counters and capture queue statistics. */
     public async netGetStats(): Promise<NetStatsInfo> {
+        const direct = this.getDirect();
+        if (direct && !this.connected) {
+            const s = await direct.networkStatus();
+            return {
+                txPackets: s.txPackets, rxPackets: s.rxPackets, txBytes: s.txBytes, rxBytes: s.rxBytes,
+                captureQueueSize: s.queued, droppedCount: s.dropped,
+            };
+        }
         const r = await this.sendCommand({ Command: 'NETGETSTATS' });
         if (!r.Success) { throw new Error(r.Error || 'NETGETSTATS failed'); }
         return r.NetStats!;
@@ -5254,6 +5290,11 @@ export class BridgeClient {
      * @param ip IPv4 address as dotted-quad string to filter on (type=3).
      */
     public async netSetFilter(filterType: number, protocol?: number, port?: number, ip?: string): Promise<void> {
+        const direct = this.getDirect();
+        if (direct && !this.connected) {
+            await direct.setCaptureFilter(filterType, protocol, port, ip);
+            return;
+        }
         const r = await this.sendCommand({
             Command: 'NETSETFILTER',
             NetFilterType: filterType,
@@ -5263,6 +5304,36 @@ export class BridgeClient {
         } as CommandMessage);
         if (!r.Success) { throw new Error(r.Error || 'NETSETFILTER failed'); }
     }
+}
+
+/**
+ * A packet table row from the emulator's dissector lines (`[IPv4] src=.. dst=..`, `[UDP] src=..
+ * dst=..`, ...): addresses and ports, the innermost protocol, and that layer's details.
+ */
+function packetRow(no: number, tx: boolean, timestampUs: number, len: number, summary: string): ParsedPacketRow {
+    const row: ParsedPacketRow = {
+        no, time: (timestampUs / 1e6).toFixed(6), dir: tx ? 'TX' : 'RX', server: '', src: '', dst: '', proto: 'Ethernet', len, info: '',
+    };
+    let srcIp = '', dstIp = '';
+    for (const line of summary.split('\n')) {
+        const m = /^\[([^\]]+)\]\s*(.*)$/.exec(line.trim());
+        if (!m) { continue; }
+        const [, layer, rest] = m;
+        const field = (name: string) => new RegExp(`(?:^|\\s)${name}=(\\S+)`).exec(rest)?.[1] ?? '';
+        if (layer === 'Ethernet') {
+            row.src = field('src'); row.dst = field('dst'); row.info = rest;
+        } else if (layer === 'IPv4') {
+            srcIp = field('src'); dstIp = field('dst');
+            row.src = srcIp; row.dst = dstIp; row.proto = 'IPv4'; row.info = rest;
+        } else if (layer === 'TCP' || layer === 'UDP') {
+            row.src = `${srcIp}:${field('src')}`; row.dst = `${dstIp}:${field('dst')}`; row.proto = layer;
+            row.info = rest.replace(/^src=\S+ dst=\S+\s*/, '');
+        } else {
+            row.proto = layer.startsWith('Unknown') ? 'Ethernet' : layer;
+            row.info = layer.startsWith('Unknown') ? `${layer} ${rest}` : rest;
+        }
+    }
+    return row;
 }
 
 /** Snapshot metadata entry returned by GETSNAPSHOTS. */
