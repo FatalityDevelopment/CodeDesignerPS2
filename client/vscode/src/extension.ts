@@ -15,6 +15,7 @@ import { ZipperWorkbenchProvider } from './providers/zipperWorkbench/zipperWorkb
 import { ANIMATION_EDITOR_PAGE, MAP_EDITOR_PAGE, ModelEditorProvider } from './providers/modelEditor/modelEditorProvider';
 import { WelcomeProvider, WelcomeDataDelegate } from './providers/welcome/welcomeProvider';
 import { SocketClient } from './socketClient';
+import { Ps2DebugClient, DEFAULT_PS2DEBUG_ADDRESS } from './ps2debug/ps2DebugClient';
 import { registerWebviewDevReload } from './utils/devReload';
 
 let socketClient: SocketClient | null = null;
@@ -176,15 +177,21 @@ export function activate(context: vscode.ExtensionContext) {
 
 	// Register socket event handlers
 	socketClient.onConnected(() => {
-		outputChannel.info('Connected to C# server');
-		vscode.window.showInformationMessage('Connected to C# server');
+		const what = socketClient?.isBridgeConnected() ? 'C# server' : 'Ps2Emulator';
+		outputChannel.info(`Connected to ${what}`);
+		vscode.window.showInformationMessage(`Connected to ${what}`);
 		// Auto-open all live memory views (reuses existing panels if already open)
 		disasmPanelProvider.onSocketConnected();
 	});
 
 	socketClient.onDisconnected(() => {
-		outputChannel.warn('Disconnected from C# server');
-		vscode.window.showWarningMessage('Disconnected from C# server');
+		if (socketClient?.isDirect()) {
+			// The Bridge went away; the directly connected emulator is still up.
+			outputChannel.warn('Disconnected from C# server (Ps2Emulator is still connected)');
+			return;
+		}
+		outputChannel.warn('Disconnected from server');
+		vscode.window.showWarningMessage('Disconnected from server');
 		// (Structs panel disabled — pointerManagerProvider.setServerStructs([]) not needed)
 		// Update the sidebar status bar to STOPPED so the user knows the
 		// connection dropped (covers server crashes / unexpected disconnects).
@@ -204,6 +211,43 @@ export function activate(context: vscode.ExtensionContext) {
 		socketClient?.disconnect();
 		vscode.window.showInformationMessage('Disconnected from C# server');
 	});
+
+	// Ps2Emulator's debug server, connected directly: live memory, registers,
+	// stepping, breakpoints and disassembly go to it instead of the Bridge.
+	// EE and IOP console text from a directly connected Ps2Emulator.
+	const ps2ConsoleChannel = vscode.window.createOutputChannel('Ps2Emulator Console');
+	context.subscriptions.push(ps2ConsoleChannel);
+	context.subscriptions.push(vscode.commands.registerCommand('codedesigner.connectPs2Emulator', async () => {
+		const client = socketClient;
+		if (!client) {
+			return;
+		}
+		const address = vscode.workspace.getConfiguration('codedesigner')
+			.get<string>('ps2Emulator.debugServer', DEFAULT_PS2DEBUG_ADDRESS);
+		try {
+			const emulator = await Ps2DebugClient.connect(address, {
+				onPaused: pause => {
+					outputChannel.info(`Ps2Emulator paused (${pause.reason}) at 0x${pause.pc.toString(16).padStart(8, '0')}`
+						+ (pause.error ? `: ${pause.error}` : ''));
+					disasmPanelProvider.notifyPauseState(true);
+				},
+				onResumed: () => disasmPanelProvider.notifyPauseState(false),
+				onClosed: () => {
+					outputChannel.warn(`Ps2Emulator debug server at ${address} closed the connection`);
+					client.detachDirect();
+				},
+			});
+			emulator.console((_source, text) => ps2ConsoleChannel.append(text));
+			client.attachDirect(emulator);
+			outputChannel.info(`Connected to Ps2Emulator at ${address}`);
+		} catch (error) {
+			vscode.window.showErrorMessage(`Failed to connect to Ps2Emulator: ${(error as Error).message}`);
+		}
+	}));
+
+	context.subscriptions.push(vscode.commands.registerCommand('codedesigner.disconnectPs2Emulator', () => {
+		socketClient?.detachDirect();
+	}));
 
 	const sendMessageCommand = vscode.commands.registerCommand('codedesigner.sendMessage', async () => {
 		const message = await vscode.window.showInputBox({

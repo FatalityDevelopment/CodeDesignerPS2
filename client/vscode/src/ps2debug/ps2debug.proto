@@ -1,0 +1,466 @@
+// Vendored from Ps2Emulator (proto/ps2debug.proto). Copy it again when the
+// emulator's schema changes; fields are only ever added, so an older copy
+// keeps working against a newer emulator.
+//
+// The emulator's debug protocol, version 1 (docs/codedesigner-analysis.md).
+//
+// Served by `ps2 ... --debug-server <addr>` over gRPC. Fields are only ever
+// added; Hello reports the protocol version. Memory is addressed by
+// (space, offset); the EE's KSEG aliases are not needed for anything but
+// display. Errors use gRPC status codes:
+//   FAILED_PRECONDITION  the request needs execution paused
+//   NOT_FOUND            no breakpoint or watchpoint with that id
+//   INVALID_ARGUMENT     a bad space, register, range or value
+syntax = "proto3";
+
+package ps2debug.v1;
+
+// ---------------------------------------------------------------- common
+
+// A 128-bit value (EE GPRs, VU registers): low and high 64 bits.
+message U128 {
+  uint64 lo = 1;
+  uint64 hi = 2;
+}
+
+enum AddressSpace {
+  ADDRESS_SPACE_UNSPECIFIED = 0;
+  // The EE's virtual addresses, as loads and stores translate them.
+  // Device registers are not part of it.
+  EE_VIRTUAL = 1;
+  EE_RAM = 2;      // main RAM (32 MiB), physical
+  SCRATCHPAD = 3;  // EE scratchpad (16 KiB)
+  BIOS = 4;        // boot ROM (4 MiB), read-only
+  IOP_RAM = 5;     // IOP RAM (2 MiB)
+  VU0_CODE = 6;
+  VU0_DATA = 7;
+  VU1_CODE = 8;
+  VU1_DATA = 9;
+  GS_LOCAL = 10;   // GS local memory (4 MiB), read-only
+}
+
+// --------------------------------------------------------------- session
+
+service Session {
+  // What the server offers. Call first.
+  rpc Hello(HelloRequest) returns (HelloReply);
+  // Execution state now.
+  rpc Status(StatusRequest) returns (StatusReply);
+  // Every event from now on, in order.
+  rpc Events(EventsRequest) returns (stream Event);
+}
+
+message HelloRequest {
+  // Free-form client name, for logs.
+  string client_name = 1;
+}
+
+message SpaceInfo {
+  AddressSpace space = 1;
+  string name = 2;
+  uint64 size = 3;
+  bool writable = 4;
+}
+
+message HelloReply {
+  uint32 protocol_version = 1;
+  string server = 2;
+  // Fully qualified service names served.
+  repeated string services = 3;
+  repeated SpaceInfo spaces = 4;
+  // Largest request or reply message, in bytes.
+  uint64 max_message_bytes = 5;
+  // Pass back as `client` where requests take one, so points it creates
+  // are attributed to it.
+  uint32 client_id = 6;
+}
+
+message StatusRequest {}
+
+message StatusReply {
+  bool paused = 1;
+  uint32 ee_pc = 2;
+  uint64 ee_cycles = 3;
+  // Whether breakpoints, watchpoints or a run-to keep execution
+  // interpreted (slower).
+  bool armed = 4;
+  uint64 fields = 5;
+  // Events dropped because the server's queue was full.
+  uint64 dropped_events = 6;
+}
+
+message EventsRequest {}
+
+enum Action {
+  ACTION_BREAK = 0;  // pause
+  ACTION_LOG = 1;    // record an event and keep running
+}
+
+message WatchHit {
+  uint32 id = 1;
+  uint32 pc = 2;
+  // Physical EE bus address accessed.
+  uint32 address = 3;
+  uint32 size = 4;
+  bool write = 5;
+  U128 value = 6;
+  Action action = 7;
+}
+
+message Paused {
+  enum Reason {
+    REASON_UNSPECIFIED = 0;
+    REQUESTED = 1;
+    BREAKPOINT = 2;
+    WATCHPOINT = 3;
+    STEP = 4;
+    RUN_TO = 5;
+    FRAME_ADVANCE = 6;
+    ERROR = 7;
+  }
+  Reason reason = 1;
+  uint32 pc = 2;
+  // REQUESTED: the client that asked.
+  uint32 client = 3;
+  // BREAKPOINT: the breakpoint.
+  uint32 breakpoint = 4;
+  // WATCHPOINT: the access.
+  WatchHit watch = 5;
+  // ERROR: what went wrong.
+  string error = 6;
+}
+
+message BreakpointLogged {
+  uint32 id = 1;
+  uint32 pc = 2;
+}
+
+message Event {
+  // Increases by one per event; a gap means events were dropped.
+  uint64 sequence = 1;
+  oneof kind {
+    Paused paused = 2;
+    bool resumed = 3;
+    BreakpointLogged breakpoint_logged = 4;
+    WatchHit watch_logged = 5;
+  }
+}
+
+// ------------------------------------------------------------- execution
+
+service Execution {
+  rpc Pause(PauseRequest) returns (Empty);
+  rpc Resume(Empty) returns (Empty);
+  // Needs a pause. INTO runs one instruction (and its delay slot) and stays
+  // paused; OVER runs a call to its return; OUT runs to $ra.
+  rpc Step(StepRequest) returns (Empty);
+  // Resumes until the EE reaches `address`.
+  rpc RunTo(RunToRequest) returns (Empty);
+  // Resumes for `fields` video fields, then pauses.
+  rpc FrameAdvance(FrameAdvanceRequest) returns (Empty);
+}
+
+message Empty {}
+
+message PauseRequest {
+  uint32 client = 1;
+}
+
+message StepRequest {
+  enum Kind {
+    INTO = 0;
+    OVER = 1;
+    OUT = 2;
+  }
+  Kind kind = 1;
+}
+
+message RunToRequest {
+  uint32 address = 1;
+}
+
+message FrameAdvanceRequest {
+  uint32 fields = 1;
+}
+
+// ----------------------------------------------------------- breakpoints
+
+service Breakpoints {
+  rpc SetBreakpoint(SetBreakpointRequest) returns (PointReply);
+  rpc SetWatchpoint(SetWatchpointRequest) returns (PointReply);
+  // Removes a breakpoint or watchpoint.
+  rpc Remove(PointRequest) returns (Empty);
+  rpc SetEnabled(SetEnabledRequest) returns (Empty);
+  rpc List(Empty) returns (PointList);
+}
+
+message Operand {
+  oneof kind {
+    uint64 constant = 1;
+    // Low 64 bits of an EE GPR.
+    uint32 gpr = 2;
+    bool pc = 3;
+    MemoryOperand memory = 4;
+  }
+}
+
+message MemoryOperand {
+  AddressSpace space = 1;
+  uint64 offset = 2;
+  // 1, 2, 4 or 8 bytes, little-endian.
+  uint32 size = 3;
+}
+
+message Condition {
+  enum Compare {
+    EQUAL = 0;
+    NOT_EQUAL = 1;
+    LESS = 2;
+    LESS_OR_EQUAL = 3;
+    GREATER = 4;
+    GREATER_OR_EQUAL = 5;
+  }
+  Operand left = 1;
+  Compare compare = 2;
+  Operand right = 3;
+}
+
+message SetBreakpointRequest {
+  uint32 client = 1;
+  // EE virtual address; every alias of the instruction hits.
+  uint32 address = 2;
+  optional Condition condition = 3;
+  // Hit from the nth time the condition holds (0, 1: every time).
+  uint32 hit_count = 4;
+  Action action = 5;
+}
+
+enum AccessKind {
+  READ = 0;
+  WRITE = 1;
+  READ_WRITE = 2;
+}
+
+message SetWatchpointRequest {
+  uint32 client = 1;
+  // EE_VIRTUAL, EE_RAM or BIOS.
+  AddressSpace space = 2;
+  uint64 offset = 3;
+  uint64 length = 4;
+  AccessKind kind = 5;
+  // Only accesses of this value.
+  optional U128 value = 6;
+  Action action = 7;
+}
+
+message PointReply {
+  uint32 id = 1;
+}
+
+message PointRequest {
+  uint32 id = 1;
+}
+
+message SetEnabledRequest {
+  uint32 id = 1;
+  bool enabled = 2;
+}
+
+message BreakpointInfo {
+  uint32 id = 1;
+  uint32 client = 2;
+  uint32 address = 3;
+  optional Condition condition = 4;
+  uint32 hit_count = 5;
+  Action action = 6;
+  uint32 hits = 7;
+  bool enabled = 8;
+}
+
+message WatchpointInfo {
+  uint32 id = 1;
+  uint32 client = 2;
+  AddressSpace space = 3;
+  uint64 offset = 4;
+  uint64 length = 5;
+  AccessKind kind = 6;
+  optional U128 value = 7;
+  Action action = 8;
+  uint32 hits = 9;
+  bool enabled = 10;
+}
+
+message PointList {
+  repeated BreakpointInfo breakpoints = 1;
+  repeated WatchpointInfo watchpoints = 2;
+}
+
+// ---------------------------------------------------------------- memory
+
+service Memory {
+  rpc Read(ReadRequest) returns (ReadReply);
+  // Many reads in one round trip, all from the same moment of emulation
+  // (memory views, watch lists, structure dumps). Replies are in request
+  // order; each is partial on its own as Read's are.
+  rpc ReadMany(ReadManyRequest) returns (ReadManyReply);
+  rpc Write(WriteRequest) returns (WriteReply);
+}
+
+message ReadRequest {
+  AddressSpace space = 1;
+  uint64 offset = 2;
+  uint64 length = 3;
+}
+
+message ReadReply {
+  // The bytes read: all of them, or those before `unmapped_at`.
+  bytes data = 1;
+  // Set when the range ran into unmapped memory at this offset.
+  optional uint64 unmapped_at = 2;
+}
+
+message ReadManyRequest {
+  // At most 65536 reads, their lengths summing to less than the message
+  // limit.
+  repeated ReadRequest reads = 1;
+}
+
+message ReadManyReply {
+  repeated ReadReply replies = 1;
+}
+
+message WriteRequest {
+  AddressSpace space = 1;
+  uint64 offset = 2;
+  bytes data = 3;
+}
+
+message WriteReply {
+  // Bytes written before `unmapped_at` (all of them when unset).
+  uint64 written = 1;
+  optional uint64 unmapped_at = 2;
+}
+
+// ------------------------------------------------------------- registers
+
+service Registers {
+  rpc Ee(Empty) returns (EeRegisters);
+  rpc Iop(Empty) returns (IopRegisters);
+  rpc Set(SetRegisterRequest) returns (Empty);
+}
+
+message Vector {
+  uint32 x = 1;
+  uint32 y = 2;
+  uint32 z = 3;
+  uint32 w = 4;
+}
+
+message EeRegisters {
+  uint32 pc = 1;
+  repeated U128 gpr = 2;
+  U128 hi = 3;
+  U128 lo = 4;
+  uint32 sa = 5;
+  repeated uint32 cop0 = 6;
+  repeated uint32 fpr = 7;
+  uint32 fpu_acc = 8;
+  uint32 fcr0 = 9;
+  uint32 fcr31 = 10;
+  repeated Vector vu0_vf = 11;
+  repeated uint32 vu0_vi = 12;
+  Vector vu0_acc = 13;
+  bool in_delay_slot = 14;
+  uint64 cycles = 15;
+}
+
+message IopRegisters {
+  uint32 pc = 1;
+  repeated uint32 gpr = 2;
+  uint32 hi = 3;
+  uint32 lo = 4;
+  repeated uint32 cop0 = 5;
+  uint64 cycles = 6;
+}
+
+message SetRegisterRequest {
+  enum File {
+    EE_PC = 0;
+    EE_GPR = 1;
+    EE_HI = 2;
+    EE_LO = 3;
+    EE_COP0 = 4;
+    EE_FPR = 5;
+    EE_FCR31 = 6;
+    VU0_VF = 7;
+    VU0_VI = 8;
+    IOP_PC = 9;
+    IOP_GPR = 10;
+    IOP_COP0 = 11;
+  }
+  File file = 1;
+  uint32 index = 2;
+  U128 value = 3;
+}
+
+// ------------------------------------------------------------------ code
+
+service Code {
+  rpc Disassemble(DisassembleRequest) returns (DisassembleReply);
+}
+
+message DisassembleRequest {
+  // EE virtual address of the first instruction.
+  uint32 address = 1;
+  // Instructions to read from memory. Ignored when `words` is set.
+  uint32 count = 2;
+  // When set, these instruction words are disassembled as if they were at
+  // `address` onwards, instead of reading memory (a file, or bytes the
+  // client already holds). At most 4096, like `count`.
+  repeated uint32 words = 3;
+}
+
+message Line {
+  uint32 address = 1;
+  uint32 word = 2;
+  string text = 3;
+}
+
+message DisassembleReply {
+  // Stops early at unmapped memory.
+  repeated Line lines = 1;
+}
+
+// ----------------------------------------------------------------- media
+
+service Media {
+  // Console text from the EE (`sio`) and the IOP (`printf`), as produced.
+  rpc Console(ConsoleRequest) returns (stream ConsoleText);
+  // The displayed frame, at most `max_fps` times a second. A slow client
+  // gets the latest frame, never a backlog.
+  rpc Frames(FramesRequest) returns (stream FrameImage);
+}
+
+message ConsoleRequest {}
+
+message ConsoleText {
+  enum Source {
+    EE = 0;
+    IOP = 1;
+  }
+  Source source = 1;
+  bytes text = 2;
+}
+
+message FramesRequest {
+  // 0: every field.
+  uint32 max_fps = 1;
+}
+
+message FrameImage {
+  uint32 width = 1;
+  uint32 height = 2;
+  // Row-major RGBA8.
+  bytes rgba = 3;
+  uint64 field = 4;
+}

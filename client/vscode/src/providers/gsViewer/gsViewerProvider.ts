@@ -4,6 +4,7 @@ import { getOutputChannel } from '../../extension';
 import { SocketClient } from '../../socketClient';
 import { getNonce } from '../../utils/nonce';
 import { applyCodeDesignerPanelIcon } from '../../utils/webviewPanel';
+import type { StopStream } from '../../ps2debug/directEmulator';
 
 /**
  * GS framebuffer viewer.
@@ -33,15 +34,22 @@ import { applyCodeDesignerPanelIcon } from '../../utils/webviewPanel';
  *   u8  flags
  *   bytes payload  // complete JPEG when codec=1
  * ```
+ *
+ * When Ps2Emulator is connected directly (BridgeClient.getDirect()), frames
+ * come from its `Media.Frames` stream instead, as raw RGBA (codec 2).
  */
 export class GsViewerProvider {
     public static readonly viewType = 'codedesigner.gsViewer';
 
     private static readonly DEFAULT_HOST = '127.0.0.1';
     private static readonly DEFAULT_PORT = 8766;
+    /** Frame rate asked of a directly connected Ps2Emulator (raw RGBA is ~1 MB a frame). */
+    private static readonly DIRECT_MAX_FPS = 30;
 
     private _panel: vscode.WebviewPanel | undefined;
     private _socket: net.Socket | undefined;
+    /** Stops the direct emulator's frame stream, while one is open. */
+    private _stopFrames: StopStream | undefined;
     private _readBuf: Buffer = Buffer.alloc(0);
     private _frameCount = 0;
 
@@ -52,6 +60,12 @@ export class GsViewerProvider {
 
     /** Re-read PCSX2's mute state when the bridge connection changes. */
     public notifyConnectionChanged(): void {
+        // Switch frame sources when a direct Ps2Emulator connection comes or goes.
+        const direct = !!this._socketClient?.getDirect();
+        if (this._panel && direct !== !!this._stopFrames) {
+            this._teardownSocket();
+            this._connect();
+        }
         void this._sendAudioState();
     }
 
@@ -66,7 +80,7 @@ export class GsViewerProvider {
         if (this._panel) {
             this._panel.reveal(vscode.ViewColumn.Active);
             // Re-arm the socket if it died while the panel was idle.
-            if (!this._socket || this._socket.destroyed) {
+            if (!this._stopFrames && (!this._socket || this._socket.destroyed)) {
                 this._connect();
             }
             return;
@@ -125,6 +139,12 @@ export class GsViewerProvider {
         this._readBuf = Buffer.alloc(0);
         this._frameCount = 0;
 
+        const direct = this._socketClient?.getDirect();
+        if (direct) {
+            this._connectDirect(direct);
+            return;
+        }
+
         const sock = new net.Socket();
         sock.setNoDelay(true);
 
@@ -159,6 +179,28 @@ export class GsViewerProvider {
 
         sock.connect(GsViewerProvider.DEFAULT_PORT, GsViewerProvider.DEFAULT_HOST);
         this._socket = sock;
+    }
+
+    /** Frames from a directly connected Ps2Emulator (raw RGBA, codec 2). */
+    private _connectDirect(direct: NonNullable<ReturnType<SocketClient['getDirect']>>): void {
+        const log = getOutputChannel();
+        log.info(`[GsViewer] following Ps2Emulator frames at ${direct.address}`);
+        this._panel?.webview.postMessage({ type: 'status', connected: true });
+        let stop: StopStream | undefined = undefined;
+        stop = direct.frames(GsViewerProvider.DIRECT_MAX_FPS, frame => {
+            this._frameCount++;
+            const out = frame.rgba;
+            const payload = out.buffer.slice(out.byteOffset, out.byteOffset + out.byteLength);
+            this._panel?.webview.postMessage(
+                { type: 'frame', frameIdx: frame.field, width: frame.width, height: frame.height, codec: 2, payload },
+            );
+        }, error => {
+            if (this._stopFrames !== stop) return;
+            this._stopFrames = undefined;
+            if (error) log.warn(`[GsViewer] frame stream: ${error.message}`);
+            this._panel?.webview.postMessage({ type: 'status', connected: false, error: error?.message });
+        });
+        this._stopFrames = stop;
     }
 
     /**
@@ -250,6 +292,9 @@ export class GsViewerProvider {
     }
 
     private _teardownSocket(): void {
+        const stopFrames = this._stopFrames;
+        this._stopFrames = undefined;
+        stopFrames?.();
         if (this._socket) {
             try { this._socket.destroy(); } catch { /* ignore */ }
             this._socket = undefined;
@@ -399,19 +444,25 @@ export class GsViewerProvider {
             if (busy) return; // drop, decoder is behind
             busy = true;
             try {
-                if (codec !== 1) {
+                if (codec !== 1 && codec !== 2) {
                     decodeErrors++;
                     vscode.postMessage({ type: 'decodeError', error: 'unknown codec ' + codec });
                     return;
                 }
-                const blob = new Blob([payload], { type: 'image/jpeg' });
-                const bitmap = await createImageBitmap(blob);
                 if (canvas.width !== width || canvas.height !== height) {
                     canvas.width = width;
                     canvas.height = height;
                 }
-                ctx.drawImage(bitmap, 0, 0, width, height);
-                bitmap.close();
+                if (codec === 2) {
+                    // Raw RGBA8 from Ps2Emulator's debug server.
+                    const pixels = new Uint8ClampedArray(payload.buffer, payload.byteOffset, width * height * 4);
+                    ctx.putImageData(new ImageData(pixels, width, height), 0, 0);
+                } else {
+                    const blob = new Blob([payload], { type: 'image/jpeg' });
+                    const bitmap = await createImageBitmap(blob);
+                    ctx.drawImage(bitmap, 0, 0, width, height);
+                    bitmap.close();
+                }
                 lastWidth = width; lastHeight = height;
 
                 framesShown++;

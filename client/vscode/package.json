@@ -16,6 +16,16 @@
     "url": "git+https://github.com/TylerDev888/CodeDesigner.git"
   },
   "contributes": {
+    "configuration": {
+      "title": "CodeDesigner",
+      "properties": {
+        "codedesigner.ps2Emulator.debugServer": {
+          "type": "string",
+          "default": "127.0.0.1:28100",
+          "markdownDescription": "Address (`host:port`) of Ps2Emulator's debug server, started with `ps2 bios|elf ... --debug-server <port>`. **Connect to Ps2Emulator** talks to it directly, without the Bridge."
+        }
+      }
+    },
     "viewsContainers": {
       "activitybar": [
         {
@@ -42,6 +52,14 @@
       {
         "command": "codedesigner.disconnectServer",
         "title": "CodeDesigner: Disconnect from Server"
+      },
+      {
+        "command": "codedesigner.connectPs2Emulator",
+        "title": "CodeDesigner: Connect to Ps2Emulator (Debug Server)"
+      },
+      {
+        "command": "codedesigner.disconnectPs2Emulator",
+        "title": "CodeDesigner: Disconnect from Ps2Emulator"
       },
       {
         "command": "codedesigner.sendMessage",
@@ -398,6 +416,8 @@
     "webpack-cli": "^6.0.1"
   },
   "dependencies": {
+    "@grpc/grpc-js": "^1.14.7",
+    "@grpc/proto-loader": "^0.8.1",
     "@angular/cdk": "^19.2.19",
     "@angular/common": "^19.2.19",
     "@angular/compiler": "^19.2.19",
@@ -408,6 +428,7 @@
     "@types/three": "^0.184.1",
     "@vscode/webview-ui-toolkit": "^1.4.0",
     "mermaid": "^11.4.1",
+    "protobufjs": "^7.6.6",
     "rxjs": "^7.8.2",
     "three": "^0.184.0",
     "zone.js": "^0.15.0"

@@ -1,3 +1,5 @@
+import type { DirectEmulator } from './ps2debug/directEmulator';
+
 /**
  * How a BridgeClient reaches the Bridge. The extension uses TCP (socketClient.ts); a browser page uses a WebSocket.
  * Both carry the same newline-delimited JSON, so everything above the transport is shared.
@@ -1273,6 +1275,13 @@ export interface AiToolCallEvent {
  * Client for the C# server: typed commands, queueing and push events over any BridgeTransport.
  */
 export class BridgeClient {
+    /**
+     * An emulator connected directly (Ps2Emulator's debug server), if any.
+     * While one is attached, the live emulator calls (memory, registers,
+     * execution, breakpoints, disassembly) go to it instead of the Bridge;
+     * everything else still needs the Bridge.
+     */
+    private direct: DirectEmulator | null = null;
     private transportOpen = false;
     private connected: boolean = false;
     private wasConnected: boolean = false;
@@ -1560,6 +1569,9 @@ export class BridgeClient {
      * whenever another client (e.g. the MCP server) performs an address-based operation.
      */
     public async subscribeActivity(): Promise<void> {
+        if (!this.connected) {
+            return; // AI activity comes from the Bridge only.
+        }
         try {
             await this.sendCommand({ Command: 'SUBSCRIBE_ACTIVITY' });
         } catch (err) {
@@ -1568,10 +1580,51 @@ export class BridgeClient {
     }
 
     /**
-     * Check if connected
+     * Check if connected: to the Bridge, or directly to an emulator.
      */
     public isConnected(): boolean {
+        return this.connected || this.isDirect();
+    }
+
+    /** Whether the Bridge itself is connected (not just a direct emulator). */
+    public isBridgeConnected(): boolean {
         return this.connected;
+    }
+
+    /** Whether live emulator calls go to a directly connected emulator. */
+    public isDirect(): boolean {
+        return !!this.direct && this.direct.isConnected();
+    }
+
+    /** The directly connected emulator, if any. */
+    public getDirect(): DirectEmulator | null {
+        return this.isDirect() ? this.direct : null;
+    }
+
+    /**
+     * Sends live emulator calls to `emulator` from now on, and tells the
+     * connection handlers (views refresh as on a Bridge connection).
+     */
+    public attachDirect(emulator: DirectEmulator): void {
+        this.direct?.close();
+        this.direct = emulator;
+        this.connectionHandlers.forEach(handler => handler());
+    }
+
+    /**
+     * Closes the direct emulator connection; live calls go to the Bridge
+     * again. Tells the disconnection handlers unless the Bridge is still up.
+     */
+    public detachDirect(): void {
+        const direct = this.direct;
+        if (!direct) {
+            return;
+        }
+        this.direct = null;
+        direct.close();
+        if (!this.connected) {
+            this.disconnectionHandlers.forEach(handler => handler());
+        }
     }
 
     /**
@@ -1787,6 +1840,21 @@ export class BridgeClient {
      *                 any persisted data-format overrides for the range.
      */
     public async disassemble(hexCode: string, startAddress?: number, gameId?: string, skipDataFormatOverrides = false): Promise<InstructionResult[]> {
+        const direct = this.getDirect();
+        if (direct && !this.connected) {
+            // Plain disassembly from the emulator. Data-format overrides,
+            // labels and analyzer comments need the Bridge (workspace
+            // service) and are left out.
+            const words = hexCode.trim().split(/\s+/).filter(Boolean).map(w => parseInt(w, 16) >>> 0);
+            const lines = await direct.disassembleWords(startAddress ?? 0, words);
+            return lines.map(line => ({
+                Success: true,
+                Assembly: line.text,
+                Hex: line.word.toString(16).toUpperCase().padStart(8, '0'),
+                Address: line.address >>> 0,
+                ByteLength: 4,
+            }));
+        }
         const command: CommandMessage = {
             Command: 'DISASSEMBLE',
             Data: hexCode
@@ -1911,6 +1979,10 @@ export class BridgeClient {
      * @param region   - "ee" (default) or "iop"
      */
     public async readMemory(address: number, length: number, region: string = 'ee'): Promise<Buffer> {
+        const direct = this.getDirect();
+        if (direct) {
+            return direct.readMemory(address, length, region);
+        }
         const key = `${region}:${address >>> 0}:${length >>> 0}`;
         const existing = this._readMemInflight.get(key);
         if (existing) {
@@ -1952,6 +2024,10 @@ export class BridgeClient {
         region: string = 'ee',
     ): Promise<Map<number, Buffer>> {
         if (addresses.length === 0) return new Map();
+        const direct = this.getDirect();
+        if (direct) {
+            return direct.readMemoryBatch(addresses, length, region);
+        }
 
         const command: CommandMessage = {
             Command: 'READMEMBATCH',
@@ -2139,6 +2215,11 @@ export class BridgeClient {
      * @returns         - Full register dump (same shape as getRegisters()).
      */
     public async runUntilPc(targetPc: number, timeoutMs: number = 10_000): Promise<RegisterDump> {
+        const direct = this.getDirect();
+        if (direct) {
+            await direct.runTo(targetPc, timeoutMs);
+            return direct.getRegisters();
+        }
         const command: CommandMessage = {
             Command: 'RUNUNTILPC',
             TargetPc: targetPc,
@@ -2230,6 +2311,10 @@ export class BridgeClient {
      * Pause emulator execution
      */
     public async pause(): Promise<void> {
+        const direct = this.getDirect();
+        if (direct) {
+            return direct.pause();
+        }
         const command: CommandMessage = { Command: 'PAUSE' };
         const response = await this.sendCommand(command);
         if (!response.Success) {
@@ -2245,6 +2330,9 @@ export class BridgeClient {
      * targets, etc.) on first render.
      */
     public async refreshAnalysis(): Promise<void> {
+        if (!this.connected && this.isDirect()) {
+            return; // The direct emulator keeps no analysis mirror to refresh.
+        }
         const command: CommandMessage = { Command: 'REFRESHANALYSIS' };
         const response = await this.sendCommand(command);
         if (!response.Success) {
@@ -2256,6 +2344,10 @@ export class BridgeClient {
      * Resume emulator execution
      */
     public async resume(): Promise<void> {
+        const direct = this.getDirect();
+        if (direct) {
+            return direct.resume();
+        }
         const command: CommandMessage = { Command: 'RESUME' };
         const response = await this.sendCommand(command);
         if (!response.Success) {
@@ -2267,6 +2359,10 @@ export class BridgeClient {
      * Set a breakpoint at the given EE virtual address
      */
     public async setBreakpoint(address: number): Promise<void> {
+        const direct = this.getDirect();
+        if (direct) {
+            return direct.setBreakpoint(address);
+        }
         const command: CommandMessage = { Command: 'SETBP', BreakpointAddress: address };
         const response = await this.sendCommand(command);
         if (!response.Success) {
@@ -2278,6 +2374,10 @@ export class BridgeClient {
      * Clear the breakpoint at the given EE virtual address
      */
     public async clearBreakpoint(address: number): Promise<void> {
+        const direct = this.getDirect();
+        if (direct) {
+            return direct.clearBreakpoint(address);
+        }
         const command: CommandMessage = { Command: 'CLEARBP', BreakpointAddress: address };
         const response = await this.sendCommand(command);
         if (!response.Success) {
@@ -2289,6 +2389,10 @@ export class BridgeClient {
      * Clear all breakpoints
      */
     public async clearAllBreakpoints(): Promise<void> {
+        const direct = this.getDirect();
+        if (direct) {
+            return direct.clearAllBreakpoints();
+        }
         const command: CommandMessage = { Command: 'CLEARBP_ALL' };
         const response = await this.sendCommand(command);
         if (!response.Success) {
@@ -2304,6 +2408,10 @@ export class BridgeClient {
         pc: number;
         breakpointHitAddress?: number;
     }> {
+        const direct = this.getDirect();
+        if (direct) {
+            return direct.status();
+        }
         const command: CommandMessage = { Command: 'GETPC' };
         const response = await this.sendCommand(command);
         if (!response.Success) {
@@ -2323,6 +2431,10 @@ export class BridgeClient {
      * register state.
      */
     public async step(): Promise<{ paused: boolean; pc: number; breakpointHitAddress?: number; instructionAnalysis?: Record<string, string> }> {
+        const direct = this.getDirect();
+        if (direct) {
+            return direct.stepInto();
+        }
         const command: CommandMessage = { Command: 'STEP' };
         const response = await this.sendCommand(command);
         if (!response.Success) {
@@ -2340,6 +2452,11 @@ export class BridgeClient {
      * PCSX2 PINE: step into (non-blocking). Emulator will run until the next pause/breakpoint.
      */
     public async stepInto(): Promise<void> {
+        const direct = this.getDirect();
+        if (direct) {
+            await direct.stepInto();
+            return;
+        }
         const response = await this.sendCommand({ Command: 'STEPINTO' });
         if (!response.Success) {
             throw new Error(response.Error || 'StepInto failed');
@@ -2350,6 +2467,10 @@ export class BridgeClient {
      * PCSX2 PINE: step over (non-blocking). Emulator will run until the next pause/breakpoint.
      */
     public async stepOver(): Promise<void> {
+        const direct = this.getDirect();
+        if (direct) {
+            return direct.stepOver();
+        }
         const response = await this.sendCommand({ Command: 'STEPOVER' });
         if (!response.Success) {
             throw new Error(response.Error || 'StepOver failed');
@@ -2360,6 +2481,10 @@ export class BridgeClient {
      * PCSX2 PINE: step out (non-blocking). Emulator will run until the next pause/breakpoint.
      */
     public async stepOut(): Promise<void> {
+        const direct = this.getDirect();
+        if (direct) {
+            return direct.stepOut();
+        }
         const response = await this.sendCommand({ Command: 'STEPOUT' });
         if (!response.Success) {
             throw new Error(response.Error || 'StepOut failed');
@@ -2557,6 +2682,10 @@ export class BridgeClient {
      * Get a full CPU register dump from the running emulator
      */
     public async getRegisters(): Promise<RegisterDump> {
+        const direct = this.getDirect();
+        if (direct) {
+            return direct.getRegisters();
+        }
         const command: CommandMessage = { Command: 'GETREGS' };
         const response = await this.sendCommand(command);
         if (!response.Success) {
@@ -2614,6 +2743,14 @@ export class BridgeClient {
      * @param region   'ee' (default) or 'iop'
      */
     public async writeMemory(address: number, hexBytes: string, region: string = 'ee'): Promise<void> {
+        const direct = this.getDirect();
+        if (direct) {
+            const digits = hexBytes.replace(/0x/gi, '').replace(/[^0-9a-f]/gi, '');
+            if (digits.length % 2 !== 0) {
+                throw new Error(`WriteMemory: odd number of hex digits in "${hexBytes}"`);
+            }
+            return direct.writeMemory(address, Buffer.from(digits, 'hex'), region);
+        }
         const command: CommandMessage = {
             Command: 'WRITEMEM',
             Address: address,
@@ -2657,6 +2794,10 @@ export class BridgeClient {
      * @param value  New value as a decimal string or "0x"-prefixed hex string
      */
     public async setRegister(name: string, index: number, value: string): Promise<void> {
+        const direct = this.getDirect();
+        if (direct) {
+            return direct.setRegister(name, index, value);
+        }
         const command: CommandMessage = {
             Command:       'SETREG',
             RegisterName:  name,

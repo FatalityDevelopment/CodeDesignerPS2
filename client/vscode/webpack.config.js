@@ -50,7 +50,7 @@ const extensionConfig = {
         // Load .html and .css files as raw string content (no processing).
         // Import them in TypeScript as: import template from './foo.html';
         // See src/declarations.d.ts for the TypeScript module declarations.
-        test: /\.(html|css)$/,
+        test: /\.(html|css|proto)$/,
         exclude: /node_modules/,
         type: 'asset/source'
       }
