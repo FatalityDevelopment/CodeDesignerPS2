@@ -418,6 +418,23 @@ message DisassembleRequest {
   // `address` onwards, instead of reading memory (a file, or bytes the
   // client already holds). At most 4096, like `count`.
   repeated uint32 words = 3;
+  // State hints for each line (`Line.hint`); none by default. Hints come
+  // from running the lines on a private copy of the CPU (memory is never
+  // changed), from the entry of the function they are in when an index
+  // knows it. While the emulator is paused, the CPU's registers seed the
+  // copy: fully from the PC on, which also says which way branches go,
+  // and before it the ones a function keeps (`gp` anywhere; `sp`, `fp`,
+  // `s0`-`s7` in the PC's function).
+  HintLevel hints = 4;
+}
+
+enum HintLevel {
+  HINTS_NONE = 0;
+  // Only hints that name a place: control flow, loads and stores,
+  // syscalls, values that look like addresses.
+  HINTS_ADDRESSES = 1;
+  // Everything: values, call arguments, stack frames as well.
+  HINTS_FULL = 2;
 }
 
 message Line {
@@ -436,6 +453,11 @@ message Line {
   string target_label = 8;
   // Set when an index found this word inside a data table.
   optional TableKind table = 9;
+  // What the instruction does with the values it sees (see
+  // `DisassembleRequest.hints`): `a0 = 0x00301234`, `v0 ← [0x00301000] =
+  // 0x00000005 "Weapon"`, `→ 0x00102040 (a0 = 0x00000001)`, `[TAKEN]`.
+  // Empty: nothing to say, or not asked.
+  string hint = 10;
 }
 
 message DisassembleReply {

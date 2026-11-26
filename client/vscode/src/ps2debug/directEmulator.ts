@@ -33,7 +33,16 @@ export interface DirectLine {
     functionStart: boolean;
     /** A jump's or branch's target's symbol ('' when none). */
     targetLabel: string;
+    /**
+     * What the instruction does with the values it sees, from the
+     * emulator simulating the code (`a0 = 0x00301234`, `→ Player_Update
+     * (a0 = 0x00000001)`); '' when there is nothing to say or none was asked.
+     */
+    hint: string;
 }
+
+/** How much the emulator's state hints say (the disassembler's comment column). */
+export type DirectHintLevel = 'full' | 'addresses' | 'off';
 
 /** A code index region: main RAM or IOP RAM. */
 export type DirectRegion = 'ee' | 'iop';
@@ -145,7 +154,7 @@ export interface DirectEmulator {
     /** `count` instructions read from memory at `address`; stops at unmapped memory. */
     disassemble(address: number, count: number): Promise<DirectLine[]>;
     /** Disassembles `words` as if they were at `address` onwards. */
-    disassembleWords(address: number, words: number[]): Promise<DirectLine[]>;
+    disassembleWords(address: number, words: number[], hints?: DirectHintLevel): Promise<DirectLine[]>;
 
     /** Indexes a region from a snapshot taken now; with `wait`, once it is built. */
     buildIndex(region: DirectRegion, wait: boolean): Promise<DirectIndexInfo>;

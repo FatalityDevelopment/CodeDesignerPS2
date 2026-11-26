@@ -13,7 +13,7 @@ import * as protobuf from 'protobufjs';
 import type { RegisterDump } from '../bridgeClient';
 import { classifyAddress, MemoryRegion } from '../shared/memoryRegions';
 import type {
-    DirectEmulator, DirectEmulatorEvents, DirectFrame, DirectIndexInfo, DirectLine, DirectPause, DirectRef,
+    DirectEmulator, DirectEmulatorEvents, DirectFrame, DirectHintLevel, DirectIndexInfo, DirectLine, DirectPause, DirectRef,
     DirectRefKind, DirectRegion, DirectStatus, DirectSymbol, StopStream,
 } from './directEmulator';
 import protoText from './ps2debug.proto';
@@ -85,8 +85,14 @@ const SYMBOL_PAGE = 65_536;
 
 interface LineWire {
     address: number; word: number; text: string; label: string; codeRefs: number; dataRefs: number;
-    functionStart: boolean; targetLabel: string;
+    functionStart: boolean; targetLabel: string; hint: string;
 }
+
+const HINT_LEVELS: Record<DirectHintLevel, string> = {
+    full: 'HINTS_FULL',
+    addresses: 'HINTS_ADDRESSES',
+    off: 'HINTS_NONE',
+};
 
 interface IndexInfoWire {
     region: string; ready: boolean; building: boolean; field: U64; refs: U64; functions: number;
@@ -98,7 +104,7 @@ interface SymbolWire { address: number; name: string; size: number; kind: string
 function lineFromWire(l: LineWire): DirectLine {
     return {
         address: l.address >>> 0, word: l.word >>> 0, text: l.text, label: l.label, codeRefs: l.codeRefs,
-        dataRefs: l.dataRefs, functionStart: l.functionStart, targetLabel: l.targetLabel,
+        dataRefs: l.dataRefs, functionStart: l.functionStart, targetLabel: l.targetLabel, hint: l.hint ?? '',
     };
 }
 
@@ -579,12 +585,14 @@ export class Ps2DebugClient implements DirectEmulator {
         return lines;
     }
 
-    public async disassembleWords(address: number, words: number[]): Promise<DirectLine[]> {
+    public async disassembleWords(address: number, words: number[], hints: DirectHintLevel = 'off'): Promise<DirectLine[]> {
         const lines: DirectLine[] = [];
         for (let done = 0; done < words.length; done += MAX_LINES) {
             const at = (address + 4 * done) >>> 0;
             const chunk = words.slice(done, done + MAX_LINES).map(w => w >>> 0);
-            const reply = await this.call<{ lines: LineWire[] }>('Code', 'disassemble', { address: at, words: chunk });
+            const reply = await this.call<{ lines: LineWire[] }>(
+                'Code', 'disassemble', { address: at, words: chunk, hints: HINT_LEVELS[hints] },
+            );
             lines.push(...reply.lines.map(lineFromWire));
         }
         return lines;

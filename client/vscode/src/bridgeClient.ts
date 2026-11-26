@@ -1,4 +1,11 @@
-import type { DirectEmulator, DirectRef, DirectRefKind } from './ps2debug/directEmulator';
+import type { DirectEmulator, DirectHintLevel, DirectRef, DirectRefKind } from './ps2debug/directEmulator';
+
+/** The setting the disassembler keeps its comment-column hint level in. */
+const HINT_LEVEL_SETTING = 'disasm.hintLevel';
+
+function isHintLevel(value: string): value is DirectHintLevel {
+    return value === 'full' || value === 'addresses' || value === 'off';
+}
 
 /** The source labels pushed into a directly connected emulator are kept under. */
 const DIRECT_LABEL_SOURCE = 'codedesigner';
@@ -1346,6 +1353,8 @@ export class BridgeClient {
      * everything else still needs the Bridge.
      */
     private direct: DirectEmulator | null = null;
+    /** The comment-column hint level for disassembly from a direct emulator. */
+    private directHintLevel: DirectHintLevel = 'full';
     private transportOpen = false;
     private connected: boolean = false;
     private wasConnected: boolean = false;
@@ -1930,11 +1939,11 @@ export class BridgeClient {
     public async disassemble(hexCode: string, startAddress?: number, gameId?: string, skipDataFormatOverrides = false): Promise<InstructionResult[]> {
         const direct = this.getDirect();
         if (direct && !this.connected) {
-            // Plain disassembly from the emulator. Data-format overrides,
-            // labels and analyzer comments need the Bridge (workspace
-            // service) and are left out.
+            // Disassembly from the emulator, with its state hints in the
+            // comment column. Data-format overrides need the Bridge
+            // (workspace service) and are left out.
             const words = hexCode.trim().split(/\s+/).filter(Boolean).map(w => parseInt(w, 16) >>> 0);
-            const lines = await direct.disassembleWords(startAddress ?? 0, words);
+            const lines = await direct.disassembleWords(startAddress ?? 0, words, this.directHintLevel);
             return lines.map(line => ({
                 Success: true,
                 Assembly: line.text,
@@ -1942,7 +1951,7 @@ export class BridgeClient {
                 Address: line.address >>> 0,
                 ByteLength: 4,
                 Label: line.label || undefined,
-                Comment: line.targetLabel ? `-> ${line.targetLabel}` : undefined,
+                Comment: line.hint ? `; ${line.hint}` : line.targetLabel ? `-> ${line.targetLabel}` : undefined,
                 XrefCount: line.codeRefs || undefined,
                 DataRefCount: line.dataRefs || undefined,
                 FunctionStart: line.functionStart || undefined,
@@ -4426,6 +4435,9 @@ export class BridgeClient {
      * Returns `null` when the key is not present.
      */
     public async getSetting(key: string): Promise<string | null> {
+        if (key === HINT_LEVEL_SETTING && this.direct && !this.connected) {
+            return this.directHintLevel;
+        }
         const response = await this.sendCommand({ Command: 'GETSETTING', SettingKey: key });
         if (!response.Success) { throw new Error(response.Error || 'GETSETTING failed'); }
         return response.Message ?? null;
@@ -4435,6 +4447,13 @@ export class BridgeClient {
      * SETSETTING — inserts or updates an application setting in the database.
      */
     public async setSetting(key: string, value: string): Promise<void> {
+        if (key === HINT_LEVEL_SETTING && isHintLevel(value)) {
+            // The emulator's hints follow it too.
+            this.directHintLevel = value;
+            if (this.direct && !this.connected) {
+                return;
+            }
+        }
         const response = await this.sendCommand({ Command: 'SETSETTING', SettingKey: key, SettingValue: value });
         if (!response.Success) { throw new Error(response.Error || 'SETSETTING failed'); }
     }
