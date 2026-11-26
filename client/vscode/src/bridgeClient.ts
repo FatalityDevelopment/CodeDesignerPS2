@@ -1,4 +1,13 @@
-import type { DirectEmulator, DirectHintLevel, DirectRef, DirectRefKind } from './ps2debug/directEmulator';
+import type { DirectEmulator, DirectHintLevel, DirectPadButton, DirectRef, DirectRefKind } from './ps2debug/directEmulator';
+
+/** PINE's pad button mask (active-low): Select at bit 0 up to Square at bit 15. */
+const PINE_BUTTONS: DirectPadButton[] = [
+    'select', 'l3', 'r3', 'start', 'up', 'right', 'down', 'left',
+    'l2', 'r2', 'l1', 'r1', 'triangle', 'circle', 'cross', 'square',
+];
+
+/** The patch the persistent cheat engine becomes with a direct emulator. */
+const DIRECT_CHEAT_ENGINE = 'Code Designer cheat engine';
 
 /** The setting the disassembler keeps its comment-column hint level in. */
 const HINT_LEVEL_SETTING = 'disasm.hintLevel';
@@ -1354,6 +1363,31 @@ export class BridgeClient {
      * everything else still needs the Bridge.
      */
     private direct: DirectEmulator | null = null;
+    /** What this client holds on each pad of a direct emulator. */
+    private directPads: { buttons: DirectPadButton[]; sticks: [number, number, number, number] }[] = [];
+
+    private async directPadHold(
+        direct: DirectEmulator, port: number, buttons: DirectPadButton[], sticks: [number, number, number, number],
+    ): Promise<void> {
+        this.directPads[port] = { buttons, sticks };
+        const resting = sticks.every(v => v === 0x7F);
+        if (buttons.length === 0 && resting) {
+            await direct.padRelease(port);
+        } else {
+            await direct.padHold(port, buttons, resting ? undefined : sticks);
+        }
+    }
+
+    /** The cheat engine's state as a direct emulator's patch has it. */
+    private directCheatInfo(patch: { enabled: boolean; rows: number; errors: string[]; warnings: string[] } | undefined): CheatEngineInfo {
+        return {
+            injected: !!patch?.enabled,
+            engineBase: 0,
+            entries: patch?.rows ?? 0,
+            imageSize: 0,
+            warnings: patch ? [...patch.errors, ...patch.warnings] : [],
+        };
+    }
     /** The comment-column hint level for disassembly from a direct emulator. */
     private directHintLevel: DirectHintLevel = 'full';
     private transportOpen = false;
@@ -2642,6 +2676,13 @@ export class BridgeClient {
      * Returns buttons bitmask, analog stick positions, and 16 pressure values.
      */
     public async padGetState(padSlot: number = 0): Promise<PadStateInfo> {
+        const direct = this.getDirect();
+        if (direct && !this.connected) {
+            const state = await direct.padGet(padSlot);
+            const buttons = PINE_BUTTONS.reduce((mask, b, bit) => state.held.includes(b) ? mask & ~(1 << bit) : mask, 0xFFFF);
+            const [lx, ly, rx, ry] = state.sticks ?? [0x7F, 0x7F, 0x7F, 0x7F];
+            return { buttons, lx, ly, rx, ry, pressures: new Array(16).fill(0) };
+        }
         const response = await this.sendCommand({ Command: 'PADGETSTATE', PadSlot: padSlot });
         if (!response.Success) {
             throw new Error(response.Error || 'PadGetState failed');
@@ -2673,6 +2714,12 @@ export class BridgeClient {
      * Values are 0–255 with 0x7F = centred.
      */
     public async padSetAnalog(padSlot: number, lx: number = 0x7F, ly: number = 0x7F, rx: number = 0x7F, ry: number = 0x7F): Promise<void> {
+        const direct = this.getDirect();
+        if (direct && !this.connected) {
+            const held = this.directPads[padSlot]?.buttons ?? [];
+            await this.directPadHold(direct, padSlot, held, [lx, ly, rx, ry]);
+            return;
+        }
         const response = await this.sendCommand({
             Command: 'PADSETANALOG',
             PadSlot: padSlot,
@@ -2694,6 +2741,12 @@ export class BridgeClient {
         if (pressures.length !== 16) {
             throw new Error('padSetState: pressures must be exactly 16 elements');
         }
+        const direct = this.getDirect();
+        if (direct && !this.connected) {
+            const held = PINE_BUTTONS.filter((_, bit) => (buttons & (1 << bit)) === 0);
+            await this.directPadHold(direct, padSlot, held, [lx, ly, rx, ry]);
+            return;
+        }
         const response = await this.sendCommand({
             Command: 'PADSETSTATE',
             PadSlot: padSlot,
@@ -2714,6 +2767,10 @@ export class BridgeClient {
      * Returns the numeric controller type (0=NotConnected, 1=DualShock2, 2=Guitar, etc.).
      */
     public async padGetType(padSlot: number = 0): Promise<number> {
+        const direct = this.getDirect();
+        if (direct && !this.connected) {
+            return (await direct.padGet(padSlot)).connected ? 1 : 0;
+        }
         const response = await this.sendCommand({ Command: 'PADGETTYPE', PadSlot: padSlot });
         if (!response.Success) {
             throw new Error(response.Error || 'PadGetType failed');
@@ -3422,6 +3479,19 @@ export class BridgeClient {
      * @param cheatText  Multi-line cheat code text (blocks separated by blank lines).
      */
     public async applyCheats(cheatText: string): Promise<void> {
+        const direct = this.getDirect();
+        if (direct && !this.connected) {
+            // Once: a patch taken away after its first field.
+            const name = 'Code Designer (applied once)';
+            await direct.setPatch(name, cheatText, true);
+            for (let i = 0; i < 100; i++) {
+                const patch = (await direct.listPatches()).find(p => p.name === name);
+                if (!patch || patch.applied > 0) { break; }
+                await new Promise(r => setTimeout(r, 20));
+            }
+            await direct.removePatch(name).catch(() => { /* already gone */ });
+            return;
+        }
         const command: CommandMessage = {
             Command: 'APPLYCHEATS',
             Data:    cheatText,
@@ -3438,6 +3508,11 @@ export class BridgeClient {
      * injection is removed first.
      */
     public async injectCheatEngine(cheatText: string, hookAddress: number, engineBase?: number): Promise<CheatEngineInfo> {
+        const direct = this.getDirect();
+        if (direct && !this.connected) {
+            // The emulator applies the codes itself every field: no hook, no engine in RAM.
+            return this.directCheatInfo(await direct.setPatch(DIRECT_CHEAT_ENGINE, cheatText, true));
+        }
         const response = await this.sendCommand({
             Command:     'INJECTCHEATENGINE',
             Data:        cheatText,
@@ -3452,6 +3527,10 @@ export class BridgeClient {
 
     /** UPDATECHEATENGINE — replace the injected engine's table without re-hooking. */
     public async updateCheatEngine(cheatText: string): Promise<CheatEngineInfo> {
+        const direct = this.getDirect();
+        if (direct && !this.connected) {
+            return this.directCheatInfo(await direct.setPatch(DIRECT_CHEAT_ENGINE, cheatText, true));
+        }
         const response = await this.sendCommand({ Command: 'UPDATECHEATENGINE', Data: cheatText }, 60000);
         if (!response.Success || !response.CheatEngineState) {
             throw new Error(response.Error || 'UpdateCheatEngine failed');
@@ -3461,6 +3540,11 @@ export class BridgeClient {
 
     /** REMOVECHEATENGINE — restore the hooked instructions. */
     public async removeCheatEngine(): Promise<CheatEngineInfo> {
+        const direct = this.getDirect();
+        if (direct && !this.connected) {
+            await direct.removePatch(DIRECT_CHEAT_ENGINE).catch(() => { /* not set */ });
+            return this.directCheatInfo(undefined);
+        }
         const response = await this.sendCommand({ Command: 'REMOVECHEATENGINE' });
         if (!response.Success || !response.CheatEngineState) {
             throw new Error(response.Error || 'RemoveCheatEngine failed');
@@ -3470,6 +3554,11 @@ export class BridgeClient {
 
     /** CHEATENGINESTATUS — whether the engine is injected, and where. */
     public async cheatEngineStatus(): Promise<CheatEngineInfo> {
+        const direct = this.getDirect();
+        if (direct && !this.connected) {
+            const patch = (await direct.listPatches()).find(p => p.name === DIRECT_CHEAT_ENGINE);
+            return this.directCheatInfo(patch);
+        }
         const response = await this.sendCommand({ Command: 'CHEATENGINESTATUS' });
         if (!response.Success || !response.CheatEngineState) {
             throw new Error(response.Error || 'CheatEngineStatus failed');

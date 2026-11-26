@@ -15,7 +15,7 @@ import { classifyAddress, MemoryRegion } from '../shared/memoryRegions';
 import type {
     DirectChain, DirectCompare, DirectEmulator, DirectEmulatorEvents, DirectFrame, DirectHintLevel, DirectIndexInfo, DirectLine,
     DirectPause, DirectRef, DirectScanInfo, DirectScanRequest, DirectScanResult, DirectThread, DirectModule, DirectStackFrame,
-    DirectTraceSpec, DirectTraceInfo, DirectTraceRecord,
+    DirectTraceSpec, DirectTraceInfo, DirectTraceRecord, DirectPatch, DirectPadButton,
     DirectRefKind, DirectRegion, DirectStatus, DirectSymbol, StopStream,
 } from './directEmulator';
 import protoText from './ps2debug.proto';
@@ -146,6 +146,16 @@ function traceRecordFromWire(r: TraceRecordWire): DirectTraceRecord {
         };
     }
     return { kind: 'instruction', pc: (r.instruction ?? 0) >>> 0 };
+}
+
+interface PatchWire { name: string; enabled: boolean; rows: number; errors: string[]; warnings: string[]; applied: U64 }
+
+function patchFromWire(p: PatchWire): DirectPatch {
+    return { name: p.name, enabled: p.enabled, rows: p.rows, errors: p.errors, warnings: p.warnings, applied: Number(p.applied) };
+}
+
+function padButtonToWire(b: DirectPadButton): string {
+    return 'PAD_' + b.toUpperCase();
 }
 
 const HINT_LEVELS: Record<DirectHintLevel, string> = {
@@ -283,7 +293,7 @@ export class Ps2DebugClient implements DirectEmulator {
             'grpc.max_send_message_length': MAX_MESSAGE_BYTES,
         };
         const credentials = grpc.credentials.createInsecure();
-        for (const name of ['Session', 'Execution', 'Breakpoints', 'Memory', 'Registers', 'Code', 'Media', 'Symbols', 'Index', 'Search', 'Snapshots', 'Trace', 'Os']) {
+        for (const name of ['Session', 'Execution', 'Breakpoints', 'Memory', 'Registers', 'Code', 'Media', 'Symbols', 'Index', 'Search', 'Snapshots', 'Trace', 'Os', 'Patches', 'Pads']) {
             this.services[name] = new constructors[name](address, credentials, options) as unknown as Service;
         }
     }
@@ -769,6 +779,49 @@ export class Ps2DebugClient implements DirectEmulator {
 
     public async dropTrace(id: number): Promise<void> {
         await this.call<object>('Trace', 'drop', { id });
+    }
+
+    // ── patches and pads ────────────────────────────────────────────────
+
+    public async setPatch(name: string, codes: string, enabled: boolean): Promise<DirectPatch> {
+        return patchFromWire(await this.call<PatchWire>('Patches', 'set', { name, codes, enabled }));
+    }
+
+    public async listPatches(): Promise<DirectPatch[]> {
+        const reply = await this.call<{ patches: PatchWire[] }>('Patches', 'list', {});
+        return reply.patches.map(patchFromWire);
+    }
+
+    public async enablePatch(name: string, enabled: boolean): Promise<DirectPatch> {
+        return patchFromWire(await this.call<PatchWire>('Patches', 'enable', { name, enabled }));
+    }
+
+    public async removePatch(name: string): Promise<void> {
+        await this.call<object>('Patches', 'remove', { name });
+    }
+
+    public async padHold(port: number, buttons: DirectPadButton[], sticks?: [number, number, number, number]): Promise<void> {
+        const request: Record<string, unknown> = { port, buttons: buttons.map(padButtonToWire) };
+        if (sticks) { request['sticks'] = { leftX: sticks[0], leftY: sticks[1], rightX: sticks[2], rightY: sticks[3] }; }
+        await this.call<object>('Pads', 'hold', request);
+    }
+
+    public async padPress(port: number, buttons: DirectPadButton[], fields: number): Promise<void> {
+        await this.call<object>('Pads', 'press', { port, buttons: buttons.map(padButtonToWire), fields });
+    }
+
+    public async padRelease(port: number): Promise<void> {
+        await this.call<object>('Pads', 'release', { port });
+    }
+
+    public async padGet(port: number): Promise<{ held: DirectPadButton[]; sticks?: [number, number, number, number]; connected: boolean }> {
+        interface SticksWire { leftX: number; leftY: number; rightX: number; rightY: number }
+        const state = await this.call<{ held: string[]; sticks?: SticksWire; connected: boolean }>('Pads', 'get', { port });
+        return {
+            held: state.held.map(b => b.replace(/^PAD_/, '').toLowerCase() as DirectPadButton),
+            sticks: state.sticks ? [state.sticks.leftX, state.sticks.leftY, state.sticks.rightX, state.sticks.rightY] : undefined,
+            connected: state.connected,
+        };
     }
 
     // ── index ───────────────────────────────────────────────────────────

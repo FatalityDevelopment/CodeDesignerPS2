@@ -160,6 +160,24 @@ export type DirectTraceRecord =
     | { kind: 'instruction'; pc: number }
     | { kind: 'access'; pc: number; address: number; size: number; write: boolean; value: number };
 
+/** A patch the emulator applies every field (raw cheat codes). */
+export interface DirectPatch {
+    name: string;
+    enabled: boolean;
+    /** Engine rows its codes became. */
+    rows: number;
+    /** Lines not translated (they do nothing), and lines ignored on purpose. */
+    errors: string[];
+    warnings: string[];
+    /** Fields it was applied in. */
+    applied: number;
+}
+
+/** A controller button, as the protocol names it. */
+export type DirectPadButton =
+    | 'l2' | 'r2' | 'l1' | 'r1' | 'triangle' | 'circle' | 'cross' | 'square'
+    | 'select' | 'l3' | 'r3' | 'start' | 'up' | 'right' | 'down' | 'left';
+
 /** A code index region: main RAM or IOP RAM. */
 export type DirectRegion = 'ee' | 'iop';
 
@@ -326,4 +344,18 @@ export interface DirectEmulator {
     /** Code a stopped trace saw run (less what `without` saw), as [start, bytes] ranges, and the indexed functions in it. */
     coverage(id: number, without?: number): Promise<{ ranges: [number, number][]; functions: number[] }>;
     dropTrace(id: number): Promise<void>;
+
+    /** Adds or replaces (by name) a patch: raw cheat codes applied every field. */
+    setPatch(name: string, codes: string, enabled: boolean): Promise<DirectPatch>;
+    listPatches(): Promise<DirectPatch[]>;
+    enablePatch(name: string, enabled: boolean): Promise<DirectPatch>;
+    removePatch(name: string): Promise<void>;
+
+    /** Holds buttons (and sticks: lx, ly, rx, ry) on a port until released. */
+    padHold(port: number, buttons: DirectPadButton[], sticks?: [number, number, number, number]): Promise<void>;
+    /** Presses buttons for some fields. */
+    padPress(port: number, buttons: DirectPadButton[], fields: number): Promise<void>;
+    padRelease(port: number): Promise<void>;
+    /** What clients hold on a port, and whether a controller is there. */
+    padGet(port: number): Promise<{ held: DirectPadButton[]; sticks?: [number, number, number, number]; connected: boolean }>;
 }

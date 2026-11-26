@@ -1275,3 +1275,126 @@ message StackFrame {
 message StackWalkReply {
   repeated StackFrame frames = 1;
 }
+
+// --------------------------------------------------------------- patches
+
+// Raw PS2 cheat codes (decrypted: AAAAAAAA VVVVVVVV lines) the emulator
+// applies itself at the start of every field, as Code Designer's injected
+// cheat engine would, with no hook in the game: constant writes (types 0,
+// 1, 2), increments (3), serial writes (4), the timer (B) and compares
+// guarding the lines after them (C, D, E). Hook and master codes (9, F)
+// are ignored.
+service Patches {
+  // Adds a patch, or replaces the one with its name.
+  rpc Set(SetPatchRequest) returns (PatchInfo);
+  rpc List(Empty) returns (PatchList);
+  rpc Enable(EnablePatchRequest) returns (PatchInfo);
+  rpc Remove(PatchRef) returns (Empty);
+}
+
+message SetPatchRequest {
+  string name = 1;
+  // Cheat text: names, blank lines and code lines (`//` comments allowed).
+  string codes = 2;
+  bool enabled = 3;
+}
+
+message PatchInfo {
+  string name = 1;
+  bool enabled = 2;
+  // Engine rows the codes became.
+  uint32 rows = 3;
+  // Lines that could not be translated (they do nothing), and lines
+  // ignored on purpose.
+  repeated string errors = 4;
+  repeated string warnings = 5;
+  // Fields it was applied in.
+  uint64 applied = 6;
+}
+
+message PatchList {
+  repeated PatchInfo patches = 1;
+}
+
+message EnablePatchRequest {
+  string name = 1;
+  bool enabled = 2;
+}
+
+message PatchRef {
+  string name = 1;
+}
+
+// ------------------------------------------------------------------ pads
+
+// Controller input from clients, on top of the frontend's own controller
+// (buttons held by either count as held). Applied at the start of each
+// field.
+service Pads {
+  // Holds buttons and sticks until changed or released.
+  rpc Hold(PadInputRequest) returns (PadState);
+  // Holds them for some fields, then lets go.
+  rpc Press(PressRequest) returns (PadState);
+  // Lets go of everything held on a port.
+  rpc Release(PadPort) returns (PadState);
+  rpc Get(PadPort) returns (PadState);
+}
+
+// In the pad's button word order.
+enum PadButton {
+  PAD_L2 = 0;
+  PAD_R2 = 1;
+  PAD_L1 = 2;
+  PAD_R1 = 3;
+  PAD_TRIANGLE = 4;
+  PAD_CIRCLE = 5;
+  PAD_CROSS = 6;
+  PAD_SQUARE = 7;
+  PAD_SELECT = 8;
+  PAD_L3 = 9;
+  PAD_R3 = 10;
+  PAD_START = 11;
+  PAD_UP = 12;
+  PAD_RIGHT = 13;
+  PAD_DOWN = 14;
+  PAD_LEFT = 15;
+}
+
+message Sticks {
+  // 0-255, 127 at rest; y grows downwards.
+  uint32 left_x = 1;
+  uint32 left_y = 2;
+  uint32 right_x = 3;
+  uint32 right_y = 4;
+}
+
+message PadInputRequest {
+  // 0 or 1.
+  uint32 port = 1;
+  repeated PadButton buttons = 2;
+  // Unset: the sticks are left as they are.
+  optional Sticks sticks = 3;
+}
+
+message PressRequest {
+  uint32 port = 1;
+  repeated PadButton buttons = 2;
+  optional Sticks sticks = 3;
+  // How long (0: 6 fields, a tenth of a second).
+  uint32 fields = 4;
+}
+
+message PadPort {
+  uint32 port = 1;
+}
+
+message PadState {
+  uint32 port = 1;
+  // What clients hold on it.
+  repeated PadButton held = 2;
+  optional Sticks sticks = 3;
+  // Fields left of a press (0: held until released).
+  uint32 fields_left = 4;
+  // A controller is plugged in there.
+  bool connected = 5;
+}
