@@ -62,6 +62,14 @@
         "title": "CodeDesigner: Disconnect from Ps2Emulator"
       },
       {
+        "command": "codedesigner.findPs2Pointers",
+        "title": "CodeDesigner: Find Pointer Chains to an Address (Ps2Emulator)"
+      },
+      {
+        "command": "codedesigner.checkPs2Pointers",
+        "title": "CodeDesigner: Check Pointer Chains Again (Ps2Emulator)"
+      },
+      {
         "command": "codedesigner.sendMessage",
         "title": "CodeDesigner: Send Message to Server"
       },

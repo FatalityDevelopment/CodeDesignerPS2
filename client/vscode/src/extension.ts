@@ -16,6 +16,7 @@ import { ANIMATION_EDITOR_PAGE, MAP_EDITOR_PAGE, ModelEditorProvider } from './p
 import { WelcomeProvider, WelcomeDataDelegate } from './providers/welcome/welcomeProvider';
 import { SocketClient } from './socketClient';
 import { Ps2DebugClient, DEFAULT_PS2DEBUG_ADDRESS } from './ps2debug/ps2DebugClient';
+import type { DirectChain } from './ps2debug/directEmulator';
 import { registerWebviewDevReload } from './utils/devReload';
 
 let socketClient: SocketClient | null = null;
@@ -247,6 +248,77 @@ export function activate(context: vscode.ExtensionContext) {
 
 	context.subscriptions.push(vscode.commands.registerCommand('codedesigner.disconnectPs2Emulator', () => {
 		socketClient?.detachDirect();
+	}));
+
+	// Pointer chains to a value, found in Ps2Emulator (memory never leaves it).
+	let lastChains: DirectChain[] = [];
+	const chainText = (c: DirectChain) =>
+		`${c.base.toString(16).padStart(8, '0')} ${c.offsets.map(o => `+${o.toString(16)}`).join(' ')}`;
+	const parseAddress = (text: string) => {
+		const t = text.trim().replace(/^0x/i, '');
+		return /^[0-9a-f]{1,8}$/i.test(t) ? parseInt(t, 16) >>> 0 : undefined;
+	};
+	const pickChain = async (chains: DirectChain[], title: string) => {
+		const picked = await vscode.window.showQuickPick(chains.map(c => ({
+			label: chainText(c),
+			description: `${c.offsets.length} pointer${c.offsets.length === 1 ? '' : 's'}`
+				+ (c.leadsTo !== undefined ? ` → ${c.leadsTo.toString(16).padStart(8, '0')}` : ''),
+		})), { title, placeHolder: 'Pick a chain to copy it' });
+		if (picked) {
+			await vscode.env.clipboard.writeText(picked.label);
+			vscode.window.setStatusBarMessage(`Copied ${picked.label}`, 3000);
+		}
+	};
+	context.subscriptions.push(vscode.commands.registerCommand('codedesigner.findPs2Pointers', async () => {
+		const direct = socketClient?.getDirect();
+		if (!direct) {
+			vscode.window.showErrorMessage('Connect to Ps2Emulator first (CodeDesigner: Connect to Ps2Emulator).');
+			return;
+		}
+		const target = await vscode.window.showInputBox({ title: 'Find pointers to', prompt: 'EE address of the value (hex)' });
+		const address = target === undefined ? undefined : parseAddress(target);
+		if (address === undefined) { return; }
+		const bases = await vscode.window.showInputBox({
+			title: 'Chains start in',
+			prompt: 'Base range, hex start-end (empty: 0x100000 to the end of RAM). Static game data makes the best bases.',
+		});
+		if (bases === undefined) { return; }
+		const [from, to] = bases.split('-').map(parseAddress);
+		try {
+			const found = await direct.findPointers(address, 4, 0x1000, from ?? 0, to ?? 0, 1000);
+			lastChains = found.chains;
+			if (found.chains.length === 0) {
+				vscode.window.showInformationMessage(`No pointer chains to ${address.toString(16)} (${found.millis} ms).`);
+				return;
+			}
+			await pickChain(found.chains, `${found.chains.length}${found.limited ? '+' : ''} chains to ${address.toString(16)} (${found.millis} ms)`);
+		} catch (error) {
+			vscode.window.showErrorMessage(`Pointer scan failed: ${(error as Error).message}`);
+		}
+	}));
+	context.subscriptions.push(vscode.commands.registerCommand('codedesigner.checkPs2Pointers', async () => {
+		const direct = socketClient?.getDirect();
+		if (!direct || lastChains.length === 0) {
+			vscode.window.showErrorMessage('Find pointers in Ps2Emulator first.');
+			return;
+		}
+		const target = await vscode.window.showInputBox({
+			title: 'Check pointer chains',
+			prompt: 'Where the value is now (hex); empty to see where every chain leads',
+		});
+		if (target === undefined) { return; }
+		const address = target.trim() ? parseAddress(target) : undefined;
+		try {
+			const kept = await direct.checkPointers(lastChains, address);
+			if (address !== undefined) { lastChains = kept; }
+			if (kept.length === 0) {
+				vscode.window.showInformationMessage('No chain leads there now.');
+				return;
+			}
+			await pickChain(kept, `${kept.length} chains`);
+		} catch (error) {
+			vscode.window.showErrorMessage(`Pointer check failed: ${(error as Error).message}`);
+		}
 	}));
 
 	const sendMessageCommand = vscode.commands.registerCommand('codedesigner.sendMessage', async () => {

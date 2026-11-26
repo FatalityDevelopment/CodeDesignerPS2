@@ -44,6 +44,56 @@ export interface DirectLine {
 /** How much the emulator's state hints say (the disassembler's comment column). */
 export type DirectHintLevel = 'full' | 'addresses' | 'off';
 
+/** What a scan compares: an integer of 1, 2, 4 or 8 bytes, a float, a double, text or a byte pattern. */
+export type DirectValueKind = 'int' | 'float' | 'double' | 'string' | 'bytes';
+
+/** How a scan compares; the relative ones compare with the scan before. */
+export type DirectCompare =
+    | 'exact' | 'not' | 'greater' | 'less' | 'between' | 'unknown'
+    | 'changed' | 'unchanged' | 'increased' | 'decreased' | 'increasedBy' | 'decreasedBy';
+
+/** A first scan, run in the emulator. */
+export interface DirectScanRequest {
+    region: DirectRegion;
+    /** Offsets in the region (EE: physical); `end` 0 for the region's end. */
+    start: number;
+    end: number;
+    kind: DirectValueKind;
+    /** Bytes of an integer. */
+    size: number;
+    signed: boolean;
+    /** Integers typed as hex without `0x`. */
+    hex: boolean;
+    compare: DirectCompare;
+    value: string;
+    value2: string;
+}
+
+/** A scan session kept by the emulator. */
+export interface DirectScanInfo {
+    id: number;
+    count: number;
+    scans: number;
+    canUndo: boolean;
+    size: number;
+    millis: number;
+}
+
+/** One candidate: where, and its bytes at the last scan (and now, when asked). */
+export interface DirectScanResult {
+    address: number;
+    previous: Buffer;
+    current?: Buffer;
+}
+
+/** A pointer chain: read at `base`, add `offsets[0]`, read there, ... the target's offset last. */
+export interface DirectChain {
+    base: number;
+    offsets: number[];
+    /** Where it leads now (from checkPointers); undefined when a read fails. */
+    leadsTo?: number;
+}
+
 /** A code index region: main RAM or IOP RAM. */
 export type DirectRegion = 'ee' | 'iop';
 
@@ -177,4 +227,19 @@ export interface DirectEmulator {
     frames(maxFps: number, onFrame: (frame: DirectFrame) => void, onEnd: (error?: Error) => void): StopStream;
     /** Console text from the EE (`sio`) and the IOP (`printf`), as produced. */
     console(onText: (source: 'ee' | 'iop', text: string) => void): StopStream;
+
+    /** A first scan: a session the emulator keeps (memory never leaves it). */
+    newScan(request: DirectScanRequest): Promise<DirectScanInfo>;
+    /** Narrows a session, comparing with memory now and at the scan before. */
+    nextScan(id: number, compare: DirectCompare, value: string, value2: string, hex: boolean): Promise<DirectScanInfo>;
+    /** Back to the candidates before the last next scan. */
+    undoScan(id: number): Promise<DirectScanInfo>;
+    /** Up to `limit` candidates from the `from`th. */
+    scanResults(id: number, from: number, limit: number, current: boolean): Promise<DirectScanResult[]>;
+    endScan(id: number): Promise<void>;
+    /** Pointer chains from `[baseStart, baseEnd)` (both 0: the default) to an EE address. */
+    findPointers(target: number, maxDepth: number, maxOffset: number, baseStart: number, baseEnd: number, limit: number):
+        Promise<{ chains: DirectChain[]; limited: boolean; millis: number }>;
+    /** Where chains lead now; with `target`, only those reaching it. */
+    checkPointers(chains: DirectChain[], target?: number): Promise<DirectChain[]>;
 }

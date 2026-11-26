@@ -93,7 +93,7 @@ export class CheatScannerProvider {
         switch (type) {
             case 'ready':
                 this._postContext(webview);
-                this._postSession(webview, this._engine.summary());
+                await this._postSession(webview, this._engine.summary());
                 if (this._lastStruct) { webview.postMessage({ type: 'structResult', ...this._lastStruct }); }
                 break;
 
@@ -103,19 +103,19 @@ export class CheatScannerProvider {
                 break;
 
             case 'undoScan':
-                this._postSession(webview, this._engine.undo());
+                await this._postSession(webview, await this._engine.undo());
                 break;
 
             case 'newScan':
                 this._engine.reset();
-                this._postSession(webview, null);
+                await this._postSession(webview, null);
                 break;
 
             case 'page':
                 webview.postMessage({
                     type: 'scanPage',
                     offset: msg['offset'] as number,
-                    rows: this._engine.page(msg['offset'] as number, PAGE_SIZE),
+                    rows: await this._engine.page(msg['offset'] as number, PAGE_SIZE),
                 });
                 break;
 
@@ -188,7 +188,7 @@ export class CheatScannerProvider {
 
     private async _runScan(webview: vscode.Webview, request: ScanRequest, next: boolean): Promise<void> {
         if (!this.socketClient.isConnected()) {
-            webview.postMessage({ type: 'scanError', message: 'Not connected to the CodeDesigner bridge.' });
+            webview.postMessage({ type: 'scanError', message: 'Not connected to the CodeDesigner bridge or Ps2Emulator.' });
             return;
         }
         if (this._busy) { return; }
@@ -197,7 +197,7 @@ export class CheatScannerProvider {
         try {
             const summary = next ? await this._engine.nextScan(request) : await this._engine.firstScan(request);
             const secs = ((Date.now() - started) / 1000).toFixed(1);
-            this._postSession(webview, { ...summary, message: [summary.message, `Scan took ${secs}s.`].filter(Boolean).join(' ') });
+            await this._postSession(webview, { ...summary, message: [summary.message, `Scan took ${secs}s.`].filter(Boolean).join(' ') });
         } catch (err: unknown) {
             const message = err instanceof Error ? err.message : String(err);
             getOutputChannel().error(`[CheatScanner] ${message}`);
@@ -207,11 +207,11 @@ export class CheatScannerProvider {
         }
     }
 
-    private _postSession(webview: vscode.Webview, summary: ScanSummary | null): void {
+    private async _postSession(webview: vscode.Webview, summary: ScanSummary | null): Promise<void> {
         webview.postMessage({
             type: 'scanSession',
             summary,
-            rows: summary ? this._engine.page(0, PAGE_SIZE) : [],
+            rows: summary ? await this._engine.page(0, PAGE_SIZE) : [],
             pageSize: PAGE_SIZE,
         });
     }

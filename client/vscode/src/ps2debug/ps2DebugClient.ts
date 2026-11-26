@@ -13,7 +13,8 @@ import * as protobuf from 'protobufjs';
 import type { RegisterDump } from '../bridgeClient';
 import { classifyAddress, MemoryRegion } from '../shared/memoryRegions';
 import type {
-    DirectEmulator, DirectEmulatorEvents, DirectFrame, DirectHintLevel, DirectIndexInfo, DirectLine, DirectPause, DirectRef,
+    DirectChain, DirectCompare, DirectEmulator, DirectEmulatorEvents, DirectFrame, DirectHintLevel, DirectIndexInfo, DirectLine,
+    DirectPause, DirectRef, DirectScanInfo, DirectScanRequest, DirectScanResult,
     DirectRefKind, DirectRegion, DirectStatus, DirectSymbol, StopStream,
 } from './directEmulator';
 import protoText from './ps2debug.proto';
@@ -23,6 +24,8 @@ export const DEFAULT_PS2DEBUG_ADDRESS = '127.0.0.1:28100';
 /** Largest message the server sends or takes (a whole main RAM read fits). */
 const MAX_MESSAGE_BYTES = 64 << 20;
 const CALL_DEADLINE_MS = 10_000;
+/** Scans and pointer scans over all of main RAM, on slow machines. */
+const SCAN_DEADLINE_MS = 60_000;
 const CONNECT_DEADLINE_MS = 3_000;
 /** Lines one Disassemble returns at most. */
 const MAX_LINES = 4096;
@@ -86,6 +89,29 @@ const SYMBOL_PAGE = 65_536;
 interface LineWire {
     address: number; word: number; text: string; label: string; codeRefs: number; dataRefs: number;
     functionStart: boolean; targetLabel: string; hint: string;
+}
+
+interface ScanInfoWire { id: number; count: U64; scans: number; canUndo: boolean; size: number; millis: number }
+interface ScanResultWire { address: U64; previous: Buffer; current: Buffer }
+interface ChainWire { base: number; offsets: number[]; leadsTo?: number }
+
+const COMPARES: Record<DirectCompare, string> = {
+    exact: 'COMPARE_EXACT', not: 'COMPARE_NOT', greater: 'COMPARE_GREATER', less: 'COMPARE_LESS',
+    between: 'COMPARE_BETWEEN', unknown: 'COMPARE_UNKNOWN', changed: 'COMPARE_CHANGED',
+    unchanged: 'COMPARE_UNCHANGED', increased: 'COMPARE_INCREASED', decreased: 'COMPARE_DECREASED',
+    increasedBy: 'COMPARE_INCREASED_BY', decreasedBy: 'COMPARE_DECREASED_BY',
+};
+
+const VALUE_KINDS: Record<DirectScanRequest['kind'], string> = {
+    int: 'VALUE_INT', float: 'VALUE_FLOAT', double: 'VALUE_DOUBLE', string: 'VALUE_STRING', bytes: 'VALUE_BYTES',
+};
+
+function scanInfoFromWire(i: ScanInfoWire): DirectScanInfo {
+    return { id: i.id, count: Number(i.count), scans: i.scans, canUndo: i.canUndo, size: i.size, millis: i.millis };
+}
+
+function chainFromWire(c: ChainWire): DirectChain {
+    return { base: c.base >>> 0, offsets: c.offsets.map(o => o >>> 0), leadsTo: c.leadsTo === undefined || c.leadsTo === null ? undefined : c.leadsTo >>> 0 };
 }
 
 const HINT_LEVELS: Record<DirectHintLevel, string> = {
@@ -223,7 +249,7 @@ export class Ps2DebugClient implements DirectEmulator {
             'grpc.max_send_message_length': MAX_MESSAGE_BYTES,
         };
         const credentials = grpc.credentials.createInsecure();
-        for (const name of ['Session', 'Execution', 'Breakpoints', 'Memory', 'Registers', 'Code', 'Media', 'Symbols', 'Index']) {
+        for (const name of ['Session', 'Execution', 'Breakpoints', 'Memory', 'Registers', 'Code', 'Media', 'Symbols', 'Index', 'Search', 'Snapshots']) {
             this.services[name] = new constructors[name](address, credentials, options) as unknown as Service;
         }
     }
@@ -596,6 +622,53 @@ export class Ps2DebugClient implements DirectEmulator {
             lines.push(...reply.lines.map(lineFromWire));
         }
         return lines;
+    }
+
+    // ── search ──────────────────────────────────────────────────────────
+
+    public async newScan(r: DirectScanRequest): Promise<DirectScanInfo> {
+        const info = await this.call<ScanInfoWire>('Search', 'newScan', {
+            space: r.region === 'iop' ? 'IOP_RAM' : 'EE_RAM', start: r.start, end: r.end, kind: VALUE_KINDS[r.kind],
+            size: r.size, signed: r.signed, hex: r.hex, compare: COMPARES[r.compare], value: r.value, value2: r.value2,
+        }, SCAN_DEADLINE_MS);
+        return scanInfoFromWire(info);
+    }
+
+    public async nextScan(id: number, compare: DirectCompare, value: string, value2: string, hex: boolean): Promise<DirectScanInfo> {
+        const info = await this.call<ScanInfoWire>(
+            'Search', 'nextScan', { id, compare: COMPARES[compare], value, value2, hex }, SCAN_DEADLINE_MS,
+        );
+        return scanInfoFromWire(info);
+    }
+
+    public async undoScan(id: number): Promise<DirectScanInfo> {
+        return scanInfoFromWire(await this.call<ScanInfoWire>('Search', 'undoScan', { id }));
+    }
+
+    public async scanResults(id: number, from: number, limit: number, current: boolean): Promise<DirectScanResult[]> {
+        const page = await this.call<{ results: ScanResultWire[] }>('Search', 'scanResults', { id, from, limit, current });
+        return page.results.map(r => ({
+            address: Number(r.address), previous: r.previous, current: current && r.current.length ? r.current : undefined,
+        }));
+    }
+
+    public async endScan(id: number): Promise<void> {
+        await this.call<object>('Search', 'endScan', { id });
+    }
+
+    public async findPointers(target: number, maxDepth: number, maxOffset: number, baseStart: number, baseEnd: number, limit: number):
+        Promise<{ chains: DirectChain[]; limited: boolean; millis: number }> {
+        const reply = await this.call<{ chains: ChainWire[]; limited: boolean; millis: number }>('Search', 'findPointers', {
+            target: target >>> 0, maxDepth, maxOffset, baseStart, baseEnd, limit,
+        }, SCAN_DEADLINE_MS);
+        return { chains: reply.chains.map(chainFromWire), limited: reply.limited, millis: reply.millis };
+    }
+
+    public async checkPointers(chains: DirectChain[], target?: number): Promise<DirectChain[]> {
+        const request: Record<string, unknown> = { chains: chains.map(c => ({ base: c.base, offsets: c.offsets })) };
+        if (target !== undefined) { request['target'] = target >>> 0; }
+        const reply = await this.call<{ chains: ChainWire[] }>('Search', 'checkPointers', request);
+        return reply.chains.map(chainFromWire);
     }
 
     // ── index ───────────────────────────────────────────────────────────

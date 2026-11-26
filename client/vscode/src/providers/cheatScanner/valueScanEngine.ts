@@ -1,4 +1,5 @@
 import { SocketClient } from '../../socketClient';
+import type { DirectEmulator, DirectScanInfo, DirectScanRequest } from '../../ps2debug/directEmulator';
 
 /**
  * Cheat Engine-style first scan / next scan engine for the Cheat Scanner page.
@@ -12,6 +13,10 @@ import { SocketClient } from '../../socketClient';
  *  - dense mode keeps a full snapshot of the scanned range plus a per-slot
  *    candidate mask (used while the result set is still huge);
  *  - sparse mode keeps candidate addresses plus their previous raw bytes.
+ *
+ * With Ps2Emulator connected directly, the session lives in the emulator
+ * instead (its Search service): every scan runs there, against memory
+ * that never leaves it, and results are paged from it.
  */
 
 export type ScanValueType = 'u8' | 'u16' | 'u32' | 'f32' | 'string' | 'bytes';
@@ -85,6 +90,8 @@ interface SessionState {
     // sparse
     addrs?:    Uint32Array;
     prev?:     Buffer;
+    // in the emulator
+    remote?:   { direct: DirectEmulator; id: number; canUndo: boolean };
 }
 
 /** Comparator over decoded numbers; `prev` is NaN when no previous value applies. */
@@ -99,11 +106,20 @@ export class ValueScanEngine {
     get hasSession(): boolean { return this._state !== null; }
 
     reset(): void {
+        const remote = this._state?.remote;
+        if (remote) { remote.direct.endScan(remote.id).catch(() => { /* gone with the emulator */ }); }
         this._state = null;
         this._undo = null;
     }
 
-    undo(): ScanSummary | null {
+    async undo(): Promise<ScanSummary | null> {
+        const s = this._state;
+        if (s?.remote) {
+            if (!s.remote.canUndo) { return this.summary(); }
+            const info = await s.remote.direct.undoScan(s.remote.id);
+            this._state = this._fromRemote(s, s.remote.direct, info, s.scanCount - 1);
+            return this.summary('Reverted to the previous scan.');
+        }
         if (!this._undo) { return this.summary(); }
         this._state = this._undo;
         this._undo = null;
@@ -115,7 +131,7 @@ export class ValueScanEngine {
         if (!s) { return null; }
         return {
             count: s.count, scanCount: s.scanCount, valueType: s.valueType, region: s.region,
-            signed: s.signed, size: s.size, canUndo: this._undo !== null, message,
+            signed: s.signed, size: s.size, canUndo: s.remote ? s.remote.canUndo : this._undo !== null, message,
         };
     }
 
@@ -129,7 +145,11 @@ export class ValueScanEngine {
 
         let state: SessionState;
         let message: string | undefined;
-        if (req.valueType === 'string' || req.valueType === 'bytes') {
+        const direct = this.socket.getDirect();
+        if (this._state?.remote) { this.reset(); }
+        if (direct) {
+            state = await this._firstRemoteScan(direct, req);
+        } else if (req.valueType === 'string' || req.valueType === 'bytes') {
             state = await this._firstPatternScan(req);
         } else {
             const viaBridge = await this._firstBridgeScan(req);
@@ -212,6 +232,11 @@ export class ValueScanEngine {
 
         let next: SessionState;
         const meta: SessionState = { ...s, scanCount: s.scanCount + 1, snapshot: undefined, mask: undefined, addrs: undefined, prev: undefined, count: 0 };
+        if (s.remote) {
+            const info = await s.remote.direct.nextScan(s.remote.id, req.mode, req.value ?? '', req.value2 ?? '', !!req.hex);
+            this._state = this._fromRemote(meta, s.remote.direct, info, info.scans);
+            return this.summary()!;
+        }
         if (s.valueType === 'string' || s.valueType === 'bytes') {
             next = await this._nextPatternScan(s, meta, req);
         } else {
@@ -255,9 +280,17 @@ export class ValueScanEngine {
 
     // ── Paging / live values ─────────────────────────────────────────────────
 
-    page(offset: number, limit: number): ScanRow[] {
+    async page(offset: number, limit: number): Promise<ScanRow[]> {
         const s = this._state;
         if (!s) { return []; }
+        if (s.remote) {
+            const results = await s.remote.direct.scanResults(s.remote.id, offset, limit, false);
+            return results.map(r => ({
+                address: r.address >>> 0,
+                previous: formatValue(r.previous, 0, s.valueType, s.size, s.signed),
+                raw: r.previous.toString('hex'),
+            }));
+        }
         const rows: ScanRow[] = [];
         const push = (address: number, buf: Buffer, off: number) => {
             rows.push({
@@ -314,6 +347,39 @@ export class ValueScanEngine {
     }
 
     get regionTag(): ScanRegionTag | null { return this._state?.region ?? null; }
+
+    // ── In the emulator ──────────────────────────────────────────────────────
+
+    private async _firstRemoteScan(direct: DirectEmulator, req: ScanRequest): Promise<SessionState> {
+        const mask = req.region === 'iop' ? 0x001f_ffff : 0x01ff_ffff;
+        const start = req.start & mask;
+        const request: DirectScanRequest = {
+            region: req.region,
+            start,
+            end: start + (req.end - req.start),
+            kind: req.valueType === 'f32' ? 'float' : req.valueType === 'string' || req.valueType === 'bytes' ? req.valueType : 'int',
+            size: req.valueType === 'string' || req.valueType === 'bytes' ? 0 : typeSize(req.valueType),
+            signed: !!req.signed,
+            hex: !!req.hex,
+            compare: req.mode,
+            value: req.value ?? '',
+            value2: req.value2 ?? '',
+        };
+        const info = await direct.newScan(request);
+        const meta: SessionState = {
+            valueType: req.valueType, signed: !!req.signed, region: req.region, start: req.start, end: req.end,
+            size: info.size, step: info.size, count: 0, scanCount: 1,
+        };
+        return this._fromRemote(meta, direct, info, 1);
+    }
+
+    private _fromRemote(meta: SessionState, direct: DirectEmulator, info: DirectScanInfo, scans: number): SessionState {
+        return {
+            ...meta, snapshot: undefined, mask: undefined, addrs: undefined, prev: undefined,
+            size: info.size, count: info.count, scanCount: scans,
+            remote: { direct, id: info.id, canUndo: info.canUndo },
+        };
+    }
 
     // ── Internals ────────────────────────────────────────────────────────────
 

@@ -304,6 +304,36 @@ service Memory {
   // order; each is partial on its own as Read's are.
   rpc ReadMany(ReadManyRequest) returns (ReadManyReply);
   rpc Write(WriteRequest) returns (WriteReply);
+  // The items' bytes as they change: all of them first, then the ones
+  // that changed, sampled every `interval_ms`. Ends when the client goes.
+  rpc Watch(WatchRequest) returns (stream WatchUpdate);
+}
+
+message WatchItem {
+  AddressSpace space = 1;
+  uint64 offset = 2;
+  // At most 4096 bytes.
+  uint32 length = 3;
+}
+
+message WatchRequest {
+  // At most 1024.
+  repeated WatchItem items = 1;
+  // Between samples (0: 100 ms; at least 16 ms).
+  uint32 interval_ms = 2;
+}
+
+message WatchValue {
+  // Index in `WatchRequest.items`.
+  uint32 item = 1;
+  // As much as could be read (a read stops at unmapped memory).
+  bytes data = 2;
+}
+
+message WatchUpdate {
+  // The field the sample was taken in.
+  uint64 field = 1;
+  repeated WatchValue values = 2;
 }
 
 message ReadRequest {
@@ -753,4 +783,253 @@ message TablesReply {
   repeated TableInfo tables = 1;
   uint32 total = 2;
   optional uint32 next = 3;
+}
+
+// ---------------------------------------------------------------- search
+
+// Value scans that narrow down where a game keeps a value, the way a cheat
+// search does, and pointer chains to it. Sessions, their candidates and
+// the memory they compare with stay in the emulator: a client pages
+// through results and never copies memory.
+service Search {
+  // A first scan of a region: a new session with its candidates.
+  rpc NewScan(NewScanRequest) returns (ScanInfo);
+  // Narrows a session's candidates, comparing with memory now (and with
+  // what they held at the last scan).
+  rpc NextScan(NextScanRequest) returns (ScanInfo);
+  // Back to the candidates before the last next scan (one step).
+  rpc UndoScan(ScanRef) returns (ScanInfo);
+  rpc ScanResults(ScanResultsRequest) returns (ScanResultsPage);
+  rpc EndScan(ScanRef) returns (Empty);
+  rpc ListScans(Empty) returns (ScanList);
+  // Pointer chains from base addresses to a target in EE main RAM, from
+  // a snapshot of it.
+  rpc FindPointers(FindPointersRequest) returns (PointerChains);
+  // Where chains lead in memory now (after the game moved things: keep
+  // the ones that still reach the value).
+  rpc CheckPointers(CheckPointersRequest) returns (PointerChains);
+}
+
+enum ValueKind {
+  // An integer of `size` 1, 2, 4 or 8 bytes.
+  VALUE_INT = 0;
+  VALUE_FLOAT = 1;   // 4 bytes
+  VALUE_DOUBLE = 2;  // 8 bytes
+  VALUE_STRING = 3;  // Latin-1 text
+  VALUE_BYTES = 4;   // hex bytes, `??` for any
+}
+
+enum Compare {
+  COMPARE_EXACT = 0;
+  COMPARE_NOT = 1;
+  COMPARE_GREATER = 2;
+  COMPARE_LESS = 3;
+  // Between `value` and `value2`, inclusive.
+  COMPARE_BETWEEN = 4;
+  // Anything (first scans only).
+  COMPARE_UNKNOWN = 5;
+  // The rest compare with the last scan (next scans only).
+  COMPARE_CHANGED = 6;
+  COMPARE_UNCHANGED = 7;
+  COMPARE_INCREASED = 8;
+  COMPARE_DECREASED = 9;
+  COMPARE_INCREASED_BY = 10;
+  COMPARE_DECREASED_BY = 11;
+}
+
+message NewScanRequest {
+  // EE_RAM, IOP_RAM or SCRATCHPAD.
+  AddressSpace space = 1;
+  uint64 start = 2;
+  // Exclusive; 0: the end of the space.
+  uint64 end = 3;
+  ValueKind kind = 4;
+  // Bytes of a VALUE_INT.
+  uint32 size = 5;
+  bool signed = 6;
+  // Integers are hex without `0x`.
+  bool hex = 7;
+  Compare compare = 8;
+  // As typed: decimal, `0x` hex; floats equal it when they round to it.
+  string value = 9;
+  string value2 = 10;
+  // Bytes between candidates (0: the value's size; patterns go byte by
+  // byte).
+  uint32 step = 11;
+}
+
+message NextScanRequest {
+  uint32 id = 1;
+  Compare compare = 2;
+  string value = 3;
+  string value2 = 4;
+  bool hex = 5;
+}
+
+message ScanRef {
+  uint32 id = 1;
+}
+
+message ScanInfo {
+  uint32 id = 1;
+  uint64 count = 2;
+  // Scans so far, the first included.
+  uint32 scans = 3;
+  bool can_undo = 4;
+  AddressSpace space = 5;
+  ValueKind kind = 6;
+  uint32 size = 7;
+  bool signed = 8;
+  // The field the last scan read memory in, and how long it took.
+  uint64 field = 9;
+  uint32 millis = 10;
+}
+
+message ScanList {
+  repeated ScanInfo scans = 1;
+}
+
+message ScanResultsRequest {
+  uint32 id = 1;
+  uint64 from = 2;
+  // At most 10000 (0: 100).
+  uint32 limit = 3;
+  // Read each result's value now too.
+  bool current = 4;
+}
+
+message ScanResult {
+  // Offset in the session's space (for EE_RAM, the physical address).
+  uint64 address = 1;
+  // What it held at the last scan, raw and as text.
+  bytes previous = 2;
+  string previous_text = 3;
+  // Now, when asked (empty when it cannot be read).
+  bytes current = 4;
+  string current_text = 5;
+}
+
+message ScanResultsPage {
+  repeated ScanResult results = 1;
+  uint64 count = 2;
+}
+
+message PointerChain {
+  // Physical EE address of the first pointer.
+  uint32 base = 1;
+  // Added after each read; the target's offset last.
+  repeated uint32 offsets = 2;
+  // Where it leads now (CheckPointers), unset when a read fails.
+  optional uint32 leads_to = 3;
+}
+
+message FindPointersRequest {
+  // EE address of the value (any alias).
+  uint32 target = 1;
+  // Pointers per chain, at most (0: 4; at most 8).
+  uint32 max_depth = 2;
+  // Largest offset after a pointer (0: 0x1000).
+  uint32 max_offset = 3;
+  // Where chains may start, physical (both 0: 0x100000 to the end of
+  // RAM). Static data, which does not move, makes the useful bases.
+  uint32 base_start = 4;
+  uint32 base_end = 5;
+  // Chains, at most (0: 1000; at most 100000).
+  uint32 limit = 6;
+  // Take unaligned words for pointers too (pointers to objects are
+  // aligned; the offset after one need not be).
+  bool unaligned = 7;
+}
+
+message CheckPointersRequest {
+  repeated PointerChain chains = 1;
+  // When set, only chains that lead to this address (any alias).
+  optional uint32 target = 2;
+}
+
+message PointerChains {
+  // The shortest first.
+  repeated PointerChain chains = 1;
+  // The limit stopped the scan.
+  bool limited = 2;
+  uint32 millis = 3;
+}
+
+// ------------------------------------------------------------- snapshots
+
+// Copies of memory kept in the emulator, to compare later.
+service Snapshots {
+  rpc Take(TakeSnapshotRequest) returns (SnapshotInfo);
+  rpc List(Empty) returns (SnapshotList);
+  rpc Drop(SnapshotRef) returns (Empty);
+  // Where two snapshots (or one and memory now) differ.
+  rpc Diff(DiffRequest) returns (DiffReply);
+  // What a few bytes held in each snapshot, oldest first.
+  rpc History(HistoryRequest) returns (HistoryReply);
+}
+
+message TakeSnapshotRequest {
+  string name = 1;
+  // EE_RAM (default), IOP_RAM or SCRATCHPAD.
+  AddressSpace space = 2;
+}
+
+message SnapshotInfo {
+  uint32 id = 1;
+  string name = 2;
+  AddressSpace space = 3;
+  uint64 size = 4;
+  uint64 field = 5;
+}
+
+message SnapshotList {
+  repeated SnapshotInfo snapshots = 1;
+}
+
+message SnapshotRef {
+  uint32 id = 1;
+}
+
+message DiffRequest {
+  uint32 before = 1;
+  // Unset: memory now.
+  optional uint32 after = 2;
+  // Compared in words of this many bytes (0: 4).
+  uint32 unit = 3;
+  // First offset to compare.
+  uint64 from = 4;
+  // Spans, at most (0: 1000; at most 100000).
+  uint32 limit = 5;
+}
+
+message DiffSpan {
+  uint64 offset = 1;
+  uint32 length = 2;
+  // The first 64 bytes of the span on each side.
+  bytes before = 3;
+  bytes after = 4;
+}
+
+message DiffReply {
+  repeated DiffSpan spans = 1;
+  // Where to continue (from), when the limit was reached.
+  optional uint64 next = 2;
+}
+
+message HistoryRequest {
+  AddressSpace space = 1;
+  uint64 offset = 2;
+  // At most 64.
+  uint32 length = 3;
+}
+
+message HistoryValue {
+  uint32 snapshot = 1;
+  string name = 2;
+  uint64 field = 3;
+  bytes data = 4;
+}
+
+message HistoryReply {
+  repeated HistoryValue values = 1;
 }
