@@ -296,6 +296,97 @@ export function activate(context: vscode.ExtensionContext) {
 			vscode.window.showErrorMessage(`Pointer scan failed: ${(error as Error).message}`);
 		}
 	}));
+	// Traces in Ps2Emulator: who writes an address, and what code runs.
+	const hex8 = (n: number) => (n >>> 0).toString(16).padStart(8, '0');
+	const waitForTrace = async (direct: NonNullable<ReturnType<NonNullable<typeof socketClient>['getDirect']>>, id: number) => {
+		for (;;) {
+			const info = await direct.traceStatus(id);
+			if (!info.running) { return info; }
+			await new Promise(r => setTimeout(r, 200));
+		}
+	};
+	context.subscriptions.push(vscode.commands.registerCommand('codedesigner.ps2WhoWrites', async () => {
+		const direct = socketClient?.getDirect();
+		if (!direct) {
+			vscode.window.showErrorMessage('Connect to Ps2Emulator first (CodeDesigner: Connect to Ps2Emulator).');
+			return;
+		}
+		const target = await vscode.window.showInputBox({ title: 'Who writes', prompt: 'EE address (hex); 4 bytes are watched' });
+		const address = target === undefined ? undefined : parseAddress(target);
+		if (address === undefined) { return; }
+		const seconds = await vscode.window.showInputBox({ title: 'For how long', prompt: 'Seconds of game time', value: '1' });
+		const fields = Math.max(1, Math.round(Number(seconds ?? '1') * 60));
+		try {
+			const trace = await vscode.window.withProgress(
+				{ location: vscode.ProgressLocation.Notification, title: `Tracing writes to ${hex8(address)} (the game runs slower meanwhile)` },
+				async () => {
+					const started = await direct.startTrace({ writes: [{ address, length: 4 }], fields, limit: 100_000 });
+					return waitForTrace(direct, started.id);
+				});
+			const { records } = await direct.traceRecords(trace.id, 0, 100_000);
+			await direct.dropTrace(trace.id);
+			const writers = new Map<number, { count: number; last: number }>();
+			for (const r of records) {
+				if (r.kind === 'access' && r.write) {
+					const w = writers.get(r.pc) ?? { count: 0, last: 0 };
+					writers.set(r.pc, { count: w.count + 1, last: r.value });
+				}
+			}
+			if (writers.size === 0) {
+				vscode.window.showInformationMessage(`Nothing wrote ${hex8(address)} in ${fields} fields.`);
+				return;
+			}
+			const picked = await vscode.window.showQuickPick([...writers.entries()].sort((a, b) => b[1].count - a[1].count).map(([pc, w]) => ({
+				label: hex8(pc), description: `${w.count} write${w.count === 1 ? '' : 's'}, last 0x${w.last.toString(16)}`,
+			})), { title: `Instructions that wrote ${hex8(address)}`, placeHolder: 'Pick one to copy its address' });
+			if (picked) { await vscode.env.clipboard.writeText(picked.label); }
+		} catch (error) {
+			vscode.window.showErrorMessage(`Trace failed: ${(error as Error).message}`);
+		}
+	}));
+	let coverageTrace: number | undefined;
+	let previousCoverage: number | undefined;
+	context.subscriptions.push(vscode.commands.registerCommand('codedesigner.ps2StartCoverage', async () => {
+		const direct = socketClient?.getDirect();
+		if (!direct) {
+			vscode.window.showErrorMessage('Connect to Ps2Emulator first (CodeDesigner: Connect to Ps2Emulator).');
+			return;
+		}
+		try {
+			if (coverageTrace !== undefined) { await direct.stopTrace(coverageTrace); }
+			coverageTrace = (await direct.startTrace({ coverage: true, limit: 1 })).id;
+			vscode.window.showInformationMessage('Recording which code runs (the game runs slower meanwhile). Stop with "Stop Coverage".');
+		} catch (error) {
+			vscode.window.showErrorMessage(`Trace failed: ${(error as Error).message}`);
+		}
+	}));
+	context.subscriptions.push(vscode.commands.registerCommand('codedesigner.ps2StopCoverage', async () => {
+		const direct = socketClient?.getDirect();
+		if (!direct || coverageTrace === undefined) {
+			vscode.window.showErrorMessage('Start a coverage recording first.');
+			return;
+		}
+		try {
+			const id = coverageTrace;
+			coverageTrace = undefined;
+			const info = await direct.stopTrace(id);
+			const baseline = previousCoverage;
+			const result = await direct.coverage(id, baseline);
+			if (baseline !== undefined) { await direct.dropTrace(baseline).catch(() => { /* already gone */ }); }
+			previousCoverage = id;
+			const instructions = result.ranges.reduce((sum, [, len]) => sum + len / 4, 0);
+			const what = baseline === undefined
+				? `${info.covered} instructions ran`
+				: `${instructions} instructions ran that did not the time before`;
+			const picked = await vscode.window.showQuickPick(result.functions.map(f => ({ label: hex8(f) })), {
+				title: `${what}; ${result.functions.length} indexed functions start in them`,
+				placeHolder: result.functions.length ? 'Pick a function to copy its address' : 'Build the code index to see functions',
+			});
+			if (picked) { await vscode.env.clipboard.writeText(picked.label); }
+		} catch (error) {
+			vscode.window.showErrorMessage(`Coverage failed: ${(error as Error).message}`);
+		}
+	}));
 	context.subscriptions.push(vscode.commands.registerCommand('codedesigner.checkPs2Pointers', async () => {
 		const direct = socketClient?.getDirect();
 		if (!direct || lastChains.length === 0) {

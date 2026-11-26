@@ -12,7 +12,7 @@ const DIRECT_LABEL_SOURCE = 'codedesigner';
 
 /** Which index reference kinds each of the Bridge's xref kind groups covers. */
 const DIRECT_KIND_GROUPS: Record<string, DirectRefKind[]> = {
-    controlFlow: ['call', 'jump', 'branch', 'registerJump', 'case'],
+    controlFlow: ['call', 'jump', 'branch', 'registerJump', 'case', 'observed'],
     resolved: ['address', 'load', 'store'],
     pointer: ['pointer'],
 };
@@ -28,6 +28,7 @@ const DIRECT_KIND_TEXT: Record<DirectRefKind, [string, string, string]> = {
     store: ['resolved', 'Store', 'Stores to'],
     case: ['controlFlow', 'Switch case', 'Switch table entry for'],
     pointer: ['pointer', 'Pointer', 'Pointer to'],
+    observed: ['controlFlow', 'Observed call', 'Was seen calling'],
 };
 
 /**
@@ -3309,6 +3310,11 @@ export class BridgeClient {
      * Get EE OS thread list from the emulator.
      */
     public async getThreads(): Promise<ThreadEntry[]> {
+        const direct = this.getDirect();
+        if (direct && !this.connected) {
+            const threads = await direct.eeThreads();
+            return threads.map(t => ({ id: t.id, status: t.state, pc: t.pc, sp: t.sp, priority: t.priority, entryPc: t.entry }));
+        }
         const command: CommandMessage = { Command: 'GETTHREADS' };
         const response = await this.sendCommand(command);
         if (!response.Success) {
@@ -3328,6 +3334,15 @@ export class BridgeClient {
      * Get the list of loaded IOP modules (PINE mode only).
      */
     public async getModules(): Promise<ModuleEntry[]> {
+        const direct = this.getDirect();
+        if (direct && !this.connected) {
+            const hex = (n: number) => `0x${(n >>> 0).toString(16).toUpperCase().padStart(8, '0')}`;
+            const modules = await direct.iopModules();
+            return modules.map(m => ({
+                name: m.name, version: m.version, textAddr: hex(m.text), entry: hex(m.entry), gp: hex(m.gp),
+                textSize: m.textSize, dataSize: m.dataSize, bssSize: m.bssSize,
+            }));
+        }
         const command: CommandMessage = { Command: 'GETMODULES' };
         const response = await this.sendCommand(command);
         if (!response.Success) {

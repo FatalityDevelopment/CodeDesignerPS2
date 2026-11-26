@@ -1721,6 +1721,20 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                     getOutputChannel().appendLine(`[LIVE] Failed to get threads: ${err?.message ?? err}`);
                     panel.webview.postMessage({ type: 'threads', threads: [] });
                 }
+            } else if (message.type === 'getCallStack') {
+                // Ps2Emulator walks the stack from the code itself; without it
+                // the webview's own guess from the stack bytes stands.
+                const direct = this.socketClient?.getDirect();
+                if (!direct) { return; }
+                try {
+                    const frames = await direct.stackWalk();
+                    panel.webview.postMessage({
+                        type: 'callStack',
+                        frames: frames.map((f, index) => ({ index, pc: f.pc, functionLabel: f.function || undefined })),
+                    });
+                } catch (err: any) {
+                    getOutputChannel().appendLine(`[LIVE] Failed to walk the stack: ${err?.message ?? err}`);
+                }
             } else if (message.type === 'getModules') {
                 if (!this.socketClient?.isConnected()) {
                     panel.webview.postMessage({ type: 'modules', modules: [] });

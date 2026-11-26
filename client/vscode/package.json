@@ -70,6 +70,18 @@
         "title": "CodeDesigner: Check Pointer Chains Again (Ps2Emulator)"
       },
       {
+        "command": "codedesigner.ps2WhoWrites",
+        "title": "CodeDesigner: Who Writes This Address? (Ps2Emulator Trace)"
+      },
+      {
+        "command": "codedesigner.ps2StartCoverage",
+        "title": "CodeDesigner: Start Coverage (Ps2Emulator Trace)"
+      },
+      {
+        "command": "codedesigner.ps2StopCoverage",
+        "title": "CodeDesigner: Stop Coverage, Show What Ran Only This Time (Ps2Emulator)"
+      },
+      {
         "command": "codedesigner.sendMessage",
         "title": "CodeDesigner: Send Message to Server"
       },

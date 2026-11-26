@@ -94,6 +94,72 @@ export interface DirectChain {
     leadsTo?: number;
 }
 
+/** A thread as its kernel keeps it. */
+export interface DirectThread {
+    id: number;
+    state: 'running' | 'ready' | 'waiting' | 'suspended' | 'waitingSuspended' | 'dormant' | 'other';
+    /** Where it runs, or will resume. */
+    pc: number;
+    sp: number;
+    ra: number;
+    entry: number;
+    priority: number;
+}
+
+/** A loaded IOP module. */
+export interface DirectModule {
+    name: string;
+    /** Major and minor, a byte each. */
+    version: number;
+    entry: number;
+    gp: number;
+    text: number;
+    textSize: number;
+    dataSize: number;
+    bssSize: number;
+}
+
+/** One call on a stack, innermost first. */
+export interface DirectStackFrame {
+    pc: number;
+    sp: number;
+    /** Where its function starts, when found. */
+    entry?: number;
+    stackSize: number;
+    /** The symbol at the entry ('' when none). */
+    function: string;
+}
+
+/** What a trace records. */
+export interface DirectTraceSpec {
+    coverage?: boolean;
+    calls?: boolean;
+    branches?: boolean;
+    /** Stores (and loads) to log: EE address, bytes. */
+    writes?: { address: number; length: number }[];
+    reads?: { address: number; length: number }[];
+    /** Stop by itself after this many fields. */
+    fields?: number;
+    limit?: number;
+}
+
+/** A trace's state. */
+export interface DirectTraceInfo {
+    id: number;
+    running: boolean;
+    instructions: number;
+    records: number;
+    covered: number;
+}
+
+/** One thing a trace saw. */
+export type DirectTraceRecord =
+    | { kind: 'call'; from: number; to: number; sp: number; args: number[]; indirect: boolean }
+    | { kind: 'return'; from: number; to: number }
+    | { kind: 'branch'; from: number; to: number; indirect: boolean }
+    | { kind: 'instruction'; pc: number }
+    | { kind: 'access'; pc: number; address: number; size: number; write: boolean; value: number };
+
 /** A code index region: main RAM or IOP RAM. */
 export type DirectRegion = 'ee' | 'iop';
 
@@ -111,7 +177,8 @@ export interface DirectIndexInfo {
 }
 
 /** The protocol's reference kinds. */
-export type DirectRefKind = 'call' | 'jump' | 'branch' | 'registerJump' | 'address' | 'load' | 'store' | 'pointer' | 'case';
+/** `observed`: a call or jump through a register that a trace saw land there. */
+export type DirectRefKind = 'call' | 'jump' | 'branch' | 'registerJump' | 'address' | 'load' | 'store' | 'pointer' | 'case' | 'observed';
 
 /** A reference to an address, from the index. */
 export interface DirectRef {
@@ -242,4 +309,21 @@ export interface DirectEmulator {
         Promise<{ chains: DirectChain[]; limited: boolean; millis: number }>;
     /** Where chains lead now; with `target`, only those reaching it. */
     checkPointers(chains: DirectChain[], target?: number): Promise<DirectChain[]>;
+
+    /** The EE kernel's threads. */
+    eeThreads(): Promise<DirectThread[]>;
+    /** The IOP's loaded modules. */
+    iopModules(): Promise<DirectModule[]>;
+    /** The calls the EE (or an EE thread) is in, innermost first. */
+    stackWalk(thread?: number): Promise<DirectStackFrame[]>;
+
+    /** Arms a trace (the EE is interpreted while it runs). */
+    startTrace(spec: DirectTraceSpec): Promise<DirectTraceInfo>;
+    traceStatus(id: number): Promise<DirectTraceInfo>;
+    /** Disarms a trace; what it recorded stays until dropTrace. */
+    stopTrace(id: number): Promise<DirectTraceInfo>;
+    traceRecords(id: number, from: number, limit: number): Promise<{ total: number; records: DirectTraceRecord[] }>;
+    /** Code a stopped trace saw run (less what `without` saw), as [start, bytes] ranges, and the indexed functions in it. */
+    coverage(id: number, without?: number): Promise<{ ranges: [number, number][]; functions: number[] }>;
+    dropTrace(id: number): Promise<void>;
 }

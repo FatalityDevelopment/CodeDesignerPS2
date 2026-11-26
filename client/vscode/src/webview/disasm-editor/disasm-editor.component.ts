@@ -1138,6 +1138,10 @@ export class DisasmEditorComponent implements AfterViewInit {
       params.signals.callStack.set(typedFrames);
       params.bottomPanelCallStack.set(typedFrames);
       params.bottomPanelBreakpoints.set(new Set(params.state.breakpoints));
+      // A walk from the emulator, when one answers, replaces the guess.
+      if (params.state.isLive) {
+        params.vscode.postMessage({ type: 'getCallStack' });
+      }
     }
   }
 
@@ -2887,6 +2891,12 @@ export class DisasmEditorComponent implements AfterViewInit {
     // Subscribe to modules response from extension host
     svc.modulesReceived$.subscribe(modules => {
       bottomPanelModules.set(modules ?? []);
+    });
+    // A stack the emulator walked replaces the guess from the stack bytes.
+    svc.callStackReceived$.subscribe(frames => {
+      if (frames.length === 0) { return; }
+      signals.callStack.set(frames);
+      bottomPanelCallStack.set(frames);
     });
 
     // ── Cleanup ───────────────────────────────────────────────────────────────

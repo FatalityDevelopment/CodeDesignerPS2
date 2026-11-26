@@ -700,6 +700,8 @@ enum RefKind {
   REF_STORE = 6;
   REF_POINTER = 7;        // a data word holding it
   REF_CASE = 8;           // a switch table entry
+  // A jalr or jr through a register that a trace saw land here.
+  REF_OBSERVED = 9;
 }
 
 message RefsToRequest {
@@ -1032,4 +1034,244 @@ message HistoryValue {
 
 message HistoryReply {
   repeated HistoryValue values = 1;
+}
+
+// ----------------------------------------------------------------- trace
+
+// What the EE does while it runs, recorded inside the run loop: coverage,
+// calls and returns, branches, every instruction, loads and stores to
+// chosen addresses. While a trace runs the EE is interpreted one
+// instruction at a time (as with breakpoints); results stay in the
+// emulator until dropped. A trace's indirect calls and jumps are added to
+// the code index's references (REF_OBSERVED) when it stops.
+service Trace {
+  rpc Start(StartTraceRequest) returns (TraceInfo);
+  // Disarms a trace; what it recorded stays until Drop.
+  rpc Stop(TraceRef) returns (TraceInfo);
+  rpc Status(TraceRef) returns (TraceInfo);
+  rpc List(Empty) returns (TraceList);
+  // A stopped trace's records, in order.
+  rpc Records(TraceRecordsRequest) returns (TraceRecordsPage);
+  // The code a stopped trace saw run, optionally less what another saw
+  // ("what runs when I fire": a trace while firing without one while not).
+  rpc Coverage(CoverageRequest) returns (CoverageReply);
+  // Who called whom in a stopped trace's calls, by function.
+  rpc CallGraph(TraceRef) returns (CallGraphReply);
+  rpc Drop(TraceRef) returns (Empty);
+}
+
+message AccessFilter {
+  // EE address (any alias) and bytes.
+  uint32 address = 1;
+  uint32 length = 2;
+  bool reads = 3;
+  bool writes = 4;
+}
+
+message StartTraceRequest {
+  // Its owner: the trace goes when the client does.
+  uint32 client = 1;
+  bool coverage = 2;
+  // Calls (jal, jalr, bal) with their arguments, and returns (jr ra).
+  bool calls = 3;
+  // Taken branches and jumps.
+  bool branches = 4;
+  // Every instruction's address.
+  bool instructions = 5;
+  // Loads and stores to log ("who writes this").
+  repeated AccessFilter accesses = 6;
+  // Records to keep (0: 65536; at most 4194304); later ones are counted.
+  uint32 limit = 7;
+  // Stop by itself after this many fields (0: when asked).
+  uint32 fields = 8;
+}
+
+message TraceRef {
+  uint32 id = 1;
+}
+
+message TraceInfo {
+  uint32 id = 1;
+  bool running = 2;
+  uint64 instructions = 3;
+  uint64 records = 4;
+  // Records past the limit, not kept.
+  uint64 dropped = 5;
+  // Distinct instructions that ran (with coverage).
+  uint64 covered = 6;
+  uint64 start_field = 7;
+  // When it stopped (0 while running).
+  uint64 end_field = 8;
+}
+
+message TraceList {
+  repeated TraceInfo traces = 1;
+}
+
+message CallRecord {
+  uint32 from = 1;
+  uint32 to = 2;
+  uint32 sp = 3;
+  // a0-a3 as the callee got them.
+  repeated uint32 args = 4;
+  // Through a register (jalr).
+  bool indirect = 5;
+}
+
+message ReturnRecord {
+  uint32 from = 1;
+  uint32 to = 2;
+}
+
+message BranchRecord {
+  uint32 from = 1;
+  uint32 to = 2;
+  bool indirect = 3;
+}
+
+message AccessRecord {
+  // The instruction.
+  uint32 pc = 1;
+  // Physical address.
+  uint32 address = 2;
+  uint32 size = 3;
+  bool write = 4;
+  U128 value = 5;
+}
+
+message TraceRecord {
+  oneof kind {
+    CallRecord call = 1;
+    ReturnRecord return = 2;
+    BranchRecord branch = 3;
+    uint32 instruction = 4;
+    AccessRecord access = 5;
+  }
+}
+
+message TraceRecordsRequest {
+  uint32 id = 1;
+  uint64 from = 2;
+  // At most 100000 (0: 1000).
+  uint32 limit = 3;
+}
+
+message TraceRecordsPage {
+  repeated TraceRecord records = 1;
+  uint64 total = 2;
+}
+
+message CoverageRequest {
+  uint32 id = 1;
+  // Leave out what this trace saw run.
+  optional uint32 without = 2;
+}
+
+message CoverageRange {
+  // Physical address and bytes of consecutive instructions that ran.
+  uint32 start = 1;
+  uint32 length = 2;
+}
+
+message CoverageReply {
+  repeated CoverageRange ranges = 1;
+  // Instructions in the ranges.
+  uint64 instructions = 2;
+  // Functions (from the EE index) whose first instruction is in them.
+  repeated uint32 functions = 3;
+}
+
+message CallEdge {
+  // The calling function (its start, from the EE index; the call itself
+  // without one) and the callee.
+  uint32 caller = 1;
+  uint32 callee = 2;
+  uint32 count = 3;
+  string caller_name = 4;
+  string callee_name = 5;
+}
+
+message CallGraphReply {
+  // Most frequent first.
+  repeated CallEdge edges = 1;
+}
+
+// -------------------------------------------------------------------- os
+
+// What the guest's kernels keep, read in place: threads, modules, stacks.
+// Empty while a kernel is not up (or not where expected).
+service Os {
+  rpc EeThreads(Empty) returns (ThreadList);
+  rpc IopThreads(Empty) returns (ThreadList);
+  rpc IopModules(Empty) returns (ModuleList);
+  // The calls an EE thread is in, innermost first.
+  rpc StackWalk(StackWalkRequest) returns (StackWalkReply);
+}
+
+enum ThreadState {
+  THREAD_OTHER = 0;
+  THREAD_RUNNING = 1;
+  THREAD_READY = 2;
+  THREAD_WAITING = 3;
+  THREAD_SUSPENDED = 4;
+  THREAD_WAITING_SUSPENDED = 5;
+  THREAD_DORMANT = 6;
+}
+
+message ThreadInfo {
+  uint32 id = 1;
+  ThreadState state = 2;
+  // Where it runs, or will resume.
+  uint32 pc = 3;
+  // Saved (or the CPU's, running); 0 when not known.
+  uint32 sp = 4;
+  uint32 ra = 5;
+  uint32 entry = 6;
+  uint32 priority = 7;
+  // What it waits for: a kernel-specific kind and the object's id.
+  uint32 wait_kind = 8;
+  uint32 wait_id = 9;
+  uint32 stack = 10;
+  uint32 stack_size = 11;
+}
+
+message ThreadList {
+  repeated ThreadInfo threads = 1;
+}
+
+message ModuleInfo {
+  string name = 1;
+  // Major and minor, a byte each.
+  uint32 version = 2;
+  uint32 entry = 3;
+  uint32 gp = 4;
+  uint32 text = 5;
+  uint32 text_size = 6;
+  uint32 data_size = 7;
+  uint32 bss_size = 8;
+}
+
+message ModuleList {
+  // The latest loaded first.
+  repeated ModuleInfo modules = 1;
+}
+
+message StackWalkRequest {
+  // An EE thread's id (EeThreads); unset: the CPU as it is now.
+  optional uint32 thread = 1;
+}
+
+message StackFrame {
+  // The PC, or the return address into the frame.
+  uint32 pc = 1;
+  uint32 sp = 2;
+  // Where its function starts, when found.
+  optional uint32 entry = 3;
+  uint32 stack_size = 4;
+  // The symbol at the entry (empty: none).
+  string function = 5;
+}
+
+message StackWalkReply {
+  repeated StackFrame frames = 1;
 }

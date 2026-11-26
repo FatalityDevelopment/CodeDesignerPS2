@@ -14,7 +14,8 @@ import type { RegisterDump } from '../bridgeClient';
 import { classifyAddress, MemoryRegion } from '../shared/memoryRegions';
 import type {
     DirectChain, DirectCompare, DirectEmulator, DirectEmulatorEvents, DirectFrame, DirectHintLevel, DirectIndexInfo, DirectLine,
-    DirectPause, DirectRef, DirectScanInfo, DirectScanRequest, DirectScanResult,
+    DirectPause, DirectRef, DirectScanInfo, DirectScanRequest, DirectScanResult, DirectThread, DirectModule, DirectStackFrame,
+    DirectTraceSpec, DirectTraceInfo, DirectTraceRecord,
     DirectRefKind, DirectRegion, DirectStatus, DirectSymbol, StopStream,
 } from './directEmulator';
 import protoText from './ps2debug.proto';
@@ -75,6 +76,7 @@ const REF_KINDS: Record<string, DirectRefKind> = {
     REF_STORE: 'store',
     REF_POINTER: 'pointer',
     REF_CASE: 'case',
+    REF_OBSERVED: 'observed',
 };
 
 const SYMBOL_KINDS: Record<string, NonNullable<DirectSymbol['kind']>> = {
@@ -112,6 +114,38 @@ function scanInfoFromWire(i: ScanInfoWire): DirectScanInfo {
 
 function chainFromWire(c: ChainWire): DirectChain {
     return { base: c.base >>> 0, offsets: c.offsets.map(o => o >>> 0), leadsTo: c.leadsTo === undefined || c.leadsTo === null ? undefined : c.leadsTo >>> 0 };
+}
+
+interface ThreadWire { id: number; state: string; pc: number; sp: number; ra: number; entry: number; priority: number }
+interface TraceInfoWire { id: number; running: boolean; instructions: U64; records: U64; covered: U64 }
+interface TraceRecordWire {
+    call?: { from: number; to: number; sp: number; args: number[]; indirect: boolean };
+    return?: { from: number; to: number };
+    branch?: { from: number; to: number; indirect: boolean };
+    instruction?: number;
+    access?: { pc: number; address: number; size: number; write: boolean; value?: U128 };
+}
+
+const THREAD_STATES: Record<string, DirectThread['state']> = {
+    THREAD_RUNNING: 'running', THREAD_READY: 'ready', THREAD_WAITING: 'waiting', THREAD_SUSPENDED: 'suspended',
+    THREAD_WAITING_SUSPENDED: 'waitingSuspended', THREAD_DORMANT: 'dormant',
+};
+
+function traceInfoFromWire(i: TraceInfoWire): DirectTraceInfo {
+    return { id: i.id, running: i.running, instructions: Number(i.instructions), records: Number(i.records), covered: Number(i.covered) };
+}
+
+function traceRecordFromWire(r: TraceRecordWire): DirectTraceRecord {
+    if (r.call) { return { kind: 'call', from: r.call.from >>> 0, to: r.call.to >>> 0, sp: r.call.sp >>> 0, args: r.call.args.map(a => a >>> 0), indirect: r.call.indirect }; }
+    if (r.return) { return { kind: 'return', from: r.return.from >>> 0, to: r.return.to >>> 0 }; }
+    if (r.branch) { return { kind: 'branch', from: r.branch.from >>> 0, to: r.branch.to >>> 0, indirect: r.branch.indirect }; }
+    if (r.access) {
+        return {
+            kind: 'access', pc: r.access.pc >>> 0, address: r.access.address >>> 0, size: r.access.size,
+            write: r.access.write, value: Number(r.access.value?.lo ?? 0),
+        };
+    }
+    return { kind: 'instruction', pc: (r.instruction ?? 0) >>> 0 };
 }
 
 const HINT_LEVELS: Record<DirectHintLevel, string> = {
@@ -249,7 +283,7 @@ export class Ps2DebugClient implements DirectEmulator {
             'grpc.max_send_message_length': MAX_MESSAGE_BYTES,
         };
         const credentials = grpc.credentials.createInsecure();
-        for (const name of ['Session', 'Execution', 'Breakpoints', 'Memory', 'Registers', 'Code', 'Media', 'Symbols', 'Index', 'Search', 'Snapshots']) {
+        for (const name of ['Session', 'Execution', 'Breakpoints', 'Memory', 'Registers', 'Code', 'Media', 'Symbols', 'Index', 'Search', 'Snapshots', 'Trace', 'Os']) {
             this.services[name] = new constructors[name](address, credentials, options) as unknown as Service;
         }
     }
@@ -669,6 +703,72 @@ export class Ps2DebugClient implements DirectEmulator {
         if (target !== undefined) { request['target'] = target >>> 0; }
         const reply = await this.call<{ chains: ChainWire[] }>('Search', 'checkPointers', request);
         return reply.chains.map(chainFromWire);
+    }
+
+    // ── os ──────────────────────────────────────────────────────────────
+
+    public async eeThreads(): Promise<DirectThread[]> {
+        const reply = await this.call<{ threads: ThreadWire[] }>('Os', 'eeThreads', {});
+        return reply.threads.map(t => ({
+            id: t.id, state: THREAD_STATES[t.state] ?? 'other', pc: t.pc >>> 0, sp: t.sp >>> 0, ra: t.ra >>> 0,
+            entry: t.entry >>> 0, priority: t.priority,
+        }));
+    }
+
+    public async iopModules(): Promise<DirectModule[]> {
+        const reply = await this.call<{ modules: DirectModule[] }>('Os', 'iopModules', {});
+        return reply.modules;
+    }
+
+    public async stackWalk(thread?: number): Promise<DirectStackFrame[]> {
+        const request: Record<string, unknown> = {};
+        if (thread !== undefined) { request['thread'] = thread; }
+        const reply = await this.call<{ frames: { pc: number; sp: number; entry?: number; stackSize: number; function: string }[] }>(
+            'Os', 'stackWalk', request,
+        );
+        return reply.frames.map(f => ({
+            pc: f.pc >>> 0, sp: f.sp >>> 0, entry: f.entry === undefined || f.entry === null ? undefined : f.entry >>> 0,
+            stackSize: f.stackSize, function: f.function,
+        }));
+    }
+
+    // ── trace ───────────────────────────────────────────────────────────
+
+    public async startTrace(spec: DirectTraceSpec): Promise<DirectTraceInfo> {
+        const filters = (list: { address: number; length: number }[] | undefined, write: boolean) =>
+            (list ?? []).map(f => ({ address: f.address >>> 0, length: f.length, reads: !write, writes: write }));
+        const info = await this.call<TraceInfoWire>('Trace', 'start', {
+            client: this.clientId, coverage: !!spec.coverage, calls: !!spec.calls, branches: !!spec.branches,
+            accesses: [...filters(spec.writes, true), ...filters(spec.reads, false)],
+            fields: spec.fields ?? 0, limit: spec.limit ?? 0,
+        });
+        return traceInfoFromWire(info);
+    }
+
+    public async traceStatus(id: number): Promise<DirectTraceInfo> {
+        return traceInfoFromWire(await this.call<TraceInfoWire>('Trace', 'status', { id }));
+    }
+
+    public async stopTrace(id: number): Promise<DirectTraceInfo> {
+        return traceInfoFromWire(await this.call<TraceInfoWire>('Trace', 'stop', { id }));
+    }
+
+    public async traceRecords(id: number, from: number, limit: number): Promise<{ total: number; records: DirectTraceRecord[] }> {
+        const page = await this.call<{ total: U64; records: TraceRecordWire[] }>('Trace', 'records', { id, from, limit });
+        return { total: Number(page.total), records: page.records.map(traceRecordFromWire) };
+    }
+
+    public async coverage(id: number, without?: number): Promise<{ ranges: [number, number][]; functions: number[] }> {
+        const request: Record<string, unknown> = { id };
+        if (without !== undefined) { request['without'] = without; }
+        const reply = await this.call<{ ranges: { start: number; length: number }[]; functions: number[] }>(
+            'Trace', 'coverage', request, SCAN_DEADLINE_MS,
+        );
+        return { ranges: reply.ranges.map(r => [r.start >>> 0, r.length]), functions: reply.functions.map(f => f >>> 0) };
+    }
+
+    public async dropTrace(id: number): Promise<void> {
+        await this.call<object>('Trace', 'drop', { id });
     }
 
     // ── index ───────────────────────────────────────────────────────────
