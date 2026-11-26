@@ -13,7 +13,8 @@ import * as protobuf from 'protobufjs';
 import type { RegisterDump } from '../bridgeClient';
 import { classifyAddress, MemoryRegion } from '../shared/memoryRegions';
 import type {
-    DirectEmulator, DirectEmulatorEvents, DirectFrame, DirectLine, DirectPause, DirectStatus, StopStream,
+    DirectEmulator, DirectEmulatorEvents, DirectFrame, DirectIndexInfo, DirectLine, DirectPause, DirectRef,
+    DirectRefKind, DirectRegion, DirectStatus, DirectSymbol, StopStream,
 } from './directEmulator';
 import protoText from './ps2debug.proto';
 
@@ -60,6 +61,58 @@ type Unary = (
 ) => grpc.ClientUnaryCall;
 
 type Service = grpc.Client & Record<string, Unary>;
+
+const REF_KINDS: Record<string, DirectRefKind> = {
+    REF_CALL: 'call',
+    REF_JUMP: 'jump',
+    REF_BRANCH: 'branch',
+    REF_REGISTER_JUMP: 'registerJump',
+    REF_ADDRESS: 'address',
+    REF_LOAD: 'load',
+    REF_STORE: 'store',
+    REF_POINTER: 'pointer',
+    REF_CASE: 'case',
+};
+
+const SYMBOL_KINDS: Record<string, NonNullable<DirectSymbol['kind']>> = {
+    SYMBOL_LABEL: 'label',
+    SYMBOL_FUNCTION: 'function',
+    SYMBOL_OBJECT: 'object',
+};
+
+/** Symbols one List call asks for. */
+const SYMBOL_PAGE = 65_536;
+
+interface LineWire {
+    address: number; word: number; text: string; label: string; codeRefs: number; dataRefs: number;
+    functionStart: boolean; targetLabel: string;
+}
+
+interface IndexInfoWire {
+    region: string; ready: boolean; building: boolean; field: U64; refs: U64; functions: number;
+    tables: number; buildMillis: number;
+}
+
+interface SymbolWire { address: number; name: string; size: number; kind: string; source: string }
+
+function lineFromWire(l: LineWire): DirectLine {
+    return {
+        address: l.address >>> 0, word: l.word >>> 0, text: l.text, label: l.label, codeRefs: l.codeRefs,
+        dataRefs: l.dataRefs, functionStart: l.functionStart, targetLabel: l.targetLabel,
+    };
+}
+
+function indexInfoFromWire(i: IndexInfoWire): DirectIndexInfo {
+    return {
+        region: i.region === 'INDEX_IOP_RAM' ? 'iop' : 'ee', ready: i.ready, building: i.building,
+        field: Number(i.field), refs: Number(i.refs), functions: i.functions, tables: i.tables,
+        buildMillis: i.buildMillis,
+    };
+}
+
+function regionToWire(region: DirectRegion): string {
+    return region === 'iop' ? 'INDEX_IOP_RAM' : 'INDEX_EE_RAM';
+}
 
 const PAUSE_REASONS: Record<string, DirectPause['reason']> = {
     REQUESTED: 'requested',
@@ -164,7 +217,7 @@ export class Ps2DebugClient implements DirectEmulator {
             'grpc.max_send_message_length': MAX_MESSAGE_BYTES,
         };
         const credentials = grpc.credentials.createInsecure();
-        for (const name of ['Session', 'Execution', 'Breakpoints', 'Memory', 'Registers', 'Code', 'Media']) {
+        for (const name of ['Session', 'Execution', 'Breakpoints', 'Memory', 'Registers', 'Code', 'Media', 'Symbols', 'Index']) {
             this.services[name] = new constructors[name](address, credentials, options) as unknown as Service;
         }
     }
@@ -516,8 +569,8 @@ export class Ps2DebugClient implements DirectEmulator {
         for (let done = 0; done < count;) {
             const at = (address + 4 * done) >>> 0;
             const want = Math.min(MAX_LINES, count - done);
-            const reply = await this.call<{ lines: DirectLine[] }>('Code', 'disassemble', { address: at, count: want });
-            lines.push(...reply.lines);
+            const reply = await this.call<{ lines: LineWire[] }>('Code', 'disassemble', { address: at, count: want });
+            lines.push(...reply.lines.map(lineFromWire));
             if (reply.lines.length < want) {
                 break;
             }
@@ -531,9 +584,79 @@ export class Ps2DebugClient implements DirectEmulator {
         for (let done = 0; done < words.length; done += MAX_LINES) {
             const at = (address + 4 * done) >>> 0;
             const chunk = words.slice(done, done + MAX_LINES).map(w => w >>> 0);
-            const reply = await this.call<{ lines: DirectLine[] }>('Code', 'disassemble', { address: at, words: chunk });
-            lines.push(...reply.lines);
+            const reply = await this.call<{ lines: LineWire[] }>('Code', 'disassemble', { address: at, words: chunk });
+            lines.push(...reply.lines.map(lineFromWire));
         }
         return lines;
+    }
+
+    // ── index ───────────────────────────────────────────────────────────
+
+    public async buildIndex(region: DirectRegion, wait: boolean): Promise<DirectIndexInfo> {
+        // A 32 MiB index builds in well under a second; leave room for slow machines.
+        const info = await this.call<IndexInfoWire>(
+            'Index', 'build', { region: regionToWire(region), wait }, wait ? 120_000 : CALL_DEADLINE_MS,
+        );
+        return indexInfoFromWire(info);
+    }
+
+    public async indexStatus(): Promise<DirectIndexInfo[]> {
+        const reply = await this.call<{ regions: IndexInfoWire[] }>('Index', 'status', {});
+        return reply.regions.map(indexInfoFromWire);
+    }
+
+    public async refsTo(address: number, kinds: DirectRefKind[], limit: number)
+        : Promise<{ target: number; total: number; refs: DirectRef[] }> {
+        const wireKinds = Object.entries(REF_KINDS).filter(([, k]) => kinds.includes(k)).map(([wire]) => wire);
+        interface RefWire { from: number; kind: string; word: number; text: string; function?: number; functionName: string }
+        const reply = await this.call<{ target: number; total: number; refs: RefWire[] }>(
+            'Index', 'refsTo', { address: address >>> 0, kinds: wireKinds, limit },
+        );
+        return {
+            target: reply.target >>> 0,
+            total: reply.total,
+            refs: reply.refs.map(r => ({
+                from: r.from >>> 0,
+                kind: REF_KINDS[r.kind] ?? 'pointer',
+                word: r.word >>> 0,
+                text: r.text,
+                function: r.function === undefined || r.function === null ? undefined : r.function >>> 0,
+                functionName: r.functionName,
+            })),
+        };
+    }
+
+    // ── symbols ─────────────────────────────────────────────────────────
+
+    public async setSymbols(source: string, symbols: DirectSymbol[], replace: boolean): Promise<number> {
+        const kindToWire = (kind: DirectSymbol['kind']) =>
+            Object.entries(SYMBOL_KINDS).find(([, k]) => k === kind)?.[0] ?? 'SYMBOL_LABEL';
+        const reply = await this.call<{ total: number }>('Symbols', 'set', {
+            source,
+            replace,
+            symbols: symbols.map(s => ({ address: s.address >>> 0, name: s.name, size: s.size ?? 0, kind: kindToWire(s.kind) })),
+        });
+        return reply.total;
+    }
+
+    public async removeSymbols(source: string, addresses: number[]): Promise<number> {
+        const reply = await this.call<{ total: number }>('Symbols', 'remove', { source, addresses: addresses.map(a => a >>> 0) });
+        return reply.total;
+    }
+
+    public async listSymbols(contains = ''): Promise<DirectSymbol[]> {
+        const out: DirectSymbol[] = [];
+        let from: number | undefined = 0;
+        while (from !== undefined) {
+            const page: { symbols: SymbolWire[]; next?: number | null } =
+                await this.call('Symbols', 'list', { from, limit: SYMBOL_PAGE, contains });
+            for (const s of page.symbols) {
+                out.push({ address: s.address >>> 0, name: s.name, size: s.size, kind: SYMBOL_KINDS[s.kind] ?? 'label', source: s.source });
+            }
+            const next = page.next === undefined || page.next === null ? undefined : page.next >>> 0;
+            // A page always moves forward; anything else ends the listing.
+            from = next !== undefined && next > from && page.symbols.length > 0 ? next : undefined;
+        }
+        return out;
     }
 }

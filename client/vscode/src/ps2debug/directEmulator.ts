@@ -24,6 +24,55 @@ export interface DirectLine {
     word: number;
     /** Mnemonic and operands, e.g. `addiu   t0, t0, 1`. */
     text: string;
+    /** The symbol at this address ('' when none). */
+    label: string;
+    /** References to this address in the built indexes. */
+    codeRefs: number;
+    dataRefs: number;
+    /** An index found a function starting here. */
+    functionStart: boolean;
+    /** A jump's or branch's target's symbol ('' when none). */
+    targetLabel: string;
+}
+
+/** A code index region: main RAM or IOP RAM. */
+export type DirectRegion = 'ee' | 'iop';
+
+/** An index's state. */
+export interface DirectIndexInfo {
+    region: DirectRegion;
+    ready: boolean;
+    building: boolean;
+    /** The field its snapshot was taken at. */
+    field: number;
+    refs: number;
+    functions: number;
+    tables: number;
+    buildMillis: number;
+}
+
+/** The protocol's reference kinds. */
+export type DirectRefKind = 'call' | 'jump' | 'branch' | 'registerJump' | 'address' | 'load' | 'store' | 'pointer' | 'case';
+
+/** A reference to an address, from the index. */
+export interface DirectRef {
+    from: number;
+    kind: DirectRefKind;
+    /** The word at `from` and its disassembly. */
+    word: number;
+    text: string;
+    /** The function holding `from`, and its symbol ('' when none). */
+    function?: number;
+    functionName: string;
+}
+
+/** A name for an address. Addresses are normalized (KSEG0/KSEG1 folded to physical). */
+export interface DirectSymbol {
+    address: number;
+    name: string;
+    size?: number;
+    kind?: 'label' | 'function' | 'object';
+    source?: string;
 }
 
 /** Why execution paused, pushed by the emulator. */
@@ -97,6 +146,19 @@ export interface DirectEmulator {
     disassemble(address: number, count: number): Promise<DirectLine[]>;
     /** Disassembles `words` as if they were at `address` onwards. */
     disassembleWords(address: number, words: number[]): Promise<DirectLine[]>;
+
+    /** Indexes a region from a snapshot taken now; with `wait`, once it is built. */
+    buildIndex(region: DirectRegion, wait: boolean): Promise<DirectIndexInfo>;
+    indexStatus(): Promise<DirectIndexInfo[]>;
+    /** References to `address` from every built index; `kinds` empty: all. */
+    refsTo(address: number, kinds: DirectRefKind[], limit: number): Promise<{ target: number; total: number; refs: DirectRef[] }>;
+
+    /** Names addresses under `source` (clearing its others first with `replace`); returns how many addresses are named in all. */
+    setSymbols(source: string, symbols: DirectSymbol[], replace: boolean): Promise<number>;
+    /** Removes `source`'s symbols at `addresses` (all of them when empty). */
+    removeSymbols(source: string, addresses: number[]): Promise<number>;
+    /** Every symbol (the one shown per address), in address order. */
+    listSymbols(contains?: string): Promise<DirectSymbol[]>;
 
     /**
      * The displayed frame, at most `maxFps` times a second (a slow

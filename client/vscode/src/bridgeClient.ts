@@ -1,4 +1,68 @@
-import type { DirectEmulator } from './ps2debug/directEmulator';
+import type { DirectEmulator, DirectRef, DirectRefKind } from './ps2debug/directEmulator';
+
+/** The source labels pushed into a directly connected emulator are kept under. */
+const DIRECT_LABEL_SOURCE = 'codedesigner';
+
+/** Which index reference kinds each of the Bridge's xref kind groups covers. */
+const DIRECT_KIND_GROUPS: Record<string, DirectRefKind[]> = {
+    controlFlow: ['call', 'jump', 'branch', 'registerJump', 'case'],
+    resolved: ['address', 'load', 'store'],
+    pointer: ['pointer'],
+};
+
+/** The Bridge's names for a reference kind: group, label, summary verb. */
+const DIRECT_KIND_TEXT: Record<DirectRefKind, [string, string, string]> = {
+    call: ['controlFlow', 'Call', 'Calls'],
+    jump: ['controlFlow', 'Jump', 'Jumps to'],
+    branch: ['controlFlow', 'Branch', 'Branches to'],
+    registerJump: ['controlFlow', 'Register Jump', 'Jumps (register) to'],
+    address: ['resolved', 'Address', 'Builds'],
+    load: ['resolved', 'Load', 'Loads from'],
+    store: ['resolved', 'Store', 'Stores to'],
+    case: ['controlFlow', 'Switch case', 'Switch table entry for'],
+    pointer: ['pointer', 'Pointer', 'Pointer to'],
+};
+
+/**
+ * The index kinds the Bridge's kind filter asks for: `[]` for all, `null`
+ * when it asks only for kinds the index has no counterpart for (string
+ * patterns).
+ */
+function directKinds(kinds?: string[]): DirectRefKind[] | null {
+    if (!kinds || kinds.length === 0) { return []; }
+    const wanted = new Set<DirectRefKind>();
+    for (const raw of kinds) {
+        const k = raw.trim().toLowerCase();
+        const group = k.startsWith('control') || k.startsWith('branch') ? 'controlFlow'
+            : k.startsWith('resolved') || k.startsWith('address') ? 'resolved'
+                : k.startsWith('pointer') ? 'pointer' : undefined;
+        if (group) { DIRECT_KIND_GROUPS[group].forEach(x => wanted.add(x)); }
+    }
+    return wanted.size > 0 ? [...wanted] : null;
+}
+
+function hex8(value: number): string {
+    return (value >>> 0).toString(16).toUpperCase().padStart(8, '0');
+}
+
+/** A direct emulator's reference, as the Bridge reports one. */
+function referenceFromDirect(r: DirectRef, target: number, requested: number): ReferenceEntry {
+    const [kind, kindLabel, summary] = DIRECT_KIND_TEXT[r.kind];
+    const dataWord = r.kind === 'pointer' || r.kind === 'case';
+    return {
+        address: hex8(r.from),
+        addressValue: r.from,
+        kind,
+        kindLabel,
+        targetAddress: hex8(requested),
+        instruction: dataWord ? '' : r.text,
+        summary: `${summary} 0x${hex8(target)}`,
+        detail: r.functionName ? `in ${r.functionName}` : undefined,
+        matchedValue: dataWord ? `0x${hex8(r.word)}` : `0x${hex8(target)}`,
+        matchLength: dataWord ? 4 : 0,
+        sourceAddresses: [hex8(r.from)],
+    };
+}
 
 /**
  * How a BridgeClient reaches the Bridge. The extension uses TCP (socketClient.ts); a browser page uses a WebSocket.
@@ -1420,6 +1484,8 @@ export class BridgeClient {
                     } else if (parsed['type'] === 'ai_label_update') {
                         const evt = parsed as unknown as AiLabelUpdateEvent;
                         this._labelUpdateHandlers.forEach(h => h(evt));
+                        // Labels the AI edits reach a directly connected emulator too.
+                        void this.syncLabelsToDirect();
                     } else if (parsed['type'] === 'ai_packet') {
                         const evt = parsed as unknown as AiPacketEvent;
                         this._packetHandlers.forEach(h => h(evt));
@@ -1609,6 +1675,28 @@ export class BridgeClient {
         this.direct?.close();
         this.direct = emulator;
         this.connectionHandlers.forEach(handler => handler());
+        void this.syncLabelsToDirect();
+    }
+
+    /**
+     * Pushes the Bridge's labels into the directly connected emulator, so its
+     * disassembly, xrefs and function lists show them. Runs on attach and
+     * whenever labels change; does nothing unless both are connected.
+     */
+    public async syncLabelsToDirect(): Promise<void> {
+        const direct = this.getDirect();
+        if (!direct || !this.connected) {
+            return;
+        }
+        try {
+            const labels = await this.bridgeGetLabels();
+            const symbols = labels
+                .map(l => ({ address: parseInt(l.address, 16) >>> 0, name: l.label }))
+                .filter(s => !Number.isNaN(s.address) && s.name);
+            await direct.setSymbols(DIRECT_LABEL_SOURCE, symbols, true);
+        } catch (err) {
+            console.warn('[DIRECT] pushing labels to the emulator failed:', err);
+        }
     }
 
     /**
@@ -1853,6 +1941,11 @@ export class BridgeClient {
                 Hex: line.word.toString(16).toUpperCase().padStart(8, '0'),
                 Address: line.address >>> 0,
                 ByteLength: 4,
+                Label: line.label || undefined,
+                Comment: line.targetLabel ? `-> ${line.targetLabel}` : undefined,
+                XrefCount: line.codeRefs || undefined,
+                DataRefCount: line.dataRefs || undefined,
+                FunctionStart: line.functionStart || undefined,
             }));
         }
         const command: CommandMessage = {
@@ -2814,6 +2907,17 @@ export class BridgeClient {
      * Fetch all labels from the server's symbol database.
      */
     public async getLabels(): Promise<LabelEntry[]> {
+        const direct = this.getDirect();
+        if (direct && !this.connected) {
+            // The emulator's symbols: ELF names and labels pushed to it.
+            const symbols = await direct.listSymbols();
+            return symbols.map(s => ({ address: `0x${hex8(s.address)}`, label: s.name }));
+        }
+        return this.bridgeGetLabels();
+    }
+
+    /** GETLABELS from the Bridge itself. */
+    private async bridgeGetLabels(): Promise<LabelEntry[]> {
         const response = await this.sendCommand({ Command: 'GETLABELS' });
         if (!response.Success) {
             throw new Error(response.Error || 'GetLabels failed');
@@ -2826,22 +2930,35 @@ export class BridgeClient {
      * The server persists the change to ps2MemMap.json immediately.
      */
     public async addLabel(address: number, label: string, comment?: string): Promise<void> {
+        const direct = this.getDirect();
+        if (direct && !this.connected) {
+            // Kept in the emulator only; it is not saved without the Bridge.
+            await direct.setSymbols(DIRECT_LABEL_SOURCE, [{ address, name: label }], false);
+            return;
+        }
         const cmd: CommandMessage = { Command: 'ADDLABEL', Address: address, Label: label };
         if (comment) { cmd.Comment = comment; }
         const response = await this.sendCommand(cmd);
         if (!response.Success) {
             throw new Error(response.Error || 'AddLabel failed');
         }
+        void this.syncLabelsToDirect();
     }
 
     /**
      * Delete a label from the server's symbol database by address.
      */
     public async deleteLabel(address: number): Promise<void> {
+        const direct = this.getDirect();
+        if (direct && !this.connected) {
+            await direct.removeSymbols(DIRECT_LABEL_SOURCE, [address]);
+            return;
+        }
         const response = await this.sendCommand({ Command: 'DELETELABEL', Address: address });
         if (!response.Success) {
             throw new Error(response.Error || 'DeleteLabel failed');
         }
+        void this.syncLabelsToDirect();
     }
 
     /**
@@ -3124,6 +3241,18 @@ export class BridgeClient {
      * `wait` is set. The message describes the indexes the bridge holds.
      */
     public async buildXrefIndex(region: string, rebuild = false, wait = false): Promise<string> {
+        const direct = this.getDirect();
+        if (direct && !this.connected) {
+            const which = region?.toLowerCase().startsWith('iop') ? 'iop' : 'ee';
+            const status = (await direct.indexStatus()).find(i => i.region === which);
+            if (status?.ready && !rebuild) {
+                return `index ready: ${status.refs} references, ${status.functions} functions, ${status.tables} tables`;
+            }
+            const info = await direct.buildIndex(which, wait);
+            return info.ready && wait
+                ? `indexed in ${info.buildMillis} ms: ${info.refs} references, ${info.functions} functions, ${info.tables} tables`
+                : 'building';
+        }
         const response = await this.sendCommand({
             Command: 'XREFINDEX',
             Region: region,
@@ -3142,6 +3271,19 @@ export class BridgeClient {
      * pointers, and ASCII/CRC32 matches when `kinds` asks for them.
      */
     public async xrefsTo(targetAddress: number, kinds?: string[], region?: string): Promise<ReferenceEntry[]> {
+        const direct = this.getDirect();
+        if (direct && !this.connected) {
+            // Like the Bridge, build the index first when there is none.
+            if (!(await direct.indexStatus()).some(i => i.ready)) {
+                await direct.buildIndex(region?.toLowerCase().startsWith('iop') ? 'iop' : 'ee', true);
+            }
+            const wanted = directKinds(kinds);
+            if (wanted === null) {
+                return [];
+            }
+            const reply = await direct.refsTo(targetAddress, wanted, 65_536);
+            return reply.refs.map(r => referenceFromDirect(r, reply.target, targetAddress >>> 0));
+        }
         const response = await this.sendCommand({
             Command: 'XREFSTO',
             TargetAddress: targetAddress,

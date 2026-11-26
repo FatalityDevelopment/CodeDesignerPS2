@@ -424,6 +424,18 @@ message Line {
   uint32 address = 1;
   uint32 word = 2;
   string text = 3;
+  // The symbol at this address (empty: none; see Symbols).
+  string label = 4;
+  // References to this address in the built indexes (see Index), from
+  // code and from data. 0 when no index covers them.
+  uint32 code_refs = 5;
+  uint32 data_refs = 6;
+  // Whether an index found a function starting here.
+  bool function_start = 7;
+  // A jump's or branch's static target's symbol (empty: none).
+  string target_label = 8;
+  // Set when an index found this word inside a data table.
+  optional TableKind table = 9;
 }
 
 message DisassembleReply {
@@ -463,4 +475,260 @@ message FrameImage {
   // Row-major RGBA8.
   bytes rgba = 3;
   uint64 field = 4;
+}
+
+// --------------------------------------------------------------- symbols
+
+// Names for addresses: ELF symbol tables and what clients push (Code
+// Designer's label sets). Addresses are normalized: KSEG0/KSEG1 and the
+// uncached RAM mirrors fold to physical, so every alias has the same
+// symbols; replies give the normalized address. One symbol per address
+// and source; a client's wins over the ELF's ("elf").
+service Symbols {
+  // Names addresses under `source`.
+  rpc Set(SetSymbolsRequest) returns (SymbolCount);
+  // Removes symbols of a source: at some addresses, or all of them.
+  rpc Remove(RemoveSymbolsRequest) returns (SymbolCount);
+  // Loads an ELF's symbol table under the source "elf", replacing the
+  // previous ELF's. A stripped ELF has none.
+  rpc LoadElf(LoadElfRequest) returns (SymbolCount);
+  // Symbols covering addresses, and addresses with names.
+  rpc Lookup(LookupRequest) returns (LookupReply);
+  // Symbols in address order, a page at a time.
+  rpc List(ListSymbolsRequest) returns (SymbolPage);
+}
+
+enum SymbolKind {
+  SYMBOL_LABEL = 0;
+  SYMBOL_FUNCTION = 1;
+  SYMBOL_OBJECT = 2;
+}
+
+message SymbolInfo {
+  uint32 address = 1;
+  string name = 2;
+  // Bytes covered (0: the address alone).
+  uint32 size = 3;
+  SymbolKind kind = 4;
+  string source = 5;
+}
+
+message SetSymbolsRequest {
+  // Who names them, e.g. a label set's name. Not "elf".
+  string source = 1;
+  // Clear `source`'s symbols first.
+  bool replace = 2;
+  // `source` fields are ignored.
+  repeated SymbolInfo symbols = 3;
+}
+
+message SymbolCount {
+  // Symbols added or removed.
+  uint32 changed = 1;
+  // Addresses with symbols, from all sources.
+  uint32 total = 2;
+}
+
+message RemoveSymbolsRequest {
+  string source = 1;
+  // Empty: every symbol of `source`.
+  repeated uint32 addresses = 2;
+}
+
+message LoadElfRequest {
+  oneof file {
+    // A path on the emulator's machine.
+    string path = 1;
+    bytes data = 2;
+  }
+}
+
+message LookupRequest {
+  repeated uint32 addresses = 1;
+  repeated string names = 2;
+}
+
+message SymbolHit {
+  // As asked.
+  uint32 address = 1;
+  // The symbol at it, or the sized symbol covering it; unset when none.
+  optional SymbolInfo symbol = 2;
+  // How far into the symbol `address` is.
+  uint32 offset = 3;
+}
+
+message NameHit {
+  string name = 1;
+  repeated uint32 addresses = 2;
+}
+
+message LookupReply {
+  // One per address asked, in order.
+  repeated SymbolHit symbols = 1;
+  // One per name asked, in order.
+  repeated NameHit names = 2;
+}
+
+message ListSymbolsRequest {
+  // First address.
+  uint32 from = 1;
+  // Most symbols to return (0: 1000; at most 65536).
+  uint32 limit = 2;
+  // Only names containing this, ignoring case.
+  string contains = 3;
+}
+
+message SymbolPage {
+  repeated SymbolInfo symbols = 1;
+  // Where the next page starts; unset at the end.
+  optional uint32 next = 2;
+}
+
+// ----------------------------------------------------------------- index
+
+// The code index (crates/analysis): every call, jump, branch, built
+// address, load, store and data pointer to an address; functions; switch,
+// pointer and float tables. Built from a snapshot of a region's memory, on
+// a thread of its own while the game keeps running; it reflects memory as
+// it was then (rebuild after the game loads code). Addresses are
+// normalized as for Symbols; IOP RAM is at 0x1C000000.
+service Index {
+  // Takes a snapshot of the region now and indexes it, replacing the
+  // previous index once done.
+  rpc Build(BuildIndexRequest) returns (IndexInfo);
+  rpc Status(IndexStatusRequest) returns (IndexStatusReply);
+  // References to an address, from every built index.
+  rpc RefsTo(RefsToRequest) returns (RefsReply);
+  // Functions found, a page at a time, or the one holding an address.
+  rpc Functions(FunctionsRequest) returns (FunctionsReply);
+  rpc Tables(TablesRequest) returns (TablesReply);
+}
+
+enum IndexRegion {
+  INDEX_EE_RAM = 0;   // main RAM, at 0
+  INDEX_IOP_RAM = 1;  // IOP RAM, at 0x1C000000
+}
+
+message BuildIndexRequest {
+  IndexRegion region = 1;
+  // Reply once the index is built (else at once, building).
+  bool wait = 2;
+}
+
+message IndexInfo {
+  IndexRegion region = 1;
+  // An index is built and can be queried.
+  bool ready = 2;
+  // A build is running (a ready index stays until it is replaced).
+  bool building = 3;
+  // Of the ready index: the field its snapshot was taken at.
+  uint64 field = 4;
+  uint32 base = 5;
+  uint32 size = 6;
+  uint64 refs = 7;
+  uint32 functions = 8;
+  uint32 tables = 9;
+  // How long the build took.
+  uint32 build_millis = 10;
+}
+
+message IndexStatusRequest {}
+
+message IndexStatusReply {
+  repeated IndexInfo regions = 1;
+}
+
+enum RefKind {
+  REF_CALL = 0;           // jal, bal, jalr through a known register
+  REF_JUMP = 1;           // j, b
+  REF_BRANCH = 2;         // conditional branch
+  REF_REGISTER_JUMP = 3;  // jr through a known register
+  REF_ADDRESS = 4;        // lui + addiu/ori builds it
+  REF_LOAD = 5;
+  REF_STORE = 6;
+  REF_POINTER = 7;        // a data word holding it
+  REF_CASE = 8;           // a switch table entry
+}
+
+message RefsToRequest {
+  uint32 address = 1;
+  // Only these kinds (empty: all).
+  repeated RefKind kinds = 2;
+  // Skip this many.
+  uint32 offset = 3;
+  // Most to return (0: 1000).
+  uint32 limit = 4;
+}
+
+message Ref {
+  // The instruction or data word referring.
+  uint32 from = 1;
+  RefKind kind = 2;
+  // The word at `from`, as indexed, and its disassembly.
+  uint32 word = 3;
+  string text = 4;
+  // The function holding `from`, and its symbol (empty: none).
+  optional uint32 function = 5;
+  string function_name = 6;
+}
+
+message RefsReply {
+  // The normalized address asked about.
+  uint32 target = 1;
+  // References in all (before offset and limit).
+  uint32 total = 2;
+  repeated Ref refs = 3;
+}
+
+message FunctionsRequest {
+  IndexRegion region = 1;
+  // First start address.
+  uint32 from = 2;
+  // Most to return (0: 1000; at most 65536).
+  uint32 limit = 3;
+  // Instead: only the function holding this address.
+  optional uint32 containing = 4;
+}
+
+message FunctionInfo {
+  uint32 start = 1;
+  // Last instruction (inclusive).
+  uint32 end = 2;
+  // Its symbol (empty: none).
+  string name = 3;
+  // Calls to it.
+  uint32 callers = 4;
+}
+
+message FunctionsReply {
+  repeated FunctionInfo functions = 1;
+  // Functions in the index.
+  uint32 total = 2;
+  // Where the next page starts; unset at the end.
+  optional uint32 next = 3;
+}
+
+enum TableKind {
+  TABLE_JUMP = 0;
+  TABLE_POINTER = 1;
+  TABLE_FLOAT = 2;
+}
+
+message TablesRequest {
+  IndexRegion region = 1;
+  uint32 from = 2;
+  // Most to return (0: 1000; at most 65536).
+  uint32 limit = 3;
+}
+
+message TableInfo {
+  uint32 start = 1;
+  uint32 count = 2;
+  TableKind kind = 3;
+}
+
+message TablesReply {
+  repeated TableInfo tables = 1;
+  uint32 total = 2;
+  optional uint32 next = 3;
 }
