@@ -16,7 +16,6 @@ public enum InstallMode
 public sealed record InstallOptions(
     InstallMode Mode,
     bool InstallPrerequisites,
-    bool IncludePcsx2,
     bool IncludeCheatArchive,
     bool IncludeExtension,
     string RepoDir);
@@ -46,14 +45,12 @@ public static class InstallPlan
         if (options.InstallPrerequisites)
         {
             var args = new List<string> { "-Mode", options.Mode.ToString() };
-            if (!options.IncludePcsx2) args.Add("-SkipVcRedist");
             steps.Add(new("Install prerequisites", "Install-Prerequisites.ps1", args));
         }
 
         if (options.Mode == InstallMode.User)
         {
             var components = new List<string> { "CodeDesigner" };
-            if (options.IncludePcsx2) components.Add("Pcsx2");
             if (options.IncludeCheatArchive) components.Add("CheatArchive");
             if (options.IncludeExtension) components.Add("Extension");
 
@@ -66,11 +63,6 @@ public static class InstallPlan
             var args = new List<string> { "-RepoDir", options.RepoDir };
             if (!options.IncludeExtension) args.Add("-SkipExtension");
             steps.Add(new("Clone, build and deploy from source", "Setup-DevEnvironment.ps1", args));
-
-            // Building the PCSX2 fork needs Visual Studio C++ and takes an hour; use the release build.
-            if (options.IncludePcsx2)
-                steps.Add(new("Download the prebuilt PCSX2 fork", "Install-Release.ps1",
-                    new[] { "-Tag", ReleaseTag, "-Components", "Pcsx2" }));
         }
 
         return steps;

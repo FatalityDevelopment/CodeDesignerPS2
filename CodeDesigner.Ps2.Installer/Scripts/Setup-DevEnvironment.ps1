@@ -6,14 +6,14 @@
 .DESCRIPTION
     1. Clones github.com/FatalityDevelopment/CodeDesignerPS2 with submodules into -RepoDir,
        or updates the submodules of an existing checkout.
-    2. Builds CodeDesigner.sln. The build deploys the Bridge, emulator and MCP server to
+    2. Builds CodeDesigner.sln. The build deploys the Bridge and MCP server to
        %LOCALAPPDATA%\CodeDesigner and migrates the LocalDB database, importing the
        CheatCodeArchive submodule (see docs/building.md).
     3. Builds the VS Code extension, packages it and installs the .vsix into VS Code.
 
     Run Install-Prerequisites.ps1 -Mode Developer first (the installer app does).
-    PCSX2 is not built here; the installer downloads the prebuilt fork from the latest
-    release, or see docs/pcsx2-building.md.
+    The emulator is Ps2Emulator (its own repository): build it and select ps2.exe in
+    Code Designer's panel.
 
 .EXAMPLE
     .\Setup-DevEnvironment.ps1 -RepoDir "$env:USERPROFILE\source\repos\CodeDesignerPS2"
@@ -47,7 +47,7 @@ if (Test-Path (Join-Path $RepoDir '.git')) {
     if ((Test-Path $RepoDir) -and (Get-ChildItem $RepoDir -Force | Select-Object -First 1)) {
         throw "$RepoDir exists, is not empty and is not a git checkout. Pick an empty or new folder."
     }
-    Write-Info "Cloning $(Get-RepoUrl) (with the PCSX2 and CheatCodeArchive submodules, this takes a while)..."
+    Write-Info "Cloning $(Get-RepoUrl) (with its submodules, this takes a while)..."
     Invoke-Native -Exe git -Arguments @('clone', '--recurse-submodules', '--jobs', '4', (Get-RepoUrl), $RepoDir)
 }
 Write-Ok "Source ready at $RepoDir."

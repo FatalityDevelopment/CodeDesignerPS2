@@ -18,18 +18,18 @@ export interface WelcomeDataDelegate {
     isEmulatorRunning(): Promise<boolean>;
     /** Absolute path of the user's currently selected emulator (may be ''). */
     getSelectedEmulatorPath(): string;
-    /** Display name of the currently selected emulator (e.g. 'pcsx2-qtx64-dbg'). */
+    /** Display name of the currently selected emulator (e.g. 'ps2'). */
     getSelectedEmulatorLabel(): string;
     /** Absolute path of the selected BIOS file (may be ''). */
     getSelectedBiosPath(): string;
     /** Display label for the selected BIOS (file name without extension). */
     getSelectedBiosLabel(): string;
-    /** Title of the loaded game (resolved from PCSX2 or the ISO), if known. */
+    /** Title of the loaded game (resolved from the ISO), if known. */
     getLoadedGameTitle(): string;
     /** Disc serial of the loaded game (e.g. 'SCUS-97275'), if known. */
     getLoadedGameSerial(): string;
     // ── Actions ──────────────────────────────────────────────────────────
-    /** Connect to the configured emulator over PCSX2 PINE. */
+    /** Run Ps2Emulator with the selected BIOS and game (or close it). */
     connectEmulator(): void;
 }
 
@@ -367,7 +367,7 @@ export class WelcomeProvider {
             { id: 'codedesigner.openZipperWorkbench',   label: 'Asset Viewer',     subtitle: 'ZDB / ZAR / ZED packages', icon: 'database' },
             { id: 'codedesigner.openStructureVisualizer', label: 'Structures',     subtitle: 'Vtables + call graphs',   icon: 'gitcompare' },
             { id: 'codedesigner.openCompatBrowser',     label: 'PS2 Compatibility', subtitle: 'Game library + status',  icon: 'disc3' },
-            { id: 'codedesigner.openGsFrameViewer',     label: 'Preview',          subtitle: 'Live PCSX2 display',      icon: 'monitor' },
+            { id: 'codedesigner.openGsFrameViewer',     label: 'Preview',          subtitle: 'Ps2Emulator display',      icon: 'monitor' },
             { id: 'codedesigner.openJokerMaker',        label: 'Controller',       subtitle: 'Joker code maker',        icon: 'gamepad2' },
             { id: 'codedesigner.openAgentActivity',     label: 'AI Activity',      subtitle: 'Agent log + control',     icon: 'bot' },
         ];

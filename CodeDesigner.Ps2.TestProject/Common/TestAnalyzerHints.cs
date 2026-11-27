@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using CodeDesigner.Ps2.Common;
 using CodeDesigner.Ps2.Common.Disassembler;
-using CodeDesigner.Ps2.EmulatorCore;
+using CodeDesigner.Ps2.TestProject.TestSupport;
 
 namespace CodeDesigner.Ps2.TestProject
 {
@@ -83,7 +83,7 @@ namespace CodeDesigner.Ps2.TestProject
         [TestMethod]
         public void Load_ShowsLoadedValueNotStaleRegister()
         {
-            var bus = new PS2MemoryBus();
+            var bus = new TestRamBus();
             bus.WriteWord(0x00301000, 0xCAFEBABE);
             var c = MipsAnalyzer.AnalyzeInstructions(
                 Rows(Lui(A0, 0x30), Lw(A0, 0x1000, A0)), bus: bus);

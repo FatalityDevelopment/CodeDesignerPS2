@@ -15,16 +15,6 @@ namespace CodeDesigner.Ps2.Bridge.Services
     {
         private readonly IBridgeContext _ctx;
 
-        /// <summary>
-        /// Tracks which gameIds have already had a synchronous IOP-labelizer warmup
-        /// during this Bridge session. The first GETLABELSETS for a game blocks
-        /// until the labelizer finishes so the dropdown picks up new IOP sets on
-        /// first render; subsequent calls just fire a background refresh.
-        /// </summary>
-        private static readonly HashSet<string> _iopRefreshedGames =
-            new(StringComparer.OrdinalIgnoreCase);
-        private static readonly object _iopRefreshLock = new();
-
         public LabelManagerService(IBridgeContext ctx) => _ctx = ctx;
 
         public void Register(CommandRegistry reg)
@@ -43,13 +33,6 @@ namespace CodeDesigner.Ps2.Bridge.Services
             reg.Add(c => HandleDeleteLabelEntry(c.WorkspaceDir, c.GameId, c.SetName, c.LabelEntryAddress, c.Address),     "DELETELABELENTRY");
             reg.Add(c => HandleImportLabelSet(c.WorkspaceDir, c.GameId, c.SetName, c.Data),                               "IMPORTLABELSET");
             reg.Add(c => HandleExportLabelSet(c.WorkspaceDir, c.GameId, c.SetName),                                       "EXPORTLABELSET");
-            reg.Add(_ => HandleResolveStrings(),                                                                          "RESOLVESTRINGS");
-            reg.Add(c => c.Address is null
-                ? Responses.Error("Address is required for RESOLVELINKEDLIST")
-                : HandleResolveLinkedList(c.Address.Value, c.MemberOffset ?? 0),
-                "RESOLVELINKEDLIST");
-            reg.Add(c => HandleIopLabelsRefresh(c.GameId, moduleName: null),                                              "IOPLABELSREFRESH");
-            reg.Add(c => HandleIopLabelsRefresh(c.GameId, moduleName: c.SetName),                                         "IOPLABELSREFRESHMODULE");
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────
@@ -227,57 +210,6 @@ namespace CodeDesigner.Ps2.Bridge.Services
 
             try
             {
-                // If PCSX2 is connected, ensure the "IOP: <modname>" system sets are
-                // populated before returning the list. Two-tier strategy:
-                //   1. First time we see this game in this session — run synchronously
-                //      so the dropdown reflects the new sets on first render (otherwise
-                //      the user would have to hit refresh twice).
-                //   2. Subsequent calls — fire-and-forget so GETLABELSETS stays cheap;
-                //      ProcessStateService's GETMODULES delta hook keeps things current,
-                //      and the labelizer itself is idempotent.
-                if (_ctx.PineClient is not null)
-                {
-                    var refreshGameId = gameId;
-                    bool firstRun;
-                    lock (_iopRefreshLock)
-                    {
-                        firstRun = _iopRefreshedGames.Add(refreshGameId);
-                    }
-
-                    if (firstRun)
-                    {
-                        try
-                        {
-                            var labelizer = new IopModuleLabelizer(_ctx);
-                            var result = labelizer.RefreshAllAsync(refreshGameId).GetAwaiter().GetResult();
-                            _ctx.SyncLegacyDictsFromLabelManager();
-                            Console.WriteLine($"[IopLabelizer] initial refresh on GETLABELSETS ({refreshGameId}): {result.Modules} module(s), {result.Labels} label(s)");
-                        }
-                        catch (Exception ex)
-                        {
-                            // Re-arm so a later call can retry.
-                            lock (_iopRefreshLock) { _iopRefreshedGames.Remove(refreshGameId); }
-                            Console.WriteLine($"[IopLabelizer] initial refresh failed: {ex.Message}");
-                        }
-                    }
-                    else
-                    {
-                        _ = System.Threading.Tasks.Task.Run(async () =>
-                        {
-                            try
-                            {
-                                var labelizer = new IopModuleLabelizer(_ctx);
-                                await labelizer.RefreshAllAsync(refreshGameId);
-                                _ctx.SyncLegacyDictsFromLabelManager();
-                            }
-                            catch (Exception ex)
-                            {
-                                Console.WriteLine($"[IopLabelizer] background refresh failed: {ex.Message}");
-                            }
-                        });
-                    }
-                }
-
                 var summaries = _ctx.LabelRepo.GetSetSummariesAsync(gameId).GetAwaiter().GetResult();
 
                 // Always include the built-in set in the list (and as a system set so
@@ -1007,174 +939,5 @@ namespace CodeDesigner.Ps2.Bridge.Services
             }
         }
 
-        // ── RESOLVESTRINGS ────────────────────────────────────────────────────
-
-        /// <summary>
-        /// RESOLVESTRINGS — reads each String-typed label's address from live PCSX2
-        /// memory (PINE mode only), extracts the null-terminated ASCII content, and
-        /// updates the runtime label display in <c>_ctx.Labels</c> to include it.
-        /// Returns a summary of how many labels were resolved.
-        /// </summary>
-        private string HandleResolveStrings()
-        {
-            if (_ctx.PineClient == null)
-                return Responses.Error("RESOLVESTRINGS requires PINE (PCSX2) mode.");
-
-            var merged = _ctx.LabelMgr.GetMergedLabels();
-            int resolved = 0;
-            var skipped  = new List<string>();
-
-            foreach (var entry in merged)
-            {
-                if (entry.Hidden) continue;
-                if (entry.Type != MgrType.String) continue;
-
-                var addrStr = entry.Address.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
-                    ? entry.Address[2..] : entry.Address;
-                if (!uint.TryParse(addrStr, System.Globalization.NumberStyles.HexNumber, null, out uint addr))
-                    continue;
-
-                try
-                {
-                    // Read up to 256 bytes to find the null terminator.
-                    const int MaxStringLen = 256;
-                    byte[] raw = _ctx.PineClient!.ReadBytes(addr, MaxStringLen);
-
-                    int len = 0;
-                    while (len < raw.Length && raw[len] != 0) len++;
-
-                    // Only include printable ASCII characters.
-                    var sb = new StringBuilder(len);
-                    for (int i = 0; i < len; i++)
-                    {
-                        byte b = raw[i];
-                        sb.Append(b >= 0x20 && b < 0x7F ? (char)b : '?');
-                    }
-
-                    string content = sb.ToString();
-                    _ctx.Labels[addr] = ($"{entry.Name}: \"{content}\"", entry.Comment);
-                    resolved++;
-                }
-                catch
-                {
-                    skipped.Add(entry.Name);
-                }
-            }
-
-            var msg = $"Resolved {resolved} string label(s).";
-            if (skipped.Count > 0)
-                msg += $" Skipped (read error): {string.Join(", ", skipped)}.";
-
-            return Responses.Success(msg);
-        }
-
-        // ── IOPLABELSREFRESH / IOPLABELSREFRESHMODULE ────────────────────────
-
-        /// <summary>
-        /// Scans loaded IOP modules in PCSX2 and populates one read-only system label
-        /// set per module (<c>IOP: &lt;modname&gt;</c>) with the exports it provides plus
-        /// every import stub aimed at it. When <paramref name="moduleName"/> is supplied
-        /// only that one module is refreshed.
-        /// </summary>
-        private string HandleIopLabelsRefresh(string? gameId, string? moduleName)
-        {
-            if (_ctx.PineClient is null)
-                return Responses.Error("IOPLABELSREFRESH requires PCSX2 (PINE) mode.");
-
-            // Fall back to PCSX2's reported serial when the caller didn't pass one and
-            // the LabelMgr context hasn't been seeded yet, so the user can just run
-            // `iop_labels_refresh ""` (or the autodriver from GETMODULES) without
-            // having to know the serial manually.
-            if (string.IsNullOrWhiteSpace(gameId))
-                gameId = _ctx.LabelMgr.GameId;
-            if (string.IsNullOrWhiteSpace(gameId))
-            {
-                try { gameId = _ctx.PineClient.GetGameID()?.Trim(); }
-                catch { /* fall through to the explicit error below */ }
-            }
-            if (string.IsNullOrWhiteSpace(gameId))
-                return Responses.Error("IOPLABELSREFRESH: no game serial available — pass GameId explicitly or load a game in PCSX2 first.");
-
-            try
-            {
-                var labelizer = new IopModuleLabelizer(_ctx);
-                (int modules, int labels) result;
-                if (string.IsNullOrWhiteSpace(moduleName))
-                    result = labelizer.RefreshAllAsync(gameId).GetAwaiter().GetResult();
-                else
-                    result = labelizer.RefreshModuleAsync(gameId, moduleName).GetAwaiter().GetResult();
-
-                _ctx.SyncLegacyDictsFromLabelManager();
-
-                return Responses.Success(
-                    $"IOP label refresh ({gameId}): {result.modules} module(s), {result.labels} label(s).");
-            }
-            catch (Exception ex)
-            {
-                return Responses.Error($"IOPLABELSREFRESH failed: {ex.Message}");
-            }
-        }
-
-        // ── RESOLVELINKEDLIST ─────────────────────────────────────────────────
-
-        /// <summary>
-        /// RESOLVELINKEDLIST — walks a linked list from <paramref name="startAddress"/>
-        /// using <paramref name="nextOffset"/> as the byte offset within each node
-        /// where the next-node pointer is stored.  Only works in PINE (PCSX2) mode.
-        /// Optionally uses the label name found at <paramref name="startAddress"/> to
-        /// assign <c>Name[0]</c>, <c>Name[1]</c>, … entries in <c>_ctx.Labels</c>.
-        /// Returns the ordered list of node addresses.
-        /// </summary>
-        private string HandleResolveLinkedList(uint startAddress, int nextOffset)
-        {
-            if (_ctx.PineClient == null)
-                return Responses.Error("RESOLVELINKEDLIST requires PINE (PCSX2) mode.");
-
-            // Look up the label name at the start address for indexed display.
-            string labelBase = _ctx.Labels.TryGetValue(startAddress, out var existing)
-                ? existing.Label
-                : $"0x{startAddress:X8}";
-
-            // Strip "FNC_" prefix if it crept in from a previous sync.
-            if (labelBase.StartsWith("FNC_", StringComparison.Ordinal))
-                labelBase = labelBase[4..];
-
-            var nodeAddresses = new List<uint>();
-            var seen          = new HashSet<uint>();
-            uint current      = startAddress;
-            int  index        = 0;
-            // Cap at 4096 nodes to prevent infinite traversal of circular lists or corrupted memory.
-            const int MaxNodes = 4096;
-
-            while (current != 0 && !seen.Contains(current) && index < MaxNodes)
-            {
-                seen.Add(current);
-                nodeAddresses.Add(current);
-
-                // Update _ctx.Labels for this node address.
-                _ctx.Labels[current] = ($"{labelBase}[{index}]", null);
-                index++;
-
-                // Read the next pointer (uint32 little-endian) at current + nextOffset.
-                uint ptrAddr = current + (uint)nextOffset;
-                try
-                {
-                    byte[] ptrBytes = _ctx.PineClient!.ReadBytes(ptrAddr, 4);
-                    current = (uint)(ptrBytes[0] | (ptrBytes[1] << 8) | (ptrBytes[2] << 16) | (ptrBytes[3] << 24));
-                }
-                catch
-                {
-                    break;
-                }
-            }
-
-            return JsonSerializer.Serialize(new CommandResponse
-            {
-                Success   = true,
-                Command   = "RESOLVELINKEDLIST",
-                Message   = $"Walked {nodeAddresses.Count} node(s) starting at 0x{startAddress:X8}.",
-                Data      = JsonSerializer.Serialize(nodeAddresses.Select(a => $"0x{a:X8}").ToList()),
-            });
-        }
     }
 }

@@ -1,8 +1,7 @@
 using CodeDesigner.Ps2.Common;
 using CodeDesigner.Ps2.Common.CPU;
 using CodeDesigner.Ps2.Common.Cpu.Instructions.EE;
-using CodeDesigner.Ps2.EmulatorCore;
-using CodeDesigner.Ps2.EmulatorCore.IOP;
+using CodeDesigner.Ps2.TestProject.TestSupport;
 
 namespace CodeDesigner.Ps2.TestProject
 {
@@ -982,7 +981,7 @@ namespace CodeDesigner.Ps2.TestProject
         public void Test_LD_SD_IopBus()
         {
             // Verify that LD/SD/LDL/LDR/SDL/SDR use IopBus when Bus is null
-            var iopBus = new IopMemoryBus();
+            var iopBus = new TestIopRamBus();
             // Write a known 64-bit value into IOP RAM via bus directly
             iopBus.WriteWord(0x100, 0x04030201u);
             iopBus.WriteWord(0x104, 0x08070605u);
@@ -1008,7 +1007,7 @@ namespace CodeDesigner.Ps2.TestProject
         public void Test_SDL_SDR_IopBus()
         {
             // Verify that SDL/SDR use IopBus when Bus is null
-            var iopBus = new IopMemoryBus();
+            var iopBus = new TestIopRamBus();
             // Pre-fill aligned dword at 0x300 with 0xFF bytes
             iopBus.WriteWord(0x300, 0xFFFFFFFFu);
             iopBus.WriteWord(0x304, 0xFFFFFFFFu);
@@ -1900,7 +1899,7 @@ namespace CodeDesigner.Ps2.TestProject
             uint targetAddr = 0x00100000u;
             uint enc = (0x02u << 26) | ((targetAddr >> 2) & 0x03FFFFFFu);
 
-            var bus = new PS2MemoryBus();
+            var bus = new TestRamBus();
             byte[] str = System.Text.Encoding.ASCII.GetBytes("Hello\0");
             for (int i = 0; i < str.Length; i++)
                 bus.WriteByte(targetAddr + (uint)i, str[i]);
@@ -1938,7 +1937,7 @@ namespace CodeDesigner.Ps2.TestProject
             uint targetAddr = 0x00100000u;
             uint enc = (0x02u << 26) | ((targetAddr >> 2) & 0x03FFFFFFu);
 
-            var bus = new PS2MemoryBus();
+            var bus = new TestRamBus();
             byte[] str = System.Text.Encoding.ASCII.GetBytes("RawStr\0");
             for (int i = 0; i < str.Length; i++)
                 bus.WriteByte(targetAddr + (uint)i, str[i]);
@@ -1960,7 +1959,7 @@ namespace CodeDesigner.Ps2.TestProject
             uint targetAddr = 0x00100000u;
             uint enc = (0x02u << 26) | ((targetAddr >> 2) & 0x03FFFFFFu);
 
-            var bus = new PS2MemoryBus();
+            var bus = new TestRamBus();
             bus.WriteByte(targetAddr, 0x01); // non-printable
 
             var cpu = new CpuState { PC = 0x00000000u };
@@ -1978,7 +1977,7 @@ namespace CodeDesigner.Ps2.TestProject
         public void AnalyzeSingleInstruction_LW_AppendsStringHintAtLoadAddress()
         {
             // LW $a0, 0($a1): $a0 ← [0x00100000], with a string at that address
-            var bus = new PS2MemoryBus();
+            var bus = new TestRamBus();
             uint strAddr = 0x00100000u;
             byte[] hello = System.Text.Encoding.ASCII.GetBytes("Hello\0");
             for (int i = 0; i < hello.Length; i++)
@@ -1999,7 +1998,7 @@ namespace CodeDesigner.Ps2.TestProject
         public void AnalyzeSingleInstruction_LB_AppendsStringHintAtLoadAddress()
         {
             // LB $a0, 0($a1) — opcode=0x20
-            var bus = new PS2MemoryBus();
+            var bus = new TestRamBus();
             uint strAddr = 0x00200000u;
             byte[] world = System.Text.Encoding.ASCII.GetBytes("World\0");
             for (int i = 0; i < world.Length; i++)
@@ -2019,7 +2018,7 @@ namespace CodeDesigner.Ps2.TestProject
         public void AnalyzeSingleInstruction_SW_ShowsRawWordWhenNoString()
         {
             // SW $a0, 0($a1) — opcode=0x2B; the effective address holds non-ASCII data
-            var bus = new PS2MemoryBus();
+            var bus = new TestRamBus();
             uint dataAddr = 0x00300000u;
             bus.WriteWord(dataAddr, 0xDEADBEEF);
 

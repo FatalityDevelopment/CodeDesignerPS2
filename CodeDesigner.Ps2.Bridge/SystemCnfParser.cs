@@ -4,9 +4,7 @@ namespace CodeDesigner.Ps2.Bridge
 {
     /// <summary>
     /// Tiny PS2 SYSTEM.CNF parser — extracts the BOOT2 path so handlers can
-    /// resolve the boot ELF on a disc without depending on EmulatorCore.
-    /// Mirrors the implementation in
-    /// <c>CodeDesigner.Ps2.EmulatorCore.GameLoader.ParseSystemCnf</c>.
+    /// resolve the boot ELF on a disc.
     /// </summary>
     internal static class SystemCnfParser
     {

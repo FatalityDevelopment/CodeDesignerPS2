@@ -5,8 +5,7 @@
 
 .DESCRIPTION
     Release assets (built by .github/workflows/build.yml on v* tags):
-      CodeDesigner.zip      Bridge, emulator, MCP server, database tool  -> <InstallDir>\
-      PCSX2.zip             CodeDesigner's PCSX2 fork                    -> <InstallDir>\pcsx2\
+      CodeDesigner.zip      Bridge, MCP server, database tool            -> <InstallDir>\
       CheatCodeArchive.zip  Cheat database source                        -> <InstallDir>\CheatCodeArchive\
       codedesigner.vsix     VS Code extension                            -> installed into VS Code
 
@@ -15,21 +14,21 @@
 
 .EXAMPLE
     .\Install-Release.ps1                       # latest release, everything
-    .\Install-Release.ps1 -Tag v1.5.0 -Components Pcsx2
+    .\Install-Release.ps1 -Tag v1.5.0 -Components Extension
 #>
 [CmdletBinding()]
 param(
     # Release tag, or 'latest'.
     [string]$Tag = 'latest',
-    # Any of CodeDesigner, Pcsx2, CheatArchive, Extension. A single comma-separated string
+    # Any of CodeDesigner, CheatArchive, Extension. A single comma-separated string
     # is accepted too, because powershell.exe -File cannot pass arrays.
-    [string[]]$Components = @('CodeDesigner', 'Pcsx2', 'CheatArchive', 'Extension')
+    [string[]]$Components = @('CodeDesigner', 'CheatArchive', 'Extension')
 )
 
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'CodeDesigner.Setup.psm1') -Force
 
-$known = @('CodeDesigner', 'Pcsx2', 'CheatArchive', 'Extension')
+$known = @('CodeDesigner', 'CheatArchive', 'Extension')
 $Components = @($Components | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 $unknown = @($Components | Where-Object { $known -notcontains $_ })
 if ($unknown) { throw "Unknown component(s): $($unknown -join ', '). Valid: $($known -join ', ')." }
@@ -46,7 +45,6 @@ Assert-NotRunningFrom -Dir $installDir
 
 $targets = [ordered]@{
     CodeDesigner = @{ Asset = 'CodeDesigner.zip';     Dest = $installDir }
-    Pcsx2        = @{ Asset = 'PCSX2.zip';            Dest = (Join-Path $installDir 'pcsx2') }
     CheatArchive = @{ Asset = 'CheatCodeArchive.zip'; Dest = (Join-Path $installDir 'CheatCodeArchive') }
 }
 

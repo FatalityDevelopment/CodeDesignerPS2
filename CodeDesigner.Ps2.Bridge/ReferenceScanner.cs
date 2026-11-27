@@ -7,8 +7,7 @@ using CodeDesigner.Ps2.Common;
 namespace CodeDesigner.Ps2.Bridge
 {
     /// <summary>
-    /// PS2 EE main RAM size — duplicated locally to avoid an EmulatorCore
-    /// dependency. Matches CodeDesigner.Ps2.EmulatorCore.PS2MemoryBus.MainRamSize.
+    /// PS2 EE main RAM size (32 MB).
     /// </summary>
     internal static class ReferenceScannerConstants
     {

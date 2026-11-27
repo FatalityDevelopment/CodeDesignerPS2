@@ -34,7 +34,7 @@ const NET_POLL_MS = 30000;
  * SettingsTabComponent - Emulator settings tab content.
  *
  * Organised as collapsible accordion sections:
- *  - Connection (default open): PCSX2/BIOS/Game selectors + Connect
+ *  - Connection (default open): Ps2Emulator/BIOS/Game selectors + Run
  *  - Actions (default collapsed): Run, Restart, Import, Snapshot, Screenshot
  *  - Network (default collapsed): Start Servers, Packets, Config, Debug
  *  - Snapshots (default open): scrollable snapshot list with show-more toggle
@@ -105,14 +105,14 @@ const NET_POLL_MS = 30000;
             </div>
 
             <div class="row run-row">
-              <button id="runBtn" class="run-btn" (click)="runPcsx2Click.emit()"
+              <button id="runBtn" class="run-btn" (click)="runClick.emit()"
                       [disabled]="!hasSelectedEmulator()"
-                      title="Launch the emulator and attach the debugger">
+                      title="Launch Ps2Emulator with the BIOS and game, and attach the debugger">
                 <app-icon name="play" [size]="13" /><span>Run</span>
               </button>
               <button id="killEmulatorBtn" class="kill-btn" (click)="killEmulatorClick.emit()"
                       [disabled]="!emulatorProcessRunning()"
-                      title="Kill the running emulator process">
+                      title="Close Ps2Emulator">
                 <app-icon name="x" [size]="13" /><span>Kill</span>
               </button>
             </div>
@@ -140,19 +140,14 @@ const NET_POLL_MS = 30000;
                 <app-icon name="upload" [size]="14" /><span>Import</span>
               </button>
 
-              @if (!isPcsx2Selected()) {
-                <button id="snapshotBtn" (click)="snapshotClick.emit()" [disabled]="!isConnected()">
-                  <app-icon name="camera" [size]="14" /><span>Snapshot</span>
-                </button>
-              } @else {
-                <button id="snapshotPcsx2Btn" (click)="snapshotPcsx2Click.emit()" [disabled]="!isConnected()">
-                  <app-icon name="camera" [size]="14" /><span>Snapshot</span>
-                </button>
-                <button id="previewBtn" (click)="previewClick.emit()"
-                        title="Open the live emulator display inside VS Code (requires GSStreamServer support)">
-                  <app-icon name="monitor" [size]="14" /><span>Preview</span>
-                </button>
-              }
+              <button id="snapshotBtn" (click)="snapshotClick.emit()" [disabled]="!isConnected()"
+                      title="Save Ps2Emulator's memory (and the displayed frame) as a snapshot">
+                <app-icon name="camera" [size]="14" /><span>Snapshot</span>
+              </button>
+              <button id="previewBtn" (click)="previewClick.emit()"
+                      title="Open Ps2Emulator's display inside VS Code">
+                <app-icon name="monitor" [size]="14" /><span>Preview</span>
+              </button>
 
               <button id="docsBtn" (click)="docsClick.emit()">
                 <app-icon name="bookopen" [size]="14" /><span>Docs</span>
@@ -689,12 +684,11 @@ export class SettingsTabComponent implements OnDestroy {
   // ── Outputs (emulator settings) ─────────────────────────────────────────────
 
   readonly connectClick       = output<void>();
-  readonly runPcsx2Click      = output<void>();
+  readonly runClick           = output<void>();
   readonly killEmulatorClick  = output<void>();
   readonly startNetworkClick  = output<void>();
   readonly restartClick       = output<void>();
   readonly snapshotClick      = output<void>();
-  readonly snapshotPcsx2Click = output<void>();
   readonly previewClick        = output<void>();
   readonly docsClick           = output<void>();
   readonly archiveDocsClick    = output<void>();
@@ -799,10 +793,6 @@ export class SettingsTabComponent implements OnDestroy {
     !!(this.selectedEmulator() ?? '').trim()
   );
 
-  /** True when a PCSX2-named emulator is explicitly selected in the dropdown. */
-  readonly isPcsx2Selected = computed(() =>
-    (this.selectedEmulator() ?? '').toLowerCase().includes('pcsx2')
-  );
 
   // ── History / Recent Labels / Network section toggles ───────────────────────
 

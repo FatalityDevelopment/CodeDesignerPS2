@@ -9,7 +9,7 @@ import {
   OnDestroy,
 } from '@angular/core';
 import { RegisterData } from '../disasm-editor.service';
-import { PineWatchInfo } from '../state/types';
+import { WatchInfo } from '../state/types';
 import { IconComponent } from '../../shared/icon.component';
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -113,7 +113,7 @@ export type DebugTab = 'registers' | 'cop0' | 'fpr' | 'fcr' | 'vu0f' | 'vu0i' | 
 
           <!-- Watches Section -->
           <div class="inspect-section-header">
-            <span class="inspect-section-title">PINE Watchpoints</span>
+            <span class="inspect-section-title">Watchpoints</span>
             <button class="bp-clear-all-btn" (click)="clearAllWatches.emit()"><app-icon name="trash2" [size]="12" /><span>Clear All</span></button>
           </div>
           <table class="dbg-table">
@@ -187,8 +187,8 @@ export class DebugPanelComponent implements OnDestroy {
   readonly codeStart = input(0);
   readonly codeEnd = input(0x02000000);
 
-  /** Active PINE hardware watchpoints to display in the Inspect tab. */
-  readonly watches = input<PineWatchInfo[]>([]);
+  /** Active watchpoints to display in the Inspect tab. */
+  readonly watches = input<WatchInfo[]>([]);
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Outputs
@@ -198,7 +198,7 @@ export class DebugPanelComponent implements OnDestroy {
   readonly editRegister = output<{ regType: string; regIdx: number; currentValue: string }>();
 
   /** Emitted when the user clicks the delete button for a watch entry. */
-  readonly removeWatch = output<PineWatchInfo>();
+  readonly removeWatch = output<WatchInfo>();
 
   /** Emitted when the user clicks "Clear All" in the watches section. */
   readonly clearAllWatches = output<void>();
@@ -215,7 +215,7 @@ export class DebugPanelComponent implements OnDestroy {
   /** Current panel width in pixels, persisted to localStorage */
   readonly panelWidth = signal(this._loadWidth());
 
-  /** Sorted array of PINE watchpoints by start address for @for iteration. */
+  /** Sorted array of watchpoints by start address for @for iteration. */
   readonly sortedWatches = computed(() =>
     [...this.watches()].sort((a, b) =>
       parseInt(a.Start, 16) - parseInt(b.Start, 16)),
@@ -546,8 +546,8 @@ export class DebugPanelComponent implements OnDestroy {
     return (n >>> 0).toString(16).toUpperCase().padStart(pad, '0');
   }
 
-  /** Parse the start address of a PineWatchInfo as a number (for navigation). */
-  parseWatchStart(w: PineWatchInfo): number {
+  /** Parse the start address of a WatchInfo as a number (for navigation). */
+  parseWatchStart(w: WatchInfo): number {
     return parseInt(w.Start, 16) || 0;
   }
 

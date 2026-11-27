@@ -113,12 +113,11 @@
     [orchestrations]="orchestrations"
     [orchestrationsError]="orchestrationsError"
     (connectClick)="connect()"
-    (runPcsx2Click)="runPcsx2()"
+    (runClick)="run()"
     (killEmulatorClick)="killEmulatorProcess()"
     (startNetworkClick)="startNetwork()"
     (restartClick)="restart()"
     (snapshotClick)="snapshot()"
-    (snapshotPcsx2Click)="snapshotPcsx2()"
     (previewClick)="openGsViewer()"
     (docsClick)="openDocs()"
     (archiveDocsClick)="openArchiveDocs()"
@@ -170,7 +169,7 @@
 <div id="tab-cheats" class="tab-content" [style.display]="activeTab === 'cheats' ? 'flex' : 'none'">
   <app-cheats-tab
     [isConnected]="isConnected"
-    [isPcsx2]="isPcsx2"
+    [gameRunning]="gameRunning"
     [(cheatText)]="cheatText"
     (openConverterClick)="onOpenConverter()"
     (openPorterClick)="onOpenPorter()"

@@ -37,7 +37,7 @@ internal static class McpToolFactory
         // to the AI Activity panel via the bridge. Applied last so it captures
         // the final result, including any risk-friction footer. Best-effort — a
         // missing bridge just means no logging.
-        if (services.GetService<IEmulatorBridge>() is { } bridge)
+        if (services.GetService<IWorkspaceBridge>() is { } bridge)
         {
             // RiskFrictionTool reads + strips `reason` itself, so leave it in place for it.
             tool = new ActivityLoggingTool(tool, bridge, descriptor.Meta.Name, stripReason: !riskWrapped);

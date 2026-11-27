@@ -567,17 +567,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     this._broadcastStatus(paused);
   }
 
-  /**
-   * Unified fan-out for pause-state transitions. Fires the existing
-   * onPauseStateChange callback and — when transitioning to paused — kicks the
-   * Bridge to refresh its analysis mirror so the next DISASSEMBLE sees state-
-   * aware comment-column hints on first render.
-   */
+  /** Unified fan-out for pause-state transitions: fires the onPauseStateChange callback. */
   private _firePauseStateChange(paused: boolean): void {
-    if (paused && this.socketClient?.isConnected()) {
-      // Fire-and-forget; never block the pause flow on analysis warm-up.
-      this.socketClient.refreshAnalysis().catch(() => { /* ignore */ });
-    }
     const cb = this.onPauseStateChange;
     cb?.(paused);
   }
@@ -1608,52 +1599,51 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 } catch (err: any) {
                     console.error(`[LIVE] Failed to clear all breakpoints: ${err?.message ?? err}`);
                 }
-            } else if (message.type === 'addPineWatch') {
+            } else if (message.type === 'addWatch') {
                 if (!this._canIssueLiveBackendRequest()) { return; }
                 const addr: number = typeof message.address === 'number' ? message.address : 0;
                 const end: number  = typeof message.end     === 'number' ? message.end     : addr + 4;
                 try {
-                    await this.socketClient!.addPineWatch(addr, end);
+                    await this.socketClient!.addWatch(addr, end);
                 } catch (err: any) {
-                    console.warn(`[LIVE] AddPineWatch failed: ${err?.message ?? err}`);
+                    console.warn(`[LIVE] AddWatch failed: ${err?.message ?? err}`);
                 }
                 try {
-                    const watches = await this.socketClient!.listPineWatches();
-                    panel.webview.postMessage({ type: 'pineWatches', watches });
+                    const watches = await this.socketClient!.listWatches();
+                    panel.webview.postMessage({ type: 'watchList', watches });
                 } catch (err: any) {
-                    console.warn(`[LIVE] ListPineWatches failed after add: ${err?.message ?? err}`);
+                    console.warn(`[LIVE] ListWatches failed after add: ${err?.message ?? err}`);
                 }
-            } else if (message.type === 'removePineWatch') {
+            } else if (message.type === 'removeWatch') {
                 if (!this._canIssueLiveBackendRequest()) { return; }
                 const addr: number = typeof message.address === 'number' ? message.address : 0;
                 const end: number  = typeof message.end     === 'number' ? message.end     : addr + 4;
-                const cpu: number  = typeof message.cpu     === 'number' ? message.cpu     : 0;
                 try {
-                    await this.socketClient!.removePineWatch(addr, end, cpu);
+                    await this.socketClient!.removeWatch(addr, end);
                 } catch (err: any) {
-                    console.warn(`[LIVE] RemovePineWatch failed: ${err?.message ?? err}`);
+                    console.warn(`[LIVE] RemoveWatch failed: ${err?.message ?? err}`);
                 }
                 try {
-                    const watches = await this.socketClient!.listPineWatches();
-                    panel.webview.postMessage({ type: 'pineWatches', watches });
+                    const watches = await this.socketClient!.listWatches();
+                    panel.webview.postMessage({ type: 'watchList', watches });
                 } catch (err: any) {
-                    console.warn(`[LIVE] ListPineWatches failed after remove: ${err?.message ?? err}`);
+                    console.warn(`[LIVE] ListWatches failed after remove: ${err?.message ?? err}`);
                 }
-            } else if (message.type === 'clearAllPineWatches') {
+            } else if (message.type === 'clearAllWatches') {
                 if (!this._canIssueLiveBackendRequest()) { return; }
                 try {
-                    await this.socketClient!.clearAllPineWatches();
-                    panel.webview.postMessage({ type: 'pineWatches', watches: [] });
+                    await this.socketClient!.clearAllWatches();
+                    panel.webview.postMessage({ type: 'watchList', watches: [] });
                 } catch (err: any) {
-                    console.warn(`[LIVE] ClearAllPineWatches failed: ${err?.message ?? err}`);
+                    console.warn(`[LIVE] ClearAllWatches failed: ${err?.message ?? err}`);
                 }
-            } else if (message.type === 'listPineWatches') {
+            } else if (message.type === 'listWatches') {
                 if (!this._canIssueLiveBackendRequest()) { return; }
                 try {
-                    const watches = await this.socketClient!.listPineWatches();
-                    panel.webview.postMessage({ type: 'pineWatches', watches });
+                    const watches = await this.socketClient!.listWatches();
+                    panel.webview.postMessage({ type: 'watchList', watches });
                 } catch (err: any) {
-                    console.warn(`[LIVE] ListPineWatches failed: ${err?.message ?? err}`);
+                    console.warn(`[LIVE] ListWatches failed: ${err?.message ?? err}`);
                 }
             } else if (message.type === 'step') {
                 await this.stepAndBroadcast();
@@ -2317,7 +2307,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         || msg.includes('connection refused')
         || msg.includes('command timeout')
         || msg.includes('getpc error')
-        || msg.includes('pine getpc error')
+        || msg.includes('ps2emulator is not connected')
         || msg.includes('not connected to server')
         || msg.includes('disconnected')
         || msg.includes('no live memory backend')

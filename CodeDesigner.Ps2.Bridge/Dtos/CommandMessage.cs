@@ -14,23 +14,17 @@ namespace CodeDesigner.Ps2.Bridge
         public int? Length { get; set; }
         public string? Region { get; set; }
         public string? OutputPath { get; set; }
+        /// <summary>BUILDCHEATENGINE: the two instructions at the hook address, read from the emulator.</summary>
+        public List<uint>? HookWords { get; set; }
+        /// <summary>REGISTERSNAPSHOT: the memory regions the snapshot's files hold.</summary>
+        public List<SnapshotRegion>? Regions { get; set; }
         public string? InputPath { get; set; }
-        public uint? BreakpointAddress { get; set; }
         public string? Label { get; set; }
         public string? Comment { get; set; }
         public string? Query { get; set; }
         public string? SearchMode { get; set; }
         public uint? TargetAddress { get; set; }
         public List<string>? ReferenceKinds { get; set; }
-        // XREFINDEX / XREFSTO fields
-        /// <summary>Rebuild the cross-reference index even when one exists.</summary>
-        public bool? XrefRebuild { get; set; }
-        /// <summary>Block until the index is built instead of building it in the background.</summary>
-        public bool? XrefWait { get; set; }
-        // SETREG fields
-        public string? RegisterName { get; set; }
-        public int? RegisterIndex { get; set; }
-        public string? RegisterValue { get; set; }
         // LISTDISCELFS / RECOMPILE fields
         public string? IsoPath { get; set; }
         public string? ElfName { get; set; }
@@ -64,33 +58,13 @@ namespace CodeDesigner.Ps2.Bridge
         public string? HddFileSource { get; set; }
         public int?    HddSizeGb { get; set; }
         // Runtime mode control fields
-        public string? Pcsx2Host { get; set; }
-        public int? Pcsx2Slot { get; set; }
-        public string? BiosPath { get; set; }
         public string? DiscPath { get; set; }
         public long? Steps { get; set; }
-        // Optional STARTEMULATOR / STARTFILEMODE wire-up: which InternalPineSocket
-        // host:port the front end has launched CodeDesigner.Ps2.Emulator.exe on.
-        // When omitted Bridge defaults to 127.0.0.1:28012.
-        public string? InternalEmulatorHost { get; set; }
-        public int?    InternalEmulatorPort { get; set; }
         // COMPILECDS — pre-resolved pointer-manager labels (dotted names like "seal.health")
         public List<LabelEntry>? Labels { get; set; }
         // New PINE extended command fields
-        /// <summary>CPU selector for GETREGISTER/PINESETREG/LISTBP: 0=EE, 1=IOP, 0xFF=both.</summary>
-        public byte? CpuSel { get; set; }
-        /// <summary>Register category for GETREGISTER/PINESETREG.</summary>
-        public byte? RegisterCategory { get; set; }
-        /// <summary>Speed limiter mode for SETLIMITER: 0=Nominal, 1=Turbo, 2=Slomo, 3=Unlimited.</summary>
-        public byte? LimiterMode { get; set; }
-        /// <summary>Number of frames for FRAMEADVANCE.</summary>
-        public byte? FrameCount { get; set; }
-        /// <summary>Symbol name for GETSYMBOLBYNAME.</summary>
-        public string? SymbolName { get; set; }
         /// <summary>File path for SAVESTATETOFILE / LOADSTATEFROMFILE.</summary>
         public string? FilePath { get; set; }
-        /// <summary>Save-state slot index (0–9) for PINESAVESTATE / PINELOADSTATE.</summary>
-        public byte? StateSlot { get; set; }
         /// <summary>Pagination offset for LISTFUNCTIONS / LISTGLOBALS.</summary>
         public uint? Offset { get; set; }
         /// <summary>Maximum result count for LISTFUNCTIONS / LISTGLOBALS.</summary>
@@ -98,14 +72,8 @@ namespace CodeDesigner.Ps2.Bridge
         // SCANVALUE fields
         /// <summary>Scan comparison operator: "eq", "ne", "lt", "gt", "le", "ge".</summary>
         public string? Comparison { get; set; }
-        /// <summary>Scan data type: "uint8","int8","uint16","int16","uint32","int32","uint64","int64","float32","float64".</summary>
-        public string? DataType { get; set; }
-        /// <summary>Value to scan for (decimal or 0x-prefixed hex string).</summary>
-        public string? ScanValue { get; set; }
         /// <summary>Exclusive end address for SCANVALUE range scans.</summary>
         public uint? EndAddress { get; set; }
-        /// <summary>Previous result addresses for SCANVALUE filter (refine) scans.</summary>
-        public List<uint>? ScanAddresses { get; set; }
         // ADDSTRUCT / DELETESTRUCT / ADDSTRUCTMEMBER fields
         /// <summary>Struct name for ADDSTRUCT / DELETESTRUCT / ADDSTRUCTMEMBER.</summary>
         public string? StructName { get; set; }
@@ -124,11 +92,6 @@ namespace CodeDesigner.Ps2.Bridge
 
         // READMEMREGION fields
         /// <summary>
-        /// Optional byte pattern to search for within the memory region (READMEMREGION).
-        /// Each element is an unsigned byte value (0–255).
-        /// </summary>
-        public List<int>? SearchPattern { get; set; }
-        /// <summary>
         /// Address list for READMEMBATCH. Each address is read with <see cref="Length"/>
         /// bytes in the selected <see cref="Region"/>.
         /// </summary>
@@ -139,25 +102,9 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         public List<DataFormatOverrideInfo>? DataFormatOverrides { get; set; }
 
-        // PINEADDWATCH / PINEREMOVEWATCH / PINELISTWATCHES fields
-        /// <summary>
-        /// Condition bitmask for PINEADDWATCH: 0x01 = read, 0x02 = write, 0x03 = read+write.
-        /// </summary>
-        public byte? WatchCond { get; set; }
-
         // QUERYDB fields
         /// <summary>Read-only SELECT SQL statement to execute against the CodeDesigner SQLite database.</summary>
         public string? SqlQuery { get; set; }
-
-        // TRACECALLS fields
-        /// <summary>Maximum number of EE instructions to trace for TRACECALLS (default 10 000).</summary>
-        public int? MaxInstructions { get; set; }
-
-        // RUNUNTILPC fields
-        /// <summary>Target EE virtual address for RUNUNTILPC.</summary>
-        public uint? TargetPc { get; set; }
-        /// <summary>Timeout in milliseconds for RUNUNTILPC (default 10 000).</summary>
-        public int? TimeoutMs { get; set; }
 
         // Label Manager fields
         /// <summary>Workspace root directory for GETLABELSETS / CREATELABELSET etc.</summary>
@@ -310,7 +257,6 @@ namespace CodeDesigner.Ps2.Bridge
         /// <summary>User-typed prompt being sent to the orchestrator (MCPCHAT_SEND).</summary>
         public string? McpChatUserText { get; set; }
 
-
         // Discord presence fields (SETDISCORDPRESENCE)
         /// <summary>GameDisc row ID for Discord presence context.</summary>
         public int? DiscordGameDiscId { get; set; }
@@ -323,26 +269,6 @@ namespace CodeDesigner.Ps2.Bridge
         /// <summary>Discord application (client) ID for SETDISCORDAPPID.</summary>
         public string? DiscordApplicationId { get; set; }
 
-        // Pad / controller input fields (PADGETSTATE / PADSETBUTTON / PADSETANALOG / PADSETSTATE / PADGETTYPE)
-        /// <summary>Unified pad slot index (0–7).</summary>
-        public byte? PadSlot { get; set; }
-        /// <summary>Button index in PadDualshock2::Inputs (0–25) for PADSETBUTTON.</summary>
-        public byte? PadButtonIndex { get; set; }
-        /// <summary>Normalized button value (0.0–1.0) for PADSETBUTTON.</summary>
-        public float? PadButtonValue { get; set; }
-        /// <summary>Left stick X for PADSETANALOG / PADSETSTATE (0–255, 0x7F = centred).</summary>
-        public byte? PadLx { get; set; }
-        /// <summary>Left stick Y for PADSETANALOG / PADSETSTATE (0–255, 0x7F = centred).</summary>
-        public byte? PadLy { get; set; }
-        /// <summary>Right stick X for PADSETANALOG / PADSETSTATE (0–255, 0x7F = centred).</summary>
-        public byte? PadRx { get; set; }
-        /// <summary>Right stick Y for PADSETANALOG / PADSETSTATE (0–255, 0x7F = centred).</summary>
-        public byte? PadRy { get; set; }
-        /// <summary>PS2 button bitmask for PADSETSTATE (reserved; button state derived from pressures).</summary>
-        public uint? PadButtons { get; set; }
-        /// <summary>16 pressure bytes for PADSETSTATE (in PadDualshock2::Inputs order).</summary>
-        public List<byte>? PadPressures { get; set; }
-
         // Audio output field (PINESETAUDIOMUTED)
         /// <summary>True to mute PCSX2's audio output, false to unmute.</summary>
         public bool? AudioMuted { get; set; }
@@ -352,20 +278,8 @@ namespace CodeDesigner.Ps2.Bridge
         public bool? NetCaptureEnable { get; set; }
         /// <summary>Direction filter for NETCAPTURE: 0 = both, 1 = TX only, 2 = RX only.</summary>
         public byte? NetCaptureDirection { get; set; }
-        /// <summary>Maximum capture queue size for NETCAPTURE (0 → default 1000).</summary>
-        public ushort? NetCaptureMaxQueue { get; set; }
-        /// <summary>Maximum packets to drain for NETRECVCAPTURE.</summary>
-        public ushort? NetMaxPackets { get; set; }
         /// <summary>Raw Ethernet frame bytes as base64 string for NETINJECT / NETINJECTTX / NETDISASSEMBLE.</summary>
         public string? NetFrameData { get; set; }
-        /// <summary>Filter type for NETSETFILTER: 0=none, 1=protocol, 2=port, 3=IP.</summary>
-        public byte? NetFilterType { get; set; }
-        /// <summary>Protocol value for NETSETFILTER type 1: 0=all, 1=TCP, 2=UDP, 3=ICMP, 4=ARP, 5=DNS, 6=DHCP.</summary>
-        public byte? NetFilterProtocol { get; set; }
-        /// <summary>Port number for NETSETFILTER type 2.</summary>
-        public ushort? NetFilterPort { get; set; }
-        /// <summary>IPv4 address for NETSETFILTER type 3 (dotted decimal, e.g. "192.168.1.1").</summary>
-        public string? NetFilterIP { get; set; }
         /// <summary>64-byte RC4 working key (base64) for NETDECRYPTSCERT.</summary>
         public string? NetWorkingKey { get; set; }
         /// <summary>Medius payload bytes (base64) for MEDIUSDECODE — bytes AFTER the class+type prefix.</summary>
@@ -378,8 +292,6 @@ namespace CodeDesigner.Ps2.Bridge
         public string? NetPayloadData { get; set; }
         /// <summary>NETINJECT / NETINJECTTX / NETBUILDFRAME: recompute IPv4/TCP/UDP lengths and checksums.</summary>
         public bool? NetFixFrame { get; set; }
-        /// <summary>NETINJECT / NETINJECTTX / NETBUILDFRAME: move a TCP segment onto its live flow's next seq/ack (from drained captures).</summary>
-        public bool? NetTcpContinue { get; set; }
         /// <summary>NETDISSECTMANY: frames to dissect in one call.</summary>
         public List<NetFrameInput>? NetFrames { get; set; }
         /// <summary>NETBUILDMESSAGE: catalog protocol (SCERT, Lobby, LobbyExt, MGCL, DME, Game).</summary>

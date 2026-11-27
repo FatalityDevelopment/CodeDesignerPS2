@@ -64,7 +64,6 @@ const BATCH_LIMIT = 2_000;
 const BATCH_CHUNK = 500;
 /** SCANVALUE stops at this many results (ValueScanService.MaxScanResults). */
 const SCANVALUE_CAP = 100_000;
-const REGION_READ_TIMEOUT_MS = 120_000;
 
 const FIRST_SCAN_MODES: ReadonlySet<ScanMode> = new Set(['exact', 'not', 'greater', 'less', 'between', 'unknown']);
 const NEEDS_VALUE: ReadonlySet<ScanMode> = new Set(['exact', 'not', 'greater', 'less', 'between', 'increasedBy', 'decreasedBy']);
@@ -458,7 +457,7 @@ export class ValueScanEngine {
     }
 
     private async _readRange(start: number, end: number, region: ScanRegionTag): Promise<Buffer> {
-        const { bytes } = await this.socket.readMemoryRegion(start, end, undefined, region, REGION_READ_TIMEOUT_MS);
+        const { bytes } = await this.socket.readMemoryRegion(start, end, undefined, region);
         return Buffer.from(bytes, 'hex');
     }
 

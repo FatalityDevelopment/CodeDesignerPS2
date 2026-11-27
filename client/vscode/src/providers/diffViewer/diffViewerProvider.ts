@@ -108,7 +108,7 @@ export class DiffViewerProvider {
                     canSelectFiles:   true,
                     canSelectFolders: false,
                     canSelectMany:    false,
-                    filters:          { 'Memory dumps': ['bin', 'raw', 'dump', 'p2s'], 'All Files': ['*'] },
+                    filters:          { 'Memory dumps': ['bin', 'raw', 'dump'], 'All Files': ['*'] },
                     title:            `Select memory dump for side ${side}`,
                 });
                 if (!uris || uris.length === 0) { break; }

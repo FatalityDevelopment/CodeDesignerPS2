@@ -89,8 +89,6 @@
                            Foreground="{StaticResource FgSecondaryBrush}" />
                 <CheckBox x:Name="PrereqCheck" Style="{StaticResource OptionCheck}" IsChecked="True"
                           Content="Install missing prerequisites (winget, SQL Server LocalDB)" />
-                <CheckBox x:Name="Pcsx2Check" Style="{StaticResource OptionCheck}" IsChecked="True"
-                          Content="PCSX2 (CodeDesigner fork, prebuilt)" />
                 <CheckBox x:Name="ArchiveCheck" Style="{StaticResource OptionCheck}" IsChecked="True"
                           Content="Cheat code archive (imported into the database)" />
                 <CheckBox x:Name="ExtensionCheck" Style="{StaticResource OptionCheck}" IsChecked="True"

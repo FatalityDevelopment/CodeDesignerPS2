@@ -121,7 +121,7 @@ interface SavedState { layout?: DiffLayout; view?: DiffView; context?: number; s
           <option [value]="s.path" [selected]="sideA() === s.path">{{ optionLabel(s) }}</option>
         }
       </select>
-      <button class="lm-tool-btn" title="Browse for a .bin/.p2s dump" (click)="browse('A')">Browse…</button>
+      <button class="lm-tool-btn" title="Browse for a .bin dump or snapshot" (click)="browse('A')">Browse…</button>
     </div>
 
     <button class="dv-icon-btn" title="Swap A and B" (click)="swap()">&#x21C4;</button>
@@ -135,7 +135,7 @@ interface SavedState { layout?: DiffLayout; view?: DiffView; context?: number; s
           <option [value]="s.path" [selected]="sideB() === s.path">{{ optionLabel(s) }}</option>
         }
       </select>
-      <button class="lm-tool-btn" title="Browse for a .bin/.p2s dump" (click)="browse('B')">Browse…</button>
+      <button class="lm-tool-btn" title="Browse for a .bin dump or snapshot" (click)="browse('B')">Browse…</button>
     </div>
 
     <div class="dv-range">

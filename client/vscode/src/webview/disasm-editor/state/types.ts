@@ -212,9 +212,9 @@ export interface EditOverlayState {
   comment: string;
 }
 
-// ── PINE Watchpoints ──────────────────────────────────────────────────────────
+// ── Watchpoints ───────────────────────────────────────────────────────────────
 
-export interface PineWatchInfo {
+export interface WatchInfo {
   /** CPU the watchpoint applies to: 'EE' or 'IOP'. */
   Cpu:   string;
   /** Inclusive start address as a hex string (e.g. '0x00200000'). */

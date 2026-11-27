@@ -12,7 +12,7 @@ const COMMANDS_FILE = 'debug-commands.json';
 /**
  * Debug page: a user-editable list of script commands (Mods/debug-commands.json) shown like
  * code blocks with Copy / Run. Run opens a new VS Code terminal in the Mods folder and sends
- * the command line, the same way the PCSX2 launcher uses the terminal tab.
+ * the command line, the same way Run uses the terminal tab.
  */
 export class DebugCommandsProvider {
     private _panel: vscode.WebviewPanel | undefined;

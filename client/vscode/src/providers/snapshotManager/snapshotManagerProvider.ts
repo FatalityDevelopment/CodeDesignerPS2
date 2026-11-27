@@ -8,18 +8,13 @@ import { applyCodeDesignerPanelIcon } from '../../utils/webviewPanel';
 /** Minimal interface the SnapshotManagerProvider needs from DisasmPanelProvider. */
 export interface SnapshotDataDelegate {
     /**
-     * Async list of PCSX2 .p2s save states from `pcsx2.path.savestates`,
-     * already filtered to the currently selected game and sorted newest-first.
+     * Async list of the game's snapshots (folders of memory dumps), newest first.
      */
     getSnapshots(): Promise<SnapshotEntry[]>;
     openSnapshot(snapshotPath: string): Promise<void>;
     reloadSnapshot(snapshotPath: string): Promise<void>;
-    /**
-     * Read the embedded `Screenshot.png` from a .p2s archive via the bridge.
-     * Returns base64 PNG bytes (no data-URI prefix) or `null` when no
-     * screenshot is embedded / the bridge is unreachable.
-     */
-    getP2sScreenshot(p2sPath: string): Promise<string | null>;
+    /** A snapshot's screenshot as base64 PNG, or null when it has none. */
+    getScreenshot(snapshotPath: string): Promise<string | null>;
 }
 
 export class SnapshotManagerProvider {
@@ -109,10 +104,6 @@ export class SnapshotManagerProvider {
                 const snapPath = msg['path'] as string;
                 try {
                     fs.rmSync(snapPath, { recursive: true, force: true });
-                    // Best-effort: also drop the sibling .extracted/ companion the
-                    // bridge generates on demand for the hex viewer.
-                    const sidecar = snapPath + '.extracted';
-                    try { fs.rmSync(sidecar, { recursive: true, force: true }); } catch { /* may not exist */ }
                     webview.postMessage({ type: 'snapshotActionResult', message: 'Snapshot deleted.' });
                     await this._pushList(webview);
                 } catch (err: any) {
@@ -122,14 +113,14 @@ export class SnapshotManagerProvider {
             }
 
             case 'snapshotScreenshot': {
-                const p2sPath = msg['path'] as string;
+                const snapshotPath = msg['path'] as string;
                 try {
-                    const data = await this.delegate.getP2sScreenshot(p2sPath);
-                    webview.postMessage({ type: 'snapshotScreenshot', path: p2sPath, data });
+                    const data = await this.delegate.getScreenshot(snapshotPath);
+                    webview.postMessage({ type: 'snapshotScreenshot', path: snapshotPath, data });
                 } catch (err: any) {
                     webview.postMessage({
                         type: 'snapshotScreenshot',
-                        path: p2sPath,
+                        path: snapshotPath,
                         data: null,
                         error: err?.message ?? String(err),
                     });

@@ -12,7 +12,7 @@ namespace CodeDesigner.AI.Tools.Assets;
     "Open a SOCOM II map package (G:\\RUN\\M51.ZDB, or a folder with its unpacked files) as an asset session, or " +
     "join the session already open on it. Returns the session id and a summary (models by kind, changed archives). " +
     "Start here before any other assets_* tool. Risk: read-only.")]
-public sealed class AssetsOpenTool(IEmulatorBridge bridge)
+public sealed class AssetsOpenTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Path to the .ZDB package or its unpacked folder.")] string path,
@@ -23,7 +23,7 @@ public sealed class AssetsOpenTool(IEmulatorBridge bridge)
 [CdTool("assets_sessions", ToolDomain.Media, ToolRisk.ReadOnly,
     "List open asset sessions (including ones a person opened in an editor) with revision and unsaved archives. " +
     "Risk: read-only.")]
-public sealed class AssetsSessionsTool(IEmulatorBridge bridge)
+public sealed class AssetsSessionsTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(CancellationToken ct = default)
         => CdText.Message(await bridge.SendAsync(new { Command = "ASSET_SESSIONS" }, ct));
@@ -32,7 +32,7 @@ public sealed class AssetsSessionsTool(IEmulatorBridge bridge)
 [CdTool("assets_list_models", ToolDomain.Media, ToolRisk.ReadOnly,
     "List models in a session: archive, name, kind (prop, weapon, character, world, sky, library), visual count. " +
     "Filter by kind, name substring or archive (M51_MDL.ZED). Risk: read-only.")]
-public sealed class AssetsListModelsTool(IEmulatorBridge bridge)
+public sealed class AssetsListModelsTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Session id from assets_open.")] string session,
@@ -54,7 +54,7 @@ public sealed class AssetsListModelsTool(IEmulatorBridge bridge)
     "Describe one model: visuals (N<node>_<visual>), chunks (texture, vertex/triangle counts, vertex colours), each " +
     "texture (size, format, palette id, transparency, alpha test) and its GEO definition node (transform, bounds, " +
     "position unit, children). Use before retexture / tintVertexColors edits. Risk: read-only.")]
-public sealed class AssetsDescribeModelTool(IEmulatorBridge bridge)
+public sealed class AssetsDescribeModelTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Session id.")] string session,
@@ -73,7 +73,7 @@ public sealed class AssetsDescribeModelTool(IEmulatorBridge bridge)
 [CdTool("assets_texture", ToolDomain.Media, ToolRisk.ReadOnly,
     "Decode a texture (.tif) with the palette the game binds (TEX0.CBP) and return its info plus a base64 PNG with " +
     "real alpha. Risk: read-only.")]
-public sealed class AssetsTextureTool(IEmulatorBridge bridge)
+public sealed class AssetsTextureTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Session id.")] string session,
@@ -93,7 +93,7 @@ public sealed class AssetsTextureTool(IEmulatorBridge bridge)
     "List what the map places: kind (model = worldmodel, reference = a placed prop/turret/vehicle/sky, clutter = " +
     "trees/bushes/grass/rocks from CLUTTER.ZAR), model, position, scale, matrix, and the geoIndex / clutterIndex " +
     "that edit ops take. Filter by kind or name/path substring; limit defaults to 500. Risk: read-only.")]
-public sealed class AssetsMapSceneTool(IEmulatorBridge bridge)
+public sealed class AssetsMapSceneTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Session id.")] string session,
@@ -117,7 +117,7 @@ public sealed class AssetsMapSceneTool(IEmulatorBridge bridge)
     "parent, local, world}] and per vertex skinInfluences slots: skinBones int32 (skeleton index, -1 unused), " +
     "skinWeights, skinPositions / skinNormals (bone-local); their vertices are view-only for now. " +
     "Risk: read-only.")]
-public sealed class AssetsModelMeshTool(IEmulatorBridge bridge)
+public sealed class AssetsModelMeshTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Session id.")] string session,
@@ -138,7 +138,7 @@ public sealed class AssetsModelMeshTool(IEmulatorBridge bridge)
 [CdTool("assets_map_points", ToolDomain.Media, ToolRisk.ReadOnly,
     "The map's named points from AIMAPS.MPS (player / hostage starts, waypoints) with world X / Z and the AI grid. " +
     "Move one with assets_edit movePoint. Risk: read-only.")]
-public sealed class AssetsMapPointsTool(IEmulatorBridge bridge)
+public sealed class AssetsMapPointsTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Session id.")] string session,
@@ -150,7 +150,7 @@ public sealed class AssetsMapPointsTool(IEmulatorBridge bridge)
     "Character animation clips: the package's own MOTION_S.ZAR (editable) and the shared RUN/MOTION_P.ZAR " +
     "(read-only; copy one in with assets_edit addAnimation {from}). Each: name, source, editable, duration (s), " +
     "frames (intervals; samples = frames + 1), fps, bones. Risk: read-only.")]
-public sealed class AssetsListAnimationsTool(IEmulatorBridge bridge)
+public sealed class AssetsListAnimationsTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Session id.")] string session,
@@ -170,7 +170,7 @@ public sealed class AssetsListAnimationsTool(IEmulatorBridge bridge)
     "positions [[x,y,z]] (local translation, units) and rotations [[x,y,z,w]] (local unit quaternions under the " +
     "skeleton parent), one entry when static or one per sample (frames + 1, evenly over the duration). Extra bones " +
     "rifle / pistol / launcher / weapon sit under the hand (weapon attachment). Risk: read-only.")]
-public sealed class AssetsAnimationTool(IEmulatorBridge bridge)
+public sealed class AssetsAnimationTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Session id.")] string session,
@@ -189,7 +189,7 @@ public sealed class AssetsAnimationTool(IEmulatorBridge bridge)
 [CdTool("assets_weapons", ToolDomain.Media, ToolRisk.ReadOnly,
     "Weapons whose model is in the package (RUN/ZWEAPON.ZAR zweapon.rdr): internal name, model, the ZANIM effect " +
     "played when fired (fireAnimName, e.g. muzzle_m4) and fireWait (s between shots). Risk: read-only.")]
-public sealed class AssetsWeaponsTool(IEmulatorBridge bridge)
+public sealed class AssetsWeaponsTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Session id.")] string session,
@@ -203,7 +203,7 @@ public sealed class AssetsWeaponsTool(IEmulatorBridge bridge)
     "textures, tracks (target + instructions: opcode, block depth, words as floats) and the effects it spawns " +
     "(opcode 0x2D). Weapon models carry firepoint / firepoint_shell / aimpoint locators (assets_model_mesh " +
     "locators) where these spawn. Risk: read-only.")]
-public sealed class AssetsWeaponFxTool(IEmulatorBridge bridge)
+public sealed class AssetsWeaponFxTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Session id.")] string session,
@@ -216,7 +216,7 @@ public sealed class AssetsWeaponFxTool(IEmulatorBridge bridge)
     "Every ZANIM effect script in the package's CZANIM.ZAR (muzzle flashes, shells, smoke, explosions, sounds, " +
     "camera shakes ...): name, its tracks, the effects it calls (CALL_ANIMATION), the package models it uses and the " +
     "opcodes it contains (official names from the game's opcode table). Risk: read-only.")]
-public sealed class AssetsEffectsTool(IEmulatorBridge bridge)
+public sealed class AssetsEffectsTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Session id.")] string session,
@@ -237,7 +237,7 @@ public sealed class AssetsEffectsTool(IEmulatorBridge bridge)
     "euler, OBJECT_MOTION_FROM_TO duration + scaleStart/End/Rate, LIGHT colour/range/time, CALL_ANIMATION animation) " +
     "and raw words. Objects: self = the effect's object, owner = what started it (a weapon's firepoint). " +
     "Risk: read-only.")]
-public sealed class AssetsEffectTool(IEmulatorBridge bridge)
+public sealed class AssetsEffectTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Session id.")] string session,
@@ -281,7 +281,7 @@ public sealed class AssetsEffectTool(IEmulatorBridge bridge)
     "instances with assets_map_scene first). yaw is degrees about Y; omitted parts keep current values. " +
     "Indices come from assets_map_scene and shift after add/delete, so re-read before chaining. " +
     "Risk: changes the in-memory session only.")]
-public sealed class AssetsEditTool(IEmulatorBridge bridge)
+public sealed class AssetsEditTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Session id.")] string session,
@@ -292,7 +292,7 @@ public sealed class AssetsEditTool(IEmulatorBridge bridge)
 
 [CdTool("assets_undo", ToolDomain.Media, ToolRisk.MutatesDatabase,
     "Undo the last edit in a session (or redo with redo=true). Risk: changes the in-memory session only.")]
-public sealed class AssetsUndoTool(IEmulatorBridge bridge)
+public sealed class AssetsUndoTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Session id.")] string session,
@@ -306,7 +306,7 @@ public sealed class AssetsUndoTool(IEmulatorBridge bridge)
     "keeping a one-time .bak); mode=pack writes a memory-card pack <NAME>.CDB (packName must start with 'm', max 7 " +
     "characters) to outputPath and, with folderCard (a PCSX2 folder memory card), installs it as " +
     "BASCUS-97275<NAME>/<NAME>.CDB. Prefer writing a copy (outputPath) over the retail file. Risk: writes disk.")]
-public sealed class AssetsSaveTool(IEmulatorBridge bridge)
+public sealed class AssetsSaveTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Session id.")] string session,
@@ -338,7 +338,7 @@ public sealed class AssetsSaveTool(IEmulatorBridge bridge)
     "session: the model as a SOCOM 3 / CA package. From a GTA: San Andreas session: a ped (with clips as " +
     "'<source>/<name>', e.g. ped.ifp/WALK_civi, retargeted onto alg_UN01), weapon, vehicle or object becomes a SOCOM II " +
     "pack (geometry encoded from triangles; vehicles as static props). Risk: writes disk.")]
-public sealed class AssetsExportTool(IEmulatorBridge bridge)
+public sealed class AssetsExportTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Session id.")] string session,
@@ -369,7 +369,7 @@ public sealed class AssetsExportTool(IEmulatorBridge bridge)
 
 [CdTool("assets_close", ToolDomain.Media, ToolRisk.ReadOnly,
     "Close an asset session, discarding unsaved edits. Risk: read-only (drops in-memory edits).")]
-public sealed class AssetsCloseTool(IEmulatorBridge bridge)
+public sealed class AssetsCloseTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Session id.")] string session,

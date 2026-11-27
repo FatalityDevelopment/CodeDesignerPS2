@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
+import { encodePng } from '../../utils/png';
 import * as net from 'net';
 import * as os from 'os';
 import * as path from 'path';
@@ -29,7 +30,6 @@ interface EmuSettings {
     bios?: Array<{ name: string; path: string }>;
     games?: Array<{ name: string; path: string }>;
     emulators?: Array<{ type: string; path: string }>;
-    pcsx2?: { host?: string; slot?: number };
 }
 
 interface UserPreferences {
@@ -95,7 +95,7 @@ const LIVE_REGIONS_ALL: LiveRegionDef[] = [
     },
     {
         // EE hardware-register window (timers, DMAC, GIF, VIF, IPU, GS priv).
-        // PINE/Read32 can read individual register addresses inside this span;
+        // Individual register addresses can be read inside this span;
         // showing the lower 64 KB keeps the page count manageable.
         memoryRegion: MemoryRegion.EeHardware,   region: 'ee',
         address: 0x10000000, size:       64 * 1024,  label: 'EE HW regs',    defaultOpen: false,
@@ -157,8 +157,6 @@ const LIVE_REGIONS_DEFAULT = LIVE_REGIONS_ALL.filter(r => r.defaultOpen);
 /** Everything else — surfaced through the sidebar Memory Region menu. */
 const LIVE_REGIONS_OPTIONAL = LIVE_REGIONS_ALL;
 
-/** All memory regions combined — used when the user explicitly opens all views (restart, etc.). */
-const LIVE_REGIONS = LIVE_REGIONS_ALL;
 
 /** URL and branch for the cheat code archive repository. */
 const ARCHIVE_REPO_URL    = 'https://github.com/TylerDev888/CheatCodeArchive.git';
@@ -169,9 +167,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private webview?: vscode.Webview;
     private emulatorTerminal?: vscode.Terminal;
     /**
-     * Terminal hosting CodeDesigner.Ps2.Emulator.exe (built-in emulator
-     * process). Set by {@link handleStartEmulatorProcess}; cleared by the
-     * onDidCloseTerminal hook so a subsequent Run respawns the process.
+     * Terminal running Ps2Emulator (`ps2`), launched by Run; cleared by the
+     * onDidCloseTerminal hook so a subsequent Run starts it again.
      */
     private emulatorProcessTerminal?: vscode.Terminal;
     /** Terminal hosting the CodeDesigner.AI MCP stdio server when launched from the panel. */
@@ -187,18 +184,16 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     /** Disc serial of the currently selected game (set by handleGameChanged). Empty when unknown. */
     private _currentGameSerial: string = '';
     private _paused: boolean = false;
-    /** If Run was clicked before socket connect, execute this mode once connected. */
-    private _pendingRunMode: 'emulator' | 'pcsx2' | null = null;
-    /** True when the current connection is through the PCSX2 PINE bridge. */
-    private _bridgeMode: boolean = false;
-    /** Cheats of the selected cheat-archive list for the current PCSX2 game. */
+    /** True while a game runs in Ps2Emulator, connected (Run, or Connect to Ps2Emulator). */
+    private _gameRunning: boolean = false;
+    /** Cheats of the selected cheat-archive list for the running game. */
     private _archiveCheats: ArchiveCheat[] = [];
     /** Title of the selected cheat list (e.g. "GSHI", "CodeBreaker"). */
     private _archiveCheatType: string = '';
     /** Serial + title the archive cheats were fetched for. */
     private _archiveSerial: string = '';
     private _archiveGame: string = '';
-    /** Serial read from the selected disc's SYSTEM.CNF (cached per path; no PCSX2 needed). */
+    /** Serial read from the selected disc's SYSTEM.CNF (cached per path). */
     private _selectedDiscSerial: { path: string; serial: string } | undefined;
     private _activeCdsFilePath: string = '';
     private _activeCdsContent: string = '';
@@ -218,22 +213,6 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private _connectAttemptVersion = 0;
     /** Timer handle for deferred socket retry; cleared before scheduling a new retry. */
     private _connectRetryTimer: ReturnType<typeof setTimeout> | undefined;
-    /** Track whether this session launched PCSX2 so we can clean up orphans on disconnect/restart. */
-    private _launchedPcsx2InSession = false;
-    /** PID of a PCSX2 process launched by this VS Code session (if available). */
-    private _launchedPcsx2Pid: number | null = null;
-    /** Terminal used for PCSX2 launch/management. */
-    private _pcsx2Terminal?: vscode.Terminal;
-    /** Poll timer tailing the PCSX2 emu log. */
-    private _pcsx2LogTimer?: ReturnType<typeof setInterval>;
-    /** Byte offset already parsed in the PCSX2 emu log. */
-    private _pcsx2LogOffset = 0;
-    /** Unique file paths discovered in PCSX2 console output. */
-    private _pcsx2DiscoveredPaths = new Set<string>();
-    /** True once the PCSX2 emu log has reported "GSStream: listening". */
-    private _pcsx2GraphicsReady = false;
-    /** Callbacks waiting for PCSX2's GS stream to come up. */
-    private _pcsx2ReadyWaiters = new Set<() => void>();
     /** Standalone Controller webview, registered from extension.ts after provider setup. */
     private _jokerMakerProvider?: JokerMakerProvider;
 
@@ -274,8 +253,13 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
      * (view/title) Connect/Disconnect action. Uses the panel's currently
      * selected emulator / BIOS / game paths.
      */
+    /** Starts Ps2Emulator with the selected BIOS and game, or closes it when it runs. */
     public toggleConnectionFromCommand(): void {
-        this.handleConnect(this.selectedEmulatorPath, this.selectedBiosPath, this.selectedGamePath);
+        if (this.emulatorProcessTerminal || this.socketClient.isDirect()) {
+            void this.stopPs2Emulator().then(() => this.postEmulatorProcessStatus());
+        } else {
+            this.handleRunPs2Emulator(this.selectedEmulatorPath, this.selectedBiosPath, this.selectedGamePath);
+        }
     }
     /** Provides the standalone Controller panel used by the cheats tab. */
     public setJokerMakerProvider(provider: JokerMakerProvider): void {
@@ -307,10 +291,10 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         this._debugCommandsProvider   = new DebugCommandsProvider(_extensionUri);
 
         const delegate: SnapshotDataDelegate = {
-            getSnapshots:    () => this.getPcsx2Savestates(),
+            getSnapshots:    () => this.listSnapshots(),
             openSnapshot:    (p) => this.handleOpenSnapshot(p),
             reloadSnapshot:  (p) => this.handleLoadSnapshot(p),
-            getP2sScreenshot: (p) => this.handleReadP2sScreenshot(p),
+            getScreenshot:   (p) => readSnapshotScreenshot(p),
         };
         this._snapshotManagerProvider = new SnapshotManagerProvider(_extensionUri, delegate);
         this._diffViewerProvider      = new DiffViewerProvider(_extensionUri, delegate, socketClient);
@@ -324,7 +308,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             getGame:        () => this.cheatListGame(),
             getSerial:        async () => (await this.getCurrentGameForCheats()).serial,
             importRepository: serial => this.importCheatRepository(serial),
-            onListChanged:    () => { if (this._bridgeMode) { void this.handleFetchArchiveCheats(); } },
+            onListChanged:    () => { if (this._gameRunning) { void this.handleFetchArchiveCheats(); } },
             openTool:       tool => {
                 switch (tool) {
                     case 'scanner':   this._cheatScannerProvider.open(); break;
@@ -394,7 +378,11 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                     this.cleanupProcess();
                 }
                 if (t === this.emulatorProcessTerminal) {
-                    getOutputChannel().info('Built-in emulator process exited.');
+                    getOutputChannel().info('Ps2Emulator exited.');
+                    if (this._gameRunning) {
+                        this._gameRunning = false;
+                        this.webview?.postMessage({ command: 'gameRunningChanged', gameRunning: false });
+                    }
                     this.emulatorProcessTerminal = undefined;
                     void this.postEmulatorProcessStatus();
                 }
@@ -402,11 +390,6 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                     getOutputChannel().info('CodeDesigner MCP server terminal closed.');
                     this.mcpServerTerminal = undefined;
                     void this.handleRequestMcpStatus();
-                }
-                if (t === this._pcsx2Terminal) {
-                    getOutputChannel().info('Emulator launcher terminal closed.');
-                    this._pcsx2Terminal = undefined;
-                    void this.postEmulatorProcessStatus();
                 }
             })
         );
@@ -486,25 +469,11 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 case 'connect':
                     this.handleConnect(msg.emulatorPath, msg.biosPath, msg.gamePath);
                     break;
-                case 'run':
-                    this.handleRun(
-                        msg.emulatorPath ?? this.selectedEmulatorPath,
-                        msg.biosPath ?? this.selectedBiosPath,
-                        msg.gamePath ?? this.selectedGamePath
-                    );
-                    break;
                 case 'startNetwork':
                     this.handleStartNetwork();
                     break;
-                case 'startPcsx2':
-                    this.handleStartPcsx2(
-                        msg.emulatorPath ?? this.selectedEmulatorPath,
-                        msg.biosPath ?? this.selectedBiosPath,
-                        msg.gamePath ?? this.selectedGamePath
-                    );
-                    break;
-                case 'runPcsx2':
-                    this.handleRunPcsx2(
+                case 'run':
+                    this.handleRunPs2Emulator(
                         msg.emulatorPath ?? this.selectedEmulatorPath,
                         msg.biosPath ?? this.selectedBiosPath,
                         msg.gamePath ?? this.selectedGamePath
@@ -515,9 +484,6 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                     break;
                 case 'snapshot':
                     await this.handleSnapshot();
-                    break;
-                case 'snapshotPcsx2':
-                    await this.handleSnapshotPcsx2();
                     break;
                 case 'openGsViewer':
                     await vscode.commands.executeCommand('codedesigner.openGsFrameViewer');
@@ -833,21 +799,6 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     }
 
     /**
-     * Returns the path to CodeDesigner.Ps2.Emulator.exe (the built-in PS2
-     * emulator host) in the install directory, or null if it does not exist.
-     * Symmetric with {@link findBridgeExe}; the post-build deploy step in the
-     * Emulator project copies the exe alongside Bridge.
-     */
-    private static findEmulatorExe(): string | null {
-        const installDir = DisasmPanelProvider.getInstallDirectory();
-        const exeName = process.platform === 'win32'
-            ? 'CodeDesigner.Ps2.Emulator.exe'
-            : 'CodeDesigner.Ps2.Emulator';
-        const candidate = path.join(installDir, exeName);
-        return fs.existsSync(candidate) ? candidate : null;
-    }
-
-    /**
      * Returns the deployed CodeDesigner.AI executable path (the profile-driven
      * MCP server), or null when it has not been built/deployed yet.
      */
@@ -884,49 +835,6 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             }
         } catch { /* ignore read errors */ }
         return results;
-    }
-
-    /**
-     * Tries to locate a PCSX2 executable.
-     * Resolution order:
-     * 1. `pcsx2` subfolder inside the CodeDesigner install directory
-     *    (e.g. `%LOCALAPPDATA%\CodeDesigner\pcsx2\pcsx2-qt.exe`).
-     * 2. Standard OS-specific installation paths.
-     * Returns the first path found, or null if PCSX2 is not detected.
-     */
-    private static detectPcsx2Exe(): string | null {
-        const installDir = DisasmPanelProvider.getInstallDirectory();
-        const candidates: string[] = [];
-
-        if (process.platform === 'win32') {
-            // 1. pcsx2 subfolder inside the install directory (preferred). The installer's
-            //    release build of the fork keeps its MSBuild name (Release AVX2 / Release).
-            for (const exe of ['pcsx2-qt.exe', 'pcsx2-qtx64-avx2.exe', 'pcsx2-qtx64.exe']) {
-                candidates.push(path.join(installDir, 'pcsx2', exe));
-            }
-            // 2. Standard Windows installation paths
-            const pf    = process.env.PROGRAMFILES         ?? 'C:\\Program Files';
-            const pf86  = process.env['PROGRAMFILES(X86)'] ?? 'C:\\Program Files (x86)';
-            const local = process.env.LOCALAPPDATA         ?? '';
-            candidates.push(
-                path.join(pf,   'PCSX2', 'pcsx2-qt.exe'),
-                path.join(pf86, 'PCSX2', 'pcsx2-qt.exe'),
-                ...(local ? [path.join(local, 'Programs', 'PCSX2', 'pcsx2-qt.exe')] : []),
-            );
-        } else if (process.platform === 'darwin') {
-            candidates.push(
-                path.join(installDir, 'pcsx2', 'PCSX2'),
-                '/Applications/PCSX2.app/Contents/MacOS/PCSX2',
-            );
-        } else {
-            candidates.push(
-                path.join(installDir, 'pcsx2', 'pcsx2'),
-                '/usr/bin/pcsx2',
-                '/usr/local/bin/pcsx2',
-                '/snap/bin/pcsx2',
-            );
-        }
-        return candidates.find(c => c && fs.existsSync(c)) ?? null;
     }
 
     private loadEmuSettings(): void {
@@ -969,24 +877,11 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             }
         }
 
-        // 3. Auto-detect the PCSX2 executable and add it to the emulators list.
-        //    Keep any user-selected PCSX2-compatible emulator entries too; the
-        //    Bridge is resolved from the install directory, never from this list.
-        //    BIOS files must be provided and configured by the user.
-        const pcsx2Exe = DisasmPanelProvider.detectPcsx2Exe();
-        const existing = this.settings.emulators ?? [];
-        if (pcsx2Exe) {
-            if (!existing.some(e => e.path === pcsx2Exe)) {
-                this.settings.emulators = [
-                    { type: 'PCSX2', path: pcsx2Exe },
-                    ...existing,
-                ];
-            } else {
-                this.settings.emulators = existing;
-            }
-        } else {
-            this.settings.emulators = existing;
-        }
+        // 3. The emulators list: Ps2Emulator builds (ps2.exe) the user added. PCSX2 and the
+        //    built-in emulator are gone, so their entries are dropped. The Bridge is
+        //    resolved from the install directory, never from this list.
+        this.settings.emulators = (this.settings.emulators ?? []).filter(e =>
+            !/pcsx2|codedesigner\.ps2\.emulator/i.test(`${e.type} ${e.path}`));
 
         // Dedup games by path (case-insensitive). Keeps the first occurrence —
         // legacy settings files sometimes accumulate duplicate entries after a
@@ -1057,8 +952,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     }
 
     /**
-     * Persist the current emulator settings (games list, BIOS list, emulators list,
-     * and PCSX2 connection settings).
+     * Persist the current emulator settings (games list, BIOS list, emulators list).
      *
      * Strategy:
      *  - Connected  → write to the DB only (DB is the authoritative store).
@@ -1071,10 +965,6 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 await this.socketClient.setSetting('emu.games',     JSON.stringify(this.settings.games     ?? []));
                 await this.socketClient.setSetting('emu.bios',      JSON.stringify(this.settings.bios      ?? []));
                 await this.socketClient.setSetting('emu.emulators', JSON.stringify(this.settings.emulators ?? []));
-                if (this.settings.pcsx2?.host != null)
-                    await this.socketClient.setSetting('emu.pcsx2.host', String(this.settings.pcsx2.host));
-                if (this.settings.pcsx2?.slot != null)
-                    await this.socketClient.setSetting('emu.pcsx2.slot', String(this.settings.pcsx2.slot));
             } catch (err: any) {
                 getOutputChannel().debug(`Could not persist emu-settings to DB: ${err?.message ?? err}`);
             }
@@ -1086,7 +976,6 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 bios:      this.settings.bios,
                 games:     this.settings.games,
                 emulators: this.settings.emulators,
-                pcsx2:     this.settings.pcsx2,
             };
             try {
                 await fs.promises.writeFile(settingsPath, JSON.stringify(toSave, null, 2), 'utf-8');
@@ -1225,7 +1114,6 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                         bios:      this.settings.bios,
                         games:     this.settings.games,
                         emulators: this.settings.emulators,
-                        pcsx2:     this.settings.pcsx2,
                     };
                     try {
                         await fs.promises.writeFile(
@@ -1284,7 +1172,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             selectedGameName: this.selectedGameName,
             isConnected: this.socketClient.isConnected(),
             isPaused: this._paused,
-            isPcsx2: this._bridgeMode,
+            gameRunning: this._gameRunning,
             selectedEmulator: this.selectedEmulatorPath,
             selectedBios: this.selectedBiosPath,
             selectedGame: this.selectedGamePath,
@@ -1297,21 +1185,11 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 
     /**
      * Resolve the canonical PS2 disc serial (e.g. "SCUS-97275") for the
-     * currently selected ISO. Tries a running PCSX2 first, then reads
-     * SYSTEM.CNF from the ISO directly. Returns undefined when neither
-     * source yields a serial — callers must NOT substitute the ISO path.
+     * currently selected ISO, read from its SYSTEM.CNF. Returns undefined
+     * when it yields none — callers must NOT substitute the ISO path.
      */
     private async _resolveSerialForGamePath(gamePath: string): Promise<string | undefined> {
-        if (!this.socketClient.isConnected()) { return undefined; }
-
-        // 1. Live PCSX2 PINE — only useful if the same game is loaded there.
-        try {
-            const info = await this.socketClient.getPcsx2GameInfo();
-            const serial = (info.ID ?? '').replace(/\0/g, '').trim();
-            if (serial) { return serial.toUpperCase(); }
-        } catch { /* PCSX2 not running — fall through to ISO read */ }
-
-        // 2. Static ISO read — works even without an attached emulator.
+        if (!this.socketClient.isConnected() || !gamePath) { return undefined; }
         try {
             const bootElf = await this.socketClient.isoBootElf(gamePath);
             const serial = DisasmPanelProvider.serialFromBootElf(bootElf);
@@ -1338,7 +1216,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     }
 
     /**
-     * Resolve the currently loaded game's rich metadata (region, CRC, PCSX2
+     * Resolve the currently loaded game's rich metadata (region, CRC, PCSX2-list
      * compatibility status, cover art) and push it to the panel's Loaded Game
      * card. Falls back to a bare title when the game is not in the local
      * compatibility database.
@@ -1349,19 +1227,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         let serial: string | undefined;
         let title: string | undefined = this.selectedGameName || undefined;
 
-        if (this._bridgeMode && this.socketClient.isConnected()) {
-            try {
-                const info = await this.socketClient.getPcsx2GameInfo();
-                const s = (info.ID    ?? '').replace(/\0/g, '').trim();
-                const t = (info.Title ?? '').replace(/\0/g, '').trim();
-                if (s) { serial = s; }
-                if (t) { title = t; }
-            } catch { /* PCSX2 not attached — fall back to the ISO serial */ }
-        }
-
-        // Not attached: read the disc serial straight from the selected ISO so
-        // the card (and cover art) update as soon as a game is picked.
-        if (!serial && this.selectedGamePath && this.socketClient.isConnected()) {
+        // The disc serial, read straight from the selected ISO so the card
+        // (and cover art) update as soon as a game is picked.
+        if (this.selectedGamePath && this.socketClient.isConnected()) {
             try {
                 const bootElf = await this.socketClient.isoBootElf(this.selectedGamePath);
                 serial = DisasmPanelProvider.serialFromBootElf(bootElf);
@@ -1422,42 +1290,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 
     // ── Emulator launch ───────────────────────────────────────────────────────
 
-    private isPcsx2Entry(entry: { type?: string; path: string }): boolean {
-        const type = entry.type?.toLowerCase() ?? '';
-        const p = entry.path.toLowerCase();
-        return p.includes('pcsx2') || type.includes('pcsx2');
-    }
-
-    private isPcsx2Selection(emulatorPath: string): boolean {
-        if (!emulatorPath) { return false; }
-        const lower = emulatorPath.toLowerCase();
-        if (lower.includes('pcsx2')) { return true; }
-        const resolved = this.resolvePath(emulatorPath).toLowerCase();
-        const entry = (this.settings.emulators ?? []).find(e =>
-            this.resolvePath(e.path).toLowerCase() === resolved
-        );
-        return entry ? this.isPcsx2Entry(entry) : false;
-    }
-
-    private getControlServerExecutablePath(selectedEmulatorPath?: string): string | null {
-        // Primary: Bridge deployed to the install directory (no user configuration needed).
-        const installExe = DisasmPanelProvider.findBridgeExe();
-        if (installExe) { return installExe; }
-
-        // Fallback: a non-PCSX2 emulator entry the user may have configured manually.
-        if (selectedEmulatorPath && !this.isPcsx2Selection(selectedEmulatorPath)) {
-            const selectedEntry = (this.settings.emulators ?? []).find(e =>
-                this.resolvePath(e.path).toLowerCase() === this.resolvePath(selectedEmulatorPath).toLowerCase()
-            );
-            if (selectedEntry && !this.isPcsx2Entry(selectedEntry)) {
-                return this.resolvePath(selectedEntry.path);
-            }
-        }
-
-        const fallback = (this.settings.emulators ?? []).find(e => !this.isPcsx2Entry(e));
-        if (fallback) { return this.resolvePath(fallback.path); }
-
-        return null;
+    private getControlServerExecutablePath(): string | null {
+        return DisasmPanelProvider.findBridgeExe();
     }
 
     private handleConnect(emulatorPath: string, biosPath: string, gamePath: string): void {
@@ -1476,169 +1310,106 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             }
             out.info('Disconnected from server.');
             this.socketClient.disconnect();
-            // PCSX2 is intentionally left running — disconnect/reconnect only
-            // re-attaches the sockets and must not disturb emulator state.
             this.cleanupProcess();
             return;
         }
 
         out.show(true);
-        this._pendingRunMode = null;
-        this.launchControlServerAndConnect(emulatorPath);
-    }
-
-    /** Start the selected runtime mode via socket after Connect has established control-server link. */
-    private handleRun(emulatorPath: string, biosPath: string, gamePath: string): void {
-        const out = getOutputChannel();
-
-        this.selectedEmulatorPath = emulatorPath;
-        this.selectedBiosPath = biosPath;
-        this.selectedGamePath = gamePath;
-
-        out.show(true);
-        const runMode: 'emulator' | 'pcsx2' = this.isPcsx2Selection(emulatorPath) ? 'pcsx2' : 'emulator';
-
-        // If already connected, switch runtime mode immediately over socket.
-        if (this.socketClient.isConnected()) {
-            this.startRuntimeMode(runMode, biosPath, gamePath);
-            return;
-        }
-
-        // Not connected yet: launch control server, then run mode once connected.
-        this._pendingRunMode = runMode;
         this.launchControlServerAndConnect(emulatorPath);
     }
 
     /**
-     * Single-button PCSX2 flow. Reuses an already-running PCSX2 when its PINE
-     * port answers and the bridge attaches cleanly; otherwise kills any
-     * stale/orphaned instance and launches a fresh one, then attaches once
-     * PCSX2 is ready. Replaces the old Start PCSX2 / Connect / Run trio.
+     * Run: start the workspace service (the Bridge) if it is not up, launch Ps2Emulator with the
+     * selected BIOS and disc (or an ELF) and its debug server, then connect to it directly.
      */
-    private handleRunPcsx2(emulatorPath: string, biosPath: string, gamePath: string): void {
+    private handleRunPs2Emulator(emulatorPath: string, biosPath: string, gamePath: string, elfPath?: string): void {
         const out = getOutputChannel();
         this.selectedEmulatorPath = emulatorPath;
         this.selectedBiosPath = biosPath;
         this.selectedGamePath = gamePath;
         out.show(true);
-
-        if (emulatorPath && !this.isPcsx2Selection(emulatorPath)) {
-            void (async () => {
-                try {
-                    const host = (this.settings.pcsx2?.host ?? '127.0.0.1').trim() || '127.0.0.1';
-                    const slot = this.settings.pcsx2?.slot ?? 28011;
-
-                    this._pendingRunMode = null;
-                    if (!this.socketClient.isConnected() && !this.emulatorTerminal) {
-                        this.launchControlServerAndConnect(emulatorPath);
-                    }
-
-                    if (!this.handleStartPcsx2(emulatorPath, biosPath, gamePath)) { return; }
-
-                    if (!await this._waitForSocketConnected(20000)) {
-                        out.error('Control socket never connected; cannot attach external emulator.');
-                        return;
-                    }
-
-                    if (!await this._waitForPortListening(slot, host, 20000)) {
-                        out.error(`External emulator PINE port did not open on ${host}:${slot}.`);
-                        return;
-                    }
-
-                    if (!await this._attachPcsx2()) {
-                        out.error('Failed to attach to the external emulator PINE socket.');
-                        return;
-                    }
-
-                    await this._registerBreakpointsAndResume(true);
-                    out.info('Attached to external emulator and sent RESUME.');
-                } catch (err: any) {
-                    out.error(`Run external emulator failed: ${err?.message ?? err}`);
-                }
-            })();
-            return;
-        }
-
         void (async () => {
-          try {
-            const host = (this.settings.pcsx2?.host ?? '127.0.0.1').trim() || '127.0.0.1';
-            const slot = this.settings.pcsx2?.slot ?? 28011;
-
-            // Bring up the Bridge control socket — needed either way, and
-            // independent of PCSX2. The attach is driven here, so clear any
-            // pending run mode that onSocketConnected would otherwise act on.
-            this._pendingRunMode = null;
-            if (!this.socketClient.isConnected() && !this.emulatorTerminal) {
-                this.launchControlServerAndConnect(emulatorPath);
-            }
-
-            // Reuse an already-running PCSX2 if its PINE port answers and the
-            // bridge can attach — lets users keep their own PCSX2 open.
-            if (await DisasmPanelProvider.probePortListening(slot, host)) {
-                out.info(`A PCSX2 instance is listening on ${host}:${slot} — trying to attach…`);
-                if (await this._waitForSocketConnected(20000)) {
-                    // Bridge is up; its GS fan-out listener is too, so the
-                    // viewer can connect now and fill in once the stream starts.
-                    void vscode.commands.executeCommand('codedesigner.openGsFrameViewer');
-                    if (await this._attachPcsx2()) {
-                        out.info('Attached to the existing PCSX2 instance.');
-                        return;
-                    }
+            try {
+                const exe = emulatorPath ? this.resolvePath(emulatorPath) : '';
+                if (!exe || !fs.existsSync(exe)) {
+                    throw new Error('Select Ps2Emulator (ps2.exe) as the emulator first.');
                 }
-                out.warn('Existing PCSX2 did not attach — replacing it with a fresh instance.');
-            }
+                const bios = biosPath ? this.resolvePath(biosPath) : '';
+                if (!elfPath && !bios) {
+                    throw new Error('Select a BIOS first.');
+                }
+                if (!this.socketClient.isConnected() && !this.emulatorTerminal) {
+                    this.launchControlServerAndConnect(emulatorPath);
+                }
+                await this.stopPs2Emulator();
 
-            // No reusable instance: kill any stale/orphaned PCSX2, launch fresh.
-            this.terminateOrphanedPcsx2ProcessesIfNeeded('starting a fresh PCSX2', true);
-            if (!this.handleStartPcsx2(emulatorPath, biosPath, gamePath)) { return; }
+                const address = vscode.workspace.getConfiguration('codedesigner')
+                    .get<string>('ps2Emulator.debugServer', '127.0.0.1:28100');
+                const [host, portText] = address.includes(':') ? address.split(':') : ['127.0.0.1', address];
+                const port = parseInt(portText, 10);
+                const args = elfPath ? ['elf', elfPath] : ['bios', bios];
+                if (elfPath && bios) { args.push('--bios', bios); }
+                if (!elfPath && gamePath) { args.push('--disc', this.resolvePath(gamePath)); }
+                args.push(...this.ps2EmulatorStorageArgs(bios), '--debug-server', address, '--window');
+                if (vscode.workspace.getConfiguration('codedesigner').get<boolean>('ps2Emulator.network', false)) {
+                    args.push('--network');
+                }
+                out.info(`Starting Ps2Emulator: ${exe} ${args.join(' ')}`);
+                this.emulatorProcessTerminal = vscode.window.createTerminal({ name: 'Ps2Emulator', shellPath: exe, shellArgs: args });
 
-            if (!await this._waitForSocketConnected(20000)) {
-                out.error('Control socket never connected — cannot attach PCSX2.');
-                return;
+                if (!await this._waitForPortListening(port, host, 20000)) {
+                    throw new Error(`Ps2Emulator's debug server did not start on ${address}.`);
+                }
+                await vscode.commands.executeCommand('codedesigner.connectPs2Emulator');
+                if (!this.socketClient.isDirect()) {
+                    throw new Error(`Could not connect to Ps2Emulator at ${address}.`);
+                }
+                this._gameRunning = true;
+                this.webview?.postMessage({ command: 'gameRunningChanged', gameRunning: true });
+                void vscode.commands.executeCommand('codedesigner.openGsFrameViewer');
+                for (const r of LIVE_REGIONS_DEFAULT) {
+                    await this.editorProvider.openLiveMemoryView(r.region, r.address, r.size, r.label);
+                }
+                await this._registerBreakpointsAndResume(true);
+                void this.handleFetchArchiveCheats();
+                void this.postLoadedGame();
+                void this.postEmulatorProcessStatus();
+            } catch (err: any) {
+                out.error(`Run failed: ${err?.message ?? err}`);
+                vscode.window.showErrorMessage(`Run failed: ${err?.message ?? err}`);
             }
-            // Pop the GS viewer as soon as the bridge is up — it connects to the
-            // bridge's frame fan-out and shows "waiting for frames" until the
-            // attach below starts the stream, so the window appears promptly
-            // even while PCSX2 is still booting (and even if the attach is slow).
-            void vscode.commands.executeCommand('codedesigner.openGsFrameViewer');
-
-            out.info('Waiting for PCSX2 to initialize (PINE + GS stream)…');
-            if (await this._waitForPcsx2GraphicsReady(45000)) {
-                out.info('PCSX2 GS stream is listening — PINE and graphics are up.');
-            } else {
-                out.warn('Timed out waiting for PCSX2 GS stream; attaching anyway.');
-            }
-
-            if (!await this._attachPcsx2()) {
-                out.error('Failed to attach to the freshly launched PCSX2.');
-            }
-          } catch (err: any) {
-            out.error(`Run PCSX2 failed: ${err?.message ?? err}`);
-          }
         })();
     }
 
     /**
-     * Sends STARTPCSX2 over the control socket so the bridge attaches to
-     * PCSX2's PINE and starts forwarding the GS stream. Returns false if the
-     * attach fails (e.g. the targeted PCSX2 is unreachable or unhealthy).
+     * Ps2Emulator's NVRAM and memory card, kept in the extension's storage: the NVRAM starts as a
+     * copy of the .NVM beside the BIOS (so the BIOS settings are there), and both are saved on exit.
      */
-    private async _attachPcsx2(): Promise<boolean> {
-        const out = getOutputChannel();
-        const host = (this.settings.pcsx2?.host ?? '127.0.0.1').trim() || '127.0.0.1';
-        const slot = this.settings.pcsx2?.slot ?? 28011;
-        try {
-            out.info(`Sending STARTPCSX2 to control server (${host}:${slot})…`);
-            await this.socketClient.startPcsx2(host, slot);
-        } catch (err: any) {
-            out.warn(`STARTPCSX2 failed: ${err?.message ?? err}`);
-            return false;
+    private ps2EmulatorStorageArgs(bios: string): string[] {
+        if (!this._globalStoragePath) { return []; }
+        const dir = path.join(this._globalStoragePath, 'ps2emulator');
+        fs.mkdirSync(dir, { recursive: true });
+        const args = ['--memcard', path.join(dir, 'card1.ps2')];
+        if (bios) {
+            const nvram = path.join(dir, `${path.basename(bios, path.extname(bios))}.nvm`);
+            const beside = [bios.replace(/\.[^.\\/]+$/, '.NVM'), bios.replace(/\.[^.\\/]+$/, '.nvm')].find(f => fs.existsSync(f));
+            if (!fs.existsSync(nvram) && beside) { fs.copyFileSync(beside, nvram); }
+            args.push('--nvram', nvram);
         }
-        this._bridgeMode = true;
-        this._setPauseState(false);
-        this.webview?.postMessage({ command: 'pcsx2ModeChanged', isPcsx2: true });
-        void this.handleFetchArchiveCheats();
-        return true;
+        return args;
+    }
+
+    /** Closes the Ps2Emulator this panel launched, and its direct connection. */
+    private async stopPs2Emulator(): Promise<void> {
+        await vscode.commands.executeCommand('codedesigner.disconnectPs2Emulator');
+        if (this.emulatorProcessTerminal) {
+            try { this.emulatorProcessTerminal.dispose(); } catch { /* ignore */ }
+            this.emulatorProcessTerminal = undefined;
+        }
+        if (this._gameRunning) {
+            this._gameRunning = false;
+            this.webview?.postMessage({ command: 'gameRunningChanged', gameRunning: false });
+        }
     }
 
     /** Launch the Multiplayer server executable in a VSCode terminal. */
@@ -1726,7 +1497,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     /** Launch CodeDesigner control server with no mode args, then connect socket/views. */
     private launchControlServerAndConnect(selectedEmulatorPath: string): void {
         const out = getOutputChannel();
-        const resolvedExe = this.getControlServerExecutablePath(selectedEmulatorPath);
+        const resolvedExe = this.getControlServerExecutablePath();
         if (!resolvedExe) {
             const installDir = DisasmPanelProvider.getInstallDirectory();
             out.error(`CodeDesigner.Ps2.Bridge not found in the install directory (${installDir}). Build the project first to deploy it.`);
@@ -1793,11 +1564,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 }
                 if (attemptVersion !== this._connectAttemptVersion) { return; }
                 this.clearPendingSocketRetry();
-                out.info('Socket connected to emulator. Opening memory views…');
-                for (const r of LIVE_REGIONS_DEFAULT) {
-                    await this.editorProvider.openLiveMemoryView(
-                        r.region, r.address, r.size, r.label);
-                }
+                out.info('Connected to the workspace service.');
             } catch {
                 if (attemptVersion !== this._connectAttemptVersion) { return; }
                 if (attempts < maxAttempts) {
@@ -1816,65 +1583,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         this._connectAttemptVersion++;
         this.clearPendingSocketRetry();
         this.emulatorTerminal = undefined;
-        // Tear down the built-in emulator process if it's still running so a
-        // subsequent Run respawns it cleanly.
-        if (this.emulatorProcessTerminal) {
-            try { this.emulatorProcessTerminal.dispose(); } catch { /* ignore */ }
-            this.emulatorProcessTerminal = undefined;
-        }
         this._paused = false;
-        this._bridgeMode = false;
-        this._pendingRunMode = null;
         this.webview?.postMessage({ command: 'connectionStatus', connected: false });
         void this.postEmulatorProcessStatus();
-    }
-
-    private startRuntimeMode(mode: 'emulator' | 'pcsx2', biosPath: string, gamePath: string): void {
-        const out = getOutputChannel();
-        if (!this.socketClient.isConnected()) {
-            out.warn('Run requested before socket connection is ready.');
-            return;
-        }
-
-        void (async () => {
-            try {
-                if (mode === 'emulator') {
-                    const resolvedBios = biosPath ? this.resolvePath(biosPath) : undefined;
-                    const resolvedDisc = gamePath ? this.resolvePath(gamePath) : undefined;
-
-                    // The internal emulator runs in its own process — spawn
-                    // CodeDesigner.Ps2.Emulator.exe ourselves and let Bridge
-                    // simply connect to its InternalPineSocket. Mirrors how
-                    // we launch PCSX2 ourselves before sending STARTPCSX2.
-                    const spawned = this.handleStartEmulatorProcess(resolvedBios, resolvedDisc);
-                    if (!spawned) { return; }
-
-                    out.info('Sending STARTEMULATOR command to control server...');
-                    await this.socketClient.startEmulator(resolvedBios, resolvedDisc);
-                    this._bridgeMode = false;
-                    await this._registerBreakpointsAndResume(true);
-                } else {
-                    const host = (this.settings.pcsx2?.host ?? '127.0.0.1').trim() || '127.0.0.1';
-                    const slot = this.settings.pcsx2?.slot ?? 28011;
-                    out.info(`Sending STARTPCSX2 command to control server (${host}:${slot})...`);
-                    await this.socketClient.startPcsx2(host, slot);
-                    // Open the GS viewer when runtime actually starts (Run),
-                    // not when the user only launches the PCSX2 process.
-                    void vscode.commands.executeCommand('codedesigner.openGsFrameViewer');
-                    this._bridgeMode = true;
-                    this._setPauseState(false);
-                    // Notify webview of PCSX2 mode so the cheats tab shows the archive section.
-                    this.webview?.postMessage({ command: 'pcsx2ModeChanged', isPcsx2: true });
-                    // Auto-fetch archive cheats for the running game.
-                    void this.handleFetchArchiveCheats();
-                    // Resolve the loaded game's cover / region / compat status.
-                    void this.postLoadedGame();
-                }
-            } catch (err: any) {
-                out.error(`Run failed: ${err?.message ?? err}`);
-                vscode.window.showErrorMessage(`Run failed: ${err?.message ?? err}`);
-            }
-        })();
     }
 
     private clearPendingSocketRetry(): void {
@@ -1882,460 +1593,6 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             clearTimeout(this._connectRetryTimer);
             this._connectRetryTimer = undefined;
         }
-    }
-
-    private terminateOrphanedPcsx2ProcessesIfNeeded(reason: string, force = false): void {
-        if (!force && !this._launchedPcsx2InSession) { return; }
-
-        const out = getOutputChannel();
-        const platform = process.platform;
-        try {
-            if (this._launchedPcsx2Pid && Number.isFinite(this._launchedPcsx2Pid)) {
-                const pid = this._launchedPcsx2Pid;
-                if (platform === "win32") {
-                    child_process.spawnSync("taskkill", ["/F", "/PID", String(pid), "/T"], { stdio: "pipe" });
-                } else {
-                    process.kill(pid, "SIGTERM");
-                }
-                out.info(`[PCSX2] Requested shutdown for launched background PID ${pid} (${reason}).`);
-            }
-            if (platform === "win32") {
-                const kill = child_process.spawnSync("taskkill", ["/F", "/IM", "pcsx2-qt.exe", "/T"], { stdio: "pipe" });
-                const stdout = String(kill.stdout ?? "").trim();
-                const stderr = String(kill.stderr ?? "").trim();
-                if (kill.status === 0) {
-                    out.info(`[PCSX2] Cleared orphan process (${reason}). ${stdout}`.trim());
-                } else if (stdout || stderr) {
-                    out.info(`[PCSX2] No orphan cleanup needed (${reason}): ${(stderr || stdout).replace(/\s+/g, " " )}`);
-                }
-            } else {
-                const kill = child_process.spawnSync("pkill", ["-f", "pcsx2"], { stdio: "pipe" });
-                if (kill.status === 0) {
-                    out.info(`[PCSX2] Cleared orphan process (${reason}).`);
-                }
-            }
-        } catch (err: any) {
-            out.warn(`[PCSX2] Orphan cleanup failed (${reason}): ${err?.message ?? err}`);
-        }
-
-        this._launchedPcsx2InSession = false;
-        this._launchedPcsx2Pid = null;
-        if (this._pcsx2LogTimer) {
-            try { clearInterval(this._pcsx2LogTimer); } catch { /* ignore */ }
-            this._pcsx2LogTimer = undefined;
-        }
-        if (this._pcsx2Terminal) {
-            try { this._pcsx2Terminal.dispose(); } catch { /* ignore */ }
-            this._pcsx2Terminal = undefined;
-        }
-        this._pcsx2LogOffset = 0;
-        this._pcsx2DiscoveredPaths.clear();
-        this._pcsx2PersistedLabeledPaths.clear();
-        if (this._pcsx2DiscoveredFlushTimer) { clearTimeout(this._pcsx2DiscoveredFlushTimer); this._pcsx2DiscoveredFlushTimer = undefined; }
-        if (this._pcsx2SnapshotRefreshTimer) { clearTimeout(this._pcsx2SnapshotRefreshTimer); this._pcsx2SnapshotRefreshTimer = undefined; }
-    }
-
-    /**
-     * Launch the external PCSX2 application using CLI arguments from panel selections.
-     * This does not connect sockets by itself; Connect/Run still control CodeDesigner.
-     * PCSX2 is located from the emulators list, then auto-detected from the install
-     * directory's `pcsx2` subfolder, then standard OS paths — no manual path config needed.
-     */
-    private handleStartPcsx2(emulatorPath: string, biosPath: string, gamePath: string): boolean {
-        const out = getOutputChannel();
-
-        this.selectedEmulatorPath = emulatorPath;
-        this.selectedBiosPath = biosPath;
-        this.selectedGamePath = gamePath;
-
-        if (emulatorPath && !this.isPcsx2Selection(emulatorPath)) {
-            const emulatorExe = this.resolvePath(emulatorPath);
-            if (!fs.existsSync(emulatorExe)) {
-                const message = `Selected emulator not found: ${emulatorExe}`;
-                out.error(message);
-                vscode.window.showErrorMessage(message);
-                return false;
-            }
-
-            const args: string[] = [];
-            const pinePort = this.settings.pcsx2?.slot ?? 28011;
-            args.push('--pine', '--port', String(pinePort));
-            out.info(`External emulator PINE port: ${pinePort}`);
-
-            const resolvedBios = biosPath ? this.resolvePath(biosPath) : '';
-            if (resolvedBios && fs.existsSync(resolvedBios)) {
-                out.info(`External emulator BIOS selection: ${resolvedBios}`);
-                args.push('--bios', resolvedBios);
-            } else {
-                out.warn('No valid BIOS selected for emulator launch; starting without a BIOS argument.');
-            }
-
-            const resolvedDisc = gamePath ? this.resolvePath(gamePath) : '';
-            if (resolvedDisc && fs.existsSync(resolvedDisc)) {
-                out.info(`Emulator game selection: ${resolvedDisc}`);
-                args.push(resolvedDisc);
-            } else {
-                out.warn('No valid game selected for emulator launch; starting without a boot image.');
-            }
-
-            const preview = [emulatorExe, ...args]
-                .map(v => v.includes(' ') ? `"${v}"` : v)
-                .join(' ');
-            out.info(`Starting emulator: ${preview}`);
-
-            if (this._pcsx2Terminal) {
-                try { this._pcsx2Terminal.dispose(); } catch { /* ignore */ }
-                this._pcsx2Terminal = undefined;
-            }
-
-            if (process.platform === 'win32') {
-                const scriptPath = path.join(this.extensionPath, 'scripts', 'launch-pcsx2-hidden.ps1');
-                const logDir = path.join(this._globalStoragePath, 'pcsx2');
-                const emuLogPath = path.join(logDir, 'emulog.txt');
-                const pidPath = path.join(logDir, 'pid.txt');
-                try { fs.mkdirSync(logDir, { recursive: true }); } catch { /* ignore */ }
-                try { fs.writeFileSync(pidPath, ''); } catch { /* ignore */ }
-
-                const terminal = vscode.window.createTerminal({ name: 'Emulator Launcher', shellPath: 'powershell.exe', shellArgs: ['-NoLogo'] });
-                this._pcsx2Terminal = terminal;
-                terminal.show(true);
-                const psArgs = args.map(a => `'${a.replace(/'/g, "''")}'`).join(',');
-                const cmd = `& "${scriptPath}" -ExePath "${emulatorExe}" -EmuLogPath "${emuLogPath}" -PidPath "${pidPath}" -Pcsx2Mode:$false -ArgList @(${psArgs})`;
-                terminal.sendText(cmd, true);
-            } else {
-                const terminal = vscode.window.createTerminal({
-                    name: 'Emulator',
-                    shellPath: emulatorExe,
-                    shellArgs: args,
-                });
-                this._pcsx2Terminal = terminal;
-                terminal.show(true);
-            }
-
-            void this.postEmulatorProcessStatus(emulatorPath);
-            setTimeout(() => void this.postEmulatorProcessStatus(emulatorPath), 1500);
-            return true;
-        }
-
-        // A launch always starts a fresh instance, so sweep a PCSX2 this session
-        // started earlier — otherwise instances accumulate (disconnect now leaves
-        // PCSX2 running). No-ops on the first launch of the session.
-        this.terminateOrphanedPcsx2ProcessesIfNeeded('relaunch');
-
-        // Resolve emulator path: prefer the selected executable even when it is a
-        // PCSX2-compatible fork with a different filename, then fall back to auto-detection.
-        let pcsx2Exe = '';
-        if (emulatorPath) {
-            const selectedExe = this.resolvePath(emulatorPath);
-            if (fs.existsSync(selectedExe)) {
-                pcsx2Exe = selectedExe;
-            }
-        }
-        if (!pcsx2Exe || !fs.existsSync(pcsx2Exe)) {
-            pcsx2Exe = DisasmPanelProvider.detectPcsx2Exe() ?? '';
-        }
-
-        if (!pcsx2Exe || !fs.existsSync(pcsx2Exe)) {
-            out.error('PCSX2 executable not found. Place PCSX2 in the pcsx2 subfolder of the install directory, install it to a standard location, or add it via the emulator selector.');
-            vscode.window.showErrorMessage(
-                'PCSX2 not found. Place PCSX2 in the pcsx2 subfolder of the CodeDesigner install directory, or add it via the emulator selector.'
-            );
-            return false;
-        }
-
-        const args: string[] = [];
-        const resolvedDisc = gamePath ? this.resolvePath(gamePath) : '';
-
-        if (resolvedDisc && fs.existsSync(resolvedDisc)) {
-            out.info(`PCSX2 game selection: ${resolvedDisc}`);
-            args.push('-batch');
-        } else {
-            out.warn('No valid game selected for PCSX2 launch; starting without a boot image.');
-        }
-
-        args.push('-earlyconsolelog');
-        args.push('-nogui');
-        args.push('--');
-        args.push(resolvedDisc);
-
-        const preview = [pcsx2Exe, ...args]
-            .map(v => v.includes(' ') ? `"${v}"` : v)
-            .join(' ');
-        out.info(`Starting PCSX2: ${preview}`);
-
-        if (process.platform === 'win32') {
-            const scriptPath = path.join(this.extensionPath, 'scripts', 'launch-pcsx2-hidden.ps1');
-            const logDir = path.join(this._globalStoragePath, 'pcsx2');
-            const emuLogPath = path.join(logDir, 'emulog.txt');
-            const pidPath = path.join(logDir, 'pid.txt');
-            try { fs.mkdirSync(logDir, { recursive: true }); } catch { /* ignore */ }
-            try { fs.rmSync(emuLogPath, { force: true }); } catch { /* ignore */ }
-            try { fs.writeFileSync(pidPath, ''); } catch { /* ignore */ }
-
-            // Route PCSX2's application log to a path we control. pcsx2-qt opens
-            // the -logfile target while parsing args — before EmuFolders::LoadConfig
-            // prints the startup directory listing — so that listing is captured
-            // in the file. -logfile must precede the "--" boot-file separator.
-            const pcsx2Args = [...args];
-            const sepIdx = pcsx2Args.indexOf('--');
-            const logFileArgs = ['-logfile', emuLogPath];
-            if (sepIdx >= 0) {
-                pcsx2Args.splice(sepIdx, 0, ...logFileArgs);
-            } else {
-                pcsx2Args.push(...logFileArgs);
-            }
-
-            if (this._pcsx2Terminal) {
-                try { this._pcsx2Terminal.dispose(); } catch { /* ignore */ }
-                this._pcsx2Terminal = undefined;
-            }
-            const terminal = vscode.window.createTerminal({ name: 'PCSX2 Launcher', shellPath: 'powershell.exe', shellArgs: ['-NoLogo'] });
-            this._pcsx2Terminal = terminal;
-            terminal.show(true);
-            const cmd = `& "${scriptPath}" -ExePath "${pcsx2Exe}" -EmuLogPath "${emuLogPath}" -PidPath "${pidPath}" -Pcsx2Mode:$true -ArgList @(${pcsx2Args.map(a => `'${a.replace(/'/g, "''")}'`).join(',')})`;
-            terminal.sendText(cmd, true);
-
-            this.startPcsx2LogParsing(emuLogPath);
-            void this.capturePcsx2PidFromFile(pidPath);
-            out.info(`PCSX2 launched. Emu log: ${emuLogPath}`);
-            this._launchedPcsx2InSession = true;
-            void this.postEmulatorProcessStatus(emulatorPath);
-            setTimeout(() => void this.postEmulatorProcessStatus(emulatorPath), 1500);
-            return true;
-        }
-
-        if (this._pcsx2Terminal) {
-            try { this._pcsx2Terminal.dispose(); } catch { /* ignore */ }
-            this._pcsx2Terminal = undefined;
-        }
-        const terminal = vscode.window.createTerminal({
-            name: 'PCSX2',
-            shellPath: pcsx2Exe,
-            shellArgs: args,
-        });
-        this._pcsx2Terminal = terminal;
-        terminal.show(true);
-        out.info('PCSX2 started via terminal manager.');
-        this._launchedPcsx2InSession = true;
-        void this.postEmulatorProcessStatus(emulatorPath);
-        setTimeout(() => void this.postEmulatorProcessStatus(emulatorPath), 1500);
-        return true;
-    }
-
-    private async capturePcsx2PidFromFile(pidPath: string): Promise<void> {
-        for (let i = 0; i < 40; i++) {
-            try {
-                const text = (await fs.promises.readFile(pidPath, 'utf8')).trim();
-                const pid = Number(text);
-                if (Number.isFinite(pid) && pid > 0) { this._launchedPcsx2Pid = pid; return; }
-            } catch { /* ignore */ }
-            await new Promise(r => setTimeout(r, 100));
-        }
-    }
-
-    private startPcsx2LogParsing(logPath: string): void {
-        if (this._pcsx2LogTimer) { clearInterval(this._pcsx2LogTimer); this._pcsx2LogTimer = undefined; }
-        this._pcsx2LogOffset = 0;
-        this._pcsx2DiscoveredPaths.clear();
-        this._pcsx2PersistedLabeledPaths.clear();
-        this._pcsx2PathsSidecarConsumed = false;
-        if (this._pcsx2DiscoveredFlushTimer) { clearTimeout(this._pcsx2DiscoveredFlushTimer); this._pcsx2DiscoveredFlushTimer = undefined; }
-        if (this._pcsx2SnapshotRefreshTimer) { clearTimeout(this._pcsx2SnapshotRefreshTimer); this._pcsx2SnapshotRefreshTimer = undefined; }
-        this._pcsx2GraphicsReady = false;
-
-        // Poll the emu log instead of fs.watch-ing it: the file does not exist
-        // yet when PCSX2 is launching (fs.watch throws ENOENT on a missing
-        // path, which previously aborted the whole run flow), and PCSX2
-        // truncates it on open. Polling tolerates both.
-        const consume = async () => {
-            // The PowerShell launcher writes `pcsx2-paths.json` once it has
-            // parsed PCSX2's startup directory listing. Ingest it as soon as
-            // it appears — this is more reliable than racing the live log
-            // ourselves, and works for users who only see PCSX2 through the
-            // hidden-window launch flow.
-            if (!this._pcsx2PathsSidecarConsumed) {
-                await this._tryIngestPcsx2PathsSidecar(path.join(path.dirname(logPath), 'pcsx2-paths.json'));
-            }
-
-            try {
-                const stat = await fs.promises.stat(logPath);
-                // PCSX2 truncates the log when it (re)opens it — restart from 0.
-                if (stat.size < this._pcsx2LogOffset) { this._pcsx2LogOffset = 0; }
-                if (stat.size <= this._pcsx2LogOffset) { return; }
-                const fh = await fs.promises.open(logPath, 'r');
-                const len = stat.size - this._pcsx2LogOffset;
-                const buf = Buffer.alloc(len);
-                await fh.read(buf, 0, len, this._pcsx2LogOffset);
-                await fh.close();
-                this._pcsx2LogOffset = stat.size;
-                const chunk = buf.toString('utf8');
-                this.extractAndPersistPcsx2Paths(chunk);
-                this._detectPcsx2GraphicsReady(chunk);
-            } catch { /* emu log not created yet — keep polling */ }
-        };
-
-        this._pcsx2LogTimer = setInterval(() => { void consume(); }, 500);
-    }
-
-    /**
-     * Labels emitted by `EmuFolders::LoadConfig` in PCSX2 (pcsx2/Pcsx2Config.cpp:2315-2331).
-     * Each PCSX2 startup logs `<Label> Directory: <absolute path>` and we persist them
-     * under stable `pcsx2.path.<key>` setting keys so other parts of the system can
-     * resolve PCSX2's actual on-disk layout without having to re-scan the log.
-     */
-    private static readonly _pcsx2LabeledPathKeys: ReadonlyArray<readonly [RegExp, string]> = [
-        [/^DataRoot Directory:\s*(.+?)\s*$/m,            'pcsx2.path.dataRoot'],
-        [/^BIOS Directory:\s*(.+?)\s*$/m,                'pcsx2.path.bios'],
-        [/^Snapshots Directory:\s*(.+?)\s*$/m,           'pcsx2.path.snapshots'],
-        [/^Savestates Directory:\s*(.+?)\s*$/m,          'pcsx2.path.savestates'],
-        [/^MemoryCards Directory:\s*(.+?)\s*$/m,         'pcsx2.path.memoryCards'],
-        [/^Logs Directory:\s*(.+?)\s*$/m,                'pcsx2.path.logs'],
-        [/^Cheats Directory:\s*(.+?)\s*$/m,              'pcsx2.path.cheats'],
-        [/^Patches Directory:\s*(.+?)\s*$/m,             'pcsx2.path.patches'],
-        [/^Covers Directory:\s*(.+?)\s*$/m,              'pcsx2.path.covers'],
-        [/^Game Settings Directory:\s*(.+?)\s*$/m,       'pcsx2.path.gameSettings'],
-        [/^Resources Directory:\s*(.+?)\s*$/m,           'pcsx2.path.resources'],
-        [/^User Resources Directory:\s*(.+?)\s*$/m,      'pcsx2.path.userResources'],
-        [/^Cache Directory:\s*(.+?)\s*$/m,               'pcsx2.path.cache'],
-        [/^Textures Directory:\s*(.+?)\s*$/m,            'pcsx2.path.textures'],
-        [/^Input Profile Directory:\s*(.+?)\s*$/m,       'pcsx2.path.inputProfiles'],
-        [/^Video Dumping Directory:\s*(.+?)\s*$/m,       'pcsx2.path.videos'],
-        [/^Debugger Layouts Directory:\s*(.+?)\s*$/m,    'pcsx2.path.debuggerLayouts'],
-        [/^Debugger Settings Directory:\s*(.+?)\s*$/m,   'pcsx2.path.debuggerSettings'],
-    ];
-
-    /**
-     * Label-form → setting-key mapping for both the live extractor and the
-     * sidecar JSON / emu-log fallback reader. The label form matches what
-     * PCSX2 prints in the emu log AND what `launch-pcsx2-hidden.ps1` writes
-     * as keys in `pcsx2-paths.json`, so the same map drives every path.
-     */
-    private static readonly _pcsx2PathLabelToKey: Readonly<Record<string, string>> = {
-        'DataRoot':         'pcsx2.path.dataRoot',
-        'BIOS':             'pcsx2.path.bios',
-        'Snapshots':        'pcsx2.path.snapshots',
-        'Savestates':       'pcsx2.path.savestates',
-        'MemoryCards':      'pcsx2.path.memoryCards',
-        'Logs':             'pcsx2.path.logs',
-        'Cheats':           'pcsx2.path.cheats',
-        'Patches':          'pcsx2.path.patches',
-        'Covers':           'pcsx2.path.covers',
-        'Game Settings':    'pcsx2.path.gameSettings',
-        'Resources':        'pcsx2.path.resources',
-        'User Resources':   'pcsx2.path.userResources',
-        'Cache':            'pcsx2.path.cache',
-        'Textures':         'pcsx2.path.textures',
-        'Input Profile':    'pcsx2.path.inputProfiles',
-        'Video Dumping':    'pcsx2.path.videos',
-        'Debugger Layouts': 'pcsx2.path.debuggerLayouts',
-        'Debugger Settings':'pcsx2.path.debuggerSettings',
-    };
-
-    /** Labeled keys we've already persisted this session — avoids redundant DB writes. */
-    private _pcsx2PersistedLabeledPaths = new Map<string, string>();
-    /** Debounce timer for flushing the bulk `pcsx2.path.discovered` JSON array. */
-    private _pcsx2DiscoveredFlushTimer?: ReturnType<typeof setTimeout>;
-    /** True once the PowerShell-written `pcsx2-paths.json` sidecar has been ingested for this launch. */
-    private _pcsx2PathsSidecarConsumed = false;
-    /** Debounce timer for refreshing snapshot lists after a wave of path writes. */
-    private _pcsx2SnapshotRefreshTimer?: ReturnType<typeof setTimeout>;
-
-    /**
-     * Write a `pcsx2.path.*` setting, dedup against what's already cached
-     * for this session, and — when the savestates path changes — debounce
-     * a refresh of the snapshot list so both the disasm-panel settings tab
-     * AND the Snapshot Manager pick up newly-discovered .p2s files without
-     * waiting for the next game-change event. Returns true when the value
-     * was new (i.e. actually persisted to the DB).
-     */
-    private _persistPcsx2PathSetting(key: string, value: string): boolean {
-        if (!value) { return false; }
-        if (this._pcsx2PersistedLabeledPaths.get(key) === value) { return false; }
-        this._pcsx2PersistedLabeledPaths.set(key, value);
-        void this.socketClient.setSetting(key, value).catch(err => {
-            getOutputChannel().debug(`Could not persist ${key}: ${err?.message ?? err}`);
-        });
-        if (key === 'pcsx2.path.savestates') {
-            // Debounce so a burst of writes (e.g. sidecar ingest + emu-log
-            // backfill arriving milliseconds apart) only triggers one refresh.
-            if (this._pcsx2SnapshotRefreshTimer) { clearTimeout(this._pcsx2SnapshotRefreshTimer); }
-            this._pcsx2SnapshotRefreshTimer = setTimeout(() => {
-                this._pcsx2SnapshotRefreshTimer = undefined;
-                void this.loadSnapshotsForGame(this.selectedGameName);
-            }, 250);
-        }
-        return true;
-    }
-
-    private extractAndPersistPcsx2Paths(chunk: string): void {
-        // ── 1) Labeled paths: write each to its own setting key ────────────────
-        for (const [re, key] of DisasmPanelProvider._pcsx2LabeledPathKeys) {
-            const m = chunk.match(re);
-            if (!m) { continue; }
-            this._persistPcsx2PathSetting(key, m[1].trim());
-        }
-
-        // ── 2) Bulk dump: collect every path-shaped string and flush as JSON ──
-        const pathPattern = /([A-Za-z]:\\[^\s"']+|\/[^\s"']+)/g;
-        let changed = false;
-        for (const m of chunk.matchAll(pathPattern)) {
-            const p = m[1].trim();
-            if (!p || p.length < 3) { continue; }
-            const before = this._pcsx2DiscoveredPaths.size;
-            this._pcsx2DiscoveredPaths.add(p);
-            if (this._pcsx2DiscoveredPaths.size !== before) { changed = true; }
-        }
-        if (!changed) { return; }
-
-        // Debounce the bulk write — emu log emissions can be chatty during boot.
-        if (this._pcsx2DiscoveredFlushTimer) { clearTimeout(this._pcsx2DiscoveredFlushTimer); }
-        this._pcsx2DiscoveredFlushTimer = setTimeout(() => {
-            this._pcsx2DiscoveredFlushTimer = undefined;
-            const json = JSON.stringify(Array.from(this._pcsx2DiscoveredPaths).sort());
-            void this.socketClient.setSetting('pcsx2.path.discovered', json).catch(err => {
-                getOutputChannel().debug(`Could not persist pcsx2.path.discovered: ${err?.message ?? err}`);
-            });
-        }, 1000);
-    }
-
-    /** Marks PCSX2 graphics-ready when the emu log reports "GSStream: listening". */
-    private _detectPcsx2GraphicsReady(chunk: string): void {
-        if (this._pcsx2GraphicsReady || !/GSStream:\s*listening/i.test(chunk)) { return; }
-        this._pcsx2GraphicsReady = true;
-        const waiters = Array.from(this._pcsx2ReadyWaiters);
-        this._pcsx2ReadyWaiters.clear();
-        for (const w of waiters) { w(); }
-    }
-
-    /**
-     * Resolves true once the PCSX2 emu log reports "GSStream: listening" (PINE
-     * and the GS stream are both up by then), or false if the timeout elapses.
-     */
-    private _waitForPcsx2GraphicsReady(timeoutMs: number): Promise<boolean> {
-        if (this._pcsx2GraphicsReady) { return Promise.resolve(true); }
-        return new Promise<boolean>(resolve => {
-            let settled = false;
-            const finish = (value: boolean) => {
-                if (settled) { return; }
-                settled = true;
-                clearTimeout(timer);
-                this._pcsx2ReadyWaiters.delete(waiter);
-                resolve(value);
-            };
-            const waiter = () => finish(true);
-            const timer = setTimeout(() => finish(false), timeoutMs);
-            this._pcsx2ReadyWaiters.add(waiter);
-        });
-    }
-
-    /** Polls until the control socket reports connected, or the timeout elapses. */
-    private async _waitForSocketConnected(timeoutMs: number): Promise<boolean> {
-        const deadline = Date.now() + timeoutMs;
-        while (Date.now() < deadline) {
-            if (this.socketClient.isConnected()) { return true; }
-            await new Promise(r => setTimeout(r, 200));
-        }
-        return this.socketClient.isConnected();
     }
 
     /** Polls until a loopback port accepts connections, or the timeout elapses. */
@@ -2346,58 +1603,6 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             await new Promise(r => setTimeout(r, 200));
         }
         return DisasmPanelProvider.probePortListening(port, host);
-    }
-
-    /**
-     * Launch the built-in emulator (CodeDesigner.Ps2.Emulator.exe) in a
-     * VSCode terminal with the supplied BIOS / disc args, then leave it
-     * running so the Bridge can connect to its InternalPineSocket via
-     * STARTEMULATOR. Returns false when the binary cannot be found —
-     * caller aborts rather than sending STARTEMULATOR to a Bridge that
-     * has nothing to connect to.
-     *
-     * Symmetric with {@link handleStartPcsx2}: the front end owns
-     * process lifecycle for both runtimes; the Bridge is purely a
-     * router that connects to whichever process is already up.
-     */
-    private handleStartEmulatorProcess(biosPath?: string, discPath?: string): boolean {
-        const out = getOutputChannel();
-
-        // Don't spawn a second instance if one is already running from the
-        // current VS Code session.
-        if (this.emulatorProcessTerminal) {
-            out.info('Built-in emulator process is already running; reusing it.');
-            return true;
-        }
-
-        const exe = DisasmPanelProvider.findEmulatorExe();
-        if (!exe) {
-            const installDir = DisasmPanelProvider.getInstallDirectory();
-            const msg = `CodeDesigner.Ps2.Emulator binary not found in ${installDir}. Build the project first to deploy it.`;
-            out.error(msg);
-            vscode.window.showErrorMessage(msg);
-            return false;
-        }
-
-        const args: string[] = [];
-        if (biosPath && fs.existsSync(biosPath)) { args.push('--bios', biosPath); }
-        if (discPath && fs.existsSync(discPath)) { args.push('--disc', discPath); }
-
-        const preview = [exe, ...args]
-            .map(v => v.includes(' ') ? `"${v}"` : v)
-            .join(' ');
-        out.info(`Starting built-in emulator: ${preview}`);
-
-        const terminal = vscode.window.createTerminal({
-            name: 'CodeDesigner Emulator',
-            shellPath: exe,
-            shellArgs: args,
-        });
-        terminal.show(false);
-        this.emulatorProcessTerminal = terminal;
-        void this.postEmulatorProcessStatus();
-        setTimeout(() => void this.postEmulatorProcessStatus(), 1500);
-        return true;
     }
 
     /**
@@ -2469,7 +1674,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         await this.editorProvider.stepAndBroadcast();
     }
 
-    /** PCSX2 PINE: step into (non-blocking). Marks sidebar as running until next pause event. */
+    /** Step into (non-blocking). Marks sidebar as running until next pause event. */
     private async handleStepInto(): Promise<void> {
         if (!this.socketClient.isConnected()) {
             vscode.window.showWarningMessage('Not connected to emulator.');
@@ -2483,7 +1688,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    /** PCSX2 PINE: step over (non-blocking). Marks sidebar as running until next pause event. */
+    /** Step over (non-blocking). Marks sidebar as running until next pause event. */
     private async handleStepOver(): Promise<void> {
         if (!this.socketClient.isConnected()) {
             vscode.window.showWarningMessage('Not connected to emulator.');
@@ -2497,49 +1702,16 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    /** Restart the emulator: send RESTART command via socket, keeping the connection alive. */
+    /** Restart: close Ps2Emulator and run the selected BIOS and disc again. */
     private async handleRestart(): Promise<void> {
-        const out = getOutputChannel();
-
-        if (!this.socketClient.isConnected()) {
-            vscode.window.showWarningMessage('Not connected to emulator. Cannot restart.');
-            return;
-        }
-
-        out.info('Restarting emulator via socket…');
-
-        // Blank live panels so stale content is not shown during the restart
         this.editorProvider.resetLivePanels();
-
-        try {
-            await this.socketClient.restart();
-            out.info('Emulator restarted — re-opening views and registering breakpoints…');
-
-            if (this._bridgeMode) {
-                // In PCSX2 mode the external emulator manages its own memory; just
-                // re-register breakpoints and leave the live panels blank until the
-                // user manually navigates or pauses.
-                await this._registerBreakpointsAndResume();
-            } else {
-                // Re-initialize every live panel with fresh data from the restarted
-                // scheduler (RAM is freshly zeroed, BIOS ROM is reloaded).
-                for (const r of LIVE_REGIONS) {
-                    await this.editorProvider.openLiveMemoryView(
-                        r.region, r.address, r.size, r.label);
-                }
-
-                // Re-register all known breakpoints then resume deterministically.
-                await this._registerBreakpointsAndResume();
-            }
-        } catch (err: any) {
-            out.error(`Restart failed: ${err?.message ?? err}`);
-            vscode.window.showErrorMessage(`Restart failed: ${err?.message ?? err}`);
-        }
+        await this.stopPs2Emulator();
+        this.handleRunPs2Emulator(this.selectedEmulatorPath, this.selectedBiosPath, this.selectedGamePath);
     }
 
     /**
      * Re-sends every breakpoint the user has set (tracked in the extension process,
-     * not the Angular webview) to the C# server, then optionally sends RESUME.
+     * not the Angular webview) to Ps2Emulator, then optionally resumes it.
      *
      * Because each SETBP is awaited, the server has processed all of them before
      * RESUME arrives — the emulator is guaranteed to start with all BPs armed.
@@ -2551,7 +1723,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
      */
     private async _registerBreakpointsAndResume(shouldResume: boolean = true): Promise<void> {
         const out = getOutputChannel();
-        if (!this.socketClient.isConnected()) { return; }
+        if (!this.socketClient.isDirect()) { return; }
         const bps = this.editorProvider.getKnownBreakpoints();
         for (const bp of bps) {
             try {
@@ -2669,8 +1841,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private async handleSnapshot(): Promise<void> {
         const out = getOutputChannel();
 
-        if (!this.socketClient.isConnected()) {
-            vscode.window.showWarningMessage('Not connected to emulator.');
+        if (!this.socketClient.isDirect()) {
+            vscode.window.showWarningMessage('Ps2Emulator is not running.');
             return;
         }
 
@@ -2686,36 +1858,14 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 
         const isoName = this.selectedGameName || 'unknown_game';
         const dateStr = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-        const timestamp = DisasmPanelProvider.formatSnapshotTimestamp(new Date());
 
-        const baseDir = this.workspaceRoot
-            ? path.join(this.workspaceRoot, 'snapshots')
-            : path.join(require('os').tmpdir(), 'ps2snapshots');
-        const snapshotsDir = path.join(baseDir, isoName, dateStr, safeName);
+        const snapshotsDir = path.join(this.snapshotsRoot(), isoName, dateStr, safeName);
 
         out.info(`Taking snapshot → ${snapshotsDir}`);
 
         try {
-            const regions = await this.socketClient.snapshot(snapshotsDir);
+            const regions = await this.socketClient.snapshot(snapshotsDir, isoName, safeName);
             out.info(`Snapshot complete — ${regions.length} region(s) written.`);
-
-            // Save snapshot metadata so we can look up history later
-            const info: SnapshotInfoFile = {
-                name:      safeName,
-                timestamp: new Date().toISOString(),
-                isoName,
-                regions:   regions.map(r => ({
-                    Label:       r.Label,
-                    File:        path.basename(r.File),
-                    BaseAddress: r.BaseAddress,
-                    Size:        r.Size,
-                })),
-            };
-            fs.writeFileSync(
-                path.join(snapshotsDir, 'snapshot-info.json'),
-                JSON.stringify(info, null, 2),
-                'utf-8'
-            );
 
             // Re-scan the snapshots directory so the list reflects what is
             // actually on disk (handles externally deleted snapshots too).
@@ -2726,393 +1876,27 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    /**
-     * Save the live PCSX2 emulator state to a `.p2s` file in PCSX2's own
-     * savestates folder (`pcsx2.path.savestates`, populated from the emu log
-     * on first connect). PCSX2 names slot saves `<SERIAL> (<CRC>).<NN>.p2s`;
-     * for user-titled saves we keep the same prefix when serial+CRC are known
-     * so PCSX2 and the Snapshot Manager's per-game filter both recognise the
-     * file. The `.p2s` archive contains everything (memory, GS state, embedded
-     * Screenshot.png) — no sidecar `.extracted/` directory is generated here;
-     * the Snapshot Manager's "Open Memory" action extracts on demand.
-     * Routed through the PINE socket (SAVESTATETOFILE / opcode 0x22).
-     */
-    private async handleSnapshotPcsx2(): Promise<void> {
-        const out = getOutputChannel();
-
-        if (!this.socketClient.isConnected()) {
-            vscode.window.showWarningMessage('Not connected to emulator.');
-            return;
-        }
-
-        const saveDir = await this._resolvePcsx2SavestatesDir();
-        if (!saveDir) {
-            vscode.window.showWarningMessage(
-                "Could not locate PCSX2's savestates folder. Launch PCSX2 once via " +
-                'the Connect button so its directory listing is captured, or set ' +
-                'pcsx2.path.savestates manually.');
-            return;
-        }
-
-        // Prompt user for a save-state name (used as the .p2s file name).
-        const snapName = await vscode.window.showInputBox({
-            title: 'Save PCSX2 State',
-            prompt: 'Enter a name for this save state',
-            placeHolder: 'e.g. before_boss_fight',
-            ignoreFocusOut: true,
-        });
-        if (snapName === undefined) { return; } // cancelled
-
-        const safeName = (snapName.trim() || 'savestate').replace(/[^a-zA-Z0-9_\-]/g, '_');
-
-        try { fs.mkdirSync(saveDir, { recursive: true }); } catch (mkErr: any) {
-            if (mkErr?.code !== 'EEXIST') {
-                out.error(`Could not create save-state directory: ${mkErr?.message ?? mkErr}`);
-                vscode.window.showErrorMessage(`Could not create save-state directory: ${mkErr?.message ?? mkErr}`);
-                return;
-            }
-        }
-
-        const serial = this._currentGameSerial.trim().toUpperCase();
-        const crc    = serial ? this._tryDiscoverCurrentCrc(saveDir, serial) : null;
-        let fileName: string;
-        if (serial && crc)   { fileName = `${serial} (${crc}).${safeName}.p2s`; }
-        else if (serial)     { fileName = `${serial}.${safeName}.p2s`; }
-        else                 { fileName = `${safeName}.p2s`; }
-        const filePath = path.join(saveDir, fileName);
-
-        out.info(`Saving PCSX2 state → ${filePath}`);
-
-        try {
-            await this.socketClient.saveStateFile(filePath);
-            out.info(`PCSX2 state saved to '${filePath}'.`);
-            vscode.window.showInformationMessage(`PCSX2 state saved: ${fileName}`);
-
-            // Refresh the snapshot list so the new entry shows up immediately
-            // in the manager (filtered by the current game's serial).
-            void this.loadSnapshotsForGame(this.selectedGameName);
-        } catch (err: any) {
-            out.error(`PCSX2 save state failed: ${err?.message ?? err}`);
-            vscode.window.showErrorMessage(`PCSX2 save state failed: ${err?.message ?? err}`);
-        }
-    }
-
-    /**
-     * Best-effort lookup of the PCSX2 game CRC for the currently loaded disc
-     * by scanning sibling `<SERIAL> (<CRC>).*.p2s` files PCSX2 has already
-     * written. Returns `null` when the savestates folder contains no canonical
-     * save for this serial yet — the caller falls back to a CRC-less filename.
-     */
-    /**
-     * Resolve PCSX2's savestates directory with a fallback chain so the
-     * Snapshot button works even when the emu-log path-extractor never ran
-     * (e.g. PCSX2 was already running when VS Code attached, or this update
-     * shipped after the user's last fresh launch).
-     *
-     * Resolution order:
-     *   1. `pcsx2.path.savestates` setting (auto-captured from the emu log).
-     *   2. `<pcsx2.path.dataRoot>/sstates` — PCSX2's default layout
-     *      (`EmuFolders::LoadConfig` joins DataRoot + the "sstates" subkey).
-     *   3. Windows default: `%USERPROFILE%\Documents\PCSX2\sstates`.
-     *
-     * On a successful fallback we backfill the `pcsx2.path.savestates`
-     * setting so subsequent lookups are fast and consistent — useful when
-     * the emu-log polling missed the directory listing for any reason.
-     */
-    private async _resolvePcsx2SavestatesDir(): Promise<string | null> {
-        const trySetting = async (key: string): Promise<string | null> => {
-            try { return (await this.socketClient.getSetting(key))?.trim() || null; }
-            catch { return null; }
-        };
-
-        // 1. Captured savestates path.
-        const direct = await trySetting('pcsx2.path.savestates');
-        if (direct && fs.existsSync(direct)) { return direct; }
-
-        // 2. Derived from DataRoot.
-        const dataRoot = await trySetting('pcsx2.path.dataRoot');
-        if (dataRoot) {
-            const derived = path.join(dataRoot, 'sstates');
-            if (fs.existsSync(derived)) {
-                void this._backfillSavestatesPath(derived);
-                return derived;
-            }
-        }
-
-        // 3. PowerShell sidecar JSON, if present (most common case when the
-        //    launch flow ran but the live log polling missed the lines).
-        if (this._globalStoragePath) {
-            const sidecar = path.join(this._globalStoragePath, 'pcsx2', 'pcsx2-paths.json');
-            const fromSidecar = await this._tryIngestPcsx2PathsSidecar(sidecar);
-            if (fromSidecar && fs.existsSync(fromSidecar)) { return fromSidecar; }
-        }
-
-        // 4. Parse the on-disk emu log directly. Handles the case where PCSX2
-        //    has been running since before the path-extractor shipped — we
-        //    don't depend on the live polling loop having ever seen the
-        //    startup lines. Also backfills every captured pcsx2.path.* key.
-        const fromLog = await this._readPathsFromOnDiskEmuLog();
-        if (fromLog) {
-            const fromLogPath = fromLog['pcsx2.path.savestates'];
-            if (fromLogPath && fs.existsSync(fromLogPath)) { return fromLogPath; }
-            const fromLogRoot = fromLog['pcsx2.path.dataRoot'];
-            if (fromLogRoot) {
-                const derived = path.join(fromLogRoot, 'sstates');
-                if (fs.existsSync(derived)) {
-                    void this._backfillSavestatesPath(derived);
-                    return derived;
-                }
-            }
-        }
-
-        // 5. Parse PCSX2.ini directly. Works even when PCSX2 has never been
-        //    launched through VS Code (no globalStorage emu log, no sidecar)
-        //    — we mirror PCSX2's own portable-mode + DataRoot resolution and
-        //    read the [Folders] section that the emulator itself uses at
-        //    boot. The most general fallback that still relies on a real
-        //    PCSX2 install (vs. step 6's hard-coded guess).
-        const fromIni = await this._readPathsFromPcsx2Ini();
-        if (fromIni) {
-            const iniSavestates = fromIni['pcsx2.path.savestates'];
-            if (iniSavestates && fs.existsSync(iniSavestates)) { return iniSavestates; }
-            const iniRoot = fromIni['pcsx2.path.dataRoot'];
-            if (iniRoot) {
-                const derived = path.join(iniRoot, 'sstates');
-                if (fs.existsSync(derived)) {
-                    void this._backfillSavestatesPath(derived);
-                    return derived;
-                }
-            }
-        }
-
-        // 6. Windows default — PCSX2 stores user data under
-        //    %USERPROFILE%\Documents\PCSX2 unless overridden by portable mode.
-        if (process.platform === 'win32') {
-            const home = process.env.USERPROFILE || require('os').homedir();
-            if (home) {
-                const winDefault = path.join(home, 'Documents', 'PCSX2', 'sstates');
-                if (fs.existsSync(winDefault)) {
-                    void this._backfillSavestatesPath(winDefault);
-                    return winDefault;
-                }
-            }
-        }
-
-        return null;
-    }
-
-    private async _backfillSavestatesPath(p: string): Promise<void> {
-        this._persistPcsx2PathSetting('pcsx2.path.savestates', p);
-    }
-
-    /**
-     * Ingest the `pcsx2-paths.json` sidecar written by `launch-pcsx2-hidden.ps1`
-     * once PCSX2's startup directory listing has been captured. Every
-     * directory key is mapped through `_pcsx2PathLabelToKey` and written to
-     * the settings table. Returns the resolved `Savestates` path when found
-     * (so callers can use it directly without an extra getSetting round-trip).
-     */
-    private async _tryIngestPcsx2PathsSidecar(sidecarPath: string): Promise<string | null> {
-        try {
-            if (!fs.existsSync(sidecarPath)) { return null; }
-            const raw = await fs.promises.readFile(sidecarPath, 'utf8');
-            const doc = JSON.parse(raw) as { directories?: Record<string, string> };
-            const dirs = doc?.directories;
-            if (!dirs || typeof dirs !== 'object') { return null; }
-
-            let savestates: string | null = null;
-            for (const [label, value] of Object.entries(dirs)) {
-                const key = DisasmPanelProvider._pcsx2PathLabelToKey[label];
-                if (!key || typeof value !== 'string' || !value) { continue; }
-                this._persistPcsx2PathSetting(key, value);
-                if (key === 'pcsx2.path.savestates') { savestates = value; }
-            }
-            this._pcsx2PathsSidecarConsumed = true;
-            return savestates;
-        } catch (err: any) {
-            getOutputChannel().debug(`Could not read pcsx2-paths.json sidecar: ${err?.message ?? err}`);
-            return null;
-        }
-    }
-
-    /**
-     * Parse PCSX2's `PCSX2.ini` directly. The `[Folders]` section is the
-     * source PCSX2 itself reads at boot, so it works even when the user
-     * hasn't launched PCSX2 from VS Code (no globalStorage emu log, no
-     * sidecar JSON). DataRoot is resolved by mirroring PCSX2's own logic:
-     *  - if a `portable.ini` sits next to the executable, DataRoot = exeDir
-     *  - otherwise, DataRoot = `%USERPROFILE%\Documents\PCSX2` (Windows)
-     *
-     * Backfills every parsed directory into `pcsx2.path.*` so subsequent
-     * lookups take the cached fast path.
-     */
-    private async _readPathsFromPcsx2Ini(): Promise<Record<string, string> | null> {
-        let exePath: string | null;
-        try { exePath = await this.socketClient.getSetting('ui.selectedEmulator'); }
-        catch { exePath = null; }
-        if (!exePath || !fs.existsSync(exePath)) { return null; }
-
-        const exeDir = path.dirname(exePath);
-        let dataRoot: string;
-        if (fs.existsSync(path.join(exeDir, 'portable.ini'))) {
-            dataRoot = exeDir;
-        } else if (process.platform === 'win32') {
-            const home = process.env.USERPROFILE || require('os').homedir();
-            if (!home) { return null; }
-            dataRoot = path.join(home, 'Documents', 'PCSX2');
-        } else {
-            return null;
-        }
-
-        const iniPath = path.join(dataRoot, 'inis', 'PCSX2.ini');
-        if (!fs.existsSync(iniPath)) { return null; }
-
-        let text: string;
-        try { text = await fs.promises.readFile(iniPath, 'utf8'); }
-        catch { return null; }
-
-        const sectionMatch = text.match(/^\[Folders\]\s*\r?\n([\s\S]*?)(?=^\[|\Z)/m);
-        if (!sectionMatch) { return null; }
-
-        // PCSX2's INI uses condensed keys (e.g. "MemoryCards", "GameSettings");
-        // the emu log uses spaced labels ("Memory Cards", "Game Settings").
-        // Map ini-key → emu-label so we can reuse `_pcsx2PathLabelToKey`.
-        const iniToLabel: Readonly<Record<string, string>> = {
-            'Bios':             'BIOS',
-            'Snapshots':        'Snapshots',
-            'Savestates':       'Savestates',
-            'MemoryCards':      'MemoryCards',
-            'Logs':             'Logs',
-            'Cheats':           'Cheats',
-            'Patches':          'Patches',
-            'Covers':           'Covers',
-            'GameSettings':     'Game Settings',
-            'Resources':        'Resources',
-            'UserResources':    'User Resources',
-            'Cache':            'Cache',
-            'Textures':         'Textures',
-            'InputProfiles':    'Input Profile',
-            'Videos':           'Video Dumping',
-            'DebuggerLayouts':  'Debugger Layouts',
-            'DebuggerSettings': 'Debugger Settings',
-        };
-        // PCSX2's LoadConfig joins these against `<DataRoot>/inis` (the
-        // `Settings` folder), not DataRoot itself.
-        const settingsRelative = new Set(['DebuggerLayouts', 'DebuggerSettings']);
-        const settingsDir = path.join(dataRoot, 'inis');
-
-        const out: Record<string, string> = {
-            'pcsx2.path.dataRoot': dataRoot,
-        };
-
-        for (const m of sectionMatch[1].matchAll(/^\s*([A-Za-z]+)\s*=\s*(.+?)\s*$/gm)) {
-            const iniKey = m[1];
-            const value  = m[2];
-            const label  = iniToLabel[iniKey];
-            if (!label) { continue; }
-            const settingKey = DisasmPanelProvider._pcsx2PathLabelToKey[label];
-            if (!settingKey || !value) { continue; }
-            const baseDir = settingsRelative.has(iniKey) ? settingsDir : dataRoot;
-            out[settingKey] = path.isAbsolute(value) ? value : path.join(baseDir, value);
-        }
-
-        if (Object.keys(out).length <= 1) { return null; }
-
-        for (const [key, value] of Object.entries(out)) {
-            this._persistPcsx2PathSetting(key, value);
-        }
-        return out;
-    }
-
-    /**
-     * Last-resort path discovery: parse the on-disk emu log directly,
-     * looking for the `<Label> Directory: <path>` lines PCSX2 prints during
-     * `EmuFolders::LoadConfig`. Used by `_resolvePcsx2SavestatesDir` so a
-     * session whose log polling never ran (e.g. PCSX2 was already running
-     * before this code shipped) can still find PCSX2's folders on the next
-     * snapshot click — and also opportunistically backfills every
-     * `pcsx2.path.*` setting so future lookups are O(1).
-     */
-    private async _readPathsFromOnDiskEmuLog(): Promise<Record<string, string> | null> {
-        const logDir = this._globalStoragePath
-            ? path.join(this._globalStoragePath, 'pcsx2')
-            : null;
-        if (!logDir) { return null; }
-        const logPath = path.join(logDir, 'emulog.txt');
-        if (!fs.existsSync(logPath)) { return null; }
-
-        let text: string;
-        try { text = await fs.promises.readFile(logPath, 'utf8'); }
-        catch { return null; }
-
-        const out: Record<string, string> = {};
-        const re = /^(?:\[[^\]]*\]\s*)?(.+?) Directory:\s*(.+?)\s*$/gm;
-        for (const m of text.matchAll(re)) {
-            const label = m[1].trim();
-            const value = m[2].trim();
-            const key = DisasmPanelProvider._pcsx2PathLabelToKey[label];
-            if (!key || !value) { continue; }
-            if (!(key in out)) { out[key] = value; } // first occurrence wins
-        }
-        if (Object.keys(out).length === 0) { return null; }
-
-        // Backfill every captured path into the settings table so this
-        // expensive read only happens once.
-        for (const [key, value] of Object.entries(out)) {
-            this._persistPcsx2PathSetting(key, value);
-        }
-        return out;
-    }
-
-    private _tryDiscoverCurrentCrc(saveDir: string, serial: string): string | null {
-        if (!serial) { return null; }
-        let files: string[];
-        try { files = fs.readdirSync(saveDir); } catch { return null; }
-        const escaped = serial.replace(/[-]/g, '\\-');
-        const re = new RegExp(`^${escaped}\\s+\\(([0-9A-Fa-f]{8})\\)\\.`, 'i');
-        for (const f of files) {
-            const m = f.match(re);
-            if (m) { return m[1].toUpperCase(); }
-        }
-        return null;
-    }
-
-    /**
-     * Take a screenshot of the game's screen in PCSX2 via the PINE socket bridge
-     * (PINESAVESCREENSHOT command → PineClient.SaveScreenshot opcode 0x32).
-     * Only available in PINE mode.
-     */
+    /** Saves the frame Ps2Emulator displays now as a PNG (asks where). */
     public async handleSaveScreenshot(): Promise<void> {
         const out = getOutputChannel();
-
-        if (!this.socketClient.isConnected()) {
-            vscode.window.showWarningMessage('Not connected to emulator.');
-            return;
-        }
-
         try {
-            await this.socketClient.pineSaveScreenshot();
-            out.info('Screenshot saved in PCSX2.');
-            vscode.window.showInformationMessage('Screenshot saved in PCSX2.');
+            const frame = await this.socketClient.screenshot();
+            const name = `${this.selectedGameName || 'ps2'}-${DisasmPanelProvider.formatSnapshotTimestamp(new Date())}.png`;
+            const target = await vscode.window.showSaveDialog({
+                defaultUri: vscode.Uri.file(path.join(this.workspaceRoot || require('os').homedir(), name)),
+                filters: { 'PNG image': ['png'] },
+            });
+            if (!target) { return; }
+            fs.writeFileSync(target.fsPath, encodePng(frame.width, frame.height, frame.rgba));
+            out.info(`Screenshot saved: ${target.fsPath}`);
         } catch (err: any) {
             out.error(`Save screenshot failed: ${err?.message ?? err}`);
             vscode.window.showErrorMessage(`Save screenshot failed: ${err?.message ?? err}`);
         }
     }
+    /** Opens a snapshot's memory dumps (.bin files) in the disassembler. */
     public async handleOpenSnapshot(snapshotPath: string): Promise<void> {
-        // PCSX2 .p2s save states are zips; extract them to a sibling .extracted
-        // directory on demand so the hex viewer can open the embedded .bin
-        // memory dumps. Idempotent — the bridge re-uses the existing folder
-        // when snapshot-info.json is newer than the .p2s.
-        let dirPath = snapshotPath;
-        if (snapshotPath.endsWith('.p2s')) {
-            try {
-                dirPath = await this.socketClient.extractP2s(snapshotPath);
-            } catch (err: any) {
-                vscode.window.showErrorMessage(`Could not extract snapshot: ${err?.message ?? err}`);
-                return;
-            }
-        }
+        const dirPath = snapshotPath;
 
         try {
             const files = fs.readdirSync(dirPath)
@@ -3128,28 +1912,12 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    /**
-     * Read Screenshot.png from a .p2s archive via the bridge and return it as
-     * a base64-encoded string (no data-URI prefix). Returns `null` when the
-     * archive has no embedded screenshot or when the bridge is unavailable.
-     * Used by the Snapshot Manager webview's preview pane.
-     */
-    public async handleReadP2sScreenshot(p2sPath: string): Promise<string | null> {
-        if (!this.socketClient.isConnected()) { return null; }
-        try {
-            return await this.socketClient.readP2sScreenshot(p2sPath);
-        } catch (err: any) {
-            getOutputChannel().debug(`readP2sScreenshot(${p2sPath}) failed: ${err?.message ?? err}`);
-            return null;
-        }
-    }
-
-    /** Reload a snapshot as a save state — writes memory back into the live emulator. */
+    /** Reload a snapshot — writes its RAM back into Ps2Emulator. */
     public async handleLoadSnapshot(snapshotPath: string): Promise<void> {
         const out = getOutputChannel();
 
-        if (!this.socketClient.isConnected()) {
-            vscode.window.showWarningMessage('Not connected to emulator.');
+        if (!this.socketClient.isDirect()) {
+            vscode.window.showWarningMessage('Ps2Emulator is not running.');
             return;
         }
 
@@ -3162,17 +1930,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 
         out.info(`Reloading snapshot from ${snapshotPath}`);
         try {
-            // PCSX2 .p2s snapshots are reloaded via the PINE socket (LOADSTATEFROMFILE).
-            // Internal emulator snapshots use the LOADSNAPSHOT memory-restore path.
-            if (snapshotPath.endsWith('.p2s')) {
-                await this.socketClient.loadStateFile(snapshotPath);
-                out.info(`PCSX2 state loaded from '${snapshotPath}'.`);
-                vscode.window.showInformationMessage(`PCSX2 state restored: ${path.basename(snapshotPath)}`);
-            } else {
-                const regions = await this.socketClient.loadSnapshot(snapshotPath);
-                out.info(`Snapshot reloaded — ${regions.length} region(s) restored.`);
-                vscode.window.showInformationMessage(`Snapshot restored (${regions.length} region(s)). Emulator is paused.`);
-            }
+            const regions = await this.socketClient.loadSnapshot(snapshotPath);
+            out.info(`Snapshot reloaded — ${regions.length} region(s) restored.`);
+            vscode.window.showInformationMessage(`Snapshot restored (${regions.length} region(s)). Emulator is paused.`);
         } catch (err: any) {
             out.error(`Reload snapshot failed: ${err?.message ?? err}`);
             vscode.window.showErrorMessage(`Reload snapshot failed: ${err?.message ?? err}`);
@@ -3196,23 +1956,17 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         this.loadSnapshotsForGame(this.selectedGameName);
         this.loadGameLabels(this.selectedGameName);
 
-        // Resolve the SCUS/SLUS serial (PINE → ISO bootElf), then upsert the
+        // Resolve the SCUS/SLUS serial (the ISO's bootElf), then upsert the
         // Game / GameRegion / GameDisc rows so the label manager can scope by
-        // the stable GameDisc.Id. The upsert runs even when PCSX2 isn't
-        // attached — that's what was missing before, leaving the Games table
-        // empty for the loaded title.
-        if (gamePath && this._bridgeMode) {
+        // the stable GameDisc.Id. The upsert runs even when no emulator runs,
+        // so the Games table has the loaded title.
+        if (gamePath) {
             const serial = await this._resolveSerialForGamePath(gamePath);
             if (serial) {
                 this._currentGameSerial = serial;
                 let discId: number | undefined;
                 try {
-                    let gameTitle = this.selectedGameName;
-                    try {
-                        const info = await this.socketClient.getPcsx2GameInfo();
-                        const t = (info.Title ?? '').replace(/\0/g, '').trim();
-                        if (t) { gameTitle = t; }
-                    } catch { /* PCSX2 not attached — fall back to filename */ }
+                    const gameTitle = this.selectedGameName;
                     discId = await this.socketClient.updateGameDisc(serial, gamePath, undefined, gameTitle);
                 } catch { /* DB upsert is best-effort */ }
                 this.editorProvider.setCurrentGame(this.selectedGameName, this.workspaceRoot, serial, discId);
@@ -3234,96 +1988,54 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
      * Scan the snapshots/<isoName>/ directory and populate this.snapshots.
      * Handles two snapshot formats:
      *  - Internal emulator: <date>/<name>/ directory with snapshot-info.json + .bin files
-     *  - PCSX2 save states: <date>/<name>.p2s file with a companion <name>.p2s.extracted/ directory
      * Previously-deleted snapshots are automatically excluded because this always
      * re-reads the current filesystem state.
      */
     private async loadSnapshotsForGame(isoName: string): Promise<void> {
-        const entries = await this.getPcsx2Savestates();
+        const entries = await this.listSnapshots();
         this.snapshots = entries;
         this.webview?.postMessage({ command: 'updateSnapshots', snapshots: entries, gameName: isoName });
         this._snapshotManagerProvider.notifySnapshotsChanged();
     }
 
+    /** Where snapshots are kept: the workspace's snapshots folder, else a temporary one. */
+    private snapshotsRoot(): string {
+        return this.workspaceRoot
+            ? path.join(this.workspaceRoot, 'snapshots')
+            : path.join(require('os').tmpdir(), 'ps2snapshots');
+    }
+
     /**
-     * List PCSX2 .p2s save-state files from the directory PCSX2 reported
-     * (`pcsx2.path.savestates` in the settings table, populated on the first
-     * emulator connection). When a current game serial is known the list is
-     * filtered to that game's save states (PCSX2 names them
-     * `<SERIAL> (<CRC>).<slot>.p2s`); otherwise every .p2s file in the folder
-     * is returned.
+     * The selected game's snapshots (every game's when none is selected), newest first: the
+     * directories under snapshots/<game>/<date>/ with a snapshot-info.json.
      */
-    public async getPcsx2Savestates(): Promise<SnapshotEntry[]> {
-        if (!this.socketClient.isConnected()) { return []; }
-
-        const dir = await this._resolvePcsx2SavestatesDir();
-        if (!dir) { return []; }
-
-        let files: string[];
-        try { files = fs.readdirSync(dir); }
-        catch { return []; }
-
-        const serialFilter = this._currentGameSerial
-            ? this._currentGameSerial.trim().toUpperCase()
-            : '';
-        // Two-tier match: canonical PCSX2 naming (with CRC) plus a fallback
-        // for user-titled saves that follow the "<SERIAL>.<slug>.p2s" form
-        // we write when CRC is unknown. Files matching neither pattern still
-        // appear in the list — they just lack parsed serial/slot metadata.
-        const nameReFull = /^([A-Za-z]+-\d+)\s+\(([0-9A-Fa-f]{8})\)\.(.+?)\.p2s$/;
-        const nameReSerialOnly = /^([A-Za-z]+-\d+)\.(.+?)\.p2s$/;
+    public async listSnapshots(): Promise<SnapshotEntry[]> {
+        const root = this.snapshotsRoot();
+        const games = this.selectedGameName ? [this.selectedGameName] : safeReadDir(root);
         const entries: SnapshotEntry[] = [];
-
-        for (const name of files) {
-            if (!name.toLowerCase().endsWith('.p2s')) { continue; }
-            const mFull   = name.match(nameReFull);
-            const mSerial = mFull ? null : name.match(nameReSerialOnly);
-            const serial  = mFull ? mFull[1].toUpperCase()
-                          : mSerial ? mSerial[1].toUpperCase()
-                          : '';
-            const crc     = mFull ? mFull[2].toUpperCase() : undefined;
-            const slot    = mFull ? mFull[3]
-                          : mSerial ? mSerial[2]
-                          : undefined;
-
-            // Per-game filter: only skip files whose parsed serial *differs*
-            // from the current game. Files without a parseable serial fall
-            // through (likely user-saved customs) so they're never lost.
-            if (serialFilter && serial && serial !== serialFilter) { continue; }
-
-            const full = path.join(dir, name);
-            let mtimeMs = 0;
-            let size    = 0;
-            try {
-                const st = fs.statSync(full);
-                mtimeMs = st.mtimeMs;
-                size    = st.size;
-            } catch { /* unreadable — show anyway */ }
-
-            const label = slot === 'resume'
-                ? 'Resume state'
-                : slot === undefined
-                    ? path.basename(name, '.p2s')
-                    : /^\d+$/.test(slot)
-                        ? `Slot ${parseInt(slot, 10)}`
-                        : slot;
-
-            const mtime = new Date(mtimeMs || Date.now());
-            entries.push({
-                label,
-                name,
-                timestamp: mtime.toLocaleString(),
-                path:      full,
-                date:      mtime.toISOString().slice(0, 10),
-                isoName:   serial && crc ? `${serial} (${crc})` : '',
-                serial:    serial || undefined,
-                crc,
-                slot,
-                sizeBytes: size,
-                mtimeMs,
-            });
+        for (const game of games) {
+            for (const date of safeReadDir(path.join(root, game))) {
+                for (const name of safeReadDir(path.join(root, game, date))) {
+                    const dir = path.join(root, game, date, name);
+                    const infoPath = path.join(dir, 'snapshot-info.json');
+                    if (!fs.existsSync(infoPath)) { continue; }
+                    let info: { name?: string; timestamp?: string; regions?: { Size?: number }[] } = {};
+                    try { info = JSON.parse(fs.readFileSync(infoPath, 'utf-8')); } catch { /* show it anyway */ }
+                    const mtimeMs = fs.statSync(infoPath).mtimeMs;
+                    const when = new Date(info.timestamp ?? mtimeMs);
+                    entries.push({
+                        label:     info.name || name,
+                        name,
+                        timestamp: when.toLocaleString(),
+                        path:      dir,
+                        date,
+                        isoName:   game,
+                        sizeBytes: (info.regions ?? []).reduce((sum, r) => sum + (r.Size ?? 0), 0),
+                        mtimeMs,
+                    });
+                }
+            }
         }
-
         entries.sort((a, b) => (b.mtimeMs ?? 0) - (a.mtimeMs ?? 0));
         return entries;
     }
@@ -3471,8 +2183,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 
     /**
      * The game the Cheat List and Cheats tab work on. Keyed by the selected game first
-     * so the saved list doesn't move when the serial is resolved later (e.g. once PCSX2
-     * attaches); the serial is the key only when no game file is selected.
+     * so the saved list doesn't move when the serial is resolved later; the serial is
+     * the key only when no game file is selected.
      */
     private cheatListGame(): CheatListGame {
         const name = this.selectedGameName || this._currentGameSerial || '';
@@ -3481,7 +2193,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 
     /**
      * Cheats from the cheat archive for the Cheat List's "Game cheats" import and the
-     * Cheat Porter. Works without PCSX2 (the serial comes from the selected disc). When
+     * Cheat Porter. Works without an emulator (the serial comes from the selected disc). When
      * the game has several cheat lists, the user picks one; returns null on cancel.
      */
     private async getGameCheatsForCheatList(): Promise<Array<{ name: string; codes: string[] }> | null> {
@@ -3517,19 +2229,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         return result.cheats.map(c => ({ name: c.name, codes: c.codes }));
     }
 
-    /**
-     * The game being played, for cheat features: the PCSX2 game when the bridge runs
-     * PCSX2, otherwise the selected disc (serial read from its SYSTEM.CNF, cached).
-     */
+    /** The game being played, for cheat features: the selected disc (serial from its SYSTEM.CNF, cached). */
     public async getCurrentGameForCheats(): Promise<{ serial?: string; title?: string }> {
-        if (this._bridgeMode && this.socketClient.isConnected()) {
-            try {
-                const info = await this.socketClient.getPcsx2GameInfo();
-                const serial = (info.ID ?? '').replace(/\0/g, '').trim();
-                const title  = (info.Title ?? '').replace(/\0/g, '').trim();
-                if (serial) { return { serial: serial.toUpperCase(), title: title || this.selectedGameName }; }
-            } catch { /* fall back to the selected disc */ }
-        }
         if (this._currentGameSerial) { return { serial: this._currentGameSerial, title: this.selectedGameName }; }
         if (!this.selectedGamePath) { return {}; }
         if (this._selectedDiscSerial?.path !== this.selectedGamePath) {
@@ -3713,48 +2414,36 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 
     /**
      * The running game's archive cheats for the Controller page's joker
-     * detection. Re-fetches when the game in PCSX2 changed since the last load.
+     * detection. Re-fetches when the game changed since the last load.
      */
     public async getGameCheatsForJoker(): Promise<{ game: string; serial: string; cheats: Array<{ name: string; codes: string[] }> }> {
-        if (!this._bridgeMode) { throw new Error('Game cheats need the PCSX2 bridge.'); }
-        const info = await this.socketClient.getPcsx2GameInfo();
-        const serial = (info.ID ?? '').replace(/\0/g, '').trim();
+        if (!this._gameRunning) { throw new Error('Game cheats need a game running in Ps2Emulator.'); }
+        const { serial, title } = await this.getCurrentGameForCheats();
         if (!serial) { throw new Error('No game serial available (is a game running?).'); }
         if (serial !== this._archiveSerial || this._archiveCheats.length === 0) {
             await this.handleFetchArchiveCheats();
         }
         return {
-            game:   this._archiveGame || (info.Title ?? '').replace(/\0/g, '').trim(),
+            game:   this._archiveGame || title || '',
             serial,
             cheats: this._archiveCheats.map(c => ({ name: c.name, codes: c.codes })),
         };
     }
 
     /**
-     * Load the running PCSX2 game's cheats from the cheat archive (database), from
+     * Load the running game's cheats from the cheat archive (database), from
      * `cheatListId` or else the list chosen for this game before, then broadcast
      * them with the game's available lists and update the label overlays.
      */
     private async handleFetchArchiveCheats(cheatListId?: number): Promise<void> {
-        if (!this._bridgeMode) { return; }
+        if (!this._gameRunning) { return; }
 
         const out = getOutputChannel();
         this.webview?.postMessage({ command: 'archiveCheatsLoading' });
 
-        let serial = '';
-        let gameTitle = '';
-        try {
-            const info = await this.socketClient.getPcsx2GameInfo();
-            // Strip embedded null bytes that the PINE protocol may include in
-            // string responses (the null terminator is counted in strSize on
-            // the C# side), then trim surrounding whitespace.
-            serial    = (info.ID    ?? '').replace(/\0/g, '').trim();
-            gameTitle = (info.Title ?? '').replace(/\0/g, '').trim();
-        } catch (err: any) {
-            out.warn(`Archive cheats: could not get PCSX2 game info — ${err?.message ?? err}`);
-            this.webview?.postMessage({ command: 'archiveCheatsError', error: 'Could not read game info from PCSX2.' });
-            return;
-        }
+        const game = await this.getCurrentGameForCheats();
+        const serial = game.serial ?? '';
+        const gameTitle = game.title ?? '';
 
         if (!serial) {
             this.webview?.postMessage({ command: 'archiveCheatsError', error: 'No game serial available (is a game running?).' });
@@ -4141,7 +2830,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                         compilerOut.info(`breakpoint requested @ ${addrHex} — use SETBP to install`);
                         break;
                     case 'watchpoint':
-                        compilerOut.info(`watchpoint requested: ${sc.AccessType ?? 'write'} @ ${addrHex} (${sc.WatchSize ?? 4} bytes) — use PINEADDWATCH to install`);
+                        compilerOut.info(`watchpoint requested: ${sc.AccessType ?? 'write'} @ ${addrHex} (${sc.WatchSize ?? 4} bytes) — installed when sent to Ps2Emulator`);
                         break;
                     case 'log': {
                         const directive = sc.Directive ?? 'log';
@@ -4296,7 +2985,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                             const cond = sc.AccessType === 'read'      ? 1
                                        : sc.AccessType === 'readwrite' ? 3
                                        : 2; // default: write
-                            await this.socketClient.addPineWatch(sc.Address, endAddr, cond);
+                            await this.socketClient.addWatch(sc.Address, endAddr, cond);
                             out.info(`CDS watchpoint installed: ${sc.AccessType ?? 'write'} @ ${addrHex} (${size} bytes)`);
                             compilerOut.info(`watchpoint installed: ${sc.AccessType ?? 'write'} @ ${addrHex} (${size} bytes)`);
                             break;
@@ -4309,8 +2998,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                         }
                     }
                 } catch (sidecarErr: any) {
-                    // Log but do not abort — sidecar install is best-effort (e.g. breakpoints
-                    // require PINE debugger extension; watchpoints require PINE mode).
+                    // Log but do not abort — sidecar install is best-effort (it needs
+                    // Ps2Emulator running).
                     out.warn(`CDS sidecar install failed for ${sc.Kind} @ ${addrHex}: ${sidecarErr?.message ?? sidecarErr}`);
                     compilerOut.warn(`sidecar install failed for ${sc.Kind} @ ${addrHex}: ${sidecarErr?.message ?? sidecarErr}`);
                 }
@@ -4548,22 +3237,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         this._setPauseState(false);
         this.webview?.postMessage({ command: 'connectionStatus', connected: true });
         this._scheduleValidateCds(50);
-        for (const r of LIVE_REGIONS_DEFAULT) {
-            await this.editorProvider.openLiveMemoryView(r.region, r.address, r.size, r.label);
-        }
 
         // Pull authoritative user preferences from the DB and refresh the UI.
         await this.loadUserPreferencesFromDb();
-
-        const pendingMode = this._pendingRunMode;
-        this._pendingRunMode = null;
-        if (pendingMode) {
-            this.startRuntimeMode(
-                pendingMode,
-                this.selectedBiosPath,
-                this.selectedGamePath
-            );
-        }
     }
 
     /**
@@ -4600,8 +3276,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     /**
     * Auto-start the CodeDesigner console app in default control-server mode.
      * Called at extension activation when auto-connect fails.
-     * Looks for CodeDesigner.Ps2.Bridge in the install directory first, then
-     * falls back to any non-PCSX2 emulator configured in emu-settings.json.
+     * Looks for CodeDesigner.Ps2.Bridge in the install directory.
      * Returns true if a terminal was spawned (or was already running), false otherwise.
      */
     public async autoStartServer(): Promise<boolean> {
@@ -4833,147 +3508,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         setTimeout(() => void this.handleRequestMcpStatus(), 2500);
     }
 
-    /** Escape a string for a single-quoted PowerShell literal. */
-    private static psQuote(value: string): string {
-        return `'${value.replace(/'/g, "''")}'`;
-    }
-
-    /** Run a short child process and capture stdout/stderr. */
-    private static execFileCapture(
-        file: string,
-        args: string[],
-        timeout = 4000,
-    ): Promise<{ stdout: string; stderr: string }> {
-        return new Promise((resolve, reject) => {
-            child_process.execFile(file, args, { timeout, windowsHide: true }, (err, stdout, stderr) => {
-                if (err) { reject(err); return; }
-                resolve({ stdout: String(stdout ?? ''), stderr: String(stderr ?? '') });
-            });
-        });
-    }
-
-    /** True when a process with the exact executable path is currently running. */
-    private static async isProcessRunningByPath(exePath: string): Promise<boolean> {
-        if (!exePath) { return false; }
-
-        if (process.platform === 'win32') {
-            const imageName = path.basename(exePath).replace(/'/g, "''");
-            const script = [
-                `$target = ${DisasmPanelProvider.psQuote(exePath)}`,
-                '$target = [System.IO.Path]::GetFullPath($target)',
-                `$procs = @(Get-CimInstance Win32_Process -Filter "Name='${imageName}'" | Where-Object { $_.ExecutablePath -and ([System.IO.Path]::GetFullPath($_.ExecutablePath) -ieq $target) })`,
-                'if ($procs.Count -gt 0) { "1" }',
-            ].join('; ');
-            try {
-                const { stdout } = await DisasmPanelProvider.execFileCapture(
-                    'powershell.exe',
-                    ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script],
-                );
-                return stdout.trim().length > 0;
-            } catch {
-                return false;
-            }
-        }
-
-        const resolved = path.resolve(exePath);
-        try {
-            const { stdout } = await DisasmPanelProvider.execFileCapture('ps', ['-axo', 'pid=,args=']);
-            return stdout.split(/\r?\n/).some(line => line.includes(resolved));
-        } catch {
-            return false;
-        }
-    }
-
-    /** Kill all processes whose executable path exactly matches the provided path. */
-    private static async killProcessesByPath(exePath: string): Promise<boolean> {
-        if (!exePath) { return false; }
-
-        if (process.platform === 'win32') {
-            const imageName = path.basename(exePath).replace(/'/g, "''");
-            const script = [
-                `$target = ${DisasmPanelProvider.psQuote(exePath)}`,
-                '$target = [System.IO.Path]::GetFullPath($target)',
-                `$procs = @(Get-CimInstance Win32_Process -Filter "Name='${imageName}'" | Where-Object { $_.ExecutablePath -and ([System.IO.Path]::GetFullPath($_.ExecutablePath) -ieq $target) })`,
-                'foreach ($p in $procs) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }',
-                'if ($procs.Count -gt 0) { "1" }',
-            ].join('; ');
-            try {
-                const { stdout } = await DisasmPanelProvider.execFileCapture(
-                    'powershell.exe',
-                    ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script],
-                    6000,
-                );
-                return stdout.trim().length > 0;
-            } catch {
-                return false;
-            }
-        }
-
-        const resolved = path.resolve(exePath);
-        try {
-            const { stdout } = await DisasmPanelProvider.execFileCapture('ps', ['-axo', 'pid=,args=']);
-            const pids = stdout
-                .split(/\r?\n/)
-                .map(line => line.trim())
-                .filter(line => line.includes(resolved))
-                .map(line => Number(line.split(/\s+/, 1)[0]))
-                .filter(pid => Number.isFinite(pid) && pid > 0);
-            for (const pid of pids) {
-                try { process.kill(pid, 'SIGTERM'); } catch { /* ignore */ }
-            }
-            return pids.length > 0;
-        } catch {
-            return false;
-        }
-    }
-
-    /** Candidate emulator executable paths whose process state can be probed or killed. */
-    private emulatorProcessCandidatePaths(emulatorPath = this.selectedEmulatorPath): string[] {
-        const candidates: string[] = [];
-        const selected = (emulatorPath ?? '').trim();
-        if (selected) {
-            candidates.push(this.resolvePath(selected));
-        }
-
-        const pcsx2Exe = DisasmPanelProvider.detectPcsx2Exe();
-        if ((!selected || this.isPcsx2Selection(selected)) && pcsx2Exe) {
-            candidates.push(pcsx2Exe);
-        }
-
-        const builtInExe = DisasmPanelProvider.findEmulatorExe();
-        if (!selected && builtInExe) {
-            candidates.push(builtInExe);
-        }
-
-        return Array.from(new Set(candidates.filter(Boolean).map(p => path.resolve(p))));
-    }
-
-    /** Detects the selected emulator, including instances left running before VS Code reopened. */
-    private async detectSelectedEmulatorProcessRunning(emulatorPath = this.selectedEmulatorPath): Promise<boolean> {
-        const selected = (emulatorPath ?? '').trim();
-        const host = (this.settings.pcsx2?.host ?? '127.0.0.1').trim() || '127.0.0.1';
-        const slot = this.settings.pcsx2?.slot ?? 28011;
-
-        // PINE listeners survive VS Code reloads and are the most reliable sign
-        // that PCSX2 is alive and attachable. For explicitly selected non-PCSX2
-        // emulators, prefer exact process-path checks below so another emulator
-        // on the same PINE port does not light this row green.
-        if ((!selected || this.isPcsx2Selection(selected)) && await DisasmPanelProvider.probePortListening(slot, host)) {
-            return true;
-        }
-
-        // With no explicit selection, also detect a leftover built-in emulator.
-        if (!selected && await DisasmPanelProvider.probePortListening(28012)) {
-            return true;
-        }
-
-        for (const candidate of this.emulatorProcessCandidatePaths(emulatorPath)) {
-            if (await DisasmPanelProvider.isProcessRunningByPath(candidate)) {
-                return true;
-            }
-        }
-
-        return false;
+    /** Whether Ps2Emulator runs: launched from this panel, or connected directly. */
+    private async detectSelectedEmulatorProcessRunning(_emulatorPath = this.selectedEmulatorPath): Promise<boolean> {
+        return !!this.emulatorProcessTerminal || this.socketClient.isDirect();
     }
 
     /** Probe the selected emulator process and push its status to the panel. */
@@ -4987,50 +3524,14 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         await this.postEmulatorProcessStatus();
     }
 
-    /** Explicit user action: stop the selected emulator and refresh the process status. */
+    /** Explicit user action: close Ps2Emulator and refresh the process status. */
     private async handleKillEmulatorProcess(emulatorPath: string): Promise<void> {
-        const out = getOutputChannel();
         const selected = (emulatorPath ?? this.selectedEmulatorPath ?? '').trim();
         if (selected) { this.selectedEmulatorPath = selected; }
-
-        let killed = false;
-        for (const candidate of this.emulatorProcessCandidatePaths(selected)) {
-            if (await DisasmPanelProvider.killProcessesByPath(candidate)) {
-                out.info(`Killed emulator process: ${candidate}`);
-                killed = true;
-            }
-        }
-
-        if (!selected || this.isPcsx2Selection(selected)) {
-            this.terminateOrphanedPcsx2ProcessesIfNeeded('user requested kill', true);
-            killed = true;
-        }
-
-        if (this._pcsx2Terminal) {
-            try { this._pcsx2Terminal.dispose(); } catch { /* ignore */ }
-            this._pcsx2Terminal = undefined;
-        }
-        if (this._pcsx2LogTimer) {
-            try { clearInterval(this._pcsx2LogTimer); } catch { /* ignore */ }
-            this._pcsx2LogTimer = undefined;
-        }
-
-        if (this.emulatorProcessTerminal) {
-            try { this.emulatorProcessTerminal.dispose(); } catch { /* ignore */ }
-            this.emulatorProcessTerminal = undefined;
-            killed = true;
-        }
-
-        if (this.emulatorTerminal) {
-            try { this.emulatorTerminal.dispose(); } catch { /* ignore */ }
-            this.emulatorTerminal = undefined;
-        }
-
-        try { this.socketClient.disconnect(); } catch { /* ignore */ }
-        this.cleanupProcess();
-
-        if (!killed) {
-            vscode.window.showInformationMessage('No running emulator process was detected.');
+        const running = await this.detectSelectedEmulatorProcessRunning();
+        await this.stopPs2Emulator();
+        if (!running) {
+            vscode.window.showInformationMessage('Ps2Emulator is not running.');
         }
         await this.postEmulatorProcessStatus(selected);
     }
@@ -5210,10 +3711,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 
     /**
      * Probe whether a TCP listener is accepting connections on the given
-     * loopback port. Used to detect an already-running InternalPineSocket
-     * (default 28012) so we don't redundantly spawn a second Emulator.exe
-     * that will just fail to bind the port and exit 1, polluting the UI
-     * with a phantom "terminal terminated with exit code: 1" toast.
+     * loopback port (Ps2Emulator's debug server, while it starts).
      *
      * Resolves true if the connect succeeds, false on refused / timeout /
      * any error. Times out at 500 ms so the probe never blocks the user's
@@ -5239,102 +3737,32 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     }
 
     /**
-     * Ensure CodeDesigner.Ps2.Emulator.exe is running in *bare* mode (no BIOS,
-     * no file) so Bridge's STARTFILEMODE handler has an InternalPineSocket to
-     * push the binary into. Reuses any existing emulator process — including
-     * a BIOS-mode one from a previous Run, *and* one we didn't spawn ourselves
-     * (e.g. a leftover instance from a previous VS Code session whose
-     * extension has been reloaded) — because Bridge writes the file straight
-     * into RAM via PINE and resets PC, so no fresh process spawn or
-     * port-collision dance is needed.
-     *
-     * Returns false only when the binary itself cannot be found.
-     */
-    private async ensureEmulatorRunningForFileMode(): Promise<boolean> {
-        const out = getOutputChannel();
-
-        if (this.emulatorProcessTerminal) {
-            out.info('Reusing running built-in emulator process for file-mode load.');
-            return true;
-        }
-
-        // If something is already listening on the InternalPineSocket port
-        // (28012), don't spawn another emulator — Bridge will use whatever's
-        // there. Without this probe we'd spawn a second --bare which fails to
-        // bind the port, exits with code 1, and shows the user a confusing
-        // "terminal terminated with exit code: 1" toast even though file mode
-        // actually worked.
-        if (await DisasmPanelProvider.probePortListening(28012)) {
-            out.info('Built-in emulator already listening on port 28012; reusing instead of spawning another.');
-            return true;
-        }
-
-        const exe = DisasmPanelProvider.findEmulatorExe();
-        if (!exe) {
-            const installDir = DisasmPanelProvider.getInstallDirectory();
-            const msg = `CodeDesigner.Ps2.Emulator binary not found in ${installDir}. Build the project first to deploy it.`;
-            out.error(msg);
-            vscode.window.showErrorMessage(msg);
-            return false;
-        }
-
-        const args = ['--bare'];
-        const preview = [exe, ...args]
-            .map(v => v.includes(' ') ? `"${v}"` : v)
-            .join(' ');
-        out.info(`Starting built-in emulator (bare mode): ${preview}`);
-
-        const terminal = vscode.window.createTerminal({
-            name: 'CodeDesigner Emulator',
-            shellPath: exe,
-            shellArgs: args,
-        });
-        terminal.show(false);
-        this.emulatorProcessTerminal = terminal;
-        void this.postEmulatorProcessStatus();
-        setTimeout(() => void this.postEmulatorProcessStatus(), 1500);
-        return true;
-    }
-
-    /**
-     * Load a PS2 ELF, BIN, or RAW file into the internal emulator in file mode
-     * (STARTFILEMODE command).  Bridge writes the binary into the running
-     * emulator's RAM via PINE and points PC at the entry point — no BIOS, no
-     * boot sequence, no per-file process spawn. All default live memory
-     * panels are opened so the user can inspect memory immediately.
-     *
-     * Called from extension.ts when the user opens a registered file type
-     * (.elf, .bin, .raw) via the standard VS Code File → Open menu.
+     * Opens a file in Ps2Emulator: an ELF runs as a program (with the selected BIOS, if any); other
+     * binaries are imported into the running emulator's memory.
      */
     public async openFileMode(filePath: string): Promise<void> {
-        const out = getOutputChannel();
-        if (!this.socketClient.isConnected()) {
-            vscode.window.showWarningMessage('Not connected to emulator. Cannot open file.');
+        if (/\.elf$/i.test(filePath)) {
+            this.handleRunPs2Emulator(this.selectedEmulatorPath, this.selectedBiosPath, '', filePath);
             return;
         }
-
-        out.info(`Opening file in internal emulator (file mode): ${filePath}`);
-
-        // Make sure *some* Emulator.exe is running — bare-mode if none yet.
-        // Bridge will load the binary into its RAM via PINE, regardless of
-        // whether the emulator is bare, BIOS-mode, or already file-loaded.
-        if (!(await this.ensureEmulatorRunningForFileMode())) { return; }
-
-        try {
-            const result = await this.socketClient.startFileMode(filePath);
-            const entryHex = result.entryPoint.toString(16).toUpperCase().padStart(8, '0');
-            out.info(`File mode started — entry point 0x${entryHex}`);
-
-            for (const r of LIVE_REGIONS_DEFAULT) {
-                await this.editorProvider.openLiveMemoryView(r.region, r.address, r.size, r.label);
-            }
-
-            vscode.window.showInformationMessage(
-                `File loaded. Entry point: 0x${entryHex}. Emulator is paused — set breakpoints then press Run.`
-            );
-        } catch (err: any) {
-            out.error(`File mode failed: ${err?.message ?? err}`);
-            vscode.window.showErrorMessage(`File mode failed: ${err?.message ?? err}`);
+        if (!this.socketClient.isDirect()) {
+            vscode.window.showWarningMessage('Run Ps2Emulator first, then import the binary (Actions → Import).');
+            return;
         }
+        await this.handleImportBin();
+    }
+}
+
+/** The entries of a directory, or none when it cannot be read. */
+function safeReadDir(dir: string): string[] {
+    try { return fs.readdirSync(dir); } catch { return []; }
+}
+
+/** A snapshot's Screenshot.png as base64 (no data-URI prefix), or null when it has none. */
+async function readSnapshotScreenshot(snapshotPath: string): Promise<string | null> {
+    try {
+        return (await fs.promises.readFile(path.join(snapshotPath, 'Screenshot.png'))).toString('base64');
+    } catch {
+        return null;
     }
 }

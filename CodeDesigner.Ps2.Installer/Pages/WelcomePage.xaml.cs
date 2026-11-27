@@ -61,7 +61,6 @@ public partial class WelcomePage : UserControl
         InstallRequested?.Invoke(new InstallOptions(
             SelectedMode,
             InstallPrerequisites: PrereqCheck.IsChecked == true,
-            IncludePcsx2: Pcsx2Check.IsChecked == true,
             IncludeCheatArchive: ArchiveCheck.IsChecked == true,
             IncludeExtension: ExtensionCheck.IsChecked == true,
             RepoDir: repoDir));

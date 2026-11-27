@@ -6,85 +6,10 @@ namespace CodeDesigner.AI.Tools.Memory;
 // Memory scanning + binary-blob scanning + code reference search.
 // Commands match legacy CodeDesigner.Ps2.McpServer/Tools/Scanning.cs.
 
-[CdTool("scan_strings", ToolDomain.Memory, ToolRisk.ReadOnly,
-    "Scan live EE/IOP RAM for null-terminated ASCII strings. Risk: read-only.")]
-public sealed class ScanStringsTool(IEmulatorBridge bridge)
-{
-    [ToolEntryPoint] public async Task<string> InvokeAsync(
-        [Description("Virtual start address (hex/decimal).")] string address,
-        [Description("Bytes to scan.")] int length,
-        [Description("'ee' (default) or 'iop'.")] string region = "ee", CancellationToken ct = default)
-    {
-        var a = CdText.TryParseAddress(address);
-        if (a is null) return CdText.Error($"invalid address '{address}'.");
-        return CdText.Message(await bridge.SendAsync(new { Command = "SCANSTRINGS", Address = a.Value, Length = length, Region = region }, ct));
-    }
-}
-
-[CdTool("scan_functions", ToolDomain.Memory, ToolRisk.ReadOnly,
-    "Scan live EE/IOP RAM for likely MIPS function entry points (ADDIU $sp,$sp,-N prologues). Risk: read-only.")]
-public sealed class ScanFunctionsTool(IEmulatorBridge bridge)
-{
-    [ToolEntryPoint] public async Task<string> InvokeAsync(
-        [Description("Virtual start address (hex/decimal).")] string address,
-        [Description("Bytes to scan.")] int length,
-        [Description("'ee' (default) or 'iop'.")] string region = "ee", CancellationToken ct = default)
-    {
-        var a = CdText.TryParseAddress(address);
-        if (a is null) return CdText.Error($"invalid address '{address}'.");
-        return CdText.Message(await bridge.SendAsync(new { Command = "SCANFUNCTIONS", Address = a.Value, Length = length, Region = region }, ct));
-    }
-}
-
-[CdTool("scan_pointers", ToolDomain.Memory, ToolRisk.ReadOnly,
-    "Scan live RAM for 4-byte aligned values that are confirmed EE RAM pointers. Risk: read-only.")]
-public sealed class ScanPointersTool(IEmulatorBridge bridge)
-{
-    [ToolEntryPoint] public async Task<string> InvokeAsync(
-        [Description("Virtual start address (hex/decimal).")] string address,
-        [Description("Bytes to scan.")] int length,
-        [Description("'ee' (default) or 'iop'.")] string region = "ee", CancellationToken ct = default)
-    {
-        var a = CdText.TryParseAddress(address);
-        if (a is null) return CdText.Error($"invalid address '{address}'.");
-        return CdText.Message(await bridge.SendAsync(new { Command = "SCANPOINTERS", Address = a.Value, Length = length, Region = region }, ct));
-    }
-}
-
-[CdTool("scan_floats", ToolDomain.Memory, ToolRisk.ReadOnly,
-    "Scan live RAM for plausible IEEE-754 single-precision floats. Risk: read-only.")]
-public sealed class ScanFloatsTool(IEmulatorBridge bridge)
-{
-    [ToolEntryPoint] public async Task<string> InvokeAsync(
-        [Description("Virtual start address (hex/decimal).")] string address,
-        [Description("Bytes to scan.")] int length,
-        [Description("'ee' (default) or 'iop'.")] string region = "ee", CancellationToken ct = default)
-    {
-        var a = CdText.TryParseAddress(address);
-        if (a is null) return CdText.Error($"invalid address '{address}'.");
-        return CdText.Message(await bridge.SendAsync(new { Command = "SCANFLOATS", Address = a.Value, Length = length, Region = region }, ct));
-    }
-}
-
-[CdTool("scan_integers", ToolDomain.Memory, ToolRisk.ReadOnly,
-    "Scan live RAM for non-zero 4-byte aligned 32-bit integers. Risk: read-only.")]
-public sealed class ScanIntegersTool(IEmulatorBridge bridge)
-{
-    [ToolEntryPoint] public async Task<string> InvokeAsync(
-        [Description("Virtual start address (hex/decimal).")] string address,
-        [Description("Bytes to scan.")] int length,
-        [Description("'ee' (default) or 'iop'.")] string region = "ee", CancellationToken ct = default)
-    {
-        var a = CdText.TryParseAddress(address);
-        if (a is null) return CdText.Error($"invalid address '{address}'.");
-        return CdText.Message(await bridge.SendAsync(new { Command = "SCANINTEGERS", Address = a.Value, Length = length, Region = region }, ct));
-    }
-}
-
 // ── File-binary scanning (offline) ─────────────────────────────────────
 [CdTool("get_strings", ToolDomain.Memory, ToolRisk.ReadOnly,
     "Scan a base64 binary blob for printable ASCII strings. Risk: read-only.")]
-public sealed class GetStringsTool(IEmulatorBridge bridge)
+public sealed class GetStringsTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Virtual start address (hex/decimal) for result addresses.")] string address,
@@ -98,7 +23,7 @@ public sealed class GetStringsTool(IEmulatorBridge bridge)
 
 [CdTool("get_functions", ToolDomain.Memory, ToolRisk.ReadOnly,
     "Scan a base64 binary blob for MIPS function entry points. Risk: read-only.")]
-public sealed class GetFunctionsTool(IEmulatorBridge bridge)
+public sealed class GetFunctionsTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Virtual start address (hex/decimal).")] string address,
@@ -112,7 +37,7 @@ public sealed class GetFunctionsTool(IEmulatorBridge bridge)
 
 [CdTool("get_pointers", ToolDomain.Memory, ToolRisk.ReadOnly,
     "Scan a base64 binary blob for confirmed EE RAM pointers. Risk: read-only.")]
-public sealed class GetPointersTool(IEmulatorBridge bridge)
+public sealed class GetPointersTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Virtual start address (hex/decimal).")] string address,
@@ -126,7 +51,7 @@ public sealed class GetPointersTool(IEmulatorBridge bridge)
 
 [CdTool("get_floats", ToolDomain.Memory, ToolRisk.ReadOnly,
     "Scan a base64 binary blob for plausible single-precision floats. Risk: read-only.")]
-public sealed class GetFloatsTool(IEmulatorBridge bridge)
+public sealed class GetFloatsTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Virtual start address (hex/decimal).")] string address,
@@ -140,7 +65,7 @@ public sealed class GetFloatsTool(IEmulatorBridge bridge)
 
 [CdTool("get_integers", ToolDomain.Memory, ToolRisk.ReadOnly,
     "Scan a base64 binary blob for non-zero 4-byte aligned integers. Risk: read-only.")]
-public sealed class GetIntegersTool(IEmulatorBridge bridge)
+public sealed class GetIntegersTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Virtual start address (hex/decimal).")] string address,
@@ -153,115 +78,3 @@ public sealed class GetIntegersTool(IEmulatorBridge bridge)
 }
 
 // ── Code reference + generic search + value scan ───────────────────────
-[CdTool("find_code_references", ToolDomain.Memory, ToolRisk.ReadOnly,
-    "Find every MIPS instruction in live RAM that references a target address (J/JAL/branches/LUI+ADDIU pairs). Risk: read-only.")]
-public sealed class FindCodeReferencesTool(IEmulatorBridge bridge)
-{
-    [ToolEntryPoint] public async Task<string> InvokeAsync(
-        [Description("Target address (hex/decimal).")] string targetAddress,
-        [Description("Scan start address (default 0).")] string startAddress = "0x00000000",
-        [Description("Bytes to scan (default 0x2000000 = 32 MB).")] string length = "0x2000000",
-        [Description("'ee' (default) or 'iop'.")] string region = "ee", CancellationToken ct = default)
-    {
-        var t = CdText.TryParseAddress(targetAddress); if (t is null) return CdText.Error($"invalid targetAddress '{targetAddress}'.");
-        var s = CdText.TryParseAddress(startAddress);  if (s is null) return CdText.Error($"invalid startAddress '{startAddress}'.");
-        var l = CdText.TryParseAddress(length);        if (l is null) return CdText.Error($"invalid length '{length}'.");
-        return CdText.Message(await bridge.SendAsync(new
-        {
-            Command = "SEARCH", Query = $"0x{t.Value:X8}", Address = s.Value, Length = (int)l.Value, SearchMode = "refs", Region = region,
-        }, ct));
-    }
-}
-
-[CdTool("get_xrefs", ToolDomain.Memory, ToolRisk.ReadOnly,
-    "List cross-references to an address from the bridge's index: calls, jumps, branches, lui-built addresses, loads, stores and data pointers (optionally ASCII/CRC32 matches of a string there). The index is built once per region and reused; the first call may take a few seconds. Risk: read-only.")]
-public sealed class GetXrefsTool(IEmulatorBridge bridge)
-{
-    [ToolEntryPoint] public async Task<string> InvokeAsync(
-        [Description("Target address (hex/decimal). KSEG0/uncached aliases resolve to the same address.")] string targetAddress,
-        [Description("Comma-separated kinds: controlFlow, resolved, pointer, string. Default: controlFlow,resolved,pointer.")] string kinds = "controlFlow,resolved,pointer",
-        CancellationToken ct = default)
-    {
-        var t = CdText.TryParseAddress(targetAddress);
-        if (t is null) return CdText.Error($"invalid targetAddress '{targetAddress}'.");
-        var kindList = kinds.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        string json = await bridge.SendAsync(new { Command = "XREFSTO", TargetAddress = t.Value, ReferenceKinds = kindList }, ct);
-
-        try
-        {
-            using var doc = System.Text.Json.JsonDocument.Parse(json);
-            var root = doc.RootElement;
-            if (!root.TryGetProperty("References", out var refs) || refs.ValueKind != System.Text.Json.JsonValueKind.Array)
-                return CdText.Message(json);
-
-            var sb = new System.Text.StringBuilder();
-            sb.AppendLine(root.TryGetProperty("Message", out var m) ? m.GetString() : $"References to 0x{t.Value:X8}");
-            foreach (var r in refs.EnumerateArray())
-            {
-                string Get(string name) => r.TryGetProperty(name, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String ? v.GetString() ?? "" : "";
-                string instruction = Get("instruction");
-                sb.Append($"0x{Get("address")}  {Get("kindLabel"),-13} {Get("summary")}");
-                if (instruction.Length > 0) sb.Append($"  | {instruction}");
-                sb.AppendLine();
-            }
-            return sb.ToString().TrimEnd();
-        }
-        catch
-        {
-            return CdText.Message(json);
-        }
-    }
-}
-
-[CdTool("get_function", ToolDomain.Memory, ToolRisk.ReadOnly,
-    "Return the detected function containing an address: entry, last instruction, size and how many places call or point to it. Functions come from the cross-reference index (call targets and stack-frame prologues after jr ra). Risk: read-only.")]
-public sealed class GetFunctionTool(IEmulatorBridge bridge)
-{
-    [ToolEntryPoint] public async Task<string> InvokeAsync(
-        [Description("Any address inside the function (hex/decimal).")] string address,
-        CancellationToken ct = default)
-    {
-        var a = CdText.TryParseAddress(address);
-        if (a is null) return CdText.Error($"invalid address '{address}'.");
-        return CdText.Message(await bridge.SendAsync(new { Command = "FUNCTIONAT", TargetAddress = a.Value }, ct));
-    }
-}
-
-[CdTool("rebuild_xrefs", ToolDomain.Memory, ToolRisk.ReadOnly,
-    "Rebuild the cross-reference index for a region after the game loads new code or data. Waits for the build. Risk: read-only (reads RAM).")]
-public sealed class RebuildXrefsTool(IEmulatorBridge bridge)
-{
-    [ToolEntryPoint] public async Task<string> InvokeAsync(
-        [Description("'ee' (default), 'iop' or 'bios'.")] string region = "ee", CancellationToken ct = default)
-        => CdText.Message(await bridge.SendAsync(new { Command = "XREFINDEX", Region = region, XrefRebuild = true, XrefWait = true }, ct));
-}
-
-[CdTool("scan_value", ToolDomain.Memory, ToolRisk.ReadOnly,
-    "Scan live RAM for a specific value (u8/u16/u32/u64/f32) with a comparison operator. Risk: read-only.")]
-public sealed class ScanValueTool(IEmulatorBridge bridge)
-{
-    [ToolEntryPoint] public async Task<string> InvokeAsync(
-        [Description("Value to scan (decimal or 0x-hex string).")] string scanValue,
-        [Description("Type: uint32, uint16, uint8, uint64, float32, etc.")] string dataType,
-        [Description("Comparison: eq | ne | lt | gt | le | ge (default eq).")] string comparison = "eq",
-        [Description("Start address (hex/decimal). Omit for full EE RAM.")] string? startAddress = null,
-        [Description("Exclusive end address (hex/decimal). Omit for full EE RAM.")] string? endAddress = null,
-        [Description("Comma-separated previous addresses for refine mode. Omit for full scan.")] string? previousAddresses = null,
-        CancellationToken ct = default)
-    {
-        uint? start = startAddress != null ? CdText.TryParseAddress(startAddress) : null;
-        uint? end   = endAddress   != null ? CdText.TryParseAddress(endAddress)   : null;
-        List<uint>? prev = null;
-        if (!string.IsNullOrWhiteSpace(previousAddresses))
-        {
-            prev = new();
-            foreach (var part in previousAddresses.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-                if (CdText.TryParseAddress(part) is uint a) prev.Add(a);
-        }
-        return CdText.Message(await bridge.SendAsync(new
-        {
-            Command = "SCANVALUE", ScanValue = scanValue, DataType = dataType, Comparison = comparison,
-            Address = start, EndAddress = end, ScanAddresses = prev,
-        }, ct));
-    }
-}

@@ -1,4 +1,3 @@
-using System.Buffers.Binary;
 using System.ComponentModel;
 using System.Text;
 using System.Text.Json;
@@ -9,34 +8,24 @@ using CodeDesigner.Ps2.CdsLanguage.SyntaxItems;
 namespace CodeDesigner.AI.Tools.Patching;
 
 // CDS-language tools that need the CodeDesigner.Ps2.CdsLanguage library
-// (decompile via live memory + disasm; offline explain via the parser).
+// (decompile code words; offline explain via the parser).
 
 [CdTool("decompile_to_cds", ToolDomain.Patching, ToolRisk.ReadOnly,
-    "Read live memory, disassemble it, and emit a re-compilable .cds source (branch targets become :target_ labels). Risk: read-only.")]
-public sealed class DecompileToCdsTool(IEmulatorBridge bridge)
+    "Disassemble code words and emit a re-compilable .cds source (branch targets become :target_ labels). " +
+    "Read the words from the running game with Ps2Emulator's MCP (ps2_read_memory). Risk: read-only.")]
+public sealed class DecompileToCdsTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
-        [Description("Start virtual address (hex/decimal).")] string address,
-        [Description("Instruction count (1-512, default 16).")] int count = 16,
-        [Description("'ee' (default) or 'iop'.")] string region = "ee",
+        [Description("Address of the first word (hex/decimal).")] string address,
+        [Description("The code: 32-bit hex words, space/newline separated (at most 512).")] string opcodes,
         CancellationToken ct = default)
     {
         var addr = CdText.TryParseAddress(address);
         if (addr is null) return CdText.Error($"invalid address '{address}'.");
-        count = Math.Clamp(count, 1, 512);
+        var words = opcodes.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        if (words.Length == 0 || words.Length > 512) return CdText.Error("give 1 to 512 hex words.");
 
-        var mem = await bridge.SendAsync(new { Command = "READMEM", Address = addr.Value, Length = count * 4, Region = region }, ct);
-        var data = CdText.TryGetData(mem);
-        if (data is null) return CdText.Message(mem);
-
-        var bytes = Convert.FromBase64String(data);
-        var words = new StringBuilder();
-        for (int i = 0; i + 3 < bytes.Length; i += 4)
-        {
-            if (words.Length > 0) words.Append(' ');
-            words.Append(BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(i)).ToString("X8"));
-        }
-        var disasm = await bridge.SendAsync(new { Command = "DISASSEMBLE", Data = words.ToString(), Address = addr.Value }, ct);
+        var disasm = await bridge.SendAsync(new { Command = "DISASSEMBLE", Data = string.Join(' ', words), Address = addr.Value }, ct);
         return CdFormat.DecompileToCds(disasm, addr.Value);
     }
 }

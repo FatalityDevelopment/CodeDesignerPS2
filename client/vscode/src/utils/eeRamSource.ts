@@ -8,7 +8,7 @@ export const EE_RAM_BASE = 0x00000000;
 /** READMEMREGION returns hex; 4 MB slices keep each response ~8 MB and let us report progress. */
 const LIVE_READ_CHUNK = 4 * 1024 * 1024;
 
-/** An EE RAM image: a dump on disk (raw .bin, snapshot folder or .p2s) or the emulator's live RAM. */
+/** An EE RAM image: a dump on disk (raw .bin or snapshot folder) or the emulator's live RAM. */
 export type EeRamSource =
     | { kind: 'live' }
     | { kind: 'dump'; path: string; label: string };
@@ -29,23 +29,15 @@ export async function readLiveEeRam(socketClient: SocketClient, progress: (m: st
 }
 
 /**
- * Map a snapshot path to the EE RAM .bin it holds. PCSX2 .p2s states are
- * extracted by the bridge (EEmem.bin in a sibling .extracted folder);
- * snapshot folders use their EE dump; anything else is read as a raw dump.
+ * Map a snapshot path to the EE RAM .bin it holds: snapshot folders use their
+ * EE dump; anything else is read as a raw dump.
  */
-export async function resolveEeDumpFile(socketClient: SocketClient, p: string): Promise<string> {
+export async function resolveEeDumpFile(_socketClient: SocketClient, p: string): Promise<string> {
     let dir: string | null = null;
-    if (p.toLowerCase().endsWith('.p2s')) {
-        if (!socketClient.isConnected()) {
-            throw new Error('Connect to the bridge to read .p2s save states.');
-        }
-        dir = await socketClient.extractP2s(p);
-    } else {
-        try {
-            if ((await fs.promises.stat(p)).isDirectory()) { dir = p; }
-        } catch {
-            throw new Error(`File not found: ${p}`);
-        }
+    try {
+        if ((await fs.promises.stat(p)).isDirectory()) { dir = p; }
+    } catch {
+        throw new Error(`File not found: ${p}`);
     }
     if (!dir) { return p; }
 

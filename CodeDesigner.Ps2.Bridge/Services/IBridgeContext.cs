@@ -20,30 +20,6 @@ namespace CodeDesigner.Ps2.Bridge.Services
     /// </summary>
     internal interface IBridgeContext
     {
-        // ── Active debug clients ─────────────────────────────────────────────
-        /// <summary>PCSX2 PINE client — set when STARTPCSX2 attached.</summary>
-        PineClient? PineClient { get; set; }
-
-        /// <summary>Built-in emulator client — set when STARTEMULATOR attached.</summary>
-        InternalEmulatorClient? InternalClient { get; set; }
-
-        /// <summary>
-        /// Second built-in-emulator client used purely as the analysis substrate.
-        /// In PCSX2 mode this points at a separately-launched bare emulator that
-        /// receives mirrored memory + registers at every breakpoint so the MIPS
-        /// analyzer can produce state-aware comment-column hints. In built-in mode
-        /// this is the same instance as <see cref="InternalClient"/>.
-        /// Null when no analysis emulator is attached — analysis falls back to
-        /// the existing blank-state path.
-        /// </summary>
-        InternalEmulatorClient? AnalysisClient { get; set; }
-
-        /// <summary>Active client (PineClient ?? InternalClient).</summary>
-        IDebugClient? Client { get; }
-
-        /// <summary>Whether <see cref="Client"/> is non-null.</summary>
-        bool HasDebugClient { get; }
-
         // ── Persistence ──────────────────────────────────────────────────────
         CodeDesignerDbContext Db { get; }
         DbLabelRepository LabelRepo { get; }
@@ -76,26 +52,5 @@ namespace CodeDesigner.Ps2.Bridge.Services
 
         /// <summary>Empty the nav-history log.</summary>
         void ClearNavHistory();
-
-        // ── Peer service handles ─────────────────────────────────────────────
-        // Set by <see cref="SocketServer"/> after constructing the service
-        // instances. Other services can call into MemoryService for the
-        // chunked debug-socket reader without copying its logic.
-        MemoryService Memory { get; }
-
-        /// <summary>
-        /// Owns the analysis mirror — register snapshot cached at the last
-        /// pause, plus memory mirror into <see cref="AnalysisClient"/> when one
-        /// is attached. Disassembly + step handlers call this to seed
-        /// <see cref="CodeDesigner.Ps2.Common.MipsAnalyzer"/> with real runtime
-        /// state for accurate comment-column hints.
-        /// </summary>
-        AnalysisStateService AnalysisState { get; }
-
-        /// <summary>
-        /// Cross-reference index (who calls / branches to / loads from / points at
-        /// an address). Disassembly reads per-row reference counts from it.
-        /// </summary>
-        XrefIndexService Xrefs { get; }
     }
 }

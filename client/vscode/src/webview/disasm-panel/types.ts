@@ -19,13 +19,13 @@ export interface SnapshotEntry {
   name: string;
   date: string;
   isoName: string;
-  /** PCSX2 disc serial parsed from the .p2s file name (e.g. "SCUS-97275"). */
+  /** Disc serial (e.g. "SCUS-97275"), when known. */
   serial?: string;
-  /** PCSX2 disc CRC parsed from the .p2s file name (8 hex chars). */
+  /** Disc CRC (8 hex chars), when known. */
   crc?: string;
-  /** PCSX2 slot token parsed from the .p2s file name ("00".."09", "resume", "backup"). */
+  /** Save slot, when the snapshot has one. */
   slot?: string;
-  /** Byte size of the .p2s archive on disk. */
+  /** Bytes of memory the snapshot holds. */
   sizeBytes?: number;
   /** File modification time in ms since epoch — used for stable date sorting. */
   mtimeMs?: number;

@@ -9,7 +9,7 @@ namespace CodeDesigner.AI.Tools.Labels;
 
 [CdTool("label_add_batch", ToolDomain.Labels, ToolRisk.MutatesDatabase,
     "Create/update many labels at once from a JSON array. Risk: writes database.")]
-public sealed class LabelAddBatchTool(IEmulatorBridge bridge)
+public sealed class LabelAddBatchTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint]
     public async Task<string> InvokeAsync(
@@ -41,7 +41,7 @@ public sealed class LabelAddBatchTool(IEmulatorBridge bridge)
 
 [CdTool("label_repair_orphan_members", ToolDomain.Labels, ToolRisk.MutatesDatabase,
     "Repair labels whose address contains ':+...' but whose ParentId/Offset relationship is missing. Risk: writes database.")]
-public sealed class LabelRepairOrphanMembersTool(IEmulatorBridge bridge)
+public sealed class LabelRepairOrphanMembersTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint]
     public async Task<string> InvokeAsync(
@@ -60,7 +60,7 @@ public sealed class LabelRepairOrphanMembersTool(IEmulatorBridge bridge)
 
 [CdTool("group_create", ToolDomain.Labels, ToolRisk.MutatesDatabase,
     "Create/update a label group (Class/Module/Subsystem/VTable) for the Structure Visualizer. Risk: writes database.")]
-public sealed class GroupCreateTool(IEmulatorBridge bridge)
+public sealed class GroupCreateTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint]
     public async Task<string> InvokeAsync(
@@ -79,7 +79,7 @@ public sealed class GroupCreateTool(IEmulatorBridge bridge)
 
 [CdTool("group_list", ToolDomain.Labels, ToolRisk.ReadOnly,
     "List label groups in a set with their members (for the Structure Visualizer). Risk: read-only.")]
-public sealed class GroupListTool(IEmulatorBridge bridge)
+public sealed class GroupListTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint]
     public async Task<string> InvokeAsync(
@@ -94,7 +94,7 @@ public sealed class GroupListTool(IEmulatorBridge bridge)
 
 [CdTool("group_add_member", ToolDomain.Labels, ToolRisk.MutatesDatabase,
     "Add the label at an address to a group (the label must already exist in the set). Risk: writes database.")]
-public sealed class GroupAddMemberTool(IEmulatorBridge bridge)
+public sealed class GroupAddMemberTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint]
     public async Task<string> InvokeAsync(
@@ -113,7 +113,7 @@ public sealed class GroupAddMemberTool(IEmulatorBridge bridge)
 
 [CdTool("group_remove_member", ToolDomain.Labels, ToolRisk.MutatesDatabase,
     "Remove the member at an address from a label group. Risk: writes database.")]
-public sealed class GroupRemoveMemberTool(IEmulatorBridge bridge)
+public sealed class GroupRemoveMemberTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint]
     public async Task<string> InvokeAsync(
@@ -130,7 +130,7 @@ public sealed class GroupRemoveMemberTool(IEmulatorBridge bridge)
 
 [CdTool("group_delete", ToolDomain.Labels, ToolRisk.MutatesDatabase,
     "Delete a label group (its members are detached, not deleted). Risk: writes database.")]
-public sealed class GroupDeleteTool(IEmulatorBridge bridge)
+public sealed class GroupDeleteTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint]
     public async Task<string> InvokeAsync(
@@ -144,27 +144,9 @@ public sealed class GroupDeleteTool(IEmulatorBridge bridge)
     }
 }
 
-[CdTool("callgraph_scan", ToolDomain.Labels, ToolRisk.ReadOnly,
-    "Scan a code region for JAL/JALR call edges and persist them. Run once before callgraph_query. Risk: read-only.")]
-public sealed class CallGraphScanTool(IEmulatorBridge bridge)
-{
-    [ToolEntryPoint]
-    public async Task<string> InvokeAsync(
-        [Description("Game identifier. Prefer the numeric GameDisc.Id (most stable); the SCUS/SLUS serial (e.g. 'SCUS-97275') also works. Omit for file-only sessions.")] string? gameId,
-        [Description("Start address of the code segment to scan (hex/decimal).")] string address,
-        [Description("Number of bytes to scan from the start address.")] int length,
-        [Description("Memory region: 'ee' (default) or 'iop'.")] string? region = null,
-        CancellationToken ct = default)
-    {
-        var payload = JsonSerializer.Serialize(new { gameId, address, length, region });
-        var json = await bridge.SendAsync(new { Command = "SCANCALLGRAPH", Data = payload }, ct);
-        return GroupResponse.Extract(json);
-    }
-}
-
 [CdTool("callgraph_query", ToolDomain.Labels, ToolRisk.ReadOnly,
     "Return callers/callees of a focus function, up to a depth. Requires a prior callgraph_scan. Risk: read-only.")]
-public sealed class CallGraphQueryTool(IEmulatorBridge bridge)
+public sealed class CallGraphQueryTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint]
     public async Task<string> InvokeAsync(

@@ -9,7 +9,7 @@ namespace CodeDesigner.AI.Tools.Cheats;
 
 [CdTool("cheat_list_games", ToolDomain.Cheats, ToolRisk.ReadOnly,
     "List games that own at least one saved cheat list/build. Risk: read-only.")]
-public sealed class CheatListGamesTool(IEmulatorBridge bridge)
+public sealed class CheatListGamesTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(CancellationToken ct = default)
         => CdText.Message(await bridge.SendAsync(new { Command = "CHEATEDITOR_GAMES" }, ct));
@@ -17,7 +17,7 @@ public sealed class CheatListGamesTool(IEmulatorBridge bridge)
 
 [CdTool("cheat_list_builds", ToolDomain.Cheats, ToolRisk.ReadOnly,
     "List the saved cheat lists ('builds') for a game. Risk: read-only.")]
-public sealed class CheatListBuildsTool(IEmulatorBridge bridge)
+public sealed class CheatListBuildsTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Game id (from cheat_list_games).")] int gameId, CancellationToken ct = default)
@@ -26,7 +26,7 @@ public sealed class CheatListBuildsTool(IEmulatorBridge bridge)
 
 [CdTool("cheat_list_get", ToolDomain.Cheats, ToolRisk.ReadOnly,
     "Read a full cheat list as editor text. Prefer cheat_list_sections/search/get_section first to keep token usage low. Risk: read-only.")]
-public sealed class CheatListGetTool(IEmulatorBridge bridge)
+public sealed class CheatListGetTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Cheat list id (from cheat_list_builds). Prefer scoped section reads for large lists.")] int listId, CancellationToken ct = default)
@@ -35,7 +35,7 @@ public sealed class CheatListGetTool(IEmulatorBridge bridge)
 
 [CdTool("cheat_list_sections", ToolDomain.Cheats, ToolRisk.ReadOnly,
     "List section headers in one cheat list with cheat/code counts. Use this before reading codes to keep token usage low. Risk: read-only.")]
-public sealed class CheatListSectionsTool(IEmulatorBridge bridge)
+public sealed class CheatListSectionsTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Cheat list id (from cheat_list_builds).")]
@@ -48,7 +48,7 @@ public sealed class CheatListSectionsTool(IEmulatorBridge bridge)
 
 [CdTool("cheat_list_get_section", ToolDomain.Cheats, ToolRisk.ReadOnly,
     "Read only one section from a cheat list as editor text; optionally filter cheats inside it. Risk: read-only.")]
-public sealed class CheatListGetSectionTool(IEmulatorBridge bridge)
+public sealed class CheatListGetSectionTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Cheat list id (from cheat_list_builds).")]
@@ -75,7 +75,7 @@ public sealed class CheatListGetSectionTool(IEmulatorBridge bridge)
 
 [CdTool("cheat_search", ToolDomain.Cheats, ToolRisk.ReadOnly,
     "Search cheat labels, section headers, descriptions, and code text. Returns compact hits; fetch a section afterward for full codes. Risk: read-only.")]
-public sealed class CheatSearchTool(IEmulatorBridge bridge)
+public sealed class CheatSearchTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Search text. Matches labels, sections, descriptions, and code lines. May be omitted when section is provided.")]
@@ -105,7 +105,7 @@ public sealed class CheatSearchTool(IEmulatorBridge bridge)
 
 [CdTool("cheat_list_save", ToolDomain.Cheats, ToolRisk.MutatesDatabase,
     "Overwrite a cheat list's entries. Data is the editor text returned by cheat_list_get or cheat_list_get_section. Risk: writes database.")]
-public sealed class CheatListSaveTool(IEmulatorBridge bridge)
+public sealed class CheatListSaveTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Cheat list id to overwrite.")] int listId,
@@ -116,7 +116,7 @@ public sealed class CheatListSaveTool(IEmulatorBridge bridge)
 
 [CdTool("cheat_list_create", ToolDomain.Cheats, ToolRisk.MutatesDatabase,
     "Create a new empty cheat list/build for a game. Risk: writes database.")]
-public sealed class CheatListCreateTool(IEmulatorBridge bridge)
+public sealed class CheatListCreateTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Game id to attach the new list to.")] int gameId,
@@ -127,7 +127,7 @@ public sealed class CheatListCreateTool(IEmulatorBridge bridge)
 
 [CdTool("cheat_list_delete", ToolDomain.Cheats, ToolRisk.MutatesDatabase,
     "Delete a cheat list/build by id. Risk: writes database.")]
-public sealed class CheatListDeleteTool(IEmulatorBridge bridge)
+public sealed class CheatListDeleteTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Cheat list id to delete.")] int listId, CancellationToken ct = default)
@@ -136,7 +136,7 @@ public sealed class CheatListDeleteTool(IEmulatorBridge bridge)
 
 [CdTool("cheat_list_import", ToolDomain.Cheats, ToolRisk.MutatesDatabase,
     "Import a cheat list from a file on disk into the archive database. Risk: writes database.")]
-public sealed class CheatListImportTool(IEmulatorBridge bridge)
+public sealed class CheatListImportTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Absolute path to the cheat file to import.")] string filePath, CancellationToken ct = default)

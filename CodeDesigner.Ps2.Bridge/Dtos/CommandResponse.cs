@@ -81,8 +81,6 @@ namespace CodeDesigner.Ps2.Bridge
         public List<IntegerEntry>?  Integers  { get; set; }
         public List<SearchMatch>?   Matches   { get; set; }
         public List<ReferenceEntry>? References { get; set; }
-        // GETTHREADS
-        public List<ThreadEntry>?   Threads   { get; set; }
 
         /// <summary>
         /// Per-address analysis comments produced when an instruction executes with
@@ -117,57 +115,17 @@ namespace CodeDesigner.Ps2.Bridge
         public List<IsoFileEntryInfo>? IsoFiles { get; set; }
         public long? IsoSectorCount { get; set; }
         public bool? IsoIsRawImage { get; set; }
-        // SCANVALUE results
-        public List<ScanValueResult>? ScanResults { get; set; }
         // GETSTRUCTS results
         public List<StructEntry>? Structs { get; set; }
         // COMPILECDS sidecar results (assert / breakpoint / watchpoint directives)
         public List<CdsSidecarResult>? Sidecars { get; set; }
-        // Structured CDS diagnostics returned by VALIDATECDS / COMPILECDS / CDSPATCH.
+        // Structured CDS diagnostics returned by VALIDATECDS / COMPILECDS.
         public List<CdsDiagnostic>? Diagnostics { get; set; }
-        // New PINE extended command response fields
-        public float? FPS { get; set; }
-        public string? SymbolAddress { get; set; }
-        public string? SymbolName { get; set; }
-        public uint? SymbolSize { get; set; }
-        public string? RegisterValue { get; set; }
-        public uint? TotalSymbols { get; set; }
-        public List<PineBreakpointInfo>?  Breakpoints  { get; set; }
-        public List<PineStackFrameInfo>?  StackFrames  { get; set; }
-        public List<IopModuleInfo>?       Modules      { get; set; }
-        public List<PineSymbolInfo>?      PineSymbols  { get; set; }
-        public List<PineDisassemblyLineInfo>? DisassemblyLines { get; set; }
-        public List<PineLocalInfo>?       LocalVars    { get; set; }
-        /// <summary>List of PINE hardware watchpoints returned by PINELISTWATCHES.</summary>
-        public List<PineWatchInfo>?       PineWatches  { get; set; }
-
         // GETNAVHISTORY results
         public List<NavHistoryEntry>? NavHistory { get; set; }
 
         // GETADDRESSHISTORY results
         public List<AddressHistoryEntry>? AddressHistory { get; set; }
-
-        // READMEMREGION results
-        /// <summary>
-        /// Absolute EE virtual addresses where the requested <c>SearchPattern</c>
-        /// was found within the scanned region.  <c>null</c> when no pattern was
-        /// supplied or no matches were found.
-        /// </summary>
-        public List<uint>? MatchAddresses { get; set; }
-        /// <summary>
-        /// READMEMBATCH result map: key = uppercase hex address without 0x prefix
-        /// (e.g. "80010000"), value = Base64 payload for that address.
-        /// </summary>
-        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-        public Dictionary<string, string>? ReadMemBatch { get; set; }
-
-        // TRACECALLS result
-        /// <summary>
-        /// Ordered list of JAL/JALR call sites recorded during a TRACECALLS run.
-        /// Each entry contains the caller address (<c>From</c>) and the resolved
-        /// call target (<c>To</c>) after the branch delay slot has executed.
-        /// </summary>
-        public List<CallTraceEntry>? TracedCalls { get; set; }
 
         // Memory Manager results (MCPMEMORY_LIST / MCPMEMORY_GET / MCPMEMORY_ADD / MCPMEMORY_UPDATE)
         /// <summary>List of MCP memory entries returned by MCPMEMORY_LIST.</summary>

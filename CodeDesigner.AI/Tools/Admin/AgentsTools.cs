@@ -8,7 +8,7 @@ namespace CodeDesigner.AI.Tools.Admin;
 
 [CdTool("list_agent_profiles", ToolDomain.Admin, ToolRisk.ReadOnly,
     "List all AI agent profiles in the database. Risk: read-only.")]
-public sealed class ListAgentProfilesTool(IEmulatorBridge bridge)
+public sealed class ListAgentProfilesTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(CancellationToken ct = default)
         => CdText.Message(await bridge.SendAsync(new { Command = "MCPAGENT_LIST" }, ct));
@@ -16,7 +16,7 @@ public sealed class ListAgentProfilesTool(IEmulatorBridge bridge)
 
 [CdTool("get_agent_profile", ToolDomain.Admin, ToolRisk.ReadOnly,
     "Get full details (Markdown fields) of an agent profile by ID. Risk: read-only.")]
-public sealed class GetAgentProfileTool(IEmulatorBridge bridge)
+public sealed class GetAgentProfileTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Agent profile ID.")] int id, CancellationToken ct = default)
@@ -25,7 +25,7 @@ public sealed class GetAgentProfileTool(IEmulatorBridge bridge)
 
 [CdTool("create_agent_profile", ToolDomain.Admin, ToolRisk.MutatesDatabase,
     "Create a new AI agent profile. All Markdown fields optional. Risk: writes database.")]
-public sealed class CreateAgentProfileTool(IEmulatorBridge bridge)
+public sealed class CreateAgentProfileTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Display name (must be unique).")] string name,
@@ -56,7 +56,7 @@ public sealed class CreateAgentProfileTool(IEmulatorBridge bridge)
 
 [CdTool("update_agent_profile", ToolDomain.Admin, ToolRisk.MutatesDatabase,
     "Update fields of an existing agent profile (null = unchanged). Risk: writes database.")]
-public sealed class UpdateAgentProfileTool(IEmulatorBridge bridge)
+public sealed class UpdateAgentProfileTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Agent profile ID.")] int id,
@@ -84,7 +84,7 @@ public sealed class UpdateAgentProfileTool(IEmulatorBridge bridge)
 
 [CdTool("delete_agent_profile", ToolDomain.Admin, ToolRisk.MutatesDatabase,
     "Permanently delete an agent profile by ID (irreversible). Risk: writes database.")]
-public sealed class DeleteAgentProfileTool(IEmulatorBridge bridge)
+public sealed class DeleteAgentProfileTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Agent profile ID.")] int id, CancellationToken ct = default)

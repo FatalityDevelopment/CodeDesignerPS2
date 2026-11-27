@@ -16,7 +16,7 @@ import type {
     DirectChain, DirectCompare, DirectEmulator, DirectEmulatorEvents, DirectFrame, DirectHintLevel, DirectIndexInfo, DirectLine,
     DirectPause, DirectRef, DirectScanInfo, DirectScanRequest, DirectScanResult, DirectThread, DirectModule, DirectStackFrame,
     DirectTraceSpec, DirectTraceInfo, DirectTraceRecord, DirectPatch, DirectPadButton, DirectNetworkStatus,
-    DirectCapturedFrame,
+    DirectCapturedFrame, DirectSpace, DirectWatch,
     DirectRefKind, DirectRegion, DirectStatus, DirectSymbol, StopStream,
 } from './directEmulator';
 import protoText from './ps2debug.proto';
@@ -53,7 +53,8 @@ interface EeRegisters {
 }
 interface StatusReply { paused: boolean; eePc: number; eeCycles: U64; armed: boolean }
 interface BreakpointInfo { id: number; address: number }
-interface PointList { breakpoints: BreakpointInfo[] }
+interface WatchpointWire { id: number; space: string; offset: U64; length: U64; kind: string; hits: number }
+interface PointList { breakpoints: BreakpointInfo[]; watchpoints?: WatchpointWire[] }
 interface PausedWire { reason: string; pc: number; error: string }
 interface EventWire { kind?: 'paused' | 'resumed' | 'breakpointLogged' | 'watchLogged'; paused?: PausedWire }
 
@@ -474,6 +475,23 @@ export class Ps2DebugClient implements DirectEmulator {
         }
     }
 
+    public async readSpace(space: DirectSpace, offset: number, length: number): Promise<Buffer> {
+        const reply = await this.call<ReadReply>('Memory', 'read', { space, offset, length });
+        return Buffer.from(reply.data);
+    }
+
+    public async writeSpace(space: DirectSpace, offset: number, data: Buffer): Promise<void> {
+        const reply = await this.call<{ written: U64; unmappedAt?: U64 }>('Memory', 'write', { space, offset, data });
+        if (reply.unmappedAt !== undefined && reply.unmappedAt !== null) {
+            throw new Error(`wrote ${reply.written} of ${data.length} bytes to ${space}`);
+        }
+    }
+
+    public async screenshot(): Promise<DirectFrame> {
+        const frame = await this.call<{ width: number; height: number; rgba: Buffer; field: U64 }>('Media', 'screenshot', {});
+        return { width: frame.width, height: frame.height, rgba: Buffer.from(frame.rgba), field: Number(frame.field) };
+    }
+
     // ── registers ───────────────────────────────────────────────────────
 
     public async getRegisters(): Promise<RegisterDump> {
@@ -649,6 +667,34 @@ export class Ps2DebugClient implements DirectEmulator {
         const list = await this.call<PointList>('Breakpoints', 'list', {});
         for (const b of list.breakpoints.filter(which)) {
             await this.call<object>('Breakpoints', 'remove', { id: b.id });
+        }
+    }
+
+    // ── watchpoints ─────────────────────────────────────────────────────
+
+    public async setWatchpoint(start: number, end: number, access: DirectWatch['access']): Promise<number> {
+        const kind = access === 'read' ? 'READ' : access === 'write' ? 'WRITE' : 'READ_WRITE';
+        const reply = await this.call<{ id: number }>('Breakpoints', 'setWatchpoint', {
+            client: this.clientId, space: 'EE_VIRTUAL', offset: start >>> 0, length: Math.max(1, (end - start) >>> 0),
+            kind, action: 'ACTION_BREAK',
+        });
+        return reply.id;
+    }
+
+    public async listWatchpoints(): Promise<DirectWatch[]> {
+        const list = await this.call<PointList>('Breakpoints', 'list', {});
+        return (list.watchpoints ?? []).map(w => {
+            const start = Number(w.offset) >>> 0;
+            const access = w.kind === 'READ' ? 'read' : w.kind === 'WRITE' ? 'write' : 'read+write';
+            return { id: w.id, start, end: (start + Number(w.length)) >>> 0, access, hits: w.hits };
+        });
+    }
+
+    public async clearWatchpoints(range?: { start: number; end: number }): Promise<void> {
+        for (const w of await this.listWatchpoints()) {
+            if (!range || (w.start === range.start >>> 0 && w.end === range.end >>> 0)) {
+                await this.call<object>('Breakpoints', 'remove', { id: w.id });
+            }
         }
     }
 

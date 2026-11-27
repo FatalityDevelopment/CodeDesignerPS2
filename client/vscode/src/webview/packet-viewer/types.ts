@@ -97,7 +97,6 @@ export interface FrameEdit {
     /** New TCP/UDP payload (base64). */
     payload?: string;
     fix: boolean;
-    tcpContinue: boolean;
 }
 
 /** Actions posted to the extension host. */

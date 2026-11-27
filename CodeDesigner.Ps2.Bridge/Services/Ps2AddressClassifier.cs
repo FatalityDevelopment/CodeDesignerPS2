@@ -6,8 +6,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
     /// </summary>
     internal static class Ps2AddressClassifier
     {
-        // Hardcoded to avoid an EmulatorCore dependency. These mirror
-        // CodeDesigner.Ps2.EmulatorCore.PS2MemoryBus.{MainRamSize,ScratchpadSize}.
+        // PS2 EE main RAM and scratchpad sizes.
         public const uint EeMainRamSizeBytes    = 32 * 1024 * 1024;
         public const uint EeScratchpadSizeBytes = 16 * 1024;
 

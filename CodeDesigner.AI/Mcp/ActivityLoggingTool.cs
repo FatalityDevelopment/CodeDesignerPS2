@@ -47,7 +47,7 @@ internal sealed class ActivityLoggingTool : DelegatingMcpServerTool
 
     private const string ReasonArg = "reason";
 
-    private readonly IEmulatorBridge _bridge;
+    private readonly IWorkspaceBridge _bridge;
     private readonly string _toolName;
     private readonly bool _stripReason;
 
@@ -55,7 +55,7 @@ internal sealed class ActivityLoggingTool : DelegatingMcpServerTool
     /// Remove <c>reason</c> before invoking the inner tool. False when the inner
     /// chain is a <see cref="RiskFrictionTool"/>, which reads and strips it itself.
     /// </param>
-    public ActivityLoggingTool(McpServerTool inner, IEmulatorBridge bridge, string toolName, bool stripReason = true)
+    public ActivityLoggingTool(McpServerTool inner, IWorkspaceBridge bridge, string toolName, bool stripReason = true)
         : base(inner)
     {
         _bridge = bridge;

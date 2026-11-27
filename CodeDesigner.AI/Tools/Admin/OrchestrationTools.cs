@@ -10,7 +10,7 @@ namespace CodeDesigner.AI.Tools.Admin;
 
 [CdTool("list_orchestration_plans", ToolDomain.Admin, ToolRisk.ReadOnly,
     "List all orchestration plans (active marked). Risk: read-only.")]
-public sealed class ListOrchestrationPlansTool(IEmulatorBridge bridge)
+public sealed class ListOrchestrationPlansTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(CancellationToken ct = default)
         => CdText.Message(await bridge.SendAsync(new { Command = "MCPORCHESTRATION_LIST" }, ct));
@@ -18,7 +18,7 @@ public sealed class ListOrchestrationPlansTool(IEmulatorBridge bridge)
 
 [CdTool("get_active_orchestration_plan", ToolDomain.Admin, ToolRisk.ReadOnly,
     "Get the active orchestration plan: live stage (current/next step) + all its Markdown fields. Risk: read-only.")]
-public sealed class GetActiveOrchestrationPlanTool(IEmulatorBridge bridge, IOrchestrationCoordinator orch)
+public sealed class GetActiveOrchestrationPlanTool(IWorkspaceBridge bridge, IOrchestrationCoordinator orch)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(CancellationToken ct = default)
     {
@@ -93,7 +93,7 @@ public static class OrchestrationFormat
 
 [CdTool("get_orchestration_plan", ToolDomain.Admin, ToolRisk.ReadOnly,
     "Get a specific orchestration plan by ID. Risk: read-only.")]
-public sealed class GetOrchestrationPlanTool(IEmulatorBridge bridge)
+public sealed class GetOrchestrationPlanTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Orchestration plan ID.")] int id, CancellationToken ct = default)
@@ -102,7 +102,7 @@ public sealed class GetOrchestrationPlanTool(IEmulatorBridge bridge)
 
 [CdTool("create_orchestration_plan", ToolDomain.Admin, ToolRisk.MutatesDatabase,
     "Create a new orchestration plan. All Markdown fields optional. Risk: writes database.")]
-public sealed class CreateOrchestrationPlanTool(IEmulatorBridge bridge)
+public sealed class CreateOrchestrationPlanTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Plan name (must be unique).")] string name,
@@ -128,7 +128,7 @@ public sealed class CreateOrchestrationPlanTool(IEmulatorBridge bridge)
 
 [CdTool("update_orchestration_plan", ToolDomain.Admin, ToolRisk.MutatesDatabase,
     "Update fields of an existing orchestration plan (null = unchanged). Risk: writes database.")]
-public sealed class UpdateOrchestrationPlanTool(IEmulatorBridge bridge)
+public sealed class UpdateOrchestrationPlanTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Orchestration plan ID.")] int id,
@@ -152,7 +152,7 @@ public sealed class UpdateOrchestrationPlanTool(IEmulatorBridge bridge)
 
 [CdTool("set_active_orchestration_plan", ToolDomain.Admin, ToolRisk.MutatesDatabase,
     "Mark an orchestration plan as active (deactivates the previously active one). Risk: writes database.")]
-public sealed class SetActiveOrchestrationPlanTool(IEmulatorBridge bridge)
+public sealed class SetActiveOrchestrationPlanTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Orchestration plan ID.")] int id, CancellationToken ct = default)
@@ -161,7 +161,7 @@ public sealed class SetActiveOrchestrationPlanTool(IEmulatorBridge bridge)
 
 [CdTool("delete_orchestration_plan", ToolDomain.Admin, ToolRisk.MutatesDatabase,
     "Permanently delete an orchestration plan (irreversible). Risk: writes database.")]
-public sealed class DeleteOrchestrationPlanTool(IEmulatorBridge bridge)
+public sealed class DeleteOrchestrationPlanTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Orchestration plan ID.")] int id, CancellationToken ct = default)
@@ -170,7 +170,7 @@ public sealed class DeleteOrchestrationPlanTool(IEmulatorBridge bridge)
 
 [CdTool("import_orchestration_plan", ToolDomain.Admin, ToolRisk.MutatesDatabase,
     "Import a plan from a Markdown file (with optional YAML front-matter). Updates if name exists. Risk: writes database.")]
-public sealed class ImportOrchestrationPlanTool(IEmulatorBridge bridge)
+public sealed class ImportOrchestrationPlanTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Absolute path to the Markdown file.")] string filePath, CancellationToken ct = default)
@@ -182,7 +182,7 @@ public sealed class ImportOrchestrationPlanTool(IEmulatorBridge bridge)
 
 [CdTool("export_orchestration_plan", ToolDomain.Admin, ToolRisk.WritesDisk,
     "Export an orchestration plan to a Markdown file with YAML front-matter. Risk: writes disk.")]
-public sealed class ExportOrchestrationPlanTool(IEmulatorBridge bridge)
+public sealed class ExportOrchestrationPlanTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Orchestration plan ID.")] int id,

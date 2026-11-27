@@ -8,7 +8,7 @@ namespace CodeDesigner.AI.Tools.Media;
 
 [CdTool("list_disc_elfs", ToolDomain.Media, ToolRisk.ReadOnly,
     "Open a PS2 disc image and list every ELF/IRX on it (name, size). Risk: read-only.")]
-public sealed class ListDiscElfsTool(IEmulatorBridge bridge)
+public sealed class ListDiscElfsTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Path to the disc image (.iso/.bin/.zip).")] string isoPath, CancellationToken ct = default)
@@ -17,7 +17,7 @@ public sealed class ListDiscElfsTool(IEmulatorBridge bridge)
 
 [CdTool("recompile_elf", ToolDomain.Media, ToolRisk.WritesDisk,
     "Extract a named ELF from a disc image and statically recompile it to C++ source. Risk: writes disk.")]
-public sealed class RecompileElfTool(IEmulatorBridge bridge)
+public sealed class RecompileElfTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Path to the PS2 disc image.")] string isoPath,
@@ -30,7 +30,7 @@ public sealed class RecompileElfTool(IEmulatorBridge bridge)
 // ── Memory card ────────────────────────────────────────────────────────
 [CdTool("mc_list", ToolDomain.Media, ToolRisk.ReadOnly,
     "List all save-game directories on a PS2 memory card image. Risk: read-only.")]
-public sealed class McListTool(IEmulatorBridge bridge)
+public sealed class McListTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Path to the .ps2 memory card image.")] string mcPath, CancellationToken ct = default)
@@ -39,7 +39,7 @@ public sealed class McListTool(IEmulatorBridge bridge)
 
 [CdTool("mc_export", ToolDomain.Media, ToolRisk.WritesDisk,
     "Export a save-game directory from a memory card image to disk. Risk: writes disk.")]
-public sealed class McExportTool(IEmulatorBridge bridge)
+public sealed class McExportTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Path to the .ps2 memory card image.")] string mcPath,
@@ -50,7 +50,7 @@ public sealed class McExportTool(IEmulatorBridge bridge)
 
 [CdTool("mc_import", ToolDomain.Media, ToolRisk.WritesDisk,
     "Import a save-game directory into a memory card image. Risk: writes memory card image.")]
-public sealed class McImportTool(IEmulatorBridge bridge)
+public sealed class McImportTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Path to the .ps2 memory card image.")] string mcPath,
@@ -62,7 +62,7 @@ public sealed class McImportTool(IEmulatorBridge bridge)
 
 [CdTool("mc_delete", ToolDomain.Media, ToolRisk.WritesDisk,
     "Delete a save-game directory from a memory card image (irreversible). Risk: writes memory card image.")]
-public sealed class McDeleteTool(IEmulatorBridge bridge)
+public sealed class McDeleteTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Path to the .ps2 memory card image.")] string mcPath,
@@ -72,7 +72,7 @@ public sealed class McDeleteTool(IEmulatorBridge bridge)
 
 [CdTool("mc_format", ToolDomain.Media, ToolRisk.WritesDisk,
     "Create a new blank 8 MB PS2 memory card image (overwrites if exists). Risk: writes disk.")]
-public sealed class McFormatTool(IEmulatorBridge bridge)
+public sealed class McFormatTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Path where the new memory card image should be created.")] string mcPath,
@@ -82,7 +82,7 @@ public sealed class McFormatTool(IEmulatorBridge bridge)
 
 [CdTool("mc_read_file", ToolDomain.Media, ToolRisk.ReadOnly,
     "Read the raw bytes of a file inside a memory card save directory (base64). Risk: read-only.")]
-public sealed class McReadFileTool(IEmulatorBridge bridge)
+public sealed class McReadFileTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Path to the .ps2 memory card image.")] string mcPath,
@@ -94,7 +94,7 @@ public sealed class McReadFileTool(IEmulatorBridge bridge)
 // ── HDD image ─────────────────────────────────────────────────────────
 [CdTool("hdd_list", ToolDomain.Media, ToolRisk.ReadOnly,
     "List APA partitions on a PS2 HDD image. Risk: read-only.")]
-public sealed class HddListTool(IEmulatorBridge bridge)
+public sealed class HddListTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Path to the HDD image (e.g. hdd.raw).")] string hddPath, CancellationToken ct = default)
@@ -103,7 +103,7 @@ public sealed class HddListTool(IEmulatorBridge bridge)
 
 [CdTool("hdd_list_files", ToolDomain.Media, ToolRisk.ReadOnly,
     "List files in a specific partition on a PS2 HDD image. Risk: read-only.")]
-public sealed class HddListFilesTool(IEmulatorBridge bridge)
+public sealed class HddListFilesTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Path to the HDD image.")] string hddPath,
@@ -113,7 +113,7 @@ public sealed class HddListFilesTool(IEmulatorBridge bridge)
 
 [CdTool("hdd_export", ToolDomain.Media, ToolRisk.WritesDisk,
     "Export a file from an HDD partition to disk. Risk: writes disk.")]
-public sealed class HddExportTool(IEmulatorBridge bridge)
+public sealed class HddExportTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Path to the HDD image.")] string hddPath,
@@ -125,7 +125,7 @@ public sealed class HddExportTool(IEmulatorBridge bridge)
 
 [CdTool("hdd_import", ToolDomain.Media, ToolRisk.WritesDisk,
     "Import a file/directory into an HDD partition (PFS write may be unimplemented in backend). Risk: writes HDD image.")]
-public sealed class HddImportTool(IEmulatorBridge bridge)
+public sealed class HddImportTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Path to the HDD image.")] string hddPath,
@@ -137,7 +137,7 @@ public sealed class HddImportTool(IEmulatorBridge bridge)
 
 [CdTool("hdd_delete", ToolDomain.Media, ToolRisk.WritesDisk,
     "Delete a partition from an HDD image (irreversible). Risk: writes HDD image.")]
-public sealed class HddDeleteTool(IEmulatorBridge bridge)
+public sealed class HddDeleteTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Path to the HDD image.")] string hddPath,
@@ -147,7 +147,7 @@ public sealed class HddDeleteTool(IEmulatorBridge bridge)
 
 [CdTool("hdd_create", ToolDomain.Media, ToolRisk.WritesDisk,
     "Create a new blank HDD image with an APA table (overwrites if exists). Risk: writes disk.")]
-public sealed class HddCreateTool(IEmulatorBridge bridge)
+public sealed class HddCreateTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Path where the new HDD image should be created.")] string hddPath,
@@ -158,7 +158,7 @@ public sealed class HddCreateTool(IEmulatorBridge bridge)
 // ── ISO image ─────────────────────────────────────────────────────────
 [CdTool("iso_list_files", ToolDomain.Media, ToolRisk.ReadOnly,
     "List all files/directories on a PS2 disc image (ISO-9660). Risk: read-only.")]
-public sealed class IsoListFilesTool(IEmulatorBridge bridge)
+public sealed class IsoListFilesTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Path to the disc image (.iso/.bin/.zip).")] string isoPath, CancellationToken ct = default)
@@ -167,7 +167,7 @@ public sealed class IsoListFilesTool(IEmulatorBridge bridge)
 
 [CdTool("iso_read_file", ToolDomain.Media, ToolRisk.ReadOnly,
     "Extract a file from a disc image to disk (or return base64 when outputPath is omitted). Risk: read-only.")]
-public sealed class IsoReadFileTool(IEmulatorBridge bridge)
+public sealed class IsoReadFileTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Path to the disc image.")] string isoPath,
@@ -179,7 +179,7 @@ public sealed class IsoReadFileTool(IEmulatorBridge bridge)
 
 [CdTool("iso_get_info", ToolDomain.Media, ToolRisk.ReadOnly,
     "Get metadata about a PS2 disc image (format, sector count, size, title). Risk: read-only.")]
-public sealed class IsoGetInfoTool(IEmulatorBridge bridge)
+public sealed class IsoGetInfoTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Path to the disc image.")] string isoPath, CancellationToken ct = default)
@@ -187,20 +187,3 @@ public sealed class IsoGetInfoTool(IEmulatorBridge bridge)
 }
 
 // ── GS frame streaming ─────────────────────────────────────────────────
-[CdTool("get_gs_frame", ToolDomain.Media, ToolRisk.ReadOnly,
-    "Get the latest PCSX2 GS frame as base64 JPEG (in-memory snapshot). For a quick visual " +
-    "check prefer pcsx2_save_screenshot; reserve this for deeper frame analysis / streaming. " +
-    "Risk: read-only.")]
-public sealed class GetGsFrameTool(IEmulatorBridge bridge)
-{
-    [ToolEntryPoint] public async Task<string> InvokeAsync(CancellationToken ct = default)
-        => CdText.Message(await bridge.SendAsync(new { Command = "GETGSFRAME" }, ct));
-}
-
-[CdTool("get_gs_stream_status", ToolDomain.Media, ToolRisk.ReadOnly,
-    "Report GS streaming pipeline health (connection, port, subscribers, frame counters, drops). Risk: read-only.")]
-public sealed class GetGsStreamStatusTool(IEmulatorBridge bridge)
-{
-    [ToolEntryPoint] public async Task<string> InvokeAsync(CancellationToken ct = default)
-        => CdText.Message(await bridge.SendAsync(new { Command = "GSSTREAMSTATUS" }, ct));
-}

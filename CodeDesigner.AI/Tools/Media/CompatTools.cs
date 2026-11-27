@@ -8,7 +8,7 @@ namespace CodeDesigner.AI.Tools.Media;
 
 [CdTool("compat_list", ToolDomain.Media, ToolRisk.ReadOnly,
     "List every game disc that carries a PCSX2 compatibility status, by title. Risk: read-only.")]
-public sealed class CompatListTool(IEmulatorBridge bridge)
+public sealed class CompatListTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(CancellationToken ct = default)
         => CdText.Message(await bridge.SendAsync(new { Command = "COMPAT_LIST" }, ct));
@@ -16,7 +16,7 @@ public sealed class CompatListTool(IEmulatorBridge bridge)
 
 [CdTool("compat_details", ToolDomain.Media, ToolRisk.ReadOnly,
     "Get the compatibility details for one game by serial and/or title. Risk: read-only.")]
-public sealed class CompatDetailsTool(IEmulatorBridge bridge)
+public sealed class CompatDetailsTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Disc serial (e.g. 'SCUS-97275'). Provide this and/or a title.")] string? gameSerial = null,
@@ -31,7 +31,7 @@ public sealed class CompatDetailsTool(IEmulatorBridge bridge)
 
 [CdTool("compat_cover", ToolDomain.Media, ToolRisk.ReadOnly,
     "Check whether cover art exists for a disc serial (fetches/caches it; the binary image itself is not returned). Risk: read-only.")]
-public sealed class CompatCoverTool(IEmulatorBridge bridge)
+public sealed class CompatCoverTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Disc serial (e.g. 'SCUS-97275').")] string gameSerial, CancellationToken ct = default)
@@ -47,7 +47,7 @@ public sealed class CompatCoverTool(IEmulatorBridge bridge)
 
 [CdTool("compat_sync", ToolDomain.Media, ToolRisk.WritesDisk,
     "Download the latest PCSX2 compatibility database and update local game statuses. Risk: network + writes database.")]
-public sealed class CompatSyncTool(IEmulatorBridge bridge)
+public sealed class CompatSyncTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(CancellationToken ct = default)
         => CdText.Message(await bridge.SendAsync(new { Command = "COMPAT_SYNC" }, ct));

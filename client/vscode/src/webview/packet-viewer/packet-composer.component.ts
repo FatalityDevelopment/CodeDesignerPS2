@@ -41,7 +41,6 @@ interface LogEntry {
 export interface ComposerSettings {
     direction?: Direction;
     fix?: boolean;
-    tcpContinue?: boolean;
     protocol?: string;
 }
 
@@ -82,9 +81,6 @@ const BUILD_PROTOCOLS = ['Game', 'DME', 'Lobby', 'LobbyExt', 'MGCL', 'SCERT'];
             </div>
             <label class="pv-check" title="Recompute the IPv4 length/checksum and the TCP/UDP length/checksum">
                 <input type="checkbox" [checked]="fix()" (change)="fix.set(asInput($event).checked); changed()" /> Fix checksums
-            </label>
-            <label class="pv-check" title="Rewrite TCP seq/ack to follow the live connection (needs a running capture of it)">
-                <input type="checkbox" [checked]="tcpContinue()" (change)="tcpContinue.set(asInput($event).checked); changed()" /> Continue TCP flow
             </label>
         </div>
 
@@ -218,7 +214,6 @@ export class PacketComposerComponent {
 
     readonly direction   = signal<Direction>('rx');
     readonly fix         = signal(true);
-    readonly tcpContinue = signal(true);
     readonly frameHex    = signal('');
     readonly preview     = signal<Preview | null>(null);
     readonly previewError = signal('');
@@ -253,8 +248,8 @@ export class PacketComposerComponent {
     });
     readonly tcpWarning = computed(() => {
         const b = this.frameBytes();
-        if (!b || b.length < 34 || b[23] !== 6 || this.tcpContinue()) { return ''; }
-        return 'TCP: with "Continue TCP flow" off, the original seq/ack go out, and a stack that already saw them drops the segment as a duplicate.';
+        if (!b || b.length < 34 || b[23] !== 6) { return ''; }
+        return 'TCP: the frame goes out with its own seq/ack; a stack that already saw them drops the segment as a duplicate.';
     });
 
     readonly entries = computed(() => {
@@ -277,7 +272,6 @@ export class PacketComposerComponent {
     applySettings(s: ComposerSettings): void {
         if (s.direction) { this.direction.set(s.direction); }
         if (s.fix !== undefined) { this.fix.set(s.fix); }
-        if (s.tcpContinue !== undefined) { this.tcpContinue.set(s.tcpContinue); }
         if (s.protocol && BUILD_PROTOCOLS.includes(s.protocol)) { this.protocol.set(s.protocol); }
         this.syncRtType();
     }
@@ -305,7 +299,7 @@ export class PacketComposerComponent {
         if (!frame) { return; }
         this.addLog(true, message);
         this._applyRequest = ++this._requestId;
-        this.action.emit({ type: 'buildFrame', frame: bytesToB64(frame), requestId: this._applyRequest, payload: data, fix: true, tcpContinue: false });
+        this.action.emit({ type: 'buildFrame', frame: bytesToB64(frame), requestId: this._applyRequest, payload: data, fix: true });
     }
 
     onInjectResult(ok: boolean, message: string): void {
@@ -350,7 +344,7 @@ export class PacketComposerComponent {
         this._previewTimer = setTimeout(() => {
             const frame = this.frameBytes();
             if (!frame || frame.length < 14) { this.preview.set(null); this.previewError.set(''); return; }
-            this.action.emit({ type: 'buildFrame', frame: bytesToB64(frame), requestId: ++this._requestId, fix: this.fix(), tcpContinue: false });
+            this.action.emit({ type: 'buildFrame', frame: bytesToB64(frame), requestId: ++this._requestId, fix: this.fix() });
         }, 300);
     }
 
@@ -376,7 +370,7 @@ export class PacketComposerComponent {
                 if (i > 0 && this.intervalMs() > 0) { await new Promise(r => setTimeout(r, this.intervalMs())); }
                 const result = await new Promise<{ ok: boolean; message: string }>(resolve => {
                     this._injectWaiter = resolve;
-                    this.action.emit({ type: 'inject', frame: bytesToB64(frame), tx: this.direction() === 'tx', fix: this.fix(), tcpContinue: this.tcpContinue() });
+                    this.action.emit({ type: 'inject', frame: bytesToB64(frame), tx: this.direction() === 'tx', fix: this.fix() });
                 });
                 this.addLog(result.ok, count > 1 ? `[${i + 1}/${count}] ${result.message}` : result.message);
                 if (!result.ok) { break; }
@@ -414,7 +408,7 @@ export class PacketComposerComponent {
     }
 
     private emitSettings(): void {
-        this.settingsChanged.emit({ direction: this.direction(), fix: this.fix(), tcpContinue: this.tcpContinue(), protocol: this.protocol() });
+        this.settingsChanged.emit({ direction: this.direction(), fix: this.fix(), protocol: this.protocol() });
     }
 
     private addLog(ok: boolean, text: string): void {

@@ -18,9 +18,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
         public const uint EeIopMirrorBase = 0x1C000000u;
         public const uint EeIopMirrorEnd  = 0x1E000000u;     // exclusive
 
-        // PS2 layout constants — duplicated locally so Bridge has zero
-        // EmulatorCore dependency. Match EmulatorCore's PS2MemoryBus +
-        // IopMemoryBus.
+        // PS2 memory layout.
         public const uint EeRamSize           = 32 * 1024 * 1024;
         public const uint BiosRomPhysBase     = 0x1FC00000u;
         public const uint BiosRomSize         = 4 * 1024 * 1024;

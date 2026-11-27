@@ -11,7 +11,7 @@ namespace CodeDesigner.AI.Tools.Weapons;
 [CdTool("weapons_list", ToolDomain.Media, ToolRisk.ReadOnly,
     "List every weapon entry in a ZED archive with vertex/triangle counts and bound texture names. " +
     "Use when picking a template that visually resembles a target image. Risk: read-only.")]
-public sealed class WeaponsListTool(IEmulatorBridge bridge)
+public sealed class WeaponsListTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Path to the WEAP_MDL.ZED (or similar) archive.")] string archivePath,
@@ -26,7 +26,7 @@ public sealed class WeaponsListTool(IEmulatorBridge bridge)
 [CdTool("weapons_describe_template", ToolDomain.Media, ToolRisk.ReadOnly,
     "Get a structured DTO for one template weapon: per-chunk vertex/triangle/scale data, vertex " +
     "bounds, texture metadata, and a short explainer of the .mdl/.tif binary layout. Risk: read-only.")]
-public sealed class WeaponsDescribeTemplateTool(IEmulatorBridge bridge)
+public sealed class WeaponsDescribeTemplateTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Path to the archive.")] string archivePath,
@@ -43,7 +43,7 @@ public sealed class WeaponsDescribeTemplateTool(IEmulatorBridge bridge)
 [CdTool("weapons_thumbnail", ToolDomain.Media, ToolRisk.ReadOnly,
     "Render a template weapon's bound texture as a base64 PNG. Use to visually compare templates " +
     "against a user-supplied weapon image. Risk: read-only.")]
-public sealed class WeaponsThumbnailTool(IEmulatorBridge bridge)
+public sealed class WeaponsThumbnailTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Path to the archive.")] string archivePath,
@@ -62,7 +62,7 @@ public sealed class WeaponsThumbnailTool(IEmulatorBridge bridge)
     "CLUT layout) and return the encoded .tif bytes as base64. Provide EITHER imagePath OR " +
     "imageBase64 — for an image attached in chat, base64-encode it and pass via imageBase64. " +
     "Use before weapons_create to preview the texture without committing. Risk: read-only.")]
-public sealed class WeaponsEncodeTextureTool(IEmulatorBridge bridge)
+public sealed class WeaponsEncodeTextureTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Path to the archive containing the template.")] string archivePath,
@@ -89,7 +89,7 @@ public sealed class WeaponsEncodeTextureTool(IEmulatorBridge bridge)
     "rebinds. Returns base64 model bytes. Use to preview mesh edits before weapons_create. " +
     "Edits JSON shape: { \"perChunk\": [{ \"chunkIndex\": 0, \"transform\": { \"scaleX\": 1.2, " +
     "\"translateY\": 100 }, \"newTextureName\": \"new.tif\" }] }. Risk: read-only.")]
-public sealed class WeaponsEncodeModelTool(IEmulatorBridge bridge)
+public sealed class WeaponsEncodeModelTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Path to the archive containing the template.")] string archivePath,
@@ -110,7 +110,7 @@ public sealed class WeaponsEncodeModelTool(IEmulatorBridge bridge)
     "OR base64 for chat-attached images) and optionally tweak the mesh, then add the result as new " +
     "entries (model + texture, plus palette if indexed) alongside the template inside the archive. " +
     "Originals are untouched. Risk: writes archive.")]
-public sealed class WeaponsCreateTool(IEmulatorBridge bridge)
+public sealed class WeaponsCreateTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Path to the archive (will be modified in place unless outputPath is given).")] string archivePath,

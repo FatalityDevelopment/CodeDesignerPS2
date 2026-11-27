@@ -6,7 +6,7 @@
 .DESCRIPTION
     User mode      : .NET 8 Runtime, VS Code, SQL Server LocalDB.
     Developer mode : .NET 8 SDK, Node.js LTS, Git, VS Code, SQL Server LocalDB.
-    Both modes also install the VC++ runtime that PCSX2 needs, unless -SkipVcRedist.
+    Both modes also install the VC++ runtime that Ps2Emulator (ps2.exe) needs, unless -SkipVcRedist.
 
     Packages come from winget; LocalDB comes from Microsoft's SQL Server Express bootstrapper
     because it has no winget package. Windows asks for administrator approval where an
@@ -19,7 +19,7 @@
 param(
     [ValidateSet('User', 'Developer')]
     [string]$Mode = 'User',
-    # Skip the VC++ runtime (only PCSX2 needs it).
+    # Skip the VC++ runtime (Ps2Emulator needs it).
     [switch]$SkipVcRedist
 )
 

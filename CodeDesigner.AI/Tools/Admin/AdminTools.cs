@@ -10,7 +10,7 @@ namespace CodeDesigner.AI.Tools.Admin;
     "Run arbitrary SQL against the CodeDesigner DB. For LABELS prefer the label tools " +
     "(label_search / label_search_sets / label_list / get_functions) — they are cheaper and indexed; use " +
     "query_db only for data with no dedicated tool. Risk: DANGEROUS.")]
-public sealed class QueryDbTool(IEmulatorBridge bridge)
+public sealed class QueryDbTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("SQL statement. Use cd_context_get(\"db_schema\") to discover tables.")] string sql,
@@ -20,7 +20,7 @@ public sealed class QueryDbTool(IEmulatorBridge bridge)
 
 [CdTool("get_setting", ToolDomain.Admin, ToolRisk.ReadOnly,
     "Read a single CodeDesigner setting by key. Risk: read-only.")]
-public sealed class GetSettingTool(IEmulatorBridge bridge)
+public sealed class GetSettingTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Setting key.")] string key, CancellationToken ct = default)
@@ -29,7 +29,7 @@ public sealed class GetSettingTool(IEmulatorBridge bridge)
 
 [CdTool("set_setting", ToolDomain.Admin, ToolRisk.MutatesDatabase,
     "Set a CodeDesigner setting key/value. Risk: writes database.")]
-public sealed class SetSettingTool(IEmulatorBridge bridge)
+public sealed class SetSettingTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Setting key.")] string key,
@@ -39,7 +39,7 @@ public sealed class SetSettingTool(IEmulatorBridge bridge)
 
 [CdTool("get_all_settings", ToolDomain.Admin, ToolRisk.ReadOnly,
     "List all settings, optionally filtered by key prefix. Risk: read-only.")]
-public sealed class GetAllSettingsTool(IEmulatorBridge bridge)
+public sealed class GetAllSettingsTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Optional key prefix to filter.")] string? prefix = null, CancellationToken ct = default)
@@ -48,7 +48,7 @@ public sealed class GetAllSettingsTool(IEmulatorBridge bridge)
 
 [CdTool("delete_setting", ToolDomain.Admin, ToolRisk.MutatesDatabase,
     "Delete a CodeDesigner setting by key. Risk: writes database.")]
-public sealed class DeleteSettingTool(IEmulatorBridge bridge)
+public sealed class DeleteSettingTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Setting key.")] string key, CancellationToken ct = default)
@@ -57,7 +57,7 @@ public sealed class DeleteSettingTool(IEmulatorBridge bridge)
 
 [CdTool("get_nav_history", ToolDomain.Admin, ToolRisk.ReadOnly,
     "Get the navigation history (addresses visited via navigate_to). Risk: read-only.")]
-public sealed class GetNavHistoryTool(IEmulatorBridge bridge)
+public sealed class GetNavHistoryTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(CancellationToken ct = default)
         => CdText.Message(await bridge.SendAsync(new { Command = "GETNAVHISTORY" }, ct));
@@ -65,7 +65,7 @@ public sealed class GetNavHistoryTool(IEmulatorBridge bridge)
 
 [CdTool("clear_nav_history", ToolDomain.Admin, ToolRisk.MutatesDatabase,
     "Clear the navigation history. Risk: writes database.")]
-public sealed class ClearNavHistoryTool(IEmulatorBridge bridge)
+public sealed class ClearNavHistoryTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(CancellationToken ct = default)
         => CdText.Message(await bridge.SendAsync(new { Command = "CLEARNAVHISTORY" }, ct));
@@ -73,7 +73,7 @@ public sealed class ClearNavHistoryTool(IEmulatorBridge bridge)
 
 [CdTool("navigate_to", ToolDomain.Admin, ToolRisk.MutatesDatabase,
     "Record a navigation step to an address (for the nav history). Risk: writes database.")]
-public sealed class NavigateToTool(IEmulatorBridge bridge)
+public sealed class NavigateToTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Virtual address (hex/decimal).")] string address, CancellationToken ct = default)

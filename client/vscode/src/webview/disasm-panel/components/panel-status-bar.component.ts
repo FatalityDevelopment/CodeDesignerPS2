@@ -74,12 +74,12 @@ import { IconComponent } from '../../shared/icon.component';
           </button>
           <button class="dbg-btn" id="emu-step-into-btn"
                   (click)="stepInto.emit()" [disabled]="!isPaused()"
-                  title="Step Into — follow calls (PCSX2 PINE)">
+                  title="Step Into — follow calls">
             <span class="dbg-glyph">↓</span><span class="dbg-btn-label">Into</span>
           </button>
           <button class="dbg-btn" id="emu-step-over-btn"
                   (click)="stepOver.emit()" [disabled]="!isPaused()"
-                  title="Step Over — skip calls (PCSX2 PINE)">
+                  title="Step Over — skip calls">
             <span class="dbg-glyph">↷</span><span class="dbg-btn-label">Over</span>
           </button>
         </div>

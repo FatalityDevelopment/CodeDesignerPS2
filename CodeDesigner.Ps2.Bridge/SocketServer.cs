@@ -60,21 +60,7 @@ namespace CodeDesigner.Ps2.Bridge
         /// <summary>Persists relayed AI activity to the AiActivityLogs table (null when the DB has no connection string).</summary>
         private readonly Services.AiActivityRecorder? _activityRecorder;
 
-        /// <summary>
-        /// Dedicated binary fan-out for GS framebuffer streaming. Owns its own
-        /// inbound socket to PCSX2's GSStreamServer and a separate outbound
-        /// listener for webview/MCP subscribers. Independent from this class's
-        /// JSON command socket so 60fps frame traffic cannot back up the
-        /// JSON-RPC channel.
-        /// </summary>
-        private readonly GSStreamForwarder _gsStreamForwarder;
         private WebGateway? _webGateway;
-
-        /// <summary>
-        /// Port the GS frame fan-out listens on for binary subscribers (the
-        /// webview's high-rate path). 8765 is the JSON channel; 8766 is this.
-        /// </summary>
-        public int GsStreamListenerPort => _gsStreamForwarder.ListenerPort;
 
         /// <summary>
         /// Streams of clients that have subscribed to AI activity push notifications.
@@ -88,11 +74,7 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private static readonly HashSet<string> _activityAddressCommands = new(StringComparer.OrdinalIgnoreCase)
         {
-            "READMEM", "WRITEMEM", "LOADBIN", "DISASSEMBLE",
-            "SETBP", "CLEARBP",
-            "SCANSTRINGS", "SCANFUNCTIONS", "SCANPOINTERS", "SCANFLOATS", "SCANINTEGERS", "SCANREFERENCES",
-            "SCANVALUE",
-            "NAVIGATETO",
+            "DISASSEMBLE", "SCANREFERENCES", "SCANVALUE", "NAVIGATETO",
         };
 
         /// <summary>
@@ -134,65 +116,6 @@ namespace CodeDesigner.Ps2.Bridge
 
         /// <summary>Persistence layer for disassembler data-format overrides.</summary>
         internal DbDataFormatRepository DataFormatRepo { get; }
-
-        /// <summary>
-        /// PCSX2 PINE client. Set in <c>--pcsx2</c> mode or after STARTPCSX2.
-        /// Runs the PCSX2-specific PINE protocol (game metadata, OS thread
-        /// inspection, etc.) on top of the cross-runtime <see cref="IDebugClient"/>
-        /// surface.
-        ///
-        /// <para>
-        /// Setting this also notifies <see cref="GSStreamForwarder"/> so it can
-        /// open / drop the inbound GS-frame connection in lockstep with the
-        /// PCSX2 attachment.
-        /// </para>
-        /// </summary>
-        private PineClient? _pineClient;
-        public PineClient? PineClient
-        {
-            get => _pineClient;
-            set
-            {
-                _pineClient = value;
-                if (value != null)
-                    _gsStreamForwarder.AttachPineClient(value);
-                else
-                    _gsStreamForwarder.DetachPineClient();
-            }
-        }
-
-        /// <summary>
-        /// Built-in emulator client. Set after STARTEMULATOR / STARTFILEMODE
-        /// spawns <c>CodeDesigner.Ps2.Emulator.exe</c>. Speaks PINE-shaped IPC
-        /// to the emulator's <c>InternalPineSocket</c> on TCP 28012 — the peer
-        /// of <see cref="PineClient"/> for the non-PCSX2 path.
-        /// </summary>
-        public InternalEmulatorClient? InternalClient { get; set; }
-
-        /// <summary>
-        /// Second built-in-emulator client used as the analysis substrate.
-        /// See <see cref="IBridgeContext.AnalysisClient"/> for the contract.
-        /// </summary>
-        public InternalEmulatorClient? AnalysisClient { get; set; }
-
-        /// <summary>
-        /// Active <see cref="IDebugClient"/> for the current runtime mode —
-        /// either <see cref="PineClient"/> (PCSX2 PINE) or
-        /// <see cref="InternalClient"/> (built-in emulator). Returns <c>null</c>
-        /// when neither client is attached. Handlers always go through this.
-        /// </summary>
-        public IDebugClient? Client => (IDebugClient?)PineClient ?? InternalClient;
-
-        /// <summary>Whether any debug client is currently attached.</summary>
-        public bool HasDebugClient => Client != null;
-
-        /// <summary>
-        /// Convenience for handlers that branch on PCSX2 mode specifically
-        /// (e.g. PINE-only opcodes like NETGETSTATUS, GETMODULES). Prefer
-        /// routing through <see cref="Client"/> when the operation is
-        /// supported on both runtimes.
-        /// </summary>
-        private bool IsPineMode => PineClient != null;
 
         // ── Navigation history ────────────────────────────────────────────────
         // A bounded circular log of recently visited EE addresses, populated
@@ -239,27 +162,9 @@ namespace CodeDesigner.Ps2.Bridge
             }
         }
 
-        // Restart used to be coordinated through PendingRestart + _restartComplete
-        // back when the scheduler ran in-process. With the emulator now in its
-        // own process, RESET is a fire-and-forget call to the active client
-        // (PineClient.Reset() or InternalEmulatorClient.RequestRestart()).
-
         public event EventHandler<string>? MessageReceived;
         public event EventHandler<string>? ClientConnected;
         public event EventHandler? ClientDisconnected;
-        /// <summary>
-        /// Optional callback for runtime-mode commands handled by Program.cs.
-        /// Used for STARTPCSX2/STARTEMULATOR style commands that need process-level control.
-        /// </summary>
-        public Func<CommandMessage, string>? RuntimeCommandHandler { get; set; }
-
-        /// <summary>
-        /// No-op retained for binary compatibility with code that may still call
-        /// it. The old in-process restart coordination is gone — restarts are
-        /// now driven through the active <see cref="IDebugClient"/>.
-        /// </summary>
-        public void SignalRestartComplete() { /* no-op */ }
-
         public SocketServer(int port = 8765)
             : this(port, CreateLocalDbContext(), ownsDb: true)
         {
@@ -299,34 +204,14 @@ namespace CodeDesigner.Ps2.Bridge
                     new BridgeDbContextFactory(DatabaseInitialiser.BuildDbOptions(activityConnectionString)));
             }
 
-            // Constructed before the service list because GsStreamService takes
-            // a reference to it. The listener doesn't actually bind until Start().
-            _gsStreamForwarder = new GSStreamForwarder();
-
             // Build the per-domain command services and the dispatcher that
             // routes commands to them. New services should be added to the
             // list below — see ICommandService for the migration recipe.
             Services.IBridgeContext ctx = this;
-            // MemoryService and RegisterService are constructed first so peer
-            // services that depend on them (e.g. WatchpointTraceService) can
-            // be wired up via constructor injection.
-            _memoryService        = new Services.MemoryService(ctx);
-            _registerService      = new Services.RegisterService(ctx);
-            _analysisStateService = new Services.AnalysisStateService(ctx);
-            _xrefIndexService     = new Services.XrefIndexService(ctx);
             _dispatcher = new Services.CommandDispatcher(new Services.ICommandService[]
             {
-                _memoryService,
-                _registerService,
-                _analysisStateService,
-                _xrefIndexService,
-                new Services.ExecutionService(ctx),
                 new Services.CheatsService(ctx),
                 new Services.NetworkService(ctx),
-                new Services.PadService(ctx),
-                new Services.PineWatchService(ctx),
-                new Services.SaveStateService(ctx),
-                new Services.SteppingService(ctx),
                 new Services.QueryDbService(ctx),
                 new Services.NavHistoryService(ctx),
                 new Services.SettingsService(ctx),
@@ -344,23 +229,16 @@ namespace CodeDesigner.Ps2.Bridge
                 new Services.ChatService(ctx),
                 new Services.MemoryEntryService(ctx),
                 new Services.SnapshotHistoryService(ctx),
-                new Services.SymbolDatabaseService(ctx),
                 new Services.GameDiscService(ctx),
                 new Services.DiscordPresenceService(ctx),
                 new Services.CompatService(ctx),
                 new Services.CheatEditorService(ctx),
                 new Services.HddService(ctx),
-                new Services.ProcessStateService(ctx),
-                new Services.WatchpointTraceService(ctx, _registerService),
-                new Services.ValueScanService(ctx),
-                new Services.BreakpointDisassemblyService(ctx),
                 new Services.LabelManagerService(ctx),
                 new Services.AssemblerService(ctx),
                 new Services.CodeAnalysisService(ctx),
                 new Services.VisualizerService(ctx),
-                new Services.EmulatorControlService(ctx),
                 new Services.DataFormatService(ctx),
-                new Services.GsStreamService(ctx, _gsStreamForwarder),
                 new Services.FileSystemService(),
             });
 
@@ -373,18 +251,9 @@ namespace CodeDesigner.Ps2.Bridge
             catch (Exception ex) { Console.WriteLine($"[Bridge] initial label sync failed: {ex.Message}"); }
         }
 
-        private readonly Services.MemoryService         _memoryService;
-        private readonly Services.RegisterService       _registerService;
-        private readonly Services.AnalysisStateService  _analysisStateService;
-        private readonly Services.XrefIndexService      _xrefIndexService;
-        Services.MemoryService        Services.IBridgeContext.Memory        => _memoryService;
-        Services.AnalysisStateService Services.IBridgeContext.AnalysisState => _analysisStateService;
-        Services.XrefIndexService     Services.IBridgeContext.Xrefs         => _xrefIndexService;
-
         /// <inheritdoc/>
         public void Dispose()
         {
-            try { _gsStreamForwarder.Dispose(); } catch { /* swallow */ }
             if (_ownsDb)
                 Db.Dispose();
         }
@@ -571,11 +440,6 @@ namespace CodeDesigner.Ps2.Bridge
             _listener = new TcpListener(IPAddress.Loopback, _port);
             _listener.Start();
             _isRunning = true;
-
-            // Bring up the GS frame fan-out alongside the JSON channel. Safe to
-            // start unconditionally — it just listens; nothing flows until a
-            // PineClient is attached and a subscriber connects.
-            _gsStreamForwarder.Start();
 
             // cd-app's way in. It connects back to this listener, so it starts after it.
             _webGateway = new WebGateway(WebGateway.DefaultPort, _port, Path.Combine(AppContext.BaseDirectory, "wwwroot"));
@@ -915,155 +779,13 @@ namespace CodeDesigner.Ps2.Bridge
 
                 switch (command.Command.ToUpperInvariant())
                 {
-                    case "STARTPCSX2":
-                    case "START_PCSX2":
-                    case "STARTPCSX2MODE":
-                    case "START_PCSX2_MODE":
-                    case "STARTEMULATOR":
-                    case "START_EMULATOR":
-                    case "STARTBUILTINEMULATOR":
-                    case "START_BUILTIN_EMULATOR":
-                    case "STARTEMULATORMODE":
-                    case "START_EMULATOR_MODE":
-                    case "STARTFILEMODE":
-                    case "START_FILE_MODE":
-                    case "STARTANALYSISEMU":
-                    case "START_ANALYSIS_EMU":
-                    case "STARTANALYSISEMULATOR":
-                    case "START_ANALYSIS_EMULATOR":
-                        if (RuntimeCommandHandler == null)
-                            return CreateErrorResponse("Runtime mode switching is not enabled in this server instance");
-                        return RuntimeCommandHandler(command);
-
-                    // All command-specific cases below have been migrated into
-                    // Services/* — see ICommandService for the recipe. The
-                    // dispatcher above handles them. Aliases that don't match
-                    // a registered name are bounced via DispatchAlias().
-                    // GETTHREADS, GETIOPTHREADS → ProcessStateService (migrated)
-                    case "GET_IOP_THREADS":
-                    case "IOPTHREADS":         return DispatchAlias(command, "GETIOPTHREADS");
-
-                    // PINEDISASSEMBLE → BreakpointDisassemblyService (migrated)
-                    case "PINE_DISASSEMBLE":
-                    case "PINE_DISASM":        return DispatchAlias(command, "PINEDISASSEMBLE");
-
+                    // Everything else is handled by Services/* through the
+                    // dispatcher above; these are snake_case aliases.
                     case "SCAN_REFERENCES":    return DispatchAlias(command, "SCANREFERENCES");
-
-                    // CONVERTCHEAT, PORTCHEATS → CheatsService (migrated)
-
-                    // SCANVALUE → ValueScanService (migrated)
-
-                    // Structs → StructService (migrated)
-
-                    // Label-manager commands → LabelManagerService (migrated)
-
-                    // Memory-card → MemoryCardService (migrated)
-
-                    // HDD → HddService (migrated)
-
-                    // ISO → IsoService (migrated)
+                    case "NET_DISASSEMBLE":    return DispatchAlias(command, "NETDISASSEMBLE");
 
                     case "PING":
                         return CreateSuccessResponse("PONG");
-
-                    // PCSX2STATUS, PCSX2GAMEINFO → EmulatorControlService (migrated)
-
-                    // RESET, STEPINTO/OVER/OUT, GETFPS, SETLIMITER, FRAMEADVANCE
-                    // → SaveStateService / SteppingService (migrated). Aliases:
-                    case "STEP_INTO":   return DispatchAlias(command, "STEPINTO");
-                    case "STEP_OVER":   return DispatchAlias(command, "STEPOVER");
-                    case "STEP_OUT":    return DispatchAlias(command, "STEPOUT");
-                    case "GET_FPS":     return DispatchAlias(command, "GETFPS");
-                    case "SET_LIMITER": return DispatchAlias(command, "SETLIMITER");
-                    case "FRAME_ADVANCE": return DispatchAlias(command, "FRAMEADVANCE");
-
-                    // LISTBP / LISTBREAKPOINTS → BreakpointDisassemblyService (migrated)
-                    case "LIST_BP":
-                    case "LISTBREAKPOINTS": return DispatchAlias(command, "LISTBP");
-
-                    // GETSYMBOL → SteppingService (migrated)
-                    case "GET_SYMBOL": return DispatchAlias(command, "GETSYMBOL");
-
-                    // GETSYMBOLBYNAME, LISTFUNCTIONS, LISTGLOBALS, GETLOCALS → SymbolDatabaseService (migrated)
-                    case "GET_SYMBOL_BY_NAME": return DispatchAlias(command, "GETSYMBOLBYNAME");
-
-                    // GETSTACK/GETMODULES → ProcessStateService; GETREGISTER/PINESETREG → RegisterService (migrated)
-                    case "GET_STACK":
-                    case "CALLSTACK":         return DispatchAlias(command, "GETSTACK");
-                    case "GET_MODULES":
-                    case "IOPMODULES":        return DispatchAlias(command, "GETMODULES");
-                    case "GET_REGISTER":
-                    case "PINEGETREGISTER":   return DispatchAlias(command, "GETREGISTER");
-                    case "PINE_SETREG":
-                    case "PINESETREGISTER":   return DispatchAlias(command, "PINESETREG");
-
-                    // SaveState slot/file ops → SaveStateService (migrated)
-                    case "SAVE_STATE_FILE":  return DispatchAlias(command, "SAVESTATETOFILE");
-                    case "LOAD_STATE_FILE":  return DispatchAlias(command, "LOADSTATEFROMFILE");
-                    case "PINE_VERSION":     return DispatchAlias(command, "PINEVERSION");
-                    case "PINE_SAVESTATE":
-                    case "PINE_SAVE_STATE":  return DispatchAlias(command, "PINESAVESTATE");
-                    case "PINE_LOADSTATE":
-                    case "PINE_LOAD_STATE":  return DispatchAlias(command, "PINELOADSTATE");
-
-                    // EXTRACTP2S → EmulatorControlService (migrated)
-                    case "EXTRACT_P2S": return DispatchAlias(command, "EXTRACTP2S");
-
-                    // READMEMREGION, SCANPATTERN → MemoryService (migrated). The
-                    // alias forms (READ_MEM_REGION, SCAN_PATTERN) are still
-                    // routed here for backwards compatibility — they redirect
-                    // through the dispatcher with the canonical name.
-                    case "READ_MEM_REGION":
-                    case "READMEM_REGION":
-                        return _dispatcher.TryDispatch(new CommandMessage
-                        {
-                            Command       = "READMEMREGION",
-                            Address       = command.Address,
-                            EndAddress    = command.EndAddress,
-                            SearchPattern = command.SearchPattern,
-                            Region        = command.Region,
-                        }) ?? CreateErrorResponse("READMEMREGION not registered");
-
-                    case "SCAN_PATTERN":
-                        return _dispatcher.TryDispatch(new CommandMessage
-                        {
-                            Command       = "SCANPATTERN",
-                            Address       = command.Address,
-                            EndAddress    = command.EndAddress,
-                            SearchPattern = command.SearchPattern,
-                            Region        = command.Region,
-                        }) ?? CreateErrorResponse("SCANPATTERN not registered");
-
-                    // TRACECALLS / RUNUNTILPC → WatchpointTraceService (migrated)
-                    case "TRACE_CALLS":   return DispatchAlias(command, "TRACECALLS");
-                    case "RUN_UNTIL_PC":  return DispatchAlias(command, "RUNUNTILPC");
-
-
-                    // PINE hardware watchpoints → PineWatchService (migrated)
-                    case "PINE_ADD_WATCH":         return DispatchAlias(command, "PINEADDWATCH");
-                    case "PINE_REMOVE_WATCH":      return DispatchAlias(command, "PINEREMOVEWATCH");
-                    case "PINE_LIST_WATCHES":      return DispatchAlias(command, "PINELISTWATCHES");
-                    case "PINE_CLEAR_ALL_WATCHES": return DispatchAlias(command, "PINECLEARALLWATCHES");
-                    case "PINE_SAVE_SCREENSHOT":   return DispatchAlias(command, "PINESAVESCREENSHOT");
-
-                    // Pad / controller input → PadService (migrated)
-                    case "PAD_GET_STATE":  return DispatchAlias(command, "PADGETSTATE");
-                    case "PAD_SET_BUTTON": return DispatchAlias(command, "PADSETBUTTON");
-                    case "PAD_SET_ANALOG": return DispatchAlias(command, "PADSETANALOG");
-                    case "PAD_SET_STATE":  return DispatchAlias(command, "PADSETSTATE");
-                    case "PAD_GET_TYPE":   return DispatchAlias(command, "PADGETTYPE");
-
-                    // DEV9 network bridge → NetworkService (migrated). Aliases
-                    // (NET_GET_STATUS / NET_CAPTURE / etc.) bounce through the
-                    // dispatcher with the canonical name.
-                    case "NET_GET_STATUS":   return DispatchAlias(command, "NETGETSTATUS");
-                    case "NET_CAPTURE":      return DispatchAlias(command, "NETCAPTURE");
-                    case "NET_RECV_CAPTURE": return DispatchAlias(command, "NETRECVCAPTURE");
-                    case "NET_INJECT":       return DispatchAlias(command, "NETINJECT");
-                    case "NET_INJECT_TX":    return DispatchAlias(command, "NETINJECTTX");
-                    case "NET_DISASSEMBLE":  return DispatchAlias(command, "NETDISASSEMBLE");
-                    case "NET_SET_FILTER":   return DispatchAlias(command, "NETSETFILTER");
-                    case "NET_GET_STATS":    return DispatchAlias(command, "NETGETSTATS");
 
                     // QUERYDB / NAV history / Settings / Snapshots / Memory-card
                     // → migrated to dedicated services. Aliases bounce through.

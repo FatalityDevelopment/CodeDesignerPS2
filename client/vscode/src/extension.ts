@@ -545,7 +545,7 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(openElfFileCommand);
 
 	// ── GS frame viewer ───────────────────────────────────────────────────────
-	// Live PCSX2 display surfaced inside VS Code via the bridge's binary fan-out
+	// Ps2Emulator's display surfaced inside VS Code (its frame stream);
 	// socket on port 8766. Decoupled from the JSON command channel (port 8765)
 	// so 60fps frame traffic never backs up command/response.
 	const gsViewerProvider = new GsViewerProvider(context.extensionUri, socketClient);
@@ -564,7 +564,7 @@ export function activate(context: vscode.ExtensionContext) {
 	);
 	context.subscriptions.push(openAgentActivityCommand);
 
-	// Save a PCSX2 screenshot — surfaced as a command so the GS frame viewer's
+	// Save Ps2Emulator's displayed frame as a PNG — a command so the GS frame viewer's
 	// in-webview Screenshot button can trigger it without a panel round-trip.
 	const saveScreenshotCommand = vscode.commands.registerCommand(
 		'codedesigner.saveScreenshot',
@@ -574,7 +574,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 	// Controller (virtual PS2 controller)
 	// Standalone webview that builds GameShark joker codes from a canvas-rendered
-	// controller, mirrors live pad state via PINE, and can drive PCSX2 pad input.
+	// controller, mirrors live pad state, and can drive Ps2Emulator's pad input.
 	const jokerMakerProvider = new JokerMakerProvider(context.extensionUri, socketClient);
 	const openJokerMakerCommand = vscode.commands.registerCommand(
 		'codedesigner.openJokerMaker',

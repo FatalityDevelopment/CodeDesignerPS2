@@ -1,12 +1,11 @@
 # Builds the release assets that CodeDesignerInstaller.exe (Install-Release.ps1) downloads:
 #
-#   <OutputDir>\CodeDesigner.zip          Bridge, emulator, MCP server, database tool, AI, Multiplayer
+#   <OutputDir>\CodeDesigner.zip          Bridge, MCP server, database tool, AI, Multiplayer
 #                                         (the %LOCALAPPDATA%\CodeDesigner layout, made by the
 #                                         projects' own deploy targets pointed at a staging dir)
 #   <OutputDir>\CheatCodeArchive.zip      CheatCodeArchive\Database\ from the submodule
 #   <OutputDir>\codedesigner.vsix         VS Code extension
 #   <OutputDir>\CodeDesignerInstaller.exe Self-contained installer, pinned to -Version
-#   <OutputDir>\PCSX2.zip                 Only with -Pcsx2BinDir (CI zips the PCSX2 job's output itself)
 #
 # CI runs this on every push (.github/workflows/build.yml) and publishes the assets on v* tags.
 # Run from the repo root:
@@ -18,7 +17,6 @@ param(
     [string]$OutputDir,
     # Release tag the installer pins to. Empty = the installer downloads the latest release.
     [string]$Version = '',
-    [string]$Pcsx2BinDir,
     [switch]$SkipExtension,
     [switch]$SkipInstaller
 )
@@ -103,13 +101,6 @@ if (-not $SkipInstaller) {
         '-c', 'Release', '-r', 'win-x64', '-nologo', "-p:ReleaseTag=$Version", '-o', $installerOut
     )
     Copy-Item (Join-Path $installerOut 'CodeDesignerInstaller.exe') $OutputDir
-}
-
-# ---- PCSX2.zip ---------------------------------------------------------------------
-
-if ($Pcsx2BinDir) {
-    Write-Host '== Packaging PCSX2'
-    New-Zip -Source $Pcsx2BinDir -Zip (Join-Path $OutputDir 'PCSX2.zip')
 }
 
 Remove-Item $stage -Recurse -Force

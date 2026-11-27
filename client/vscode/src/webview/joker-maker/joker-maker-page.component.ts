@@ -44,7 +44,7 @@ interface Stick {
     pressButton: ButtonName; // l3 / r3
 }
 
-// The PS button is not part of the pad word (no joker bit, no PINE input),
+// The PS button is not part of the pad word (no joker bit, no pad input),
 // so it has no hit region.
 const BUTTONS: readonly Button[] = [
     { name: 'l2', kind: 'rect', x: 186, y: 84,  w: 104, h: 36 },
@@ -90,7 +90,7 @@ const KEY_MAP: Record<string, ButtonName> = {
     Enter: 'start', ShiftRight: 'select',
 };
 
-/** Build: clicks toggle buttons into a joker combo. Play: momentary input sent to PCSX2. */
+/** Build: clicks toggle buttons into a joker combo. Play: momentary input sent to Ps2Emulator. */
 type Mode = 'build' | 'play';
 type PolaritySetting = 'auto' | Polarity;
 
@@ -151,11 +151,11 @@ const CUSTOM = 'custom';
       <div class="jm-stage-bar">
         <div class="jm-seg" role="tablist" aria-label="Mode">
           <button type="button" role="tab" [class.jm-seg-on]="mode() === 'build'" [attr.aria-selected]="mode() === 'build'"
-                  (click)="setMode('build')" title="Click buttons to build a joker combo. Nothing is sent to PCSX2.">Build code</button>
+                  (click)="setMode('build')" title="Click buttons to build a joker combo. Nothing is sent to the emulator.">Build code</button>
           <button type="button" role="tab" [class.jm-seg-on]="mode() === 'play'" [attr.aria-selected]="mode() === 'play'"
-                  (click)="setMode('play')" title="Hold buttons and drag sticks to send input to PCSX2.">Play</button>
+                  (click)="setMode('play')" title="Hold buttons and drag sticks to send input to Ps2Emulator.">Play</button>
         </div>
-        <label class="jm-toggle" [class.jm-toggle-dim]="!connected()" title="Mirror the real controller via PINE (orange).">
+        <label class="jm-toggle" [class.jm-toggle-dim]="!connected()" title="Mirror the emulated controller (orange).">
           <input type="checkbox" [checked]="liveEnabled()" [disabled]="!connected()"
                  (change)="setLiveEnabled($any($event.target).checked)" />
           Live pad
@@ -172,7 +172,7 @@ const CUSTOM = 'custom';
         @if (mode() === 'build') {
           Click buttons or press keys to toggle them into the combo. Click a stick for L3 / R3.
         } @else {
-          Hold buttons or keys to press them in PCSX2. Drag sticks; right-click or Shift+click a stick for L3 / R3.
+          Hold buttons or keys to press them in Ps2Emulator. Drag sticks; right-click or Shift+click a stick for L3 / R3.
           @if (!connected()) { <span class="jm-warn">Not connected: input is not sent.</span> }
         }
         <span class="jm-keys">Keys: arrows &middot; W A S D &middot; Q E 1 3 &middot; Z C &middot; Enter &middot; Right Shift</span>
@@ -226,7 +226,7 @@ const CUSTOM = 'custom';
             @case ('ok')      { <span class="jm-game-title">{{ gameTitle() || 'Unknown game' }}</span> <span class="lm-mono">{{ gameSerial() }}</span> }
             @case ('loading') { <span class="lm-muted">Reading the game's cheats...</span> }
             @case ('error')   { <span class="jm-err">{{ gameError() }}</span> }
-            @default          { <span class="lm-muted">Connect to PCSX2 to find the game's joker address.</span> }
+            @default          { <span class="lm-muted">Run Ps2Emulator to find the game's joker address.</span> }
           }
         </div>
         @if (gameStatus() === 'ok' && candidates().length === 0) {

@@ -1,11 +1,11 @@
 namespace CodeDesigner.AI.Abstractions;
 
 /// <summary>
-/// Abstraction over the CodeDesigner emulator socket server. Tool projects depend
+/// Abstraction over the CodeDesigner workspace service (the Bridge socket server). Tool projects depend
 /// on this rather than the concrete <c>SocketBridgeClient</c>, keeping them free
 /// of transport/infra dependencies. The Server supplies the implementation.
 /// </summary>
-public interface IEmulatorBridge
+public interface IWorkspaceBridge
 {
     /// <summary>
     /// Serialize <paramref name="command"/> to JSON, send it to the backend, and

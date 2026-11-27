@@ -82,7 +82,7 @@ interface SavedState { source?: string; target?: string; codes?: string }
           <option [value]="s.path" [selected]="source() === s.path">{{ optionLabel(s) }}</option>
         }
       </select>
-      <button class="lm-tool-btn" title="Browse for a .bin/.p2s dump" (click)="browse('source')">Browse…</button>
+      <button class="lm-tool-btn" title="Browse for a .bin dump or snapshot" (click)="browse('source')">Browse…</button>
     </div>
 
     <button class="cp-icon-btn" title="Swap From and To" (click)="swap()">&#x21C4;</button>
@@ -96,7 +96,7 @@ interface SavedState { source?: string; target?: string; codes?: string }
           <option [value]="s.path" [selected]="target() === s.path">{{ optionLabel(s) }}</option>
         }
       </select>
-      <button class="lm-tool-btn" title="Browse for a .bin/.p2s dump" (click)="browse('target')">Browse…</button>
+      <button class="lm-tool-btn" title="Browse for a .bin dump or snapshot" (click)="browse('target')">Browse…</button>
     </div>
 
     <button class="cp-primary-btn" [disabled]="!canPort() || busy()" [title]="portBlocker()" (click)="port()">

@@ -1,12 +1,12 @@
 using CodeDesigner.Ps2.CheatEngine;
-using CodeDesigner.Ps2.EmulatorCore;
+using CodeDesigner.Ps2.TestProject.TestSupport;
 
 namespace CodeDesigner.Ps2.TestProject
 {
     /// <summary>
     /// Tests for <see cref="CdsCheatEngine"/> — the assembly-level persistent cheat engine
     /// that hooks into the game loop and continuously re-applies cheat values.
-    /// The "Run_" tests execute the injected engine on the EE interpreter.
+    /// The "Run_" tests execute the injected engine on a test EE (TestSupport/TestMachine).
     /// </summary>
     [TestClass]
     public class TestCdsCheatEngine
@@ -47,8 +47,8 @@ namespace CodeDesigner.Ps2.TestProject
         /// <summary>IByteEditor over the interpreter's main RAM.</summary>
         private sealed class EmulatorRamEditor : IByteEditor
         {
-            private readonly PS2Emulator _emu;
-            public EmulatorRamEditor(PS2Emulator emu) => _emu = emu;
+            private readonly TestMachine _emu;
+            public EmulatorRamEditor(TestMachine emu) => _emu = emu;
             public byte[] Read(int address, int byteLength)
             {
                 var buf = new byte[byteLength];
@@ -82,12 +82,12 @@ namespace CodeDesigner.Ps2.TestProject
 
         /// <summary>
         /// Interpreter fixture: a "game loop" at <see cref="Hook"/> that counts its passes in
-        /// t5 (addiu t5, t5, 1; nop; j Hook; nop). The interpreter has no TLB, so the engine is
+        /// t5 (addiu t5, t5, 1; nop; j Hook; nop). The test machine has no TLB, so the engine is
         /// built with memory base 0 and code addresses hit RAM directly.
         /// </summary>
         private sealed class Machine
         {
-            public readonly PS2Emulator Emu = new();
+            public readonly TestMachine Emu = new();
             public readonly CdsCheatEngine Engine;
 
             public Machine()

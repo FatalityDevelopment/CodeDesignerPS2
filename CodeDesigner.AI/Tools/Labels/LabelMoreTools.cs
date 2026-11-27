@@ -10,7 +10,7 @@ namespace CodeDesigner.AI.Tools.Labels;
 // ── Label sets ─────────────────────────────────────────────────────────
 [CdTool("label_list_sets", ToolDomain.Labels, ToolRisk.ReadOnly,
     "List all label sets for a game (including the built-in set). Risk: read-only.")]
-public sealed class LabelListSetsTool(IEmulatorBridge bridge)
+public sealed class LabelListSetsTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Game identifier. Prefer the numeric GameDisc.Id (most stable); the SCUS/SLUS serial (e.g. 'SCUS-97275') also works.")] string gameId,
@@ -21,7 +21,7 @@ public sealed class LabelListSetsTool(IEmulatorBridge bridge)
 
 [CdTool("label_search_sets", ToolDomain.Labels, ToolRisk.ReadOnly,
     "Search label-set names and count matching labels inside each set. Use before fetching full sets to keep token usage low. Risk: read-only.")]
-public sealed class LabelSearchSetsTool(IEmulatorBridge bridge)
+public sealed class LabelSearchSetsTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Game identifier. Prefer numeric GameDisc.Id or SCUS/SLUS serial.")]
@@ -45,7 +45,7 @@ public sealed class LabelSearchSetsTool(IEmulatorBridge bridge)
 
 [CdTool("label_create_set", ToolDomain.Labels, ToolRisk.MutatesDatabase,
     "Create a new, empty label set. Risk: writes database.")]
-public sealed class LabelCreateSetTool(IEmulatorBridge bridge)
+public sealed class LabelCreateSetTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Game identifier. Prefer the numeric GameDisc.Id (most stable); the SCUS/SLUS serial (e.g. 'SCUS-97275') also works.")] string gameId,
@@ -56,7 +56,7 @@ public sealed class LabelCreateSetTool(IEmulatorBridge bridge)
 
 [CdTool("label_set_active", ToolDomain.Labels, ToolRisk.MutatesDatabase,
     "Mark a label set as active (merged with built-in for lookups). Risk: writes database.")]
-public sealed class LabelSetActiveTool(IEmulatorBridge bridge)
+public sealed class LabelSetActiveTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Game identifier. Prefer the numeric GameDisc.Id (most stable); the SCUS/SLUS serial (e.g. 'SCUS-97275') also works.")] string gameId,
@@ -67,7 +67,7 @@ public sealed class LabelSetActiveTool(IEmulatorBridge bridge)
 
 [CdTool("label_delete_set", ToolDomain.Labels, ToolRisk.MutatesDatabase,
     "Permanently delete a label set and all its entries (irreversible). Risk: writes database.")]
-public sealed class LabelDeleteSetTool(IEmulatorBridge bridge)
+public sealed class LabelDeleteSetTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Game identifier. Prefer the numeric GameDisc.Id (most stable); the SCUS/SLUS serial (e.g. 'SCUS-97275') also works.")] string gameId,
@@ -77,30 +77,10 @@ public sealed class LabelDeleteSetTool(IEmulatorBridge bridge)
 }
 
 // ── IOP module labels ──────────────────────────────────────────────────
-[CdTool("iop_labels_refresh", ToolDomain.Labels, ToolRisk.MutatesDatabase,
-    "Refresh every 'IOP: <module>' label set from loaded IOP modules (PCSX2 PINE mode). Idempotent. Risk: writes database.")]
-public sealed class IopLabelsRefreshTool(IEmulatorBridge bridge)
-{
-    [ToolEntryPoint] public async Task<string> InvokeAsync(
-        [Description("Game identifier. Prefer the numeric GameDisc.Id (most stable); the SCUS/SLUS serial (e.g. 'SCUS-97275') also works.")] string gameId, CancellationToken ct = default)
-        => CdText.Message(await bridge.SendAsync(new { Command = "IOPLABELSREFRESH", GameId = gameId }, ct));
-}
-
-[CdTool("iop_labels_refresh_module", ToolDomain.Labels, ToolRisk.MutatesDatabase,
-    "Refresh the 'IOP: <module>' label set for a single IOP module. PINE mode required. Risk: writes database.")]
-public sealed class IopLabelsRefreshModuleTool(IEmulatorBridge bridge)
-{
-    [ToolEntryPoint] public async Task<string> InvokeAsync(
-        [Description("Game identifier. Prefer the numeric GameDisc.Id (most stable); the SCUS/SLUS serial (e.g. 'SCUS-97275') also works.")] string gameId,
-        [Description("IOP module name (e.g. 'secrman').")] string moduleName,
-        CancellationToken ct = default)
-        => CdText.Message(await bridge.SendAsync(new { Command = "IOPLABELSREFRESHMODULE", GameId = gameId, SetName = moduleName }, ct));
-}
-
 // ── Label list/delete ──────────────────────────────────────────────────
 [CdTool("label_list_functions", ToolDomain.Labels, ToolRisk.ReadOnly,
     "List only Function-typed labels (FNC_ prefix) from the active label set. Risk: read-only.")]
-public sealed class LabelListFunctionsTool(IEmulatorBridge bridge)
+public sealed class LabelListFunctionsTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(CancellationToken ct = default)
         => CdFormat.LabelsFiltered(
@@ -111,7 +91,7 @@ public sealed class LabelListFunctionsTool(IEmulatorBridge bridge)
 
 [CdTool("label_search", ToolDomain.Labels, ToolRisk.ReadOnly,
     "Search labels by name, address, comment, value type, or label type across a game/set. Returns compact hits; fetch full set only when needed. Risk: read-only.")]
-public sealed class LabelSearchTool(IEmulatorBridge bridge)
+public sealed class LabelSearchTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Search text for label name/address/comment/value type. May be omitted if type is provided.")]
@@ -141,7 +121,7 @@ public sealed class LabelSearchTool(IEmulatorBridge bridge)
 
 [CdTool("label_delete", ToolDomain.Labels, ToolRisk.MutatesDatabase,
     "Remove a label entry from a label set. Risk: writes database.")]
-public sealed class LabelDeleteTool(IEmulatorBridge bridge)
+public sealed class LabelDeleteTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Game identifier. Prefer the numeric GameDisc.Id (most stable); the SCUS/SLUS serial (e.g. 'SCUS-97275') also works.")] string gameId,
@@ -156,33 +136,10 @@ public sealed class LabelDeleteTool(IEmulatorBridge bridge)
 }
 
 // ── Resolve helpers ────────────────────────────────────────────────────
-[CdTool("label_resolve_strings", ToolDomain.Labels, ToolRisk.MutatesDatabase,
-    "Read live PCSX2 memory for each String-typed label and update with the null-terminated ASCII found there. Risk: writes database.")]
-public sealed class LabelResolveStringsTool(IEmulatorBridge bridge)
-{
-    [ToolEntryPoint] public async Task<string> InvokeAsync(CancellationToken ct = default)
-        => CdText.Message(await bridge.SendAsync(new { Command = "RESOLVESTRINGS" }, ct));
-}
-
-[CdTool("label_resolve_linked_list", ToolDomain.Labels, ToolRisk.ReadOnly,
-    "Walk a linked list in live PCSX2 memory from a head, using a per-node next-offset. Risk: read-only.")]
-public sealed class LabelResolveLinkedListTool(IEmulatorBridge bridge)
-{
-    [ToolEntryPoint] public async Task<string> InvokeAsync(
-        [Description("Virtual address of the first node (hex/decimal).")] string address,
-        [Description("Byte offset within each node of the next-node pointer.")] int nextOffset,
-        CancellationToken ct = default)
-    {
-        var a = CdText.TryParseAddress(address);
-        if (a is null) return CdText.Error($"invalid address '{address}'.");
-        return CdText.Message(await bridge.SendAsync(new { Command = "RESOLVELINKEDLIST", Address = a.Value, MemberOffset = nextOffset }, ct));
-    }
-}
-
 // ── Pointer / struct definitions ───────────────────────────────────────
 [CdTool("label_get_pointers", ToolDomain.Labels, ToolRisk.ReadOnly,
     "List struct definitions (a named base address + its member fields). 'Pointer' = struct here. Risk: read-only.")]
-public sealed class LabelGetPointersTool(IEmulatorBridge bridge)
+public sealed class LabelGetPointersTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(CancellationToken ct = default)
         => CdText.Message(await bridge.SendAsync(new { Command = "GETSTRUCTS" }, ct));
@@ -190,7 +147,7 @@ public sealed class LabelGetPointersTool(IEmulatorBridge bridge)
 
 [CdTool("label_add_pointer", ToolDomain.Labels, ToolRisk.MutatesDatabase,
     "Define a struct: a named base address whose fields you then map with label_add_pointer_member. Risk: writes database.")]
-public sealed class LabelAddPointerTool(IEmulatorBridge bridge)
+public sealed class LabelAddPointerTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Unique pointer name (e.g. 'PlayerState').")] string pointerName,
@@ -201,7 +158,7 @@ public sealed class LabelAddPointerTool(IEmulatorBridge bridge)
 
 [CdTool("label_delete_pointer", ToolDomain.Labels, ToolRisk.MutatesDatabase,
     "Delete a struct definition by name. Risk: writes database.")]
-public sealed class LabelDeletePointerTool(IEmulatorBridge bridge)
+public sealed class LabelDeletePointerTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Pointer name to delete.")] string pointerName, CancellationToken ct = default)
@@ -210,7 +167,7 @@ public sealed class LabelDeletePointerTool(IEmulatorBridge bridge)
 
 [CdTool("label_add_pointer_member", ToolDomain.Labels, ToolRisk.MutatesDatabase,
     "Add/update a struct field: a named member at a byte offset from the (dereferenced) base. Risk: writes database.")]
-public sealed class LabelAddPointerMemberTool(IEmulatorBridge bridge)
+public sealed class LabelAddPointerMemberTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Pointer name.")] string pointerName,

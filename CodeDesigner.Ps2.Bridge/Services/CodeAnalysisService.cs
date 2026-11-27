@@ -25,18 +25,11 @@ namespace CodeDesigner.Ps2.Bridge.Services
             reg.Add(c => HandleGetPointers(c.Address ?? 0, c.Data),                                                         "GETPOINTERS");
             reg.Add(c => HandleGetFloats(c.Address ?? 0, c.Data),                                                           "GETFLOATS");
             reg.Add(c => HandleGetIntegers(c.Address ?? 0, c.Data),                                                         "GETINTEGERS");
-            reg.Add(c => HandleScanStrings(c.Address ?? 0, c.Length ?? 0, c.Region),                                        "SCANSTRINGS");
-            reg.Add(c => HandleScanFunctions(c.Address ?? 0, c.Length ?? 0, c.Region),                                      "SCANFUNCTIONS");
-            reg.Add(c => HandleScanPointers(c.Address ?? 0, c.Length ?? 0, c.Region),                                       "SCANPOINTERS");
-            reg.Add(c => HandleScanFloats(c.Address ?? 0, c.Length ?? 0, c.Region),                                         "SCANFLOATS");
-            reg.Add(c => HandleScanIntegers(c.Address ?? 0, c.Length ?? 0, c.Region),                                       "SCANINTEGERS");
             reg.Add(c => HandleSearch(c.Query ?? "", c.SearchMode ?? "text", c.Address ?? 0, c.Length ?? 0, c.Region, c.Data), "SEARCH");
             reg.Add(c => HandleScanReferences(c.TargetAddress, c.Address ?? 0, c.Length ?? 0, c.Region, c.Data, c.ReferenceKinds), "SCANREFERENCES", "SCAN_REFERENCES");
         }
 
-        // PS2 EE memory layout constants — hardcoded here to avoid an
-        // EmulatorCore dependency. These match
-        // CodeDesigner.Ps2.EmulatorCore.PS2MemoryBus.{MainRamSize,ScratchpadSize}.
+        // PS2 EE memory layout: main RAM and scratchpad sizes.
         private const uint EeMainRamSizeBytes   = 32 * 1024 * 1024;
         private const uint EeScratchpadSizeBytes = 16 * 1024;
 
@@ -449,278 +442,8 @@ namespace CodeDesigner.Ps2.Bridge.Services
         }
 
         /// <summary>
-        /// Handle SCANSTRINGS — reads <paramref name="length"/> bytes of live emulator
-        /// memory starting at <paramref name="address"/> and scans for null-terminated
-        /// printable ASCII strings of at least 4 characters.
-        /// </summary>
-        private string HandleScanStrings(uint address, int length, string? region)
-        {
-            if (_ctx.Client == null)
-                return Responses.Error("No live memory backend — start with --run or --pcsx2");
-            if (length <= 0)
-                return Responses.Error("Length is required for SCANSTRINGS");
-
-            try
-            {
-                bool useIop = string.Equals(region, "iop", StringComparison.OrdinalIgnoreCase);
-                var bytes   = _ctx.Memory.ReadLiveBytes(address, length, useIop);
-                var results = new List<StringEntry>();
-                foreach (var hit in StringScanner.FindStrings(bytes, address))
-                {
-                    results.Add(new StringEntry
-                    {
-                        Address = $"0x{hit.Address:X8}",
-                        Value   = hit.Value
-                    });
-                }
-
-                return JsonSerializer.Serialize(new CommandResponse
-                {
-                    Success = true,
-                    Command = "SCANSTRINGS",
-                    Strings = results
-                });
-            }
-            catch (Exception ex)
-            {
-                return Responses.Error($"ScanStrings error: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Handle SCANFUNCTIONS — reads <paramref name="length"/> bytes of live emulator
-        /// memory and detects MIPS function entry points via ADDIU $sp,$sp,-N prologues
-        /// and JAL targets.
-        /// </summary>
-        private string HandleScanFunctions(uint address, int length, string? region)
-        {
-            if (_ctx.Client == null)
-                return Responses.Error("No live memory backend — start with --run or --pcsx2");
-            if (length <= 0)
-                return Responses.Error("Length is required for SCANFUNCTIONS");
-
-            try
-            {
-                bool useIop  = string.Equals(region, "iop", StringComparison.OrdinalIgnoreCase);
-                var bytes      = _ctx.Memory.ReadLiveBytes(address, length, useIop);
-                var candidates = new HashSet<uint>();
-
-                for (int i = 0; i + 3 < bytes.Length; i += 4)
-                {
-                    uint instr  = BitConverter.ToUInt32(bytes, i);
-                    uint opcode = (instr >> 26) & 0x3Fu;
-
-                    if (opcode == 0x09u)
-                    {
-                        uint  rs  = (instr >> 21) & 0x1Fu;
-                        uint  rt  = (instr >> 16) & 0x1Fu;
-                        short imm = (short)(instr & 0xFFFFu);
-                        if (rs == 29u && rt == 29u && imm < 0)
-                            candidates.Add(address + (uint)i);
-                    }
-                    else if (opcode == 0x03u)
-                    {
-                        uint pc     = address + (uint)i;
-                        uint target = ((instr & 0x03FFFFFFu) << 2) | (pc & 0xF0000000u);
-                        if (target >= address && target < address + (uint)bytes.Length)
-                            candidates.Add(target);
-                    }
-                }
-
-                var functions = candidates
-                    .OrderBy(addr => addr)
-                    .Select(addr => new FunctionEntry
-                    {
-                        Address = $"0x{addr:X8}",
-                        Label   = _ctx.Labels.TryGetValue(addr, out var entry)
-                                      ? entry.Label
-                                      : $"FNC_0x{addr:X8}"
-                    })
-                    .ToList();
-
-                return JsonSerializer.Serialize(new CommandResponse
-                {
-                    Success   = true,
-                    Command   = "SCANFUNCTIONS",
-                    Functions = functions
-                });
-            }
-            catch (Exception ex)
-            {
-                return Responses.Error($"ScanFunctions error: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Handle SCANPOINTERS — reads <paramref name="length"/> bytes of live emulator
-        /// memory starting at <paramref name="address"/> and returns 4-byte aligned values
-        /// that are confirmed EE memory pointers.
-        /// </summary>
-        private string HandleScanPointers(uint address, int length, string? region)
-        {
-            if (_ctx.Client == null)
-                return Responses.Error("No live memory backend — start with --run or --pcsx2");
-            if (length <= 0)
-                return Responses.Error("Length is required for SCANPOINTERS");
-
-            try
-            {
-                bool useIop = string.Equals(region, "iop", StringComparison.OrdinalIgnoreCase);
-                var bytes   = _ctx.Memory.ReadLiveBytes(address, length, useIop);
-
-                // Build the set of all EE addresses referenced by MIPS code.
-                // We always use EE RAM as the code source regardless of the scan
-                // region so that the filter works when scanning BIOS, scratchpad, IOP, etc.
-                // In PINE mode we don't have direct access to the full EE RAM array;
-                // skip the code-reference filter to avoid a huge IPC read.
-                // Skip the code-reference filter when running through a debug
-                // socket — pulling all of EE RAM over the wire to build the
-                // ref set is too slow. The pre-existing PINE-mode path also
-                // skipped this filter, so behaviour matches.
-                HashSet<uint> codeRefs = new HashSet<uint>();
-
-                var results = new List<PointerEntry>();
-
-                for (int i = 0; i + 3 < bytes.Length; i += 4)
-                {
-                    uint val = BitConverter.ToUInt32(bytes, i);
-
-                    // Filter 1: plausible EE address range.
-                    if (!IsValidEePointerValue(val)) continue;
-
-                    // Filter 2: must be referenced by MIPS code in EE RAM.
-                    // Skip this filter when no code has been found yet (early boot).
-                    uint physVal = val >= 0x80000000u && val < 0xC0000000u ? val & 0x1FFFFFFFu : val;
-                    if (codeRefs.Count > 0 && !codeRefs.Contains(physVal)) continue;
-
-                    results.Add(new PointerEntry
-                    {
-                        Address  = $"0x{(address + (uint)i):X8}",
-                        PointsTo = $"0x{val:X8}"
-                    });
-                }
-
-                return JsonSerializer.Serialize(new CommandResponse
-                {
-                    Success  = true,
-                    Command  = "SCANPOINTERS",
-                    Pointers = results
-                });
-            }
-            catch (Exception ex)
-            {
-                return Responses.Error($"ScanPointers error: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Handle SCANFLOATS — reads <paramref name="length"/> bytes of live emulator
-        /// memory and returns 4-byte aligned IEEE-754 single-precision floats whose
-        /// absolute value falls in the range [0.001, 1 000 000].
-        /// </summary>
-        private string HandleScanFloats(uint address, int length, string? region)
-        {
-            if (_ctx.Client == null)
-                return Responses.Error("No live memory backend — start with --run or --pcsx2");
-            if (length <= 0)
-                return Responses.Error("Length is required for SCANFLOATS");
-
-            try
-            {
-                bool useIop = string.Equals(region, "iop", StringComparison.OrdinalIgnoreCase);
-                var bytes   = _ctx.Memory.ReadLiveBytes(address, length, useIop);
-                var results = new List<FloatEntry>();
-
-                for (int i = 0; i + 3 < bytes.Length; i += 4)
-                {
-                    uint bits = BitConverter.ToUInt32(bytes, i);
-                    float f   = BitConverter.Int32BitsToSingle((int)bits);
-
-                    if (float.IsNaN(f) || float.IsInfinity(f))
-                        continue;
-
-                    // Skip subnormals (exponent bits == 0) — PS2 hardware flushes these to 0.
-                    uint exp = (bits >> 23) & 0xFFu;
-                    if (exp == 0u)
-                        continue;
-
-                    float absVal = MathF.Abs(f);
-                    if (absVal < FloatScanMinAbs || absVal > FloatScanMaxAbs)
-                        continue;
-
-                    results.Add(new FloatEntry
-                    {
-                        Address = $"0x{(address + (uint)i):X8}",
-                        Value   = f,
-                        Raw     = $"0x{bits:X8}"
-                    });
-                }
-
-                return JsonSerializer.Serialize(new CommandResponse
-                {
-                    Success = true,
-                    Command = "SCANFLOATS",
-                    Floats  = results
-                });
-            }
-            catch (Exception ex)
-            {
-                return Responses.Error($"ScanFloats error: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Handle SCANINTEGERS — reads <paramref name="length"/> bytes of live emulator
-        /// memory and returns every non-zero 4-byte aligned 32-bit signed integer.
-        /// Values of 0x00000000 and 0xFFFFFFFF (common fill/sentinel patterns) are excluded.
-        /// </summary>
-        private string HandleScanIntegers(uint address, int length, string? region)
-        {
-            if (_ctx.Client == null)
-                return Responses.Error("No live memory backend — start with --run or --pcsx2");
-            if (length <= 0)
-                return Responses.Error("Length is required for SCANINTEGERS");
-
-            try
-            {
-                bool useIop = string.Equals(region, "iop", StringComparison.OrdinalIgnoreCase);
-                var bytes   = _ctx.Memory.ReadLiveBytes(address, length, useIop);
-                var results = new List<IntegerEntry>();
-
-                for (int i = 0; i + 3 < bytes.Length; i += 4)
-                {
-                    uint raw = BitConverter.ToUInt32(bytes, i);
-                    // Skip common fill/sentinel values.
-                    if (raw == 0x00000000u || raw == 0xFFFFFFFFu)
-                        continue;
-
-                    int val = (int)raw;
-                    results.Add(new IntegerEntry
-                    {
-                        Address = $"0x{(address + (uint)i):X8}",
-                        Value   = val,
-                        Hex     = $"0x{raw:X8}"
-                    });
-                }
-
-                return JsonSerializer.Serialize(new CommandResponse
-                {
-                    Success  = true,
-                    Command  = "SCANINTEGERS",
-                    Integers = results
-                });
-            }
-            catch (Exception ex)
-            {
-                return Responses.Error($"ScanIntegers error: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Handle SEARCH — searches bytes for a query string using the given mode.
-        /// Bytes are taken from base64-encoded <c>Data</c> when present, or read
-        /// directly from live emulator memory using <c>Address</c>, <c>Length</c>
-        /// and <c>Region</c>.
+        /// Handle SEARCH — searches bytes (base64 <c>Data</c>, loaded at <c>Address</c>)
+        /// for a query string using the given mode.
         /// Modes: "text" (case-insensitive substring), "bytes" (hex pattern),
         ///        "string" (raw byte match), "regex" (case-insensitive regex).
         /// </summary>
@@ -732,20 +455,9 @@ namespace CodeDesigner.Ps2.Bridge.Services
 
             try
             {
-                byte[] bytes;
-                if (!string.IsNullOrEmpty(base64Data))
-                {
-                    bytes = Convert.FromBase64String(base64Data);
-                }
-                else
-                {
-                    if (_ctx.Client == null)
-                        return Responses.Error("No live memory backend — start with --run or --pcsx2");
-                    if (length <= 0)
-                        return Responses.Error("Length is required when searching live memory");
-                    bool useIop = string.Equals(region, "iop", StringComparison.OrdinalIgnoreCase);
-                    bytes = _ctx.Memory.ReadLiveBytes(startAddress, length, useIop);
-                }
+                if (string.IsNullOrEmpty(base64Data))
+                    return Responses.Error("Data (the bytes to search, base64) is required for SEARCH");
+                byte[] bytes = Convert.FromBase64String(base64Data);
 
                 var matches = new List<SearchMatch>();
 
@@ -1100,23 +812,11 @@ namespace CodeDesigner.Ps2.Bridge.Services
 
             try
             {
-                byte[] bytes;
-                if (!string.IsNullOrEmpty(base64Data))
-                {
-                    bytes = Convert.FromBase64String(base64Data);
-                    if (length <= 0)
-                        length = bytes.Length;
-                }
-                else
-                {
-                    if (_ctx.Client == null)
-                        return Responses.Error("No live memory backend — start with --pcsx2 or STARTEMULATOR");
-                    if (length <= 0)
-                        return Responses.Error("Length is required when scanning live references");
-
-                    bool useIop = string.Equals(region, "iop", StringComparison.OrdinalIgnoreCase);
-                    bytes = _ctx.Memory.ReadLiveBytesChunked(startAddress, length, useIop);
-                }
+                if (string.IsNullOrEmpty(base64Data))
+                    return Responses.Error("Data (the bytes to scan, base64) is required for SCANREFERENCES");
+                byte[] bytes = Convert.FromBase64String(base64Data);
+                if (length <= 0)
+                    length = bytes.Length;
 
                 var references = ReferenceScanner.Scan(new ReferenceScanInput
                 {

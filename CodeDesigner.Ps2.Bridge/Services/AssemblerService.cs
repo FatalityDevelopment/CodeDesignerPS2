@@ -20,7 +20,6 @@ namespace CodeDesigner.Ps2.Bridge.Services
             reg.Add(c => HandleAssemble(c.Data),                                "ASSEMBLE");
             reg.Add(c => HandleCompileCds(c.Data, c.Labels),                    "COMPILECDS");
             reg.Add(c => HandleValidateCds(c.Data, c.Labels),                   "VALIDATECDS");
-            reg.Add(c => HandleCdsPatch(c.Data, c.Labels),                      "CDSPATCH");
             reg.Add(c => HandleDisassemble(c.Data, c.Address, c.GameId, c.SkipDataFormatOverrides == true), "DISASSEMBLE");
         }
 
@@ -47,8 +46,8 @@ namespace CodeDesigner.Ps2.Bridge.Services
         /// <c>Sidecars</c> field of the response:
         /// </para>
         /// <list type="bullet">
-        ///   <item><c>assert</c> — checked against live memory when a backend is available;
-        ///     a failed assertion aborts code output and reports an error.</item>
+        ///   <item><c>assert</c> — returned as metadata for the caller to check against the
+        ///     emulator's memory (the Bridge has no emulator).</item>
         ///   <item><c>breakpoint</c> — returned as metadata for the caller to install.</item>
          ///   <item><c>watchpoint</c> — returned as metadata for the caller to install.</item>
          ///   <item><c>log</c>/<c>print</c> — returned as metadata for the caller to surface.</item>
@@ -116,62 +115,18 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 // ── Process sidecar commands ─────────────────────────────────────────
                 var sidecars       = CdsCompiler.GetSidecarCommands(items);
                 var sidecarResults = new List<CdsSidecarResult>();
-                bool assertFailed  = false;
 
                 foreach (var sc in sidecars)
                 {
                     switch (sc)
                     {
-                        case AssertSyntaxItem assert:
-                        {
-                            var sidecar = CreateSidecarResult(assert);
-
-                            uint? actual = TryReadWordFromLiveMemory(assert.Address);
-                            if (actual.HasValue)
-                            {
-                                sidecar.ActualValue = actual;
-                                bool pass = string.Equals(assert.Operator, "!=",
-                                    StringComparison.Ordinal)
-                                    ? actual.Value != assert.ExpectedValue
-                                    : actual.Value == assert.ExpectedValue;
-                                sidecar.AssertPassed = pass;
-
-                                if (!pass)
-                                {
-                                    assertFailed = true;
-                                    results.Add(new InstructionResult
-                                    {
-                                        Success = false,
-                                        Error   = $"Assert failed at 0x{assert.Address:X8}: " +
-                                                  $"expected {assert.Operator} 0x{assert.ExpectedValue:X8}, " +
-                                                  $"got 0x{actual.Value:X8}"
-                                    });
-                                }
-                            }
-
-                            sidecarResults.Add(sidecar);
-                            break;
-                        }
-
+                        case AssertSyntaxItem:
                         case BreakpointSyntaxItem:
                         case WatchpointSyntaxItem:
                         case LogSyntaxItem:
                             sidecarResults.Add(CreateSidecarResult(sc));
                             break;
                     }
-                }
-
-                // If any assert failed against live memory, return without code words.
-                if (assertFailed)
-                {
-                    return JsonSerializer.Serialize(new CommandResponse
-                    {
-                        Success  = false,
-                        Command  = "COMPILECDS",
-                        Results  = results,
-                        Sidecars = sidecarResults.Count > 0 ? sidecarResults : null,
-                        Diagnostics = parser.Diagnostics.Count > 0 ? parser.Diagnostics.ToList() : null
-                    });
                 }
 
                 // Ordered raw code list: assembled words as 32-bit writes, raw code
@@ -199,213 +154,6 @@ namespace CodeDesigner.Ps2.Bridge.Services
             catch (Exception ex)
             {
                 return Responses.Error($"Compile error: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Try to read a 32-bit word from live PS2 memory at the given virtual address.
-        /// Returns <see langword="null"/> when no live backend is connected or the read fails.
-        /// </summary>
-        private uint? TryReadWordFromLiveMemory(uint address)
-        {
-            try
-            {
-                if (_ctx.Client != null)
-                {
-                    uint clientAddr = address >= 0x80000000u && address <= 0xBFFFFFFFu
-                        ? address
-                        : (address < 0x20000000u ? address | 0x80000000u : address);
-                    byte[] bytes = _ctx.Client.ReadBytes(clientAddr, 4);
-                    if (bytes.Length == 4)
-                        return System.BitConverter.ToUInt32(bytes, 0);
-                }
-            }
-            catch { /* swallow — no live backend or address out of range */ }
-            return null;
-        }
-
-        /// <summary>
-        /// Handle CDSPATCH command — compile a CDS source, check assert sidecars against live
-        /// memory, apply the generated GameShark codes to RAM, and then install any
-        /// <c>breakpoint</c> / <c>watchpoint</c> sidecar commands.
-        ///
-        /// <para>
-        /// This is the atomic "compile + apply" variant of the two-step
-        /// <c>COMPILECDS</c> → <c>APPLYCHEATS</c> workflow, useful for MCP agents and
-        /// automation scripts that want a single round-trip.
-        /// </para>
-        ///
-        /// <para>
-        /// On assert failure the command returns <c>Success=false</c> and aborts without
-        /// writing any memory or installing any breakpoints or watchpoints.
-        /// </para>
-        /// </summary>
-        private string HandleCdsPatch(string? sourceCode, List<LabelEntry>? externalLabels = null)
-        {
-            try
-            {
-                if (string.IsNullOrWhiteSpace(sourceCode))
-                    return Responses.Error("No source code provided");
-
-                if (_ctx.Client == null)
-                    return Responses.Error("No live memory backend — start with --pcsx2 or STARTEMULATOR");
-
-                // ── Build external label dictionary ──────────────────────────────────
-                var extDict = new Dictionary<string, uint>(StringComparer.OrdinalIgnoreCase);
-                if (externalLabels != null)
-                {
-                    foreach (var entry in externalLabels)
-                    {
-                        if (string.IsNullOrWhiteSpace(entry.Label) ||
-                            string.IsNullOrWhiteSpace(entry.Address)) continue;
-                        var addrStr = entry.Address.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
-                            ? entry.Address[2..]
-                            : entry.Address;
-                        if (uint.TryParse(addrStr, System.Globalization.NumberStyles.HexNumber,
-                                null, out uint addr))
-                            extDict[entry.Label] = addr;
-                    }
-                }
-                foreach (var kv in _ctx.Labels)
-                    extDict[kv.Value.Label] = kv.Key;
-
-                // ── Parse ────────────────────────────────────────────────────────────
-                var parser = new CdsParser();
-                var items  = parser.Parse(sourceCode, basePath: "", externalLabels: extDict);
-
-                // Collect parser diagnostics as error results (informational — returned in response)
-                var errorResults = new List<InstructionResult>();
-                foreach (var diag in parser.Diagnostics)
-                {
-                    errorResults.Add(new InstructionResult
-                    {
-                        Success    = false,
-                        Assembly   = string.Empty,
-                        Error      = diag.Message,
-                        LineNumber = diag.LineNumber
-                    });
-                }
-
-                // ── Check assert sidecars ────────────────────────────────────────────
-                var sidecars       = CdsCompiler.GetSidecarCommands(items);
-                var sidecarResults = new List<CdsSidecarResult>();
-
-                foreach (var sc in sidecars)
-                {
-                    if (sc is not AssertSyntaxItem assert)
-                    {
-                        if (sc is LogSyntaxItem log)
-                            sidecarResults.Add(CreateSidecarResult(log));
-                        continue;
-                    }
-
-                    var sidecar = CreateSidecarResult(assert);
-
-                    uint? actual = TryReadWordFromLiveMemory(assert.Address);
-                    if (actual.HasValue)
-                    {
-                        sidecar.ActualValue = actual;
-                        bool pass = string.Equals(assert.Operator, "!=", StringComparison.Ordinal)
-                            ? actual.Value != assert.ExpectedValue
-                            : actual.Value == assert.ExpectedValue;
-                        sidecar.AssertPassed = pass;
-
-                        if (!pass)
-                        {
-                            sidecarResults.Add(sidecar);
-                            return JsonSerializer.Serialize(new CommandResponse
-                            {
-                                Success  = false,
-                                Command  = "CDSPATCH",
-                                Error    = $"Assert failed at 0x{assert.Address:X8}: " +
-                                           $"expected {assert.Operator} 0x{assert.ExpectedValue:X8}, " +
-                                           $"got 0x{actual.Value:X8}",
-                                Results  = errorResults.Count > 0 ? errorResults : null,
-                                Sidecars = sidecarResults
-                            });
-                        }
-                    }
-
-                    sidecarResults.Add(sidecar);
-                }
-
-                if (errorResults.Count > 0)
-                {
-                    return JsonSerializer.Serialize(new CommandResponse
-                    {
-                        Success  = false,
-                        Command  = "CDSPATCH",
-                        Error    = $"{errorResults.Count} CDS parse error(s) — patch not applied",
-                        Results  = errorResults,
-                        Sidecars = sidecarResults.Count > 0 ? sidecarResults : null
-                    });
-                }
-
-                // ── Build GameShark codes and apply them ─────────────────────────────
-                var codeLines  = CdsCompiler.CompileToCodes(items).Select(c => c.ToString()).ToList();
-
-                var cheatText = string.Join('\n', codeLines);
-
-                IByteEditor byteEditor = new DebugClientByteEditor(_ctx.Client!);
-                var engine    = new CheatEngine.CheatEngine(byteEditor);
-                var cheatList = new CheatList(cheatText);
-                engine.PatchMemory(cheatList);
-
-                // ── Install remaining sidecars (breakpoints / watchpoints) ────────────
-                var installed = new List<string>();
-                var skipped   = new List<string>();
-
-                foreach (var sc in sidecars)
-                {
-                    switch (sc)
-                    {
-                        case BreakpointSyntaxItem bp:
-                            try
-                            {
-                                SetBreakpointInternal(bp.Address);
-                                sidecarResults.Add(CreateSidecarResult(bp));
-                                installed.Add($"breakpoint @ 0x{bp.Address:X8}");
-                            }
-                            catch (Exception ex)
-                            {
-                                skipped.Add($"breakpoint @ 0x{bp.Address:X8}: {ex.Message}");
-                            }
-                            break;
-
-                        case WatchpointSyntaxItem wp:
-                            try
-                            {
-                                SetWatchpointInternal(wp.Address, wp.Size, wp.AccessType);
-                                sidecarResults.Add(CreateSidecarResult(wp));
-                                installed.Add($"watchpoint {wp.AccessType} @ 0x{wp.Address:X8} ({wp.Size} bytes)");
-                            }
-                            catch (Exception ex)
-                            {
-                                skipped.Add($"watchpoint @ 0x{wp.Address:X8}: {ex.Message}");
-                            }
-                            break;
-                    }
-                }
-
-                // ── Build summary message ────────────────────────────────────────────
-                var sb = new System.Text.StringBuilder();
-                sb.Append($"Patch applied — {codeLines.Count} code(s) written");
-                if (installed.Count > 0)
-                    sb.Append($", {installed.Count} sidecar(s) installed");
-                if (skipped.Count > 0)
-                    sb.Append($", {skipped.Count} sidecar(s) skipped (see Sidecars)");
-
-                return JsonSerializer.Serialize(new CommandResponse
-                {
-                    Success  = true,
-                    Command  = "CDSPATCH",
-                    Message  = sb.ToString(),
-                    Sidecars = sidecarResults.Count > 0 ? sidecarResults : null
-                });
-            }
-            catch (Exception ex)
-            {
-                return Responses.Error($"CDSPATCH error: {ex.Message}");
             }
         }
 
@@ -509,43 +257,6 @@ namespace CodeDesigner.Ps2.Bridge.Services
             {
                 return Responses.Error($"VALIDATECDS error: {ex.Message}");
             }
-        }
-
-        /// <summary>
-        /// Install a software breakpoint at the given EE virtual address through
-        /// the active <see cref="IDebugClient"/> (_ctx.PineClient or InternalEmulatorClient).
-        /// </summary>
-        private void SetBreakpointInternal(uint address)
-        {
-            if (_ctx.Client == null)
-                throw new InvalidOperationException("No live backend for breakpoint installation");
-            _ctx.Client.SetBreakpoint(AddressTranslator.NormalizeBreakpointForClient(address));
-        }
-
-        /// <summary>
-        /// Install a hardware watchpoint at the given EE virtual address range.
-        /// In PINE mode delegates to <see cref="_ctx.PineClient.AddWatch"/>; PINE-only feature.
-        /// </summary>
-        private void SetWatchpointInternal(uint address, uint size, WatchpointAccessType accessType)
-        {
-            if (_ctx.PineClient == null)
-                throw new InvalidOperationException("Watchpoints via CDSPATCH require PINE mode (connect to PCSX2 first)");
-            if (_ctx.PineClient == null)
-                throw new InvalidOperationException("PINE _ctx.Client not connected");
-
-            uint cond = accessType switch
-            {
-                WatchpointAccessType.Read      => 1u,
-                WatchpointAccessType.ReadWrite => 3u,
-                _                              => 2u   // Write
-            };
-            uint physStart = address & 0x1FFFFFFF;
-            // Guard against physStart + size wrapping past the 29-bit physical address space
-            if (size > 0x1FFFFFFF - physStart)
-                throw new ArgumentOutOfRangeException(nameof(size),
-                    $"Watchpoint range overflow: physStart=0x{physStart:X8} + size={size} exceeds physical address space");
-            uint physEnd   = physStart + size;
-            _ctx.PineClient.AddWatch(cpu: 0, physStart, physEnd, (byte)cond);
         }
 
         /// <summary>
@@ -736,32 +447,12 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 var results        = new List<InstructionResult>();
                 var instructionList = new List<(uint instruction, uint address)>();
 
-                // Resolve a memory bus for comment-column ASCII / pointer
-                // annotations. Prefer the analysis-emulator mirror when one
-                // is attached (no PINE traffic); fall back to the live client
-                // (PINE or built-in) when no mirror is available so strings
-                // and pointer chains still resolve in plain browsing mode.
-                IDebugClient? hintClient = _ctx.AnalysisClient ?? _ctx.Client;
-                CodeDesigner.Ps2.Common.Interfaces.IPs2MemoryBus? mirrorBus =
-                    hintClient != null
-                        ? new ByteEditorMemoryBusAdapter(new DebugClientByteEditor(hintClient))
-                        : null;
-
-                // Layer the disasm-page bytes on top of the mirror bus so the
-                // analyzer can resolve strings/pointers that live within the
-                // current page even when no mirror is attached. Out-of-page
-                // reads still fall back to the mirror (when available); they
-                // never reach PCSX2 PINE.
+                // The page's bytes are the analyzer's memory: strings and pointers on
+                // the page resolve; reads beyond it see nothing. (Live state hints come
+                // from Ps2Emulator, which disassembles with its own memory.)
                 CodeDesigner.Ps2.Common.Interfaces.IPs2MemoryBus analysisBus =
-                    new PageBytesMemoryBus(byteBuf, baseAddr, mirrorBus);
-
-                // Simulated loads can be many per page, so they only read the page
-                // and the local analysis mirror — never the live PINE connection.
-                CodeDesigner.Ps2.Common.Interfaces.IPs2MemoryBus loadBus =
-                    new PageBytesMemoryBus(byteBuf, baseAddr,
-                        _ctx.AnalysisClient != null
-                            ? new ByteEditorMemoryBusAdapter(new DebugClientByteEditor(_ctx.AnalysisClient))
-                            : null);
+                    new PageBytesMemoryBus(byteBuf, baseAddr, null);
+                CodeDesigner.Ps2.Common.Interfaces.IPs2MemoryBus loadBus = analysisBus;
 
                 // Walk the byte buffer.  For every offset, check whether an
                 // override covers it; if so emit data rows, otherwise emit an
@@ -872,49 +563,6 @@ namespace CodeDesigner.Ps2.Bridge.Services
                         continue;
                     }
 
-                    // ── Inferred data table (switch / pointer / float) ────────
-                    // From the cross-reference index: entries render as data
-                    // rows instead of being decoded as instructions. A user's
-                    // own data format (above) always wins.
-                    if ((rowAddr & 3u) == 0 && byteIndex + 4 <= byteBuf.Length
-                        && _ctx.Xrefs.TryGetDataTable(rowAddr, out var table, out int entry))
-                    {
-                        var kind = table.Kind == XrefIndexService.DataTableKind.Float
-                            ? Database.Entities.DataFormatKind.Float
-                            : Database.Entities.DataFormatKind.Word;
-                        string asm = FormatDataDirective(byteBuf, byteIndex, kind, out string? hexStr);
-                        uint val = BitConverter.ToUInt32(byteBuf, byteIndex);
-                        string? cmt = table.Kind switch
-                        {
-                            XrefIndexService.DataTableKind.Jump    => $"case {entry} -> {LabelOrAddress(val)}",
-                            XrefIndexService.DataTableKind.Pointer => TryResolvePointerComment(val, analysisBus) ?? $"-> {LabelOrAddress(val)}",
-                            _ => null,
-                        };
-                        if (entry == 0)
-                        {
-                            string title = table.Kind switch
-                            {
-                                XrefIndexService.DataTableKind.Jump    => "switch table",
-                                XrefIndexService.DataTableKind.Pointer => "pointer table",
-                                _                                      => "float table",
-                            };
-                            cmt = $"{title}, {table.Count} entries" + (cmt is null ? "" : $" | {cmt}");
-                        }
-
-                        results.Add(new InstructionResult
-                        {
-                            Address        = rowAddr,
-                            ByteLength     = 4,
-                            Hex            = hexStr,
-                            Assembly       = asm,
-                            Success        = true,
-                            Comment        = cmt,
-                            DataFormatKind = DataFormatService.KindToWire(kind),
-                            AutoFormatted  = true,
-                        });
-                        byteIndex += 4;
-                        continue;
-                    }
 
                     // ── Auto-detected string at this offset ───────────────────
                     // Emit byte rows for the printable-ASCII run + null
@@ -1041,114 +689,21 @@ namespace CodeDesigner.Ps2.Bridge.Services
                     byteIndex += 4;
                 }
 
-                // State-aware analysis: when the live client is paused and the
-                // paused PC is on this page, seed the analyzer with the mirrored
-                // register snapshot from AnalysisStateService at that row. Rows
-                // above the PC stay on blank state (the snapshot describes the
-                // PC, not the code before it), and [TAKEN]/[NOT TAKEN] hints are
-                // only shown from the PC to the next control-flow change.
-                CodeDesigner.Ps2.Common.CPU.CpuState? seedCpu = null;
-                uint? seedPc = null;
-                bool includeStateHints = false;
-                Func<uint, bool>? seedContext = null;
-                if (_ctx.AnalysisState is not null)
-                {
-                    try
-                    {
-                        _ctx.AnalysisState.RefreshFromLive(force: false);
-                        var snap = _ctx.AnalysisState.TryAcquire();
-                        if (snap is not null)
-                        {
-                            // The full snapshot applies at the PC row (when it is on
-                            // this page). Rows elsewhere still get the registers a
-                            // function keeps for its whole body — $gp everywhere, $sp
-                            // and $s0-$s7/$fp inside the PC's function (or near the PC
-                            // without a function index) — so loads through an object
-                            // pointer or $gp resolve and show their pointer chains.
-                            uint pc = ToPagePhysical(snap.PcAtMirror);
-                            seedCpu = snap.Cpu;
-                            seedPc = pc;
-                            includeStateHints = pc >= rangeStart && pc < rangeEnd;
-                            if (_ctx.Xrefs.TryGetFunction(pc, out uint fnStart, out uint fnEnd))
-                                seedContext = a => a >= fnStart && a <= fnEnd;
-                            else
-                                seedContext = a => a + NearPcWindow >= pc && a <= pc + NearPcWindow;
-                        }
-                    }
-                    catch
-                    {
-                        // Best-effort: a failed mirror falls back to blank-state
-                        // analysis — the disassembly still renders.
-                    }
-                }
-
-                // Run analyzer using the instruction's built-in Analyze() method.
-                // State-specific hints (TAKEN / NOT TAKEN) are kept only when
-                // seedCpu is populated; otherwise they'd be misleading against
-                // a blank register file. Only MIPS-instruction rows participate
-                // — data-format rows (.byte/.half/.word/...) are skipped so the
-                // analyzer does not try to "execute" embedded data.
-                // Lead-in: simulate the code just before this page (without
-                // emitting rows for it) so register values set above the page
-                // still resolve hints on it. With a function index that is the
-                // whole function from its entry (from the index's snapshot, no
-                // live read); otherwise the last 0x80 bytes.
-                var analyzedList = instructionList;
-                HashSet<uint>? functionStarts = null;
-                if (instructionList.Count > 0)
-                {
-                    byte[]? leadIn = null;
-                    uint leadStart = 0;
-                    if (_ctx.Xrefs.TryGetFunction(baseAddr, out uint fnStart, out _) && fnStart < baseAddr)
-                    {
-                        leadStart = Math.Max(fnStart, baseAddr >= MaxFunctionLeadIn ? baseAddr - MaxFunctionLeadIn : 0u);
-                        leadIn = _ctx.Xrefs.TryGetSnapshotBytes(leadStart, (int)(baseAddr - leadStart));
-                    }
-                    if (leadIn == null && hintClient != null && baseAddr >= LeadInBytes)
-                    {
-                        try
-                        {
-                            leadStart = baseAddr - LeadInBytes;
-                            leadIn = new DebugClientByteEditor(hintClient).Read((int)leadStart, LeadInBytes);
-                            if (leadIn.Length != LeadInBytes) leadIn = null;
-                        }
-                        catch
-                        {
-                            // Unreadable lead-in (region start, read failure): analyze the page alone.
-                            leadIn = null;
-                        }
-                    }
-                    if (leadIn != null)
-                    {
-                        analyzedList = new List<(uint instruction, uint address)>(instructionList.Count + leadIn.Length / 4);
-                        for (int off = 0; off + 4 <= leadIn.Length; off += 4)
-                            analyzedList.Add((BitConverter.ToUInt32(leadIn, off), leadStart + (uint)off));
-                        analyzedList.AddRange(instructionList);
-                    }
-
-                    // Register state resets at every function entry on (or before) the page.
-                    if (_ctx.Xrefs.HasIndex)
-                    {
-                        functionStarts = new HashSet<uint>();
-                        foreach (var (_, a) in analyzedList)
-                            if (_ctx.Xrefs.IsFunctionStart(a)) functionStarts.Add(a);
-                    }
-                }
-
+                // Run the analyzer over the page's instructions, from a blank register
+                // file (state hints for a paused game come from Ps2Emulator). Only
+                // MIPS-instruction rows participate — data-format rows
+                // (.byte/.half/.word/...) are skipped so the analyzer does not try to
+                // "execute" embedded data.
                 HintLevel hintLevel = CurrentHintLevel();
                 var comments = MipsAnalyzer.AnalyzeInstructions(
-                    analyzedList,
+                    instructionList,
                     startAddress ?? 0,
                     executeInstructions: true,
                     bus: analysisBus,
                     lookupLabel: addr => _ctx.Labels.TryGetValue(addr, out var e) ? e.Label : null,
-                    includeStateHints: includeStateHints,
-                    seedCpu: seedCpu,
-                    seedPc: seedPc,
+                    includeStateHints: false,
                     loadBus: loadBus,
-                    functionStarts: functionStarts,
-                    hintLevel: hintLevel,
-                    seedContext: seedContext);
+                    hintLevel: hintLevel);
 
                 // Apply comments and labels to results.  Look each row up by
                 // address rather than by index because the row stride is now
@@ -1163,13 +718,6 @@ namespace CodeDesigner.Ps2.Bridge.Services
                         row.Comment = aComment;
                     }
 
-                    if (_ctx.Xrefs.HasIndex)
-                    {
-                        var (code, data) = _ctx.Xrefs.CountTo(addr);
-                        if (code > 0) row.XrefCount = code;
-                        if (data > 0) row.DataRefCount = data;
-                        if (functionStarts != null && functionStarts.Contains(addr)) row.FunctionStart = true;
-                    }
 
                     if (_ctx.Labels.TryGetValue(addr, out var labelEntry))
                     {
@@ -1515,26 +1063,8 @@ namespace CodeDesigner.Ps2.Bridge.Services
             return $"0x{address:X8}";
         }
 
-        /// <summary>Without a function index, rows this close to the paused PC count as its function.</summary>
-        private const uint NearPcWindow = 0x10000;
 
-        /// <summary>Bytes before a page that the analyzer simulates (not shown) to carry register state in.</summary>
-        private const int LeadInBytes = 0x80;
 
-        /// <summary>
-        /// Longest stretch of a function above the page that is simulated. Real
-        /// functions are far shorter; this only bounds a mis-detected one.
-        /// </summary>
-        private const uint MaxFunctionLeadIn = 0x4000;
-
-        /// <summary>
-        /// Maps a CPU address to the form live panels disassemble at: KSEG0/KSEG1
-        /// aliases (0x80000000–0xBFFFFFFF) drop to their physical address.
-        /// </summary>
-        private static uint ToPagePhysical(uint address)
-        {
-            return address >= 0x80000000u && address < 0xC0000000u ? address & 0x1FFFFFFFu : address;
-        }
 
         /// <summary>True when <paramref name="address"/> falls inside the EE RAM windows usable as a pointer target.</summary>
         private static bool LooksLikeRamPointer(uint address)

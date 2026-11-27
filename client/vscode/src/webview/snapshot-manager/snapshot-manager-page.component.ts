@@ -22,7 +22,7 @@ import './snapshot-manager-page.css';
   encapsulation: ViewEncapsulation.None,
   template: `
 <div class="sm-shell">
-  <app-page-header icon="camera" title="Snapshots" subtitle="PCSX2 save states" />
+  <app-page-header icon="camera" title="Snapshots" subtitle="Ps2Emulator memory snapshots" />
 
   <div class="sm-toolbar">
     <div class="sm-title">
@@ -54,7 +54,7 @@ import './snapshot-manager-page.css';
       <div class="sm-list">
         @if (snapshots().length === 0) {
           <div class="sm-empty-row">
-            No .p2s files found in PCSX2's savestates folder.
+            No snapshots yet: take one with Snapshot (panel → Actions) while Ps2Emulator runs.
           </div>
         } @else if (filteredSnapshots().length === 0) {
           <div class="sm-empty-row">No snapshots match the filter.</div>
@@ -78,7 +78,7 @@ import './snapshot-manager-page.css';
       @if (!selected()) {
         <div class="sm-empty">
           <app-icon name="camera" [size]="34" />
-          <span>Select a save state on the left to preview its screenshot.</span>
+          <span>Select a snapshot on the left to preview its screenshot.</span>
         </div>
       } @else {
         <div class="sm-head">
@@ -104,7 +104,7 @@ import './snapshot-manager-page.css';
             <div><span>Size</span><strong>{{ formatBytes(selected()!.sizeBytes ?? 0) }}</strong></div>
             <div><span>Modified</span><strong>{{ selected()!.timestamp }}</strong></div>
             <div class="sm-actions">
-              <button class="sm-btn sm-primary" (click)="onReload()" title="Load this save state into PCSX2">
+              <button class="sm-btn sm-primary" (click)="onReload()" title="Load this snapshot's memory into Ps2Emulator">
                 <app-icon name="play" [size]="14" /> Load State
               </button>
               <button class="sm-btn" (click)="onOpen()" title="Extract memory dumps and open in the hex viewer">
@@ -113,7 +113,7 @@ import './snapshot-manager-page.css';
               <button class="sm-btn" (click)="onDiff()" title="Compare with another snapshot">
                 <app-icon name="gitcompare" [size]="14" /> Diff
               </button>
-              <button class="sm-btn sm-danger-btn" (click)="onDeleteRequest()" title="Delete this save state">
+              <button class="sm-btn sm-danger-btn" (click)="onDeleteRequest()" title="Delete this snapshot">
                 <svg viewBox="0 0 10 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><path d="M1 3h8M4 1.5h2M2 3l.7 7.5h4.6L8 3"/></svg>
                 Delete
               </button>
@@ -128,7 +128,7 @@ import './snapshot-manager-page.css';
     [visible]="!!pendingDeleteSnap()"
     [title]="'Delete snapshot?'"
     [body]="pendingDeleteSnap()?.name ?? ''"
-    [note]="'This permanently deletes the .p2s file and any .extracted/ companion from disk.'"
+    [note]="'This permanently deletes the snapshot folder from disk.'"
     [confirmLabel]="'Delete'"
     (confirmed)="onConfirmDelete()"
     (cancelled)="pendingDeleteSnap.set(null)">
@@ -275,7 +275,7 @@ export class SnapshotManagerPageComponent implements AfterViewInit {
         } else {
           this.screenshotData.set(null);
           const err = data['error'] as string | undefined;
-          this.previewMsg.set(err ?? 'No screenshot embedded in this save state.');
+          this.previewMsg.set(err ?? 'No screenshot was taken with this snapshot.');
         }
         break;
       }

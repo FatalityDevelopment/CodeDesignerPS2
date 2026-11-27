@@ -100,8 +100,8 @@ export class PacketViewerPageComponent implements AfterViewInit, OnDestroy {
         if (!p) { return; }
         this._resendPending = true;
         this.pvRef().showStatus(`Resending packet #${index + 1}…`);
-        // tcpContinue moves a TCP segment onto the live flow; a verbatim TCP replay is dropped as a duplicate.
-        this.post({ type: 'inject', frame: p.data, tx: p.direction === 0, fix: false, tcpContinue: true });
+        // A verbatim TCP replay carries its old seq/ack: a stack that saw them drops it as a duplicate.
+        this.post({ type: 'inject', frame: p.data, tx: p.direction === 0, fix: false });
     }
 
     edit(index: number): void {

@@ -10,7 +10,7 @@ namespace CodeDesigner.AI.Tools.Labels;
 
 [CdTool("data_format_list", ToolDomain.Labels, ToolRisk.ReadOnly,
     "List data-format overrides for a game (optionally within an address range). Risk: read-only.")]
-public sealed class DataFormatListTool(IEmulatorBridge bridge)
+public sealed class DataFormatListTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint]
     public async Task<string> InvokeAsync(
@@ -36,7 +36,7 @@ public sealed class DataFormatListTool(IEmulatorBridge bridge)
 
 [CdTool("data_format_set", ToolDomain.Labels, ToolRisk.MutatesDatabase,
     "Tag a memory range as a data type (Byte|Half|Word|DWord|QWord|Float|Double) for disassembler rendering. Risk: writes database.")]
-public sealed class DataFormatSetTool(IEmulatorBridge bridge)
+public sealed class DataFormatSetTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint]
     public async Task<string> InvokeAsync(
@@ -63,7 +63,7 @@ public sealed class DataFormatSetTool(IEmulatorBridge bridge)
 
 [CdTool("data_format_clear", ToolDomain.Labels, ToolRisk.MutatesDatabase,
     "Remove data-format overrides covering an address range (reverts to instruction decoding). Risk: writes database.")]
-public sealed class DataFormatClearTool(IEmulatorBridge bridge)
+public sealed class DataFormatClearTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint]
     public async Task<string> InvokeAsync(

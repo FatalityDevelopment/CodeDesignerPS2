@@ -24,22 +24,14 @@ namespace CodeDesigner.Ps2.Bridge.Services
     {
         private readonly IBridgeContext _ctx;
 
-        // CDS Cheat Engine instance (persistent across INJECT / UPDATE / REMOVE).
-        private CdsCheatEngine? _cdsCheatEngine;
-
         public CheatsService(IBridgeContext ctx) => _ctx = ctx;
 
         public void Register(CommandRegistry reg)
         {
             reg.Add(c => HandleGetGameCheats(c.GameSerial, c.CheatListId),                       "GETGAMECHEATS");
-            reg.Add(c => HandleApplyCheats(c.Data),                                              "APPLYCHEATS");
             reg.Add(c => HandlePortCheats(c.Data, c.SourceDumpPath, c.TargetDumpPath),           "PORTCHEATS");
             reg.Add(c => HandleConvertCheat(c.Data, c.Format, c.Direction),                      "CONVERTCHEAT");
-            reg.Add(c => HandleInjectCheatEngine(c.Data, c.HookAddress, c.EngineBase, c.CdsSource), "INJECTCHEATENGINE");
-            reg.Add(c => HandleUpdateCheatEngine(c.Data, c.CdsSource),                           "UPDATECHEATENGINE");
-            reg.Add(_ => HandleRemoveCheatEngine(),                                              "REMOVECHEATENGINE");
-            reg.Add(_ => HandleCheatEngineStatus(),                                              "CHEATENGINESTATUS");
-            reg.Add(c => HandleBuildCheatEngine(c.Data, c.HookAddress, c.EngineBase, c.CdsSource), "BUILDCHEATENGINE");
+            reg.Add(c => HandleBuildCheatEngine(c.Data, c.HookAddress, c.EngineBase, c.CdsSource, c.HookWords), "BUILDCHEATENGINE");
         }
 
         // ── GETGAMECHEATS ────────────────────────────────────────────────────
@@ -138,26 +130,6 @@ namespace CodeDesigner.Ps2.Bridge.Services
             });
         }
 
-        // ── APPLYCHEATS ──────────────────────────────────────────────────────
-
-        private string HandleApplyCheats(string? cheatText)
-        {
-            if (_ctx.Client == null)
-                return Responses.Error("No live memory backend — start with --pcsx2 or STARTEMULATOR");
-            if (string.IsNullOrWhiteSpace(cheatText))
-                return Responses.Error("No cheat data provided");
-
-            try
-            {
-                var byteEditor = new DebugClientByteEditor(_ctx.Client);
-                var engine     = new CodeDesigner.Ps2.CheatEngine.CheatEngine(byteEditor);
-                var cheatList  = new CheatList(cheatText);
-                engine.PatchMemory(cheatList);
-                return Responses.Success("Cheats applied successfully");
-            }
-            catch (Exception ex) { return Responses.Error($"ApplyCheats error: {ex.Message}"); }
-        }
-
         // ── PORTCHEATS ───────────────────────────────────────────────────────
 
         private string HandlePortCheats(string? cheatText, string? sourcePath, string? targetPath)
@@ -245,62 +217,13 @@ namespace CodeDesigner.Ps2.Bridge.Services
             catch (Exception ex) { return Responses.Error($"ConvertCheat error: {ex.Message}"); }
         }
 
-        // ── CDS Cheat Engine — INJECT / UPDATE / REMOVE ─────────────────────
-
-        private string HandleInjectCheatEngine(string? cheatText, uint? hookAddress, uint? engineBase, string? cdsSource)
-        {
-            if (_ctx.Client == null)
-                return Responses.Error("No live memory backend — start with --pcsx2 or STARTEMULATOR");
-            if (string.IsNullOrWhiteSpace(cheatText) && string.IsNullOrWhiteSpace(cdsSource))
-                return Responses.Error("No cheat data provided");
-            if (!hookAddress.HasValue)
-                return Responses.Error("HookAddress is required for INJECTCHEATENGINE");
-
-            try
-            {
-                // A previous injection still hooked (e.g. at another hook point) is removed first
-                // so the game never jumps into a half-rewritten engine.
-                if (_cdsCheatEngine?.IsInjected == true)
-                    _cdsCheatEngine.Remove();
-
-                IByteEditor byteEditor = new DebugClientByteEditor(_ctx.Client);
-                uint baseAddr          = engineBase ?? 0x000C0000;
-                var engine             = new CdsCheatEngine(byteEditor, baseAddr);
-
-                if (!string.IsNullOrWhiteSpace(cdsSource))
-                    engine.InjectFromCds(hookAddress.Value, cdsSource);
-                else
-                    engine.Inject(hookAddress.Value, cheatText!);
-                _cdsCheatEngine = engine;
-
-                return Responses.Json(new CommandResponse
-                {
-                    Success          = true,
-                    Command          = "INJECTCHEATENGINE",
-                    Data             = $"Cheat engine injected at 0x{baseAddr:X8}, hooked at 0x{hookAddress.Value:X8}",
-                    CheatEngineState = EngineInfo(engine),
-                });
-            }
-            catch (Exception ex) { return Responses.Error($"InjectCheatEngine error: {ex.Message}"); }
-        }
-
-        private string HandleCheatEngineStatus()
-            => Responses.Json(new CommandResponse
-            {
-                Success          = true,
-                Command          = "CHEATENGINESTATUS",
-                CheatEngineState = _cdsCheatEngine != null
-                    ? EngineInfo(_cdsCheatEngine)
-                    : new CheatEngineInfo { Injected = false, EngineBase = 0x000C0000 },
-            });
-
         /// <summary>
-        /// BUILDCHEATENGINE — build the engine image (code + data + table) for export
-        /// without touching memory. With a hook address and a live backend, the hooked
-        /// instructions are read and embedded so the image only needs loading at its
-        /// base plus <c>HookWord; nop</c> at the hook address.
+        /// BUILDCHEATENGINE — build the engine image (code + data + table) for export.
+        /// With a hook address and the two instructions there (<paramref name="hookWords"/>,
+        /// read from the emulator by the client), they are embedded so the image only
+        /// needs loading at its base plus <c>HookWord; nop</c> at the hook address.
         /// </summary>
-        private string HandleBuildCheatEngine(string? cheatText, uint? hookAddress, uint? engineBase, string? cdsSource)
+        private string HandleBuildCheatEngine(string? cheatText, uint? hookAddress, uint? engineBase, string? cdsSource, List<uint>? hookWords)
         {
             if (string.IsNullOrWhiteSpace(cheatText) && string.IsNullOrWhiteSpace(cdsSource))
                 return Responses.Error("No cheat data provided");
@@ -318,20 +241,15 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 var warnings = new List<string>(translation.Warnings);
                 uint word0 = 0, word1 = 0;
                 bool embedded = false;
-                if (hookAddress.HasValue && _ctx.Client != null)
+                if (hookAddress.HasValue && hookWords is { Count: 2 })
                 {
-                    var editor = new DebugClientByteEditor(_ctx.Client);
-                    word0 = BitConverter.ToUInt32(editor.Read((int)hookAddress.Value, 4), 0);
-                    word1 = BitConverter.ToUInt32(editor.Read((int)hookAddress.Value + 4, 4), 0);
-                    // While hooked here, memory holds the engine's own jump — use the saved originals.
-                    if (_cdsCheatEngine?.IsInjected == true && _cdsCheatEngine.HookAddress == hookAddress.Value)
-                        (word0, word1) = _cdsCheatEngine.OriginalInstructions;
+                    (word0, word1) = (hookWords[0], hookWords[1]);
                     CdsCheatEngine.ValidateHook(hookAddress.Value, word0, word1, baseAddr);
                     embedded = true;
                 }
                 else if (hookAddress.HasValue)
                 {
-                    warnings.Add("No live backend: the hooked instructions are not embedded (nops) — patch them before use.");
+                    warnings.Add("The hooked instructions are not known (no emulator running): they are not embedded (nops) — patch them before use.");
                 }
                 else
                 {
@@ -347,7 +265,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
                     Data             = Convert.ToBase64String(image),
                     CheatEngineState = new CheatEngineInfo
                     {
-                        Injected     = _cdsCheatEngine?.IsInjected == true,
+                        Injected     = false,
                         EngineBase   = baseAddr,
                         HookAddress  = hookAddress,
                         Entries      = translation.Entries.Count,
@@ -359,47 +277,6 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 });
             }
             catch (Exception ex) { return Responses.Error($"BuildCheatEngine error: {ex.Message}"); }
-        }
-
-        private static CheatEngineInfo EngineInfo(CdsCheatEngine engine) => new()
-        {
-            Injected    = engine.IsInjected,
-            EngineBase  = engine.EngineBase,
-            HookAddress = engine.IsInjected ? engine.HookAddress : null,
-            Entries     = engine.LastEntryCount,
-            ImageSize   = CdsCheatEngine.CheatTableOffset + (engine.LastEntryCount + 1) * CdsCheatEngine.EntrySize,
-            Warnings    = engine.LastWarnings.ToList(),
-        };
-
-        private string HandleUpdateCheatEngine(string? cheatText, string? cdsSource)
-        {
-            if (_cdsCheatEngine == null || !_cdsCheatEngine.IsInjected)
-                return Responses.Error("Cheat engine is not injected. Use INJECTCHEATENGINE first.");
-            if (string.IsNullOrWhiteSpace(cheatText) && string.IsNullOrWhiteSpace(cdsSource))
-                return Responses.Error("No cheat data provided");
-
-            try
-            {
-                if (!string.IsNullOrWhiteSpace(cdsSource))
-                    _cdsCheatEngine.UpdateCheatTableFromCds(cdsSource);
-                else
-                    _cdsCheatEngine.UpdateCheatTable(cheatText!);
-                return Responses.Json(new CommandResponse { Success = true, Command = "UPDATECHEATENGINE", Message = "Cheat table updated", CheatEngineState = EngineInfo(_cdsCheatEngine) });
-            }
-            catch (Exception ex) { return Responses.Error($"UpdateCheatEngine error: {ex.Message}"); }
-        }
-
-        private string HandleRemoveCheatEngine()
-        {
-            if (_cdsCheatEngine == null || !_cdsCheatEngine.IsInjected)
-                return Responses.Error("Cheat engine is not injected.");
-
-            try
-            {
-                _cdsCheatEngine.Remove();
-                return Responses.Json(new CommandResponse { Success = true, Command = "REMOVECHEATENGINE", Message = "Cheat engine removed and original code restored", CheatEngineState = EngineInfo(_cdsCheatEngine) });
-            }
-            catch (Exception ex) { return Responses.Error($"RemoveCheatEngine error: {ex.Message}"); }
         }
     }
 }

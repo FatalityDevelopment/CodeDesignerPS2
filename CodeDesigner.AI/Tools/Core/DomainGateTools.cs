@@ -5,7 +5,7 @@ using CodeDesigner.AI.Mcp;
 namespace CodeDesigner.AI.Tools.Core;
 
 [CdTool("cd_enable_domain", ToolDomain.Core, ToolRisk.ReadOnly,
-    "Expose another tool domain at runtime without relaunching (memory|debug|labels|network|patching|cheats|pcsx2|pad|media|admin). Honours the launch risk cap. Risk: changes the available tool list.")]
+    "Expose another tool domain at runtime without relaunching (memory|labels|network|patching|cheats|media|admin). Honours the launch risk cap. Risk: changes the available tool list.")]
 public sealed class EnableDomainTool(RuntimeDomainGate gate)
 {
     [ToolEntryPoint]

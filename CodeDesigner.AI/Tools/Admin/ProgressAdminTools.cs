@@ -54,7 +54,7 @@ public sealed class GetSharedMemoriesTool(ICdContextProvider ctx)
 
 [CdTool("get_address_snapshot_history", ToolDomain.Admin, ToolRisk.ReadOnly,
     "Read the 4-byte value at an EE address across every memory snapshot in a directory. Risk: read-only.")]
-public sealed class GetAddressSnapshotHistoryTool(IEmulatorBridge bridge)
+public sealed class GetAddressSnapshotHistoryTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("EE virtual address (hex/decimal).")] string address,

@@ -44,7 +44,7 @@ public sealed class ToolProfile
         "cd_enable_domain", "cd_list_domains",
         "progress_search", "progress_get", "progress_save",
         "cd_set_goal", "cd_get_goal", "cd_check_session_health",
-        "label_list", "memory_read", "memory_disasm", "memory_scan", "get_pc",
+        "label_list", "label_add", "disassemble", "compile_cds",
     };
 
     // ── Known profiles ──────────────────────────────────────────────────────
@@ -53,15 +53,13 @@ public sealed class ToolProfile
         {
             ["core"]        = new("core",        Array.Empty<ToolDomain>(),                                                                                                       ToolRisk.MutatesDatabase),
             ["lite"]        = new("lite",        Array.Empty<ToolDomain>(),                                                                                                       ToolRisk.MutatesDatabase, LiteTools),
-            ["re"]          = new("re",          new[] { ToolDomain.Memory, ToolDomain.Debug, ToolDomain.Labels, ToolDomain.Pcsx2, ToolDomain.Pad },                              ToolRisk.WritesMemory),
-            ["live-debug"]  = new("live-debug",  new[] { ToolDomain.Memory, ToolDomain.Debug },                                                                                   ToolRisk.WritesMemory),
-            ["packets"]     = new("packets",     new[] { ToolDomain.Network, ToolDomain.Labels },                                                                                 ToolRisk.NetworkInjection),
-            ["patching"]    = new("patching",    new[] { ToolDomain.Memory, ToolDomain.Debug, ToolDomain.Labels, ToolDomain.Patching, ToolDomain.Cheats, ToolDomain.Pcsx2 },       ToolRisk.WritesMemory),
-            ["cheats"]      = new("cheats",      new[] { ToolDomain.Memory, ToolDomain.Patching, ToolDomain.Cheats },                                                             ToolRisk.WritesMemory),
+            ["re"]          = new("re",          new[] { ToolDomain.Memory, ToolDomain.Labels, ToolDomain.Patching },                                                             ToolRisk.MutatesDatabase),
+            ["packets"]     = new("packets",     new[] { ToolDomain.Network, ToolDomain.Labels },                                                                                 ToolRisk.MutatesDatabase),
+            ["patching"]    = new("patching",    new[] { ToolDomain.Memory, ToolDomain.Labels, ToolDomain.Patching, ToolDomain.Cheats },                                          ToolRisk.MutatesDatabase),
+            ["cheats"]      = new("cheats",      new[] { ToolDomain.Memory, ToolDomain.Patching, ToolDomain.Cheats },                                                             ToolRisk.MutatesDatabase),
             ["media"]       = new("media",       new[] { ToolDomain.Media, ToolDomain.Labels },                                                                                   ToolRisk.WritesDisk),
-            ["pcsx2"]       = new("pcsx2",       new[] { ToolDomain.Pcsx2, ToolDomain.Memory, ToolDomain.Debug, ToolDomain.Labels, ToolDomain.Pad },                              ToolRisk.WritesMemory),
             ["multi-agent"] = new("multi-agent", new[] { ToolDomain.Admin },                                                                                                      ToolRisk.MutatesDatabase),
-            ["admin"]       = new("admin",       new[] { ToolDomain.Admin, ToolDomain.Memory, ToolDomain.Debug, ToolDomain.Labels, ToolDomain.Network, ToolDomain.Patching, ToolDomain.Cheats, ToolDomain.Pcsx2, ToolDomain.Pad, ToolDomain.Media }, ToolRisk.Dangerous),
+            ["admin"]       = new("admin",       new[] { ToolDomain.Admin, ToolDomain.Memory, ToolDomain.Labels, ToolDomain.Network, ToolDomain.Patching, ToolDomain.Cheats, ToolDomain.Media }, ToolRisk.Dangerous),
             ["all"]         = new("all",         Enum.GetValues<ToolDomain>(),                                                                                                    ToolRisk.Dangerous),
         };
 

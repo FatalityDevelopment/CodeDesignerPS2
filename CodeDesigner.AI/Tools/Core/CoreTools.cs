@@ -13,7 +13,7 @@ namespace CodeDesigner.AI.Tools.Core;
 [CdTool("cd_session_init", ToolDomain.Core, ToolRisk.ReadOnly,
     "Start a session: compact summary (profile, game, bridge, active progress, agent onboarding, core rules, suggested next calls). Risk: read-only.")]
 public sealed class SessionInitTool(
-    IEmulatorBridge bridge, ICdContextProvider ctx, ToolProfile profile,
+    IWorkspaceBridge bridge, ICdContextProvider ctx, ToolProfile profile,
     IToolCatalog catalog, IAgentCoordinator coord, AgentIdentity identity,
     IOrchestrationCoordinator orchestration)
 {
@@ -113,9 +113,7 @@ public sealed class SessionInitTool(
         sb.AppendLine("  - this IS session_start — always call it first, every session, before any other tool");
         sb.AppendLine("  - navigate the VS Code UI with navigate_to so the user always sees the current focus");
         sb.AppendLine("  - prefer label tools (label_search / label_search_sets / label_list / get_functions) over query_db for label lookups");
-        sb.AppendLine("  - get_threads / get_modules / get_registers / call stack need the emulator PAUSED (hit a breakpoint first)");
-        sb.AppendLine("  - pad input is press THEN release: set the button to 1, advance frames, then set it back to 0");
-        sb.AppendLine("  - preview the screen with pcsx2_save_screenshot; reserve the GS stream for deeper analysis");
+        sb.AppendLine("  - this server is the workspace; everything live (memory, registers, breakpoints, scans, patches, pads, screenshots) is Ps2Emulator's MCP (ps2_* tools)");
         sb.AppendLine("  - after applying a CDS patch / cheat, display the final code + result so the user can see it");
         sb.AppendLine("  - label addresses/structures once confirmed; prefer summaries before raw dumps");
         sb.AppendLine("  - save a progress report at milestones and before ending the session");
@@ -167,8 +165,8 @@ public sealed class SessionInitTool(
 }
 
 [CdTool("cd_status", ToolDomain.Core, ToolRisk.ReadOnly,
-    "Compact backend status: profile, bridge connectivity, emulator/game info. Risk: read-only.")]
-public sealed class StatusTool(IEmulatorBridge bridge, ToolProfile profile)
+    "Compact backend status: profile and workspace (Bridge) connectivity. The emulator is Ps2Emulator's MCP (ps2_status). Risk: read-only.")]
+public sealed class StatusTool(IWorkspaceBridge bridge, ToolProfile profile)
 {
     [ToolEntryPoint]
     public async Task<string> InvokeAsync(CancellationToken ct = default)
@@ -212,7 +210,7 @@ public sealed class ToolIndexTool(IToolCatalog catalog)
 public sealed class ToolHelpTool(IToolCatalog catalog)
 {
     [ToolEntryPoint]
-    public string InvokeAsync([Description("Exact tool name, e.g. 'memory_read'.")] string tool)
+    public string InvokeAsync([Description("Exact tool name, e.g. 'label_add'.")] string tool)
         => catalog.Describe(tool);
 }
 
@@ -267,7 +265,7 @@ public sealed class ProgressSaveTool(ICdContextProvider ctx, SessionState state)
 
 [CdTool("label_list", ToolDomain.Core, ToolRisk.ReadOnly,
     "List labels from the active label set; optional substring filter on the label name. Risk: read-only.")]
-public sealed class LabelListTool(IEmulatorBridge bridge)
+public sealed class LabelListTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint]
     public async Task<string> InvokeAsync(
@@ -283,7 +281,7 @@ public sealed class LabelListTool(IEmulatorBridge bridge)
 
 [CdTool("label_add", ToolDomain.Core, ToolRisk.MutatesDatabase,
     "Create or update a label at an address. Risk: writes database.")]
-public sealed class LabelAddTool(IEmulatorBridge bridge, SessionState state)
+public sealed class LabelAddTool(IWorkspaceBridge bridge, SessionState state)
 {
     [ToolEntryPoint]
     public async Task<string> InvokeAsync(

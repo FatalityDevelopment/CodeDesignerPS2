@@ -19,7 +19,7 @@ export interface CheatListGame {
 /** Hooks into the rest of the extension (owned by DisasmPanelProvider). */
 export interface CheatListHost {
     getGame(): CheatListGame;
-    /** The game's disc serial (from PCSX2 or the selected disc), used to find its cheat lists. */
+    /** The game's disc serial (from the selected disc), used to find its cheat lists. */
     getSerial(): Promise<string | undefined>;
     /** Import the cheat repository's text files for `serial` into cheat lists; returns a status message. */
     importRepository(serial: string): Promise<string>;
@@ -193,7 +193,7 @@ export class CheatListProvider {
             case 'importRepository': {
                 await this._withBusy(webview, type, async () => {
                     const serial = await this.host.getSerial();
-                    if (!serial) { throw new Error('No game serial — select a game in the Emulator tab or start one in PCSX2.'); }
+                    if (!serial) { throw new Error('No game serial — select a game in the Emulator tab.'); }
                     const message = await this.host.importRepository(serial);
                     await this._postList(webview);
                     webview.postMessage({ type: 'status', message });
@@ -299,7 +299,7 @@ export class CheatListProvider {
         try {
             if (!state.connected) { throw new Error('Not connected to the CodeDesigner bridge.'); }
             const serial = await this.host.getSerial();
-            if (!serial) { throw new Error('No game serial — select a game in the Emulator tab or start one in PCSX2.'); }
+            if (!serial) { throw new Error('No game serial — select a game in the Emulator tab.'); }
             state.serial = serial;
 
             const result = await this.socketClient.getGameCheats(serial, listId ?? doc.archiveCheatListId);

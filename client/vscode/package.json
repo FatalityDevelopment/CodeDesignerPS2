@@ -22,7 +22,12 @@
         "codedesigner.ps2Emulator.debugServer": {
           "type": "string",
           "default": "127.0.0.1:28100",
-          "markdownDescription": "Address (`host:port`) of Ps2Emulator's debug server, started with `ps2 bios|elf ... --debug-server <port>`. **Connect to Ps2Emulator** talks to it directly, without the Bridge."
+          "markdownDescription": "Address (`host:port`) of Ps2Emulator's debug server. **Run** starts Ps2Emulator with it (`--debug-server`); **Connect to Ps2Emulator** attaches to one started by hand."
+        },
+        "codedesigner.ps2Emulator.network": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Start Ps2Emulator with its network adapter (`--network`): a user-mode NAT gives the PS2 DHCP, DNS and the internet through host sockets."
         }
       }
     },
@@ -96,11 +101,11 @@
       },
       {
         "command": "codedesigner.openElfFile",
-        "title": "CodeDesigner: Open in Emulator (File Mode)"
+        "title": "CodeDesigner: Open in Ps2Emulator"
       },
       {
         "command": "codedesigner.openGsFrameViewer",
-        "title": "CodeDesigner: Open Preview (Live PCSX2 Display)"
+        "title": "CodeDesigner: Open Preview (Ps2Emulator Display)"
       },
       {
         "command": "codedesigner.openAgentActivity",
@@ -161,7 +166,7 @@
       },
       {
         "command": "codedesigner.toggleEmulatorConnection",
-        "title": "CodeDesigner: Connect / Disconnect Emulator",
+        "title": "CodeDesigner: Run / Close Ps2Emulator",
         "icon": "$(plug)"
       },
       {

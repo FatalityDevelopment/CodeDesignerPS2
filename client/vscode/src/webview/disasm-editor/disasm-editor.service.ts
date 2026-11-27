@@ -12,7 +12,7 @@ import {
   CallStackEntry,
   ThreadEntry,
   RegisterData,
-  PineWatchInfo,
+  WatchInfo,
 } from './state/types';
 
 // Re-export types for backward compatibility
@@ -23,7 +23,7 @@ export type {
   SymLabel,
   ThreadEntry,
   RegisterData,
-  PineWatchInfo,
+  WatchInfo,
 } from './state/types';
 
 // ── Editor state ──────────────────────────────────────────────────────────────
@@ -51,8 +51,8 @@ export interface DisasmEditorState {
   isLive: boolean;
   breakpoints: Set<number>;
   breakpointHitAddress: number | undefined;
-  /** Active PINE hardware watchpoints (synced from PCSX2 via PINELISTWATCHES). */
-  pineWatches: PineWatchInfo[];
+  /** Active watchpoints (synced from Ps2Emulator). */
+  watchList: WatchInfo[];
   /** The virtual PC address where the emulator is currently paused.  Tracked
    *  separately from `cursor` so that the PC indicator stays visible even
    *  after the user navigates the cursor away from the paused instruction. */
@@ -122,7 +122,7 @@ export class DisasmEditorService implements OnDestroy {
     isLive: false,
     breakpoints: new Set<number>(),
     breakpointHitAddress: undefined,
-    pineWatches: [],
+    watchList: [],
     pcAddress: undefined,
     symLabels: [],
     pointerLabels: [],

@@ -8,7 +8,7 @@ import {
   computed,
   OnDestroy,
 } from '@angular/core';
-import { CallStackEntry, ModuleEntry, ThreadEntry, PineWatchInfo } from '../state/types';
+import { CallStackEntry, ModuleEntry, ThreadEntry, WatchInfo } from '../state/types';
 import { IconComponent } from '../../shared/icon.component';
 
 export type BottomTab = 'callstack' | 'threads' | 'breakpoints' | 'modules' | 'watches';
@@ -210,14 +210,14 @@ export class BottomPanelComponent implements OnDestroy {
   readonly threads = input<ThreadEntry[]>([]);
   readonly breakpoints = input<Set<number>>(new Set());
   readonly modules = input<ModuleEntry[]>([]);
-  readonly watches = input<PineWatchInfo[]>([]);
+  readonly watches = input<WatchInfo[]>([]);
 
   // Outputs
   readonly navigateToAddress = output<number>();
   readonly toggleBreakpoint = output<number>();
   readonly removeBreakpoint = output<number>();
   readonly clearAllBreakpoints = output<void>();
-  readonly removeWatch = output<PineWatchInfo>();
+  readonly removeWatch = output<WatchInfo>();
   readonly clearAllWatches = output<void>();
   readonly navigateToWatchAddress = output<number>();
   readonly selectThread = output<number>();
@@ -257,7 +257,7 @@ export class BottomPanelComponent implements OnDestroy {
     return parseInt(s.replace(/^0x/i, ''), 16) || 0;
   }
 
-  parseWatchStart(w: PineWatchInfo): number {
+  parseWatchStart(w: WatchInfo): number {
     return parseInt(w.Start, 16) || 0;
   }
 

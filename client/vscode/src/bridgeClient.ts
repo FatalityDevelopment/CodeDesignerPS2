@@ -1,6 +1,29 @@
-import type { DirectEmulator, DirectHintLevel, DirectPadButton, DirectRef, DirectRefKind } from './ps2debug/directEmulator';
+import * as fs from 'fs';
+import * as path from 'path';
+import { encodePng } from './utils/png';
+import type { DirectEmulator, DirectHintLevel, DirectPadButton, DirectRef, DirectRefKind, DirectSpace } from './ps2debug/directEmulator';
 
-/** PINE's pad button mask (active-low): Select at bit 0 up to Square at bit 15. */
+/** The pad button mask (active-low), as PS2 pads report it: Select at bit 0 up to Square at bit 15. */
+/** What a snapshot holds: each physical memory, as the files Code Designer has always written. */
+const SNAPSHOT_REGIONS: { label: string; file: string; space: DirectSpace; base: number; size: number }[] = [
+    { label: 'EE RAM',     file: 'EEmem.bin',      space: 'EE_RAM',     base: 0x00000000, size: 32 << 20 },
+    { label: 'BIOS ROM',   file: 'BIOSrom.bin',    space: 'BIOS',       base: 0x1FC00000, size: 4 << 20 },
+    { label: 'Scratchpad', file: 'Scratchpad.bin', space: 'SCRATCHPAD', base: 0x70000000, size: 16 << 10 },
+    { label: 'IOP RAM',    file: 'IOPmem.bin',     space: 'IOP_RAM',    base: 0x1C000000, size: 2 << 20 },
+];
+
+/** Addresses (from `base`) where `pattern` occurs in `data`; -1 in the pattern matches any byte. */
+export function findPattern(data: Buffer, pattern: number[], base: number): number[] {
+    const matches: number[] = [];
+    if (pattern.length === 0) { return matches; }
+    for (let at = 0; at + pattern.length <= data.length; at++) {
+        let k = 0;
+        while (k < pattern.length && (pattern[k] < 0 || data[at + k] === pattern[k])) { k++; }
+        if (k === pattern.length) { matches.push((base + at) >>> 0); }
+    }
+    return matches;
+}
+
 const PINE_BUTTONS: DirectPadButton[] = [
     'select', 'l3', 'r3', 'start', 'up', 'right', 'down', 'left',
     'l2', 'r2', 'l1', 'r1', 'triangle', 'circle', 'cross', 'square',
@@ -107,28 +130,16 @@ interface CommandMessage {
     Region?: string;
     OutputPath?: string;
     InputPath?: string;
-    BreakpointAddress?: number;
     Label?: string;
     Comment?: string;
     Query?: string;
     SearchMode?: string;
     TargetAddress?: number;
     ReferenceKinds?: string[];
-    XrefRebuild?: boolean;
-    XrefWait?: boolean;
-    RegisterName?: string;
-    RegisterIndex?: number;
-    RegisterValue?: string;
     // LISTDISCELFS / RECOMPILE fields
     IsoPath?: string;
     ElfName?: string;
     OutputDirectory?: string;
-    // Runtime mode switch fields (control-server mode)
-    BiosPath?: string;
-    DiscPath?: string;
-    Steps?: number;
-    Pcsx2Host?: string;
-    Pcsx2Slot?: number;
     // CONVERTCHEAT fields
     Format?: string;
     Direction?: string;
@@ -172,21 +183,10 @@ interface CommandMessage {
     StructBaseAddress?: string;
     MemberOffset?: number;
     MemberName?: string;
-    // READMEMREGION fields
-    SearchPattern?: number[];
-    // CDS cheat engine (INJECTCHEATENGINE / BUILDCHEATENGINE)
+    // CDS cheat engine (BUILDCHEATENGINE)
+    HookWords?: number[];
     HookAddress?: number;
     EngineBase?: number;
-    // PINEADDWATCH / PINEREMOVEWATCH / PINELISTWATCHES fields
-    /** CPU selector: 0 = EE, 1 = IOP, 0xFF = both. */
-    CpuSel?: number;
-    /** Condition bitmask for PINEADDWATCH: 1 = read, 2 = write, 3 = read+write. */
-    WatchCond?: number;
-    // TRACECALLS fields
-    MaxInstructions?: number;
-    // RUNUNTILPC fields
-    TargetPc?: number;
-    TimeoutMs?: number;
     // Navigation-history source for address-bearing commands.
     NavSource?: string;
     // GETADDRESSHISTORY fields
@@ -260,43 +260,12 @@ interface CommandMessage {
     // Cheats editor (CHEATEDITOR_*)
     CheatGameId?: number;
     CheatListId?: number;
-    // Pad / controller input (PADGETSTATE / PADSETBUTTON / PADSETANALOG / PADSETSTATE / PADGETTYPE)
-    /** Unified pad slot index (0–7). */
-    PadSlot?: number;
-    /** Button index in PadDualshock2::Inputs (0–25) for PADSETBUTTON. */
-    PadButtonIndex?: number;
-    /** Normalized button value (0.0–1.0) for PADSETBUTTON. */
-    PadButtonValue?: number;
-    /** Left stick X for PADSETANALOG / PADSETSTATE (0–255, 0x7F = centred). */
-    PadLx?: number;
-    /** Left stick Y for PADSETANALOG / PADSETSTATE (0–255, 0x7F = centred). */
-    PadLy?: number;
-    /** Right stick X for PADSETANALOG / PADSETSTATE (0–255, 0x7F = centred). */
-    PadRx?: number;
-    /** Right stick Y for PADSETANALOG / PADSETSTATE (0–255, 0x7F = centred). */
-    PadRy?: number;
-    /** PS2 button bitmask for PADSETSTATE (reserved; button state derived from pressures). */
-    PadButtons?: number;
-    /** 16 pressure bytes for PADSETSTATE (in PadDualshock2::Inputs order). */
-    PadPressures?: number[];
-    // PINESETAUDIOMUTED field
-    AudioMuted?: boolean;
-    // DEV9 Network (NETCAPTURE / NETRECVCAPTURE / NETINJECT / NETINJECTTX / NETDISASSEMBLE / NETSETFILTER)
-    NetCaptureEnable?: boolean;
-    NetCaptureDirection?: number;
-    NetCaptureMaxQueue?: number;
-    NetMaxPackets?: number;
+    // Network frames (NETBUILDFRAME / NETDISASSEMBLE / NETDISSECTMANY / NETBUILDMESSAGE)
     NetFrameData?: string;
-    NetFilterType?: number;
-    NetFilterProtocol?: number;
-    NetFilterPort?: number;
-    NetFilterIP?: string;
-    /** NETINJECT / NETINJECTTX / NETBUILDFRAME: new TCP/UDP payload (base64) for the NetFrameData template. */
+    /** NETBUILDFRAME: new TCP/UDP payload (base64) for the NetFrameData template. */
     NetPayloadData?: string;
-    /** NETINJECT / NETINJECTTX / NETBUILDFRAME: recompute IPv4/TCP/UDP lengths and checksums. */
+    /** NETBUILDFRAME: recompute IPv4/TCP/UDP lengths and checksums. */
     NetFixFrame?: boolean;
-    /** NETINJECT / NETINJECTTX / NETBUILDFRAME: continue the live TCP flow's seq/ack. */
-    NetTcpContinue?: boolean;
     /** NETDISSECTMANY: frames to dissect in one call. */
     NetFrames?: Array<{ data: string; direction: number; timestampUs: number }>;
     /** NETBUILDMESSAGE: catalog protocol, message id, field values, wrapping RT type and APP target. */
@@ -689,10 +658,6 @@ export interface CommandResponse {
     // READMEMREGION results
     MatchAddresses?: number[];
     ReadMemBatch?: Record<string, string>;
-    // PINELISTWATCHES result
-    PineWatches?: PineWatchInfo[];
-    // TRACECALLS result
-    TracedCalls?: CallTraceEntry[];
     // MCPMEMORY_LIST / MCPMEMORY_ADD / MCPMEMORY_GET / MCPMEMORY_UPDATE results
     McpMemories?: McpMemoryInfo[];
     McpMemory?: McpMemoryInfo;
@@ -726,19 +691,11 @@ export interface CommandResponse {
     CheatListTitle?: string;
     // PADGETSTATE result
     PadState?: PadStateInfo;
-    // PADGETTYPE result
-    PadControllerType?: number;
-    // PINESETAUDIOMUTED / PINEGETAUDIOSTATE results
-    AudioMuted?: boolean;
-    AudioMutedInSettings?: boolean;
-    // NETGETSTATUS / NETGETSTATS / NETRECVCAPTURE / NETDISASSEMBLE results
-    NetStatus?: NetStatusInfo;
-    NetStats?: NetStatsInfo;
+    // NETDISSECTMANY / NETDISASSEMBLE results
     CapturedPackets?: CapturedPacketInfo[];
     ParsedPacketRows?: ParsedPacketRow[];
     DissectionText?: string;
-    InjectionSuccess?: boolean;
-    // NETINJECT / NETINJECTTX / NETBUILDFRAME / NETBUILDMESSAGE / NETCATALOG results
+    // NETBUILDFRAME / NETBUILDMESSAGE / NETCATALOG results
     NetFrame?: string;
     NetMessageData?: string;
     NetCatalog?: NetCatalogEntry[];
@@ -901,9 +858,9 @@ export interface HddFileEntryInfo {
 }
 
 /**
- * A PINE hardware memory watchpoint returned by listPineWatches().
+ * A watchpoint returned by listWatches().
  */
-export interface PineWatchInfo {
+export interface WatchInfo {
     /** CPU the watchpoint applies to: "EE" or "IOP". */
     Cpu:   string;
     /** Inclusive start address as a hex string (e.g. "0x00200000"). */
@@ -922,13 +879,6 @@ export interface PineWatchInfo {
 export interface CallTraceEntry {
     From: string;
     To:   string;
-}
-
-/** PCSX2 audio output state returned by PINESETAUDIOMUTED / PINEGETAUDIOSTATE. */
-export interface AudioState {
-    muted: boolean;
-    /** PCSX2's "Mute All Sound" setting is on; unmuting over PINE has no effect. */
-    mutedInSettings: boolean;
 }
 
 /**
@@ -1176,7 +1126,7 @@ export interface CdsSidecarResult {
     Operator?: string;
     /** Expected memory value for assert. */
     ExpectedValue?: number;
-    /** Actual value read from live memory (null if no live backend). */
+    /** Actual value read from Ps2Emulator's memory (unset when it does not run). */
     ActualValue?: number;
     /** true = passed, false = failed, undefined = not checked. */
     AssertPassed?: boolean;
@@ -1367,6 +1317,8 @@ export class BridgeClient {
     private directPads: { buttons: DirectPadButton[]; sticks: [number, number, number, number] }[] = [];
     /** Packets taken from the direct emulator since capture started, for row numbers. */
     private directCaptured = 0;
+    /** When the first captured packet was taken, for the time column. */
+    private directCaptureStartUs: number | undefined;
 
     private async directPadHold(
         direct: DirectEmulator, port: number, buttons: DirectPadButton[], sticks: [number, number, number, number],
@@ -1441,11 +1393,6 @@ export class BridgeClient {
      * destroys the first one's listeners and leaves its Promise permanently pending.
      */
     private _connectingPromise: Promise<void> | null = null;
-    /**
-     * In-flight coalescing for identical READMEM requests. This collapses
-     * concurrent duplicate polls from multiple UI sources into one socket command.
-     */
-    private _readMemInflight = new Map<string, Promise<Buffer>>();
     private _interactiveQueue: Array<() => Promise<void>> = [];
     private _backgroundQueue: Array<() => Promise<void>> = [];
     private _queuePumping = false;
@@ -1714,6 +1661,18 @@ export class BridgeClient {
     }
 
     /**
+     * The emulator for a live call: Ps2Emulator, connected directly. The
+     * Bridge serves the workspace only, so without it there is no emulator.
+     */
+    public requireDirect(): DirectEmulator {
+        const direct = this.getDirect();
+        if (!direct) {
+            throw new Error('Ps2Emulator is not connected: Run it from the panel, or use "CodeDesigner: Connect to Ps2Emulator".');
+        }
+        return direct;
+    }
+
+    /**
      * Sends live emulator calls to `emulator` from now on, and tells the
      * connection handlers (views refresh as on a Bridge connection).
      */
@@ -1924,10 +1883,29 @@ export class BridgeClient {
             throw new Error(response.Error || 'Compilation failed');
         }
 
-        return {
-            results:  response.Results  ?? [],
-            sidecars: response.Sidecars ?? [],
-        };
+        const results = response.Results ?? [];
+        const sidecars = response.Sidecars ?? [];
+        // Asserts are checked against Ps2Emulator's memory, when it runs: a failed one
+        // aborts the code output, as it always has.
+        const direct = this.getDirect();
+        if (direct) {
+            const failures: InstructionResult[] = [];
+            for (const sc of sidecars.filter(s => s.Kind === 'assert' && s.ExpectedValue !== undefined)) {
+                try {
+                    const actual = (await direct.readMemory(sc.Address >>> 0, 4, 'ee')).readUInt32LE(0);
+                    sc.ActualValue = actual;
+                    sc.AssertPassed = sc.Operator === '!=' ? actual !== sc.ExpectedValue : actual === sc.ExpectedValue;
+                    if (!sc.AssertPassed) {
+                        const hex = (n: number) => `0x${(n >>> 0).toString(16).toUpperCase().padStart(8, '0')}`;
+                        failures.push({ Success: false, Error: `Assert failed at ${hex(sc.Address)}: expected ${sc.Operator ?? '=='} ${hex(sc.ExpectedValue!)}, got ${hex(actual)}` } as InstructionResult);
+                    }
+                } catch { /* unreadable: left unchecked */ }
+            }
+            if (failures.length > 0) {
+                return { results: [...results.filter(r => !r.Success), ...failures], sidecars };
+            }
+        }
+        return { results, sidecars };
     }
 
     public async validateCds(sourceCode: string, labels?: LabelEntry[]): Promise<{ success: boolean; message?: string; diagnostics: CdsDiagnostic[] }> {
@@ -1975,7 +1953,7 @@ export class BridgeClient {
      */
     public async disassemble(hexCode: string, startAddress?: number, gameId?: string, skipDataFormatOverrides = false): Promise<InstructionResult[]> {
         const direct = this.getDirect();
-        if (direct && !this.connected) {
+        if (direct) {
             // Disassembly from the emulator, with its state hints in the
             // comment column. Data-format overrides need the Bridge
             // (workspace service) and are left out.
@@ -2118,39 +2096,8 @@ export class BridgeClient {
      * @param region   - "ee" (default) or "iop"
      */
     public async readMemory(address: number, length: number, region: string = 'ee'): Promise<Buffer> {
-        const direct = this.getDirect();
-        if (direct) {
-            return direct.readMemory(address, length, region);
-        }
-        const key = `${region}:${address >>> 0}:${length >>> 0}`;
-        const existing = this._readMemInflight.get(key);
-        if (existing) {
-            return existing;
-        }
-
-        const pending = (async () => {
-        const command: CommandMessage = {
-            Command: 'READMEM',
-            Address: address,
-            Length: length,
-            Region: region,
-        };
-
-        const response = await this.sendCommand(command);
-
-        if (!response.Success || !response.Data) {
-            throw new Error(response.Error || 'ReadMem failed');
-        }
-
-        return Buffer.from(response.Data, 'base64');
-        })();
-
-        this._readMemInflight.set(key, pending);
-        try {
-            return await pending;
-        } finally {
-            this._readMemInflight.delete(key);
-        }
+        const direct = this.requireDirect();
+        return direct.readMemory(address, length, region);
     }
 
     /**
@@ -2163,186 +2110,69 @@ export class BridgeClient {
         region: string = 'ee',
     ): Promise<Map<number, Buffer>> {
         if (addresses.length === 0) return new Map();
-        const direct = this.getDirect();
-        if (direct) {
-            return direct.readMemoryBatch(addresses, length, region);
-        }
-
-        const command: CommandMessage = {
-            Command: 'READMEMBATCH',
-            Addresses: addresses.map(a => a >>> 0),
-            Length: length,
-            Region: region,
-        };
-        const response = await this.sendCommand(command);
-        if (!response.Success) {
-            throw new Error(response.Error || 'READMEMBATCH failed');
-        }
-        const raw = response.ReadMemBatch ?? {};
-        const out = new Map<number, Buffer>();
-        for (const [hex, b64] of Object.entries(raw)) {
-            const addr = parseInt(hex, 16) >>> 0;
-            if (!Number.isNaN(addr) && typeof b64 === 'string') {
-                out.set(addr, Buffer.from(b64, 'base64'));
-            }
-        }
-        return out;
+        const direct = this.requireDirect();
+        return direct.readMemoryBatch(addresses, length, region);
     }
 
     /**
-     * Read a contiguous region of EE RAM (up to 16 MB) in one call.
-     * Optionally search for a byte pattern within the result.
+     * Reads a contiguous region of memory from Ps2Emulator in one call, optionally finding a
+     * byte pattern in it (-1 matches any byte).
      *
-     * @param start          - Inclusive start virtual EE address.
-     * @param end            - Exclusive end virtual EE address (must be > start).
+     * @param start          - Inclusive start address.
+     * @param end            - Exclusive end address (must be > start).
      * @param searchPattern  - Optional byte pattern to search for.
      * @param region         - "ee" (default) or "iop".
-     * @param timeoutMs      - Socket timeout; raise it for multi-megabyte reads.
-     * @returns              - Hex-string of all bytes and list of absolute match addresses.
+     * @returns              - The bytes as hex and the absolute addresses of matches.
      */
     public async readMemoryRegion(
         start: number,
         end: number,
         searchPattern?: number[],
         region: string = 'ee',
-        timeoutMs: number = 10000,
     ): Promise<{ bytes: string; matches: number[] }> {
-        const command: CommandMessage = {
-            Command: 'READMEMREGION',
-            Address: start,
-            EndAddress: end,
-            SearchPattern: searchPattern,
-            Region: region,
-        };
-        const response = await this.sendCommand(command, timeoutMs);
-        if (!response.Success) {
-            throw new Error(response.Error || 'ReadMemRegion failed');
-        }
-        return {
-            bytes:   response.Data ?? '',
-            matches: response.MatchAddresses ?? [],
-        };
+        const data = await this.readLive(start, end - start, region);
+        return { bytes: data.toString('hex'), matches: searchPattern ? findPattern(data, searchPattern, start) : [] };
+    }
+
+    /** `length` bytes of live memory from Ps2Emulator, for analysis in the workspace service. */
+    private async readLive(address: number, length: number, region: string = 'ee'): Promise<Buffer> {
+        if (length <= 0) { throw new Error('the range is empty'); }
+        return this.requireDirect().readMemory(address >>> 0, length, region);
     }
 
     /**
-     * Search live memory for a byte pattern without transferring the bytes (SCANPATTERN).
+     * Finds a byte pattern in live memory.
      * @param start    Inclusive start address.
-     * @param end      Exclusive end address (max 32 MB span).
+     * @param end      Exclusive end address.
      * @param pattern  Byte values 0–255; -1 is a wildcard.
      * @param region   "ee" (default) or "iop".
      * @returns        Absolute addresses of every match.
      */
     public async scanPattern(start: number, end: number, pattern: number[], region: string = 'ee'): Promise<number[]> {
-        const command: CommandMessage = {
-            Command:       'SCANPATTERN',
-            Address:       start,
-            EndAddress:    end,
-            SearchPattern: pattern,
-            Region:        region,
-        };
-        const response = await this.sendCommand(command, 120000);
-        if (!response.Success) {
-            throw new Error(response.Error || 'ScanPattern failed');
-        }
-        return response.MatchAddresses ?? [];
+        return findPattern(await this.readLive(start, end - start, region), pattern, start);
     }
 
-    // ── PINE hardware watchpoints ──────────────────────────────────────────────
+    // ── Watchpoints (Ps2Emulator) ──────────────────────────────────────────────
 
-    /**
-     * Add a hardware memory watchpoint in PCSX2 for the range [start, end).
-     * Backed by CBreakPoints MemCheck (MEMCHECK_BREAK). JIT-only.
-     *
-     * @param start - Inclusive start EE virtual address.
-     * @param end   - Exclusive end EE virtual address (start + size).
-     * @param cond  - 1 = read, 2 = write, 3 = read+write (default).
-     * @param cpu   - 0 = EE (default), 1 = IOP.
-     */
-    public async addPineWatch(
-        start: number,
-        end:   number,
-        cond:  number = 3,
-        cpu:   number = 0,
-    ): Promise<void> {
-        const command: CommandMessage = {
-            Command:    'PINEADDWATCH',
-            CpuSel:     cpu,
-            Address:    start,
-            EndAddress: end,
-            WatchCond:  cond,
-        };
-        const response = await this.sendCommand(command);
-        if (!response.Success) {
-            throw new Error(response.Error || 'AddPineWatch failed');
-        }
+    /** Watches EE accesses to [start, end): `cond` 1 = read, 2 = write, 3 = both (default). */
+    public async addWatch(start: number, end: number, cond: number = 3): Promise<void> {
+        const access = cond === 1 ? 'read' : cond === 2 ? 'write' : 'read+write';
+        await this.requireDirect().setWatchpoint(start, end, access);
     }
 
-    /**
-     * Remove a hardware memory watchpoint from PCSX2 for the range [start, end).
-     * Throws if no matching range is found on the specified CPU.
-     */
-    public async removePineWatch(
-        start: number,
-        end:   number,
-        cpu:   number = 0,
-    ): Promise<void> {
-        const command: CommandMessage = {
-            Command:    'PINEREMOVEWATCH',
-            CpuSel:     cpu,
-            Address:    start,
-            EndAddress: end,
-        };
-        const response = await this.sendCommand(command);
-        if (!response.Success) {
-            throw new Error(response.Error || 'RemovePineWatch failed');
-        }
+    /** Removes the watchpoints on exactly [start, end). */
+    public async removeWatch(start: number, end: number): Promise<void> {
+        await this.requireDirect().clearWatchpoints({ start, end });
     }
 
-    /** Clear all active hardware memory watchpoints on all CPUs in PCSX2. */
-    public async clearAllPineWatches(): Promise<void> {
-        const command: CommandMessage = { Command: 'PINECLEARALLWATCHES' };
-        const response = await this.sendCommand(command);
-        if (!response.Success) {
-            throw new Error(response.Error || 'ClearAllPineWatches failed');
-        }
+    public async clearAllWatches(): Promise<void> {
+        await this.requireDirect().clearWatchpoints();
     }
 
-    /**
-     * Return all currently active PINE hardware watchpoints.
-     * @param cpuSel - 0 = EE, 1 = IOP, 255 = both (default).
-     */
-    public async listPineWatches(cpuSel: number = 0xFF): Promise<PineWatchInfo[]> {
-        const command: CommandMessage = { Command: 'PINELISTWATCHES', CpuSel: cpuSel };
-        const response = await this.sendCommand(command);
-        if (!response.Success) {
-            throw new Error(response.Error || 'ListPineWatches failed');
-        }
-        return response.PineWatches ?? [];
-    }
-
-    /**
-     * Step the emulator instruction-by-instruction from the current PC to endPc,
-     * recording every JAL/JALR call site encountered.
-     * The emulator must be paused before calling this method.
-     *
-     * @param endPc           - Exclusive target PC at which tracing stops.
-     * @param maxInstructions - Safety cap on instructions stepped (default 10 000).
-     * @returns               - Ordered list of { From, To } call-site entries.
-     */
-    public async traceCalls(
-        endPc: number,
-        maxInstructions: number = 10_000,
-    ): Promise<CallTraceEntry[]> {
-        const command: CommandMessage = {
-            Command: 'TRACECALLS',
-            EndAddress: endPc,
-            MaxInstructions: maxInstructions,
-        };
-        const response = await this.sendCommand(command);
-        if (!response.Success) {
-            throw new Error(response.Error || 'TraceCalls failed');
-        }
-        return response.TracedCalls ?? [];
+    public async listWatches(): Promise<WatchInfo[]> {
+        const hex = (n: number) => `0x${(n >>> 0).toString(16).toUpperCase().padStart(8, '0')}`;
+        return (await this.requireDirect().listWatchpoints())
+            .map(w => ({ Cpu: 'EE', Start: hex(w.start), End: hex(w.end), Cond: w.access }));
     }
 
     /**
@@ -2354,88 +2184,59 @@ export class BridgeClient {
      * @returns         - Full register dump (same shape as getRegisters()).
      */
     public async runUntilPc(targetPc: number, timeoutMs: number = 10_000): Promise<RegisterDump> {
-        const direct = this.getDirect();
-        if (direct) {
-            await direct.runTo(targetPc, timeoutMs);
-            return direct.getRegisters();
-        }
-        const command: CommandMessage = {
-            Command: 'RUNUNTILPC',
-            TargetPc: targetPc,
-            TimeoutMs: timeoutMs,
-        };
-        // Give the TCP socket extra headroom over the server-side timeout.
-        const response = await this.sendCommand(command, timeoutMs + 5_000);
-        if (!response.Success) {
-            throw new Error(response.Error || 'RunUntilPc failed');
-        }
-        return this.parseRegisterDump(response);
+        const direct = this.requireDirect();
+        await direct.runTo(targetPc, timeoutMs);
+        return direct.getRegisters();
     }
 
     /**
-     * Take a snapshot: write all memory regions to .bin files in outputPath.
-     * Returns the list of written region descriptors.
+     * Takes a snapshot: writes Ps2Emulator's memory (EE RAM, BIOS, scratchpad, IOP RAM) to .bin
+     * files in outputPath, with the displayed frame as Screenshot.png, and records it in the
+     * workspace. Returns the regions written.
      */
-    public async snapshot(outputPath: string): Promise<SnapshotRegion[]> {
-        const command: CommandMessage = {
-            Command: 'SNAPSHOT',
-            OutputPath: outputPath,
-        };
-
-        const response = await this.sendCommand(command);
-
-        if (!response.Success) {
-            throw new Error(response.Error || 'Snapshot failed');
+    public async snapshot(outputPath: string, isoName?: string, title?: string, description?: string): Promise<SnapshotRegion[]> {
+        const direct = this.requireDirect();
+        fs.mkdirSync(outputPath, { recursive: true });
+        const regions: SnapshotRegion[] = [];
+        for (const r of SNAPSHOT_REGIONS) {
+            const bytes = await direct.readSpace(r.space, 0, r.size);
+            fs.writeFileSync(path.join(outputPath, r.file), bytes);
+            regions.push({ Label: r.label, File: r.file, BaseAddress: r.base, Size: bytes.length });
         }
+        try {
+            const frame = await direct.screenshot();
+            fs.writeFileSync(path.join(outputPath, 'Screenshot.png'), encodePng(frame.width, frame.height, frame.rgba));
+        } catch { /* nothing displayed yet: a snapshot without a picture */ }
+        await this.registerSnapshot(outputPath, regions, isoName, title, description);
+        return regions;
+    }
 
-        return response.Regions || [];
+    /** Records a snapshot directory in the workspace (snapshot-info.json and the database). */
+    public async registerSnapshot(outputPath: string, regions: SnapshotRegion[], isoName?: string, title?: string, description?: string): Promise<void> {
+        const response = await this.sendCommand({
+            Command: 'REGISTERSNAPSHOT', OutputPath: outputPath, Regions: regions, IsoName: isoName, Title: title, Description: description,
+        } as CommandMessage);
+        if (!response.Success) {
+            throw new Error(response.Error || 'RegisterSnapshot failed');
+        }
     }
 
     /**
-     * Reload a snapshot as a save state: read .bin files from inputPath and
-     * restore them into the live emulator memory.  The emulator is paused
-     * automatically and remains paused after the restore completes.
-     * Returns the list of restored region descriptors.
+     * Restores a snapshot's RAM (EE RAM, scratchpad, IOP RAM) into Ps2Emulator, paused first; it
+     * stays paused. The BIOS is read-only and left alone. Returns the regions restored.
      */
     public async loadSnapshot(inputPath: string): Promise<SnapshotRegion[]> {
-        const command: CommandMessage = {
-            Command: 'LOADSNAPSHOT',
-            InputPath: inputPath,
-        };
-
-        const response = await this.sendCommand(command, 60_000);
-
-        if (!response.Success) {
-            throw new Error(response.Error || 'Load snapshot failed');
+        const direct = this.requireDirect();
+        await direct.pause();
+        const regions: SnapshotRegion[] = [];
+        for (const r of SNAPSHOT_REGIONS.filter(r => r.space !== 'BIOS')) {
+            const file = path.join(inputPath, r.file);
+            if (!fs.existsSync(file)) { continue; }
+            const bytes = fs.readFileSync(file).subarray(0, r.size);
+            await direct.writeSpace(r.space, 0, bytes);
+            regions.push({ Label: r.label, File: file, BaseAddress: r.base, Size: bytes.length });
         }
-
-        return response.Regions || [];
-    }
-
-    /**
-     * Load a PS2 ELF32 executable into the internal emulator's memory bus.
-     * PT_LOAD segments are written to EE RAM at their virtual addresses and
-     * the EE program counter is set to the ELF entry point.  The emulator is
-     * left paused so the caller can set breakpoints before resuming.
-     *
-     * Only works with the internal emulator (not PCSX2 PINE mode).
-     *
-     * @param filePath  Absolute path to the ELF32 file.
-     * @returns The ELF entry-point address and loaded region descriptors.
-     */
-    public async loadElf(filePath: string): Promise<{ entryPoint: number; regions: SnapshotRegion[] }> {
-        const command: CommandMessage = {
-            Command: 'LOADELF',
-            InputPath: filePath,
-        };
-
-        const response = await this.sendCommand(command);
-
-        if (!response.Success) {
-            throw new Error(response.Error || 'LoadElf failed');
-        }
-
-        return { entryPoint: response.PC ?? 0, regions: response.Regions || [] };
+        return regions;
     }
 
     /**
@@ -2450,93 +2251,40 @@ export class BridgeClient {
      * Pause emulator execution
      */
     public async pause(): Promise<void> {
-        const direct = this.getDirect();
-        if (direct) {
-            return direct.pause();
-        }
-        const command: CommandMessage = { Command: 'PAUSE' };
-        const response = await this.sendCommand(command);
-        if (!response.Success) {
-            throw new Error(response.Error || 'Pause failed');
-        }
-    }
-
-    /**
-     * REFRESHANALYSIS — ask the Bridge to re-mirror live memory + registers
-     * into its analysis cache. Fire-and-forget on pause-state change so the
-     * next DISASSEMBLE sees a warm mirror and the comment column lights up
-     * with state-aware hints (`[TAKEN]` / `[NOT TAKEN]`, resolved pointer
-     * targets, etc.) on first render.
-     */
-    public async refreshAnalysis(): Promise<void> {
-        if (!this.connected && this.isDirect()) {
-            return; // The direct emulator keeps no analysis mirror to refresh.
-        }
-        const command: CommandMessage = { Command: 'REFRESHANALYSIS' };
-        const response = await this.sendCommand(command);
-        if (!response.Success) {
-            throw new Error(response.Error || 'REFRESHANALYSIS failed');
-        }
+        const direct = this.requireDirect();
+        return direct.pause();
     }
 
     /**
      * Resume emulator execution
      */
     public async resume(): Promise<void> {
-        const direct = this.getDirect();
-        if (direct) {
-            return direct.resume();
-        }
-        const command: CommandMessage = { Command: 'RESUME' };
-        const response = await this.sendCommand(command);
-        if (!response.Success) {
-            throw new Error(response.Error || 'Resume failed');
-        }
+        const direct = this.requireDirect();
+        return direct.resume();
     }
 
     /**
      * Set a breakpoint at the given EE virtual address
      */
     public async setBreakpoint(address: number): Promise<void> {
-        const direct = this.getDirect();
-        if (direct) {
-            return direct.setBreakpoint(address);
-        }
-        const command: CommandMessage = { Command: 'SETBP', BreakpointAddress: address };
-        const response = await this.sendCommand(command);
-        if (!response.Success) {
-            throw new Error(response.Error || 'SetBreakpoint failed');
-        }
+        const direct = this.requireDirect();
+        return direct.setBreakpoint(address);
     }
 
     /**
      * Clear the breakpoint at the given EE virtual address
      */
     public async clearBreakpoint(address: number): Promise<void> {
-        const direct = this.getDirect();
-        if (direct) {
-            return direct.clearBreakpoint(address);
-        }
-        const command: CommandMessage = { Command: 'CLEARBP', BreakpointAddress: address };
-        const response = await this.sendCommand(command);
-        if (!response.Success) {
-            throw new Error(response.Error || 'ClearBreakpoint failed');
-        }
+        const direct = this.requireDirect();
+        return direct.clearBreakpoint(address);
     }
 
     /**
      * Clear all breakpoints
      */
     public async clearAllBreakpoints(): Promise<void> {
-        const direct = this.getDirect();
-        if (direct) {
-            return direct.clearAllBreakpoints();
-        }
-        const command: CommandMessage = { Command: 'CLEARBP_ALL' };
-        const response = await this.sendCommand(command);
-        if (!response.Success) {
-            throw new Error(response.Error || 'ClearAllBreakpoints failed');
-        }
+        const direct = this.requireDirect();
+        return direct.clearAllBreakpoints();
     }
 
     /**
@@ -2547,20 +2295,7 @@ export class BridgeClient {
         pc: number;
         breakpointHitAddress?: number;
     }> {
-        const direct = this.getDirect();
-        if (direct) {
-            return direct.status();
-        }
-        const command: CommandMessage = { Command: 'GETPC' };
-        const response = await this.sendCommand(command);
-        if (!response.Success) {
-            throw new Error(response.Error || 'GetPC failed');
-        }
-        return {
-            paused: response.Paused ?? false,
-            pc: response.PC ?? 0,
-            breakpointHitAddress: response.BreakpointHitAddress ?? undefined,
-        };
+        return this.requireDirect().status();
     }
 
     /**
@@ -2570,332 +2305,91 @@ export class BridgeClient {
      * register state.
      */
     public async step(): Promise<{ paused: boolean; pc: number; breakpointHitAddress?: number; instructionAnalysis?: Record<string, string> }> {
-        const direct = this.getDirect();
-        if (direct) {
-            return direct.stepInto();
-        }
-        const command: CommandMessage = { Command: 'STEP' };
-        const response = await this.sendCommand(command);
-        if (!response.Success) {
-            throw new Error(response.Error || 'Step failed');
-        }
-        return {
-            paused: response.Paused ?? true,
-            pc: response.PC ?? 0,
-            breakpointHitAddress: response.BreakpointHitAddress ?? undefined,
-            instructionAnalysis: response.InstructionAnalysis,
-        };
+        return this.requireDirect().stepInto();
     }
 
     /**
-     * PCSX2 PINE: step into (non-blocking). Emulator will run until the next pause/breakpoint.
+     * Step into (non-blocking). Emulator will run until the next pause/breakpoint.
      */
     public async stepInto(): Promise<void> {
-        const direct = this.getDirect();
-        if (direct) {
-            await direct.stepInto();
-            return;
-        }
-        const response = await this.sendCommand({ Command: 'STEPINTO' });
-        if (!response.Success) {
-            throw new Error(response.Error || 'StepInto failed');
-        }
+        const direct = this.requireDirect();
+        await direct.stepInto();
+        return;
     }
 
     /**
-     * PCSX2 PINE: step over (non-blocking). Emulator will run until the next pause/breakpoint.
+     * Step over (non-blocking). Emulator will run until the next pause/breakpoint.
      */
     public async stepOver(): Promise<void> {
-        const direct = this.getDirect();
-        if (direct) {
-            return direct.stepOver();
-        }
-        const response = await this.sendCommand({ Command: 'STEPOVER' });
-        if (!response.Success) {
-            throw new Error(response.Error || 'StepOver failed');
-        }
+        const direct = this.requireDirect();
+        return direct.stepOver();
     }
 
     /**
-     * PCSX2 PINE: step out (non-blocking). Emulator will run until the next pause/breakpoint.
+     * Step out (non-blocking). Emulator will run until the next pause/breakpoint.
      */
     public async stepOut(): Promise<void> {
-        const direct = this.getDirect();
-        if (direct) {
-            return direct.stepOut();
-        }
-        const response = await this.sendCommand({ Command: 'STEPOUT' });
-        if (!response.Success) {
-            throw new Error(response.Error || 'StepOut failed');
-        }
+        const direct = this.requireDirect();
+        return direct.stepOut();
+    }
+
+    /** The frame Ps2Emulator displays now (also while paused). */
+    public async screenshot(): Promise<{ width: number; height: number; rgba: Buffer }> {
+        return this.requireDirect().screenshot();
     }
 
     /**
-     * PCSX2 PINE: save emulator state to a named file path.
-     * Uses the SAVESTATETOFILE command which delegates to PineClient.SaveStateFile (opcode 0x22).
-     */
-    public async saveStateFile(filePath: string): Promise<void> {
-        const response = await this.sendCommand({ Command: 'SAVESTATETOFILE', FilePath: filePath });
-        if (!response.Success) {
-            throw new Error(response.Error || 'SaveStateFile failed');
-        }
-    }
-
-    /**
-     * PCSX2 PINE: take a screenshot of the game's screen.
-     * Uses the PINESAVESCREENSHOT command which delegates to PineClient.SaveScreenshot (opcode 0x32).
-     */
-    public async pineSaveScreenshot(): Promise<void> {
-        const response = await this.sendCommand({ Command: 'PINESAVESCREENSHOT' });
-        if (!response.Success) {
-            throw new Error(response.Error || 'SaveScreenshot failed');
-        }
-    }
-
-    /**
-     * PCSX2 PINE: mute or unmute the emulator's audio output (opcode 0x45).
-     * Returns the resulting state; PCSX2's "Mute All Sound" setting blocks unmuting.
-     */
-    public async pineSetAudioMuted(muted: boolean): Promise<AudioState> {
-        const response = await this.sendCommand({ Command: 'PINESETAUDIOMUTED', AudioMuted: muted });
-        if (!response.Success) {
-            throw new Error(response.Error || 'SetAudioMuted failed');
-        }
-        return { muted: !!response.AudioMuted, mutedInSettings: !!response.AudioMutedInSettings };
-    }
-
-    /** PCSX2 PINE: read whether the emulator's audio output is muted (opcode 0x46). */
-    public async pineGetAudioState(): Promise<AudioState> {
-        const response = await this.sendCommand({ Command: 'PINEGETAUDIOSTATE' });
-        if (!response.Success) {
-            throw new Error(response.Error || 'GetAudioState failed');
-        }
-        return { muted: !!response.AudioMuted, mutedInSettings: !!response.AudioMutedInSettings };
-    }
-
-    /**
-     * PCSX2 PINE: read the full input state of a PS2 controller pad (opcode 0x33).
+     * Read the full input state of a PS2 controller pad.
      * Returns buttons bitmask, analog stick positions, and 16 pressure values.
      */
     public async padGetState(padSlot: number = 0): Promise<PadStateInfo> {
-        const direct = this.getDirect();
-        if (direct && !this.connected) {
-            const state = await direct.padGet(padSlot);
-            const buttons = PINE_BUTTONS.reduce((mask, b, bit) => state.held.includes(b) ? mask & ~(1 << bit) : mask, 0xFFFF);
-            const [lx, ly, rx, ry] = state.sticks ?? [0x7F, 0x7F, 0x7F, 0x7F];
-            return { buttons, lx, ly, rx, ry, pressures: new Array(16).fill(0) };
-        }
-        const response = await this.sendCommand({ Command: 'PADGETSTATE', PadSlot: padSlot });
-        if (!response.Success) {
-            throw new Error(response.Error || 'PadGetState failed');
-        }
-        if (!response.PadState) {
-            throw new Error('PadGetState: no pad state returned');
-        }
-        return response.PadState;
+        const direct = this.requireDirect();
+        const state = await direct.padGet(padSlot);
+        const buttons = PINE_BUTTONS.reduce((mask, b, bit) => state.held.includes(b) ? mask & ~(1 << bit) : mask, 0xFFFF);
+        const [lx, ly, rx, ry] = state.sticks ?? [0x7F, 0x7F, 0x7F, 0x7F];
+        return { buttons, lx, ly, rx, ry, pressures: new Array(16).fill(0) };
     }
 
     /**
-     * PCSX2 PINE: set a single button/axis on a pad by index and normalized value (opcode 0x34).
-     * Routes through deadzone/pressure pipeline.
-     */
-    public async padSetButton(padSlot: number, buttonIndex: number, value: number): Promise<void> {
-        const response = await this.sendCommand({
-            Command: 'PADSETBUTTON',
-            PadSlot: padSlot,
-            PadButtonIndex: buttonIndex,
-            PadButtonValue: value,
-        });
-        if (!response.Success) {
-            throw new Error(response.Error || 'PadSetButton failed');
-        }
-    }
-
-    /**
-     * PCSX2 PINE: set raw analog stick positions, bypassing deadzone (opcode 0x35).
+     * Set analog stick positions.
      * Values are 0–255 with 0x7F = centred.
      */
     public async padSetAnalog(padSlot: number, lx: number = 0x7F, ly: number = 0x7F, rx: number = 0x7F, ry: number = 0x7F): Promise<void> {
-        const direct = this.getDirect();
-        if (direct && !this.connected) {
-            const held = this.directPads[padSlot]?.buttons ?? [];
-            await this.directPadHold(direct, padSlot, held, [lx, ly, rx, ry]);
-            return;
-        }
-        const response = await this.sendCommand({
-            Command: 'PADSETANALOG',
-            PadSlot: padSlot,
-            PadLx: lx,
-            PadLy: ly,
-            PadRx: rx,
-            PadRy: ry,
-        });
-        if (!response.Success) {
-            throw new Error(response.Error || 'PadSetAnalog failed');
-        }
+        const direct = this.requireDirect();
+        const held = this.directPads[padSlot]?.buttons ?? [];
+        await this.directPadHold(direct, padSlot, held, [lx, ly, rx, ry]);
+        return;
     }
 
     /**
-     * PCSX2 PINE: atomically replace the complete input state of a pad (opcode 0x36).
+     * Replace the complete input state of a pad.
      * pressures must be 16 bytes in PadDualshock2::Inputs order; pressure > 0 means pressed.
      */
     public async padSetState(padSlot: number, lx: number = 0x7F, ly: number = 0x7F, rx: number = 0x7F, ry: number = 0x7F, pressures: number[] = new Array(16).fill(0), buttons: number = 0xFFFF): Promise<void> {
         if (pressures.length !== 16) {
             throw new Error('padSetState: pressures must be exactly 16 elements');
         }
-        const direct = this.getDirect();
-        if (direct && !this.connected) {
-            const held = PINE_BUTTONS.filter((_, bit) => (buttons & (1 << bit)) === 0);
-            await this.directPadHold(direct, padSlot, held, [lx, ly, rx, ry]);
-            return;
-        }
-        const response = await this.sendCommand({
-            Command: 'PADSETSTATE',
-            PadSlot: padSlot,
-            PadButtons: buttons,
-            PadLx: lx,
-            PadLy: ly,
-            PadRx: rx,
-            PadRy: ry,
-            PadPressures: pressures,
-        });
-        if (!response.Success) {
-            throw new Error(response.Error || 'PadSetState failed');
-        }
+        const direct = this.requireDirect();
+        const held = PINE_BUTTONS.filter((_, bit) => (buttons & (1 << bit)) === 0);
+        await this.directPadHold(direct, padSlot, held, [lx, ly, rx, ry]);
+        return;
     }
 
     /**
-     * PCSX2 PINE: query the controller type installed in a pad slot (opcode 0x37).
+     * Query the controller type installed in a pad slot.
      * Returns the numeric controller type (0=NotConnected, 1=DualShock2, 2=Guitar, etc.).
      */
     public async padGetType(padSlot: number = 0): Promise<number> {
-        const direct = this.getDirect();
-        if (direct && !this.connected) {
-            return (await direct.padGet(padSlot)).connected ? 1 : 0;
-        }
-        const response = await this.sendCommand({ Command: 'PADGETTYPE', PadSlot: padSlot });
-        if (!response.Success) {
-            throw new Error(response.Error || 'PadGetType failed');
-        }
-        return response.PadControllerType ?? 0;
-    }
-
-    /**
-     * Restart the emulator (reset both CPUs to power-on state, then pause)
-     */
-    public async restart(): Promise<void> {
-        const command: CommandMessage = { Command: 'RESTART' };
-        const response = await this.sendCommand(command);
-        if (!response.Success) {
-            throw new Error(response.Error || 'Restart failed');
-        }
-    }
-
-    /**
-     * Runtime mode switch: start (or keep) the built-in emulator in control-server mode.
-     */
-    public async startEmulator(biosPath?: string, discPath?: string, steps?: number): Promise<void> {
-        const command: CommandMessage = { Command: 'STARTEMULATOR' };
-        if (biosPath) { command.BiosPath = biosPath; }
-        if (discPath) { command.DiscPath = discPath; }
-        if (steps !== undefined) { command.Steps = steps; }
-
-        const response = await this.sendCommand(command);
-        if (!response.Success) {
-            throw new Error(response.Error || 'STARTEMULATOR failed');
-        }
-    }
-
-    /**
-     * Runtime mode switch: start PCSX2 bridge mode in control-server mode.
-     */
-    public async startPcsx2(host?: string, slot?: number): Promise<void> {
-        const command: CommandMessage = { Command: 'STARTPCSX2' };
-        if (host) { command.Pcsx2Host = host; }
-        if (slot !== undefined) { command.Pcsx2Slot = slot; }
-
-        const response = await this.sendCommand(command);
-        if (!response.Success) {
-            throw new Error(response.Error || 'STARTPCSX2 failed');
-        }
-    }
-
-    /**
-     * Runtime mode switch: start internal emulator in file mode (no BIOS, no disc).
-     * Loads an ELF32, BIN, or RAW binary into a bare scheduler and leaves it paused
-     * at the file's entry point.  The VS Code extension calls this when the user opens
-     * a registered file type (.elf, .bin, .raw) via File → Open.
-     *
-     * @param filePath  Absolute path to the file to load.
-     * @param address   Optional load address for flat binaries (defaults to 0x00000000).
-     */
-    public async startFileMode(filePath: string, address?: number): Promise<{ entryPoint: number }> {
-        const command: CommandMessage = { Command: 'STARTFILEMODE', InputPath: filePath };
-        if (address !== undefined) { command.Address = address; }
-
-        const response = await this.sendCommand(command);
-        if (!response.Success) {
-            throw new Error(response.Error || 'STARTFILEMODE failed');
-        }
-        return { entryPoint: response.PC ?? 0 };
+        const direct = this.requireDirect();
+        return (await direct.padGet(padSlot)).connected ? 1 : 0;
     }
 
     /**
      * Get a full CPU register dump from the running emulator
      */
     public async getRegisters(): Promise<RegisterDump> {
-        const direct = this.getDirect();
-        if (direct) {
-            return direct.getRegisters();
-        }
-        const command: CommandMessage = { Command: 'GETREGS' };
-        const response = await this.sendCommand(command);
-        if (!response.Success) {
-            throw new Error(response.Error || 'GetRegisters failed');
-        }
-        return this.parseRegisterDump(response);
-    }
-
-    /** Convert a raw CommandResponse (from GETREGS or RUNUNTILPC) to a RegisterDump. */
-    private parseRegisterDump(response: CommandResponse): RegisterDump {
-        return {
-            gpr:        response.GPR        ?? new Array(32).fill(0),
-            gprLo32:    response.GPR_Lo32   ?? new Array(32).fill(0),
-            gprHi32:    response.GPR_Hi32   ?? new Array(32).fill(0),
-            gprUpLo32:  response.GPR_UpLo32 ?? new Array(32).fill(0),
-            gprUpHi32:  response.GPR_UpHi32 ?? new Array(32).fill(0),
-            pc:         response.GPR_PC     ?? 0,
-            hi:         response.GPR_HI     ?? 0,
-            lo:         response.GPR_LO     ?? 0,
-            hi1:        response.GPR_HI1    ?? 0,
-            lo1:        response.GPR_LO1    ?? 0,
-            sa:         response.GPR_SA     ?? 0,
-            cop0Status: response.COP0_Status ?? 0,
-            cop0Cause:  response.COP0_Cause  ?? 0,
-            cop0Epc:    response.COP0_EPC    ?? 0,
-            cop0Count:  response.COP0_Count  ?? 0,
-            cop0Regs:   response.COP0_Regs  ?? new Array(32).fill(0),
-            fpr:        response.FPR        ?? new Array(32).fill(0),
-            fprAcc:     response.FPR_ACC    ?? 0,
-            fcr0:       response.FCR0       ?? 0,
-            fcr31:      response.FCR31      ?? 0,
-            vu0fX:      response.VU0F_X     ?? new Array(32).fill(0),
-            vu0fY:      response.VU0F_Y     ?? new Array(32).fill(0),
-            vu0fZ:      response.VU0F_Z     ?? new Array(32).fill(0),
-            vu0fW:      response.VU0F_W     ?? new Array(32).fill(0),
-            vu0AccX:    response.VU0F_ACC_X ?? 0,
-            vu0AccY:    response.VU0F_ACC_Y ?? 0,
-            vu0AccZ:    response.VU0F_ACC_Z ?? 0,
-            vu0AccW:    response.VU0F_ACC_W ?? 0,
-            vu0Q:       response.VU0F_Q     ?? 0,
-            vu0P:       response.VU0F_P     ?? 0,
-            vu0I:       response.VU0F_I     ?? 0,
-            vu0i:       response.VU0I       ?? new Array(16).fill(0),
-            vu0Status:  response.VU0_Status ?? 0,
-            vu0Mac:     response.VU0_MAC    ?? 0,
-            vu0Clip:    response.VU0_Clip   ?? 0,
-            gsPriv:     response.GS_Priv    ?? new Array(19).fill(0),
-        };
+        const direct = this.requireDirect();
+        return direct.getRegisters();
     }
 
     /**
@@ -2905,48 +2399,17 @@ export class BridgeClient {
      * @param region   'ee' (default) or 'iop'
      */
     public async writeMemory(address: number, hexBytes: string, region: string = 'ee'): Promise<void> {
-        const direct = this.getDirect();
-        if (direct) {
-            const digits = hexBytes.replace(/0x/gi, '').replace(/[^0-9a-f]/gi, '');
-            if (digits.length % 2 !== 0) {
-                throw new Error(`WriteMemory: odd number of hex digits in "${hexBytes}"`);
-            }
-            return direct.writeMemory(address, Buffer.from(digits, 'hex'), region);
+        const direct = this.requireDirect();
+        const digits = hexBytes.replace(/0x/gi, '').replace(/[^0-9a-f]/gi, '');
+        if (digits.length % 2 !== 0) {
+            throw new Error(`WriteMemory: odd number of hex digits in "${hexBytes}"`);
         }
-        const command: CommandMessage = {
-            Command: 'WRITEMEM',
-            Address: address,
-            Data:    hexBytes,
-            Region:  region,
-        };
-        const response = await this.sendCommand(command);
-        if (!response.Success) {
-            throw new Error(response.Error || 'WriteMemory failed');
-        }
+        return direct.writeMemory(address, Buffer.from(digits, 'hex'), region);
     }
 
-    /**
-     * Load a binary file from disk directly into live EE or IOP memory.
-     * The file is read server-side, avoiding the need to transfer its contents
-     * over the socket (which would time out for large dumps like 32 MB EE RAM).
-     * @param filePath Absolute path to the binary file on the server machine
-     * @param address  Target virtual address
-     * @param region   'ee' (default) or 'iop'
-     */
+    /** Writes a file's bytes into Ps2Emulator's memory at `address`. */
     public async loadBinFromFile(filePath: string, address: number, region: string = 'ee'): Promise<void> {
-        const command: CommandMessage = {
-            Command:   'LOADBIN',
-            InputPath: filePath,
-            Address:   address,
-            Region:    region,
-        };
-        // Use a generous timeout — large files (e.g. 32 MB EE RAM) take time to
-        // read from disk and copy into emulator memory even though no file data
-        // is transferred over the socket.
-        const response = await this.sendCommand(command, 120000);
-        if (!response.Success) {
-            throw new Error(response.Error || 'LoadBin failed');
-        }
+        await this.requireDirect().writeMemory(address >>> 0, fs.readFileSync(filePath), region);
     }
 
     /**
@@ -2956,20 +2419,8 @@ export class BridgeClient {
      * @param value  New value as a decimal string or "0x"-prefixed hex string
      */
     public async setRegister(name: string, index: number, value: string): Promise<void> {
-        const direct = this.getDirect();
-        if (direct) {
-            return direct.setRegister(name, index, value);
-        }
-        const command: CommandMessage = {
-            Command:       'SETREG',
-            RegisterName:  name,
-            RegisterIndex: index,
-            RegisterValue: value,
-        };
-        const response = await this.sendCommand(command);
-        if (!response.Success) {
-            throw new Error(response.Error || 'SetRegister failed');
-        }
+        const direct = this.requireDirect();
+        return direct.setRegister(name, index, value);
     }
 
     /**
@@ -3111,94 +2562,29 @@ export class BridgeClient {
         return response.Integers ?? [];
     }
 
-    /**
-     * Scan a live emulator memory region for null-terminated ASCII strings.
-     * The C# server reads the bytes directly — no binary data is transferred.
-     * @param address  Virtual start address of the region.
-     * @param length   Number of bytes to scan.
-     * @param region   "ee" or "iop".
-     */
+    /** Strings in a range of Ps2Emulator's memory, found by the workspace service. */
     public async scanLiveStrings(address: number, length: number, region: string): Promise<StringEntry[]> {
-        const response = await this.sendCommand(
-            { Command: 'SCANSTRINGS', Address: address, Length: length, Region: region },
-            120000
-        );
-        if (!response.Success) {
-            throw new Error(response.Error || 'ScanStrings failed');
-        }
-        return response.Strings ?? [];
+        return this.getStrings(await this.readLive(address, length, region), address);
     }
 
-    /**
-     * Scan a live emulator memory region for MIPS function entry points.
-     * The C# server reads the bytes directly — no binary data is transferred.
-     * @param address  Virtual start address of the region.
-     * @param length   Number of bytes to scan.
-     * @param region   "ee" or "iop".
-     */
+    /** Functions in a range of Ps2Emulator's memory, found by the workspace service. */
     public async scanLiveFunctions(address: number, length: number, region: string): Promise<FunctionEntry[]> {
-        const response = await this.sendCommand(
-            { Command: 'SCANFUNCTIONS', Address: address, Length: length, Region: region },
-            120000
-        );
-        if (!response.Success) {
-            throw new Error(response.Error || 'ScanFunctions failed');
-        }
-        return response.Functions ?? [];
+        return this.getFunctions(await this.readLive(address, length, region), address);
     }
 
-    /**
-     * Scan a live emulator memory region for values that look like valid memory pointers.
-     * The C# server reads the bytes directly — no binary data is transferred.
-     * @param address  Virtual start address of the region.
-     * @param length   Number of bytes to scan.
-     * @param region   "ee" or "iop".
-     */
+    /** Pointers in a range of Ps2Emulator's memory, found by the workspace service. */
     public async scanLivePointers(address: number, length: number, region: string): Promise<PointerEntry[]> {
-        const response = await this.sendCommand(
-            { Command: 'SCANPOINTERS', Address: address, Length: length, Region: region },
-            120000
-        );
-        if (!response.Success) {
-            throw new Error(response.Error || 'ScanPointers failed');
-        }
-        return response.Pointers ?? [];
+        return this.getPointers(await this.readLive(address, length, region), address);
     }
 
-    /**
-     * Scan a live emulator memory region for plausible 32-bit IEEE-754 float values.
-     * The C# server reads the bytes directly — no binary data is transferred.
-     * @param address  Virtual start address of the region.
-     * @param length   Number of bytes to scan.
-     * @param region   "ee" or "iop".
-     */
+    /** Floats in a range of Ps2Emulator's memory, found by the workspace service. */
     public async scanLiveFloats(address: number, length: number, region: string): Promise<FloatEntry[]> {
-        const response = await this.sendCommand(
-            { Command: 'SCANFLOATS', Address: address, Length: length, Region: region },
-            120000
-        );
-        if (!response.Success) {
-            throw new Error(response.Error || 'ScanFloats failed');
-        }
-        return response.Floats ?? [];
+        return this.getFloats(await this.readLive(address, length, region), address);
     }
 
-    /**
-     * Scan a live emulator memory region for non-zero 32-bit signed integers.
-     * The C# server reads the bytes directly — no binary data is transferred.
-     * @param address  Virtual start address of the region.
-     * @param length   Number of bytes to scan.
-     * @param region   "ee" or "iop".
-     */
+    /** Integers in a range of Ps2Emulator's memory, found by the workspace service. */
     public async scanLiveIntegers(address: number, length: number, region: string): Promise<IntegerEntry[]> {
-        const response = await this.sendCommand(
-            { Command: 'SCANINTEGERS', Address: address, Length: length, Region: region },
-            120000
-        );
-        if (!response.Success) {
-            throw new Error(response.Error || 'ScanIntegers failed');
-        }
-        return response.Integers ?? [];
+        return this.getIntegers(await this.readLive(address, length, region), address);
     }
 
     /**
@@ -3243,15 +2629,6 @@ export class BridgeClient {
         return { results: response.ScanResults ?? [], message: response.Message ?? undefined };
     }
 
-    /**
-     * For live panels pass address+length+region; for file panels pass fileData.
-     * @param address   Virtual start address (used for live searches and match address calculation).
-     * @param length    Byte length (required for live searches, ignored when fileData provided).
-     * @param query     The search string, byte pattern, or regex.
-     * @param mode      "text" | "bytes" | "string" | "regex"
-     * @param region    "ee" or "iop" — only used for live searches.
-     * @param fileData  Binary data buffer — when provided the server searches this instead of live memory.
-     */
     public async search(
         address: number,
         length: number,
@@ -3260,14 +2637,15 @@ export class BridgeClient {
         region?: string,
         fileData?: Buffer
     ): Promise<SearchMatch[]> {
+        const data = fileData ?? await this.readLive(address, length, region);
         const command: CommandMessage = {
             Command:    'SEARCH',
             Address:    address,
-            Length:     length,
+            Length:     data.length,
             Query:      query,
             SearchMode: mode,
             Region:     region,
-            Data:       fileData ? fileData.toString('base64') : undefined,
+            Data:       data.toString('base64'),
         };
         const response = await this.sendCommand(command, 120000);
         if (!response.Success) {
@@ -3276,10 +2654,6 @@ export class BridgeClient {
         return response.Matches ?? [];
     }
 
-    /**
-     * Scan for structured references to a target address.
-     * For live panels pass address+length+region; for file panels pass fileData.
-     */
     public async scanReferences(
         address: number,
         length: number,
@@ -3288,14 +2662,15 @@ export class BridgeClient {
         region?: string,
         fileData?: Buffer
     ): Promise<ReferenceEntry[]> {
+        const data = fileData ?? await this.readLive(address, length, region);
         const command: CommandMessage = {
             Command: 'SCANREFERENCES',
             Address: address,
-            Length: length,
+            Length: data.length,
             TargetAddress: targetAddress,
             ReferenceKinds: kinds,
             Region: region,
-            Data: fileData ? fileData.toString('base64') : undefined,
+            Data: data.toString('base64'),
         };
         const response = await this.sendCommand(command, 120000);
         if (!response.Success) {
@@ -3310,28 +2685,16 @@ export class BridgeClient {
      * `wait` is set. The message describes the indexes the bridge holds.
      */
     public async buildXrefIndex(region: string, rebuild = false, wait = false): Promise<string> {
-        const direct = this.getDirect();
-        if (direct && !this.connected) {
-            const which = region?.toLowerCase().startsWith('iop') ? 'iop' : 'ee';
-            const status = (await direct.indexStatus()).find(i => i.region === which);
-            if (status?.ready && !rebuild) {
-                return `index ready: ${status.refs} references, ${status.functions} functions, ${status.tables} tables`;
-            }
-            const info = await direct.buildIndex(which, wait);
-            return info.ready && wait
-                ? `indexed in ${info.buildMillis} ms: ${info.refs} references, ${info.functions} functions, ${info.tables} tables`
-                : 'building';
+        const direct = this.requireDirect();
+        const which = region?.toLowerCase().startsWith('iop') ? 'iop' : 'ee';
+        const status = (await direct.indexStatus()).find(i => i.region === which);
+        if (status?.ready && !rebuild) {
+            return `index ready: ${status.refs} references, ${status.functions} functions, ${status.tables} tables`;
         }
-        const response = await this.sendCommand({
-            Command: 'XREFINDEX',
-            Region: region,
-            XrefRebuild: rebuild,
-            XrefWait: wait,
-        }, wait ? 300000 : 10000);
-        if (!response.Success) {
-            throw new Error(response.Error || 'XREFINDEX failed');
-        }
-        return response.Message ?? '';
+        const info = await direct.buildIndex(which, wait);
+        return info.ready && wait
+            ? `indexed in ${info.buildMillis} ms: ${info.refs} references, ${info.functions} functions, ${info.tables} tables`
+            : 'building';
     }
 
     /**
@@ -3340,123 +2703,39 @@ export class BridgeClient {
      * pointers, and ASCII/CRC32 matches when `kinds` asks for them.
      */
     public async xrefsTo(targetAddress: number, kinds?: string[], region?: string): Promise<ReferenceEntry[]> {
-        const direct = this.getDirect();
-        if (direct && !this.connected) {
-            // Like the Bridge, build the index first when there is none.
-            if (!(await direct.indexStatus()).some(i => i.ready)) {
-                await direct.buildIndex(region?.toLowerCase().startsWith('iop') ? 'iop' : 'ee', true);
-            }
-            const wanted = directKinds(kinds);
-            if (wanted === null) {
-                return [];
-            }
-            const reply = await direct.refsTo(targetAddress, wanted, 65_536);
-            return reply.refs.map(r => referenceFromDirect(r, reply.target, targetAddress >>> 0));
+        const direct = this.requireDirect();
+        // Like the Bridge, build the index first when there is none.
+        if (!(await direct.indexStatus()).some(i => i.ready)) {
+            await direct.buildIndex(region?.toLowerCase().startsWith('iop') ? 'iop' : 'ee', true);
         }
-        const response = await this.sendCommand({
-            Command: 'XREFSTO',
-            TargetAddress: targetAddress,
-            ReferenceKinds: kinds,
-            Region: region,
-        }, 300000);
-        if (!response.Success) {
-            throw new Error(response.Error || 'XREFSTO failed');
+        const wanted = directKinds(kinds);
+        if (wanted === null) {
+            return [];
         }
-        return response.References ?? [];
+        const reply = await direct.refsTo(targetAddress, wanted, 65_536);
+        return reply.refs.map(r => referenceFromDirect(r, reply.target, targetAddress >>> 0));
     }
 
     /**
      * Get EE OS thread list from the emulator.
      */
     public async getThreads(): Promise<ThreadEntry[]> {
-        const direct = this.getDirect();
-        if (direct && !this.connected) {
-            const threads = await direct.eeThreads();
-            return threads.map(t => ({ id: t.id, status: t.state, pc: t.pc, sp: t.sp, priority: t.priority, entryPc: t.entry }));
-        }
-        const command: CommandMessage = { Command: 'GETTHREADS' };
-        const response = await this.sendCommand(command);
-        if (!response.Success) {
-            throw new Error(response.Error || 'GetThreads failed');
-        }
-        return (response.Threads ?? []).map(t => ({
-            id:       t.id       ?? 0,
-            status:   t.status   ?? '',
-            pc:       t.pc       ?? 0,
-            sp:       t.sp       ?? 0,
-            priority: t.priority ?? 0,
-            entryPc:  t.entryPc  ?? 0,
-        }));
+        const direct = this.requireDirect();
+        const threads = await direct.eeThreads();
+        return threads.map(t => ({ id: t.id, status: t.state, pc: t.pc, sp: t.sp, priority: t.priority, entryPc: t.entry }));
     }
 
     /**
-     * Get the list of loaded IOP modules (PINE mode only).
+     * Get the list of loaded IOP modules.
      */
     public async getModules(): Promise<ModuleEntry[]> {
-        const direct = this.getDirect();
-        if (direct && !this.connected) {
-            const hex = (n: number) => `0x${(n >>> 0).toString(16).toUpperCase().padStart(8, '0')}`;
-            const modules = await direct.iopModules();
-            return modules.map(m => ({
-                name: m.name, version: m.version, textAddr: hex(m.text), entry: hex(m.entry), gp: hex(m.gp),
-                textSize: m.textSize, dataSize: m.dataSize, bssSize: m.bssSize,
-            }));
-        }
-        const command: CommandMessage = { Command: 'GETMODULES' };
-        const response = await this.sendCommand(command);
-        if (!response.Success) {
-            throw new Error(response.Error || 'GetModules failed');
-        }
-        return (response.Modules ?? []).map(m => ({
-            name:     m.name     ?? '',
-            version:  m.version  ?? 0,
-            textAddr: m.textAddr ?? '0x00000000',
-            entry:    m.entry    ?? '0x00000000',
-            gp:       m.gp       ?? '0x00000000',
-            textSize: m.textSize ?? 0,
-            dataSize: m.dataSize ?? 0,
-            bssSize:  m.bssSize  ?? 0,
+        const direct = this.requireDirect();
+        const hex = (n: number) => `0x${(n >>> 0).toString(16).toUpperCase().padStart(8, '0')}`;
+        const modules = await direct.iopModules();
+        return modules.map(m => ({
+            name: m.name, version: m.version, textAddr: hex(m.text), entry: hex(m.entry), gp: hex(m.gp),
+            textSize: m.textSize, dataSize: m.dataSize, bssSize: m.bssSize,
         }));
-    }
-
-    /**
-     * PCSX2 PINE: load emulator state from a named .p2s file path.
-     * Uses the LOADSTATEFROMFILE command which delegates to PineClient.LoadStateFile (opcode 0x23).
-     */
-    public async loadStateFile(filePath: string): Promise<void> {
-        // PINE only replies once PCSX2 has decompressed and applied the state,
-        // which routinely exceeds the 10 s default for large .p2s files.
-        const response = await this.sendCommand({ Command: 'LOADSTATEFROMFILE', FilePath: filePath }, 60_000);
-        if (!response.Success) {
-            throw new Error(response.Error || 'LoadStateFile failed');
-        }
-    }
-
-    /**
-     * Extract memory dump files from a PCSX2 .p2s save-state archive to a
-     * companion directory (<path>.extracted/) via the EXTRACTP2S server command.
-     * Returns the path to the extracted directory on success.
-     */
-    public async extractP2s(filePath: string): Promise<string> {
-        const response = await this.sendCommand({ Command: 'EXTRACTP2S', FilePath: filePath });
-        if (!response.Success) {
-            throw new Error(response.Error || 'ExtractP2s failed');
-        }
-        return response.Message ?? (filePath + '.extracted');
-    }
-
-    /**
-     * Read `Screenshot.png` from a PCSX2 .p2s save-state archive and return it
-     * as a base64-encoded string (no leading data-URI prefix). Returns `null`
-     * when the archive does not embed a screenshot.
-     */
-    public async readP2sScreenshot(filePath: string): Promise<string | null> {
-        const response = await this.sendCommand({ Command: 'READP2SSCREENSHOT', FilePath: filePath });
-        if (!response.Success) {
-            if (response.Error && /not found in \.p2s/i.test(response.Error)) { return null; }
-            throw new Error(response.Error || 'ReadP2sScreenshot failed');
-        }
-        return (response as { Data?: string }).Data ?? null;
     }
 
     /**
@@ -3481,27 +2760,17 @@ export class BridgeClient {
      * @param cheatText  Multi-line cheat code text (blocks separated by blank lines).
      */
     public async applyCheats(cheatText: string): Promise<void> {
-        const direct = this.getDirect();
-        if (direct && !this.connected) {
-            // Once: a patch taken away after its first field.
-            const name = 'Code Designer (applied once)';
-            await direct.setPatch(name, cheatText, true);
-            for (let i = 0; i < 100; i++) {
-                const patch = (await direct.listPatches()).find(p => p.name === name);
-                if (!patch || patch.applied > 0) { break; }
-                await new Promise(r => setTimeout(r, 20));
-            }
-            await direct.removePatch(name).catch(() => { /* already gone */ });
-            return;
+        const direct = this.requireDirect();
+        // Once: a patch taken away after its first field.
+        const name = 'Code Designer (applied once)';
+        await direct.setPatch(name, cheatText, true);
+        for (let i = 0; i < 100; i++) {
+            const patch = (await direct.listPatches()).find(p => p.name === name);
+            if (!patch || patch.applied > 0) { break; }
+            await new Promise(r => setTimeout(r, 20));
         }
-        const command: CommandMessage = {
-            Command: 'APPLYCHEATS',
-            Data:    cheatText,
-        };
-        const response = await this.sendCommand(command);
-        if (!response.Success) {
-            throw new Error(response.Error || 'ApplyCheats failed');
-        }
+        await direct.removePatch(name).catch(() => { /* already gone */ });
+        return;
     }
 
     /**
@@ -3510,62 +2779,29 @@ export class BridgeClient {
      * injection is removed first.
      */
     public async injectCheatEngine(cheatText: string, hookAddress: number, engineBase?: number): Promise<CheatEngineInfo> {
-        const direct = this.getDirect();
-        if (direct && !this.connected) {
-            // The emulator applies the codes itself every field: no hook, no engine in RAM.
-            return this.directCheatInfo(await direct.setPatch(DIRECT_CHEAT_ENGINE, cheatText, true));
-        }
-        const response = await this.sendCommand({
-            Command:     'INJECTCHEATENGINE',
-            Data:        cheatText,
-            HookAddress: hookAddress >>> 0,
-            EngineBase:  engineBase !== undefined ? engineBase >>> 0 : undefined,
-        }, 60000);
-        if (!response.Success || !response.CheatEngineState) {
-            throw new Error(response.Error || 'InjectCheatEngine failed');
-        }
-        return response.CheatEngineState;
+        const direct = this.requireDirect();
+        // The emulator applies the codes itself every field: no hook, no engine in RAM.
+        return this.directCheatInfo(await direct.setPatch(DIRECT_CHEAT_ENGINE, cheatText, true));
     }
 
     /** UPDATECHEATENGINE — replace the injected engine's table without re-hooking. */
     public async updateCheatEngine(cheatText: string): Promise<CheatEngineInfo> {
-        const direct = this.getDirect();
-        if (direct && !this.connected) {
-            return this.directCheatInfo(await direct.setPatch(DIRECT_CHEAT_ENGINE, cheatText, true));
-        }
-        const response = await this.sendCommand({ Command: 'UPDATECHEATENGINE', Data: cheatText }, 60000);
-        if (!response.Success || !response.CheatEngineState) {
-            throw new Error(response.Error || 'UpdateCheatEngine failed');
-        }
-        return response.CheatEngineState;
+        const direct = this.requireDirect();
+        return this.directCheatInfo(await direct.setPatch(DIRECT_CHEAT_ENGINE, cheatText, true));
     }
 
     /** REMOVECHEATENGINE — restore the hooked instructions. */
     public async removeCheatEngine(): Promise<CheatEngineInfo> {
-        const direct = this.getDirect();
-        if (direct && !this.connected) {
-            await direct.removePatch(DIRECT_CHEAT_ENGINE).catch(() => { /* not set */ });
-            return this.directCheatInfo(undefined);
-        }
-        const response = await this.sendCommand({ Command: 'REMOVECHEATENGINE' });
-        if (!response.Success || !response.CheatEngineState) {
-            throw new Error(response.Error || 'RemoveCheatEngine failed');
-        }
-        return response.CheatEngineState;
+        const direct = this.requireDirect();
+        await direct.removePatch(DIRECT_CHEAT_ENGINE).catch(() => { /* not set */ });
+        return this.directCheatInfo(undefined);
     }
 
     /** CHEATENGINESTATUS — whether the engine is injected, and where. */
     public async cheatEngineStatus(): Promise<CheatEngineInfo> {
-        const direct = this.getDirect();
-        if (direct && !this.connected) {
-            const patch = (await direct.listPatches()).find(p => p.name === DIRECT_CHEAT_ENGINE);
-            return this.directCheatInfo(patch);
-        }
-        const response = await this.sendCommand({ Command: 'CHEATENGINESTATUS' });
-        if (!response.Success || !response.CheatEngineState) {
-            throw new Error(response.Error || 'CheatEngineStatus failed');
-        }
-        return response.CheatEngineState;
+        const direct = this.requireDirect();
+        const patch = (await direct.listPatches()).find(p => p.name === DIRECT_CHEAT_ENGINE);
+        return this.directCheatInfo(patch);
     }
 
     /**
@@ -3574,12 +2810,20 @@ export class BridgeClient {
      * instructions are embedded.
      */
     public async buildCheatEngine(cheatText: string, hookAddress?: number, engineBase?: number): Promise<{ image: Buffer; info: CheatEngineInfo }> {
+        // The hooked instructions, from Ps2Emulator when it runs, are embedded in the image.
+        const direct = this.getDirect();
+        let hookWords: number[] | undefined;
+        if (direct && hookAddress !== undefined) {
+            const bytes = await direct.readMemory(hookAddress >>> 0, 8, 'ee');
+            hookWords = [bytes.readUInt32LE(0), bytes.readUInt32LE(4)];
+        }
         const response = await this.sendCommand({
             Command:     'BUILDCHEATENGINE',
             Data:        cheatText,
             HookAddress: hookAddress !== undefined ? hookAddress >>> 0 : undefined,
             EngineBase:  engineBase !== undefined ? engineBase >>> 0 : undefined,
-        }, 60000);
+            HookWords:   hookWords,
+        } as CommandMessage, 60000);
         if (!response.Success || !response.CheatEngineState || !response.Data) {
             throw new Error(response.Error || 'BuildCheatEngine failed');
         }
@@ -3617,25 +2861,6 @@ export class BridgeClient {
             cheatListId:    response.SelectedCheatListId ?? null,
             gameId:         response.ArchiveGameId ?? null,
             lists:          response.GameCheatLists ?? [],
-        };
-    }
-
-    /**
-     * PCSX2 PINE: query the currently running game's metadata.
-     * Returns the game title, serial ID (e.g. "SLUS-20265"), UUID, and version.
-     * Only available when the server is in PINE bridge mode (--pcsx2).
-     */
-    public async getPcsx2GameInfo(): Promise<{ Title: string; ID: string; UUID: string; Version: string }> {
-        const response = await this.sendCommand({ Command: 'PCSX2GAMEINFO' });
-        if (!response.Success) {
-            throw new Error(response.Error || 'PCSX2GAMEINFO failed');
-        }
-        const data = JSON.parse(response.Data ?? '{}') as Record<string, string>;
-        return {
-            Title:   data['Title']   ?? '',
-            ID:      data['ID']      ?? '',
-            UUID:    data['UUID']    ?? '',
-            Version: data['Version'] ?? '',
         };
     }
 
@@ -4455,9 +3680,10 @@ export class BridgeClient {
         if (!response.Success) { throw new Error(response.Error || 'DELETELABELGROUPMEMBER failed'); }
     }
 
-    /** Scan a code range for JAL/JALR calls and persist the discovered call edges. */
+    /** Scans a code range of Ps2Emulator's memory for calls into the workspace's call graph. */
     public async scanCallGraph(gameId: string, address: string, length: number, region?: string): Promise<{ totalEdges: number; directEdges: number; indirectEdges: number }> {
-        const response = await this.sendCommand({ Command: 'SCANCALLGRAPH', Data: JSON.stringify({ gameId, address, length, region }) });
+        const bytes = await this.readLive(parseInt(address, 16) >>> 0, length, region ?? 'ee');
+        const response = await this.sendCommand({ Command: 'SCANCALLGRAPH', Data: JSON.stringify({ gameId, address, length, region, bytes: bytes.toString('base64') }) });
         if (!response.Success) { throw new Error(response.Error || 'SCANCALLGRAPH failed'); }
         return JSON.parse((response as any).Data ?? '{}');
     }
@@ -4508,30 +3734,6 @@ export class BridgeClient {
         } catch {
             return undefined;
         }
-    }
-
-    /**
-     * RESOLVESTRINGS — reads each String-typed label from live PCSX2 memory and
-     * updates the server-side display text to include the ASCII content.
-     * Requires PINE (PCSX2) mode.
-     */
-    public async resolveStrings(): Promise<string> {
-        const response = await this.sendCommand({ Command: 'RESOLVESTRINGS' });
-        if (!response.Success) { throw new Error(response.Error || 'RESOLVESTRINGS failed'); }
-        return response.Message ?? '';
-    }
-
-    /**
-     * RESOLVELINKEDLIST — walks a linked list starting at `startAddress` using
-     * `nextOffset` as the byte offset of the next-node pointer within each node.
-     * Returns the ordered list of node address strings.
-     * Requires PINE (PCSX2) mode.
-     */
-    public async resolveLinkedList(startAddress: number, nextOffset: number): Promise<string[]> {
-        const response = await this.sendCommand({ Command: 'RESOLVELINKEDLIST', Address: startAddress, MemberOffset: nextOffset });
-        if (!response.Success) { throw new Error(response.Error || 'RESOLVELINKEDLIST failed'); }
-        try { return JSON.parse((response as any).Data ?? '[]') as string[]; }
-        catch { return []; }
     }
 
     // ── DB-backed settings ───────────────────────────────────────────────────
@@ -5119,14 +4321,9 @@ export class BridgeClient {
 
     /** NETGETSTATUS — queries the DEV9 network adapter status. */
     public async netGetStatus(): Promise<NetStatusInfo> {
-        const direct = this.getDirect();
-        if (direct && !this.connected) {
-            const s = await direct.networkStatus();
-            return { enabled: s.attached, adapterType: s.attached ? 1 : 0, ps2Mac: s.mac.toUpperCase(), ps2IP: s.ip };
-        }
-        const r = await this.sendCommand({ Command: 'NETGETSTATUS' });
-        if (!r.Success) { throw new Error(r.Error || 'NETGETSTATUS failed'); }
-        return r.NetStatus!;
+        const direct = this.requireDirect();
+        const s = await direct.networkStatus();
+        return { enabled: s.attached, adapterType: s.attached ? 1 : 0, ps2Mac: s.mac.toUpperCase(), ps2IP: s.ip };
     }
 
     /**
@@ -5136,39 +4333,38 @@ export class BridgeClient {
      * @param maxQueue Maximum ring-buffer size (0 = server default of 1000).
      */
     public async netCapture(enable: boolean, direction?: number, maxQueue?: number): Promise<void> {
-        const direct = this.getDirect();
-        if (direct && !this.connected) {
-            this.directCaptured = 0;
-            await direct.setCapture(enable, direction ?? 0, maxQueue || 1000);
-            return;
-        }
-        const r = await this.sendCommand({
-            Command: 'NETCAPTURE',
-            NetCaptureEnable: enable,
-            NetCaptureDirection: direction,
-            NetCaptureMaxQueue: maxQueue,
-        } as CommandMessage);
-        if (!r.Success) { throw new Error(r.Error || 'NETCAPTURE failed'); }
+        const direct = this.requireDirect();
+        this.directCaptured = 0;
+        this.directCaptureStartUs = undefined;
+        await direct.setCapture(enable, direction ?? 0, maxQueue || 1000);
     }
 
     /** NETRECVCAPTURE — drains captured packets from the ring buffer. */
     public async netRecvCapture(maxPackets?: number): Promise<{ packets: CapturedPacketInfo[]; parsedRows: ParsedPacketRow[] }> {
-        const direct = this.getDirect();
-        if (direct && !this.connected) {
-            const frames = await direct.takeCaptured(maxPackets ?? 0);
-            const packets = frames.map(f => ({
-                direction: f.tx ? 1 : 2, directionName: f.tx ? 'TX' : 'RX', timestampUs: f.timestampUs,
-                length: f.data.length, data: f.data.toString('base64'),
-            }));
-            const parsedRows = frames.map(f => packetRow(++this.directCaptured, f.tx, f.timestampUs, f.data.length, f.summary));
-            return { packets, parsedRows };
+        const direct = this.requireDirect();
+        const frames = await direct.takeCaptured(maxPackets ?? 0);
+        if (frames.length === 0) { return { packets: [], parsedRows: [] }; }
+        this.directCaptureStartUs ??= frames[0].timestampUs;
+        const start = this.directCaptureStartUs;
+        const time = (us: number) => ((us - start) / 1e6).toFixed(6);
+        if (this.connected) {
+            // The workspace service's dissector: SCERT/Medius layers, server names.
+            const dissected = await this.netDissectMany(frames.map(f => ({
+                data: f.data.toString('base64'), direction: f.tx ? 0 : 1, timestampUs: f.timestampUs,
+            })));
+            dissected.parsedRows.forEach((row, k) => {
+                row.no = ++this.directCaptured;
+                row.time = time(frames[k].timestampUs);
+            });
+            return dissected;
         }
-        const r = await this.sendCommand({
-            Command: 'NETRECVCAPTURE',
-            NetMaxPackets: maxPackets,
-        } as CommandMessage);
-        if (!r.Success) { throw new Error(r.Error || 'NETRECVCAPTURE failed'); }
-        return { packets: r.CapturedPackets ?? [], parsedRows: r.ParsedPacketRows ?? [] };
+        // Without it, rows from the emulator's own dissector lines.
+        const packets = frames.map(f => ({
+            direction: f.tx ? 0 : 1, directionName: f.tx ? 'TX' : 'RX', timestampUs: f.timestampUs,
+            length: f.data.length, data: f.data.toString('base64'),
+        }));
+        const parsedRows = frames.map(f => ({ ...packetRow(++this.directCaptured, f.tx, f.timestampUs, f.data.length, f.summary), time: time(f.timestampUs) }));
+        return { packets, parsedRows };
     }
 
     /**
@@ -5182,25 +4378,18 @@ export class BridgeClient {
     }
 
     /**
-     * NETINJECT (into the PS2 RX path) / NETINJECTTX (out through the DEV9 adapter). The options
-     * swap the TCP/UDP payload, fix lengths + checksums and continue a live TCP flow first.
-     * Returns the frame that was actually sent.
+     * Puts a frame on Ps2Emulator's network adapter: into the PS2 (RX) or out through it (`tx`).
+     * The options (payload swap, length and checksum fixes) are applied by the workspace
+     * service's NETBUILDFRAME first. Returns the frame that was sent.
      */
     public async netInject(frameBase64: string, tx: boolean, options: NetFrameOptions = {}): Promise<{ ok: boolean; frame: string; message: string }> {
-        const direct = this.getDirect();
-        if (direct && !this.connected && !options.payload && !options.fix && !options.tcpContinue) {
-            const ok = await direct.injectFrame(Buffer.from(frameBase64, 'base64'), tx);
-            return { ok, frame: frameBase64, message: ok ? '' : 'the network adapter is not attached (start the emulator with --network)' };
+        const direct = this.requireDirect();
+        let frame = frameBase64;
+        if (options.payload || options.fix) {
+            frame = (await this.netBuildFrame(frameBase64, { payload: options.payload, fix: options.fix })).frame;
         }
-        const r = await this.sendCommand({
-            Command: tx ? 'NETINJECTTX' : 'NETINJECT',
-            NetFrameData: frameBase64,
-            NetPayloadData: options.payload,
-            NetFixFrame: options.fix,
-            NetTcpContinue: options.tcpContinue,
-        } as CommandMessage);
-        if (!r.Success) { throw new Error(r.Error || 'NETINJECT failed'); }
-        return { ok: r.InjectionSuccess === true, frame: r.NetFrame ?? frameBase64, message: r.Message ?? '' };
+        const ok = await direct.injectFrame(Buffer.from(frame, 'base64'), tx);
+        return { ok, frame, message: ok ? '' : 'the network adapter is not attached (start Ps2Emulator with --network)' };
     }
 
     /** NETBUILDFRAME — apply the injection edits without sending; returns the frame and its dissection. */
@@ -5210,7 +4399,6 @@ export class BridgeClient {
             NetFrameData: frameBase64,
             NetPayloadData: options.payload,
             NetFixFrame: options.fix,
-            NetTcpContinue: options.tcpContinue,
         } as CommandMessage);
         if (!r.Success) { throw new Error(r.Error || 'NETBUILDFRAME failed'); }
         return {
@@ -5269,17 +4457,12 @@ export class BridgeClient {
 
     /** NETGETSTATS — returns TX/RX counters and capture queue statistics. */
     public async netGetStats(): Promise<NetStatsInfo> {
-        const direct = this.getDirect();
-        if (direct && !this.connected) {
-            const s = await direct.networkStatus();
-            return {
-                txPackets: s.txPackets, rxPackets: s.rxPackets, txBytes: s.txBytes, rxBytes: s.rxBytes,
-                captureQueueSize: s.queued, droppedCount: s.dropped,
-            };
-        }
-        const r = await this.sendCommand({ Command: 'NETGETSTATS' });
-        if (!r.Success) { throw new Error(r.Error || 'NETGETSTATS failed'); }
-        return r.NetStats!;
+        const direct = this.requireDirect();
+        const s = await direct.networkStatus();
+        return {
+            txPackets: s.txPackets, rxPackets: s.rxPackets, txBytes: s.txBytes, rxBytes: s.rxBytes,
+            captureQueueSize: s.queued, droppedCount: s.dropped,
+        };
     }
 
     /**
@@ -5290,19 +4473,9 @@ export class BridgeClient {
      * @param ip IPv4 address as dotted-quad string to filter on (type=3).
      */
     public async netSetFilter(filterType: number, protocol?: number, port?: number, ip?: string): Promise<void> {
-        const direct = this.getDirect();
-        if (direct && !this.connected) {
-            await direct.setCaptureFilter(filterType, protocol, port, ip);
-            return;
-        }
-        const r = await this.sendCommand({
-            Command: 'NETSETFILTER',
-            NetFilterType: filterType,
-            NetFilterProtocol: protocol,
-            NetFilterPort: port,
-            NetFilterIP: ip,
-        } as CommandMessage);
-        if (!r.Success) { throw new Error(r.Error || 'NETSETFILTER failed'); }
+        const direct = this.requireDirect();
+        await direct.setCaptureFilter(filterType, protocol, port, ip);
+        return;
     }
 }
 
@@ -5391,14 +4564,12 @@ export interface DissectedLayer {
     length: number;
 }
 
-/** Payload / fix-up options shared by NETINJECT, NETINJECTTX and NETBUILDFRAME. */
+/** Payload / fix-up options applied (by NETBUILDFRAME) before a frame is injected. */
 export interface NetFrameOptions {
     /** New TCP/UDP payload (base64); lengths and checksums are recomputed. */
     payload?: string;
     /** Recompute IPv4/TCP/UDP lengths and checksums after hand edits. */
     fix?: boolean;
-    /** Rewrite TCP seq/ack to continue the live flow (learned from drained captures). */
-    tcpContinue?: boolean;
 }
 
 /** One field of a NETCATALOG message (see MessageCatalog.cs). */

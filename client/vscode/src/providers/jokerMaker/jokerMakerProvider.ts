@@ -6,7 +6,7 @@ import { applyCodeDesignerPanelIcon } from '../../utils/webviewPanel';
 
 /**
  * Mask layout used by PADGETSTATE responses (PS2 active-low: bit clear means
- * pressed). Mirrors PadDualshock2 wire layout from CodeDesigner.Ps2.EmulatorCore.
+ * pressed): the DualShock 2 wire layout.
  */
 const BUTTON_MASK = {
     select:   0x0001,
@@ -42,7 +42,7 @@ const PRESSURE_INDEX: Record<keyof typeof BUTTON_MASK, number> = {
 /**
  * Snapshot of the virtual controller state shipped from the webview whenever
  * the user changes the press list or moves a stick (Play mode only). The
- * provider translates this into a PADSETSTATE opcode for PCSX2.
+ * provider translates this into Ps2Emulator's pad input.
  */
 interface VirtualPadStateMsg {
     type:    'jokerVirtualState';
@@ -134,7 +134,7 @@ export class JokerMakerProvider {
         panel.webview.html = this._buildHtml(panel.webview);
     }
 
-    /** Push fresh connection/pcsx2 status to the open panel (if any). */
+    /** Push fresh connection status to the open panel (if any). */
     public notifyConnectionChanged(): void {
         if (!this._panel) { return; }
         this._postConnectionStatus();
@@ -187,7 +187,7 @@ export class JokerMakerProvider {
         }
     }
 
-    // Virtual controller to PCSX2 PINE
+    // Virtual controller to Ps2Emulator's pads
 
     /**
      * Convert the webview's virtual state into a PADSETSTATE call. Each pressed
@@ -225,7 +225,7 @@ export class JokerMakerProvider {
     }
 
     /**
-     * Stick drags post far faster than PINE round-trips, so keep only the
+     * Stick drags post far faster than round-trips to the emulator, so keep only the
      * newest state while a write is in flight. Writes can never land out of
      * order, and the final state (e.g. a release) always wins.
      */

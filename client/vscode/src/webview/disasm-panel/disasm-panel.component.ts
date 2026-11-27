@@ -75,15 +75,15 @@ interface InitMsg {
   selectedGameName?: string;
   isConnected?: boolean;
   isPaused?: boolean;
-  isPcsx2?: boolean;
+  gameRunning?: boolean;
   selectedEmulator?: string;
   selectedBios?: string;
   selectedGame?: string;
 }
 
-interface Pcsx2ModeChangedMsg {
-  command: 'pcsx2ModeChanged';
-  isPcsx2: boolean;
+interface GameRunningChangedMsg {
+  command: 'gameRunningChanged';
+  gameRunning: boolean;
 }
 
 /** Rich metadata for the currently loaded game (Loaded Game card). */
@@ -161,7 +161,8 @@ interface OrchestrationsResultMsg {
 export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
   isConnected = false;
   isPaused = false;
-  isPcsx2 = false;
+  /** A game runs in Ps2Emulator, connected. */
+  gameRunning = false;
   /** Mirrors the provider-side followAiEnabled state for the status bar. */
   followAiEnabled = false;
   emulators: EmuOption[] = [];
@@ -221,13 +222,12 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
       this.bridge.on<ConnectionStatusMsg>('connectionStatus').subscribe(msg => {
         this.isConnected = msg.connected;
         this.isPaused = false;
-        if (!msg.connected) { this.isPcsx2 = false; }
         // Reload memories when the socket connects (in case the first load failed while disconnected)
         if (msg.connected) { this.settingsTab?.load(); }
         this.requestEmulatorProcessStatus();
       }),
-      this.bridge.on<Pcsx2ModeChangedMsg>('pcsx2ModeChanged').subscribe(msg => {
-        this.isPcsx2 = msg.isPcsx2;
+      this.bridge.on<GameRunningChangedMsg>('gameRunningChanged').subscribe(msg => {
+        this.gameRunning = msg.gameRunning;
       }),
       this.bridge.on<PausedMsg>('paused').subscribe(msg => {
         this.isPaused = msg.paused;
@@ -253,7 +253,7 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
         // opens after auto-connect has already succeeded.
         if (msg.isConnected !== undefined) { this.isConnected = msg.isConnected; }
         if (msg.isPaused    !== undefined) { this.isPaused    = msg.isPaused;    }
-        if (msg.isPcsx2     !== undefined) { this.isPcsx2     = msg.isPcsx2;     }
+        if (msg.gameRunning !== undefined) { this.gameRunning = msg.gameRunning; }
       }),
       this.bridge.on<BrowseGameResultMsg>('browseGameResult').subscribe(msg => {
         if (msg.filePath) {
@@ -421,9 +421,9 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
     });
   }
 
-  runPcsx2(): void {
+  run(): void {
     this.bridge.postMessage({
-      command: 'runPcsx2',
+      command: 'run',
       emulatorPath: this.selectedEmulator,
       biosPath: this.selectedBios,
       gamePath: this.selectedGame,
@@ -447,10 +447,6 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
 
   snapshot(): void {
     this.bridge.postMessage({ command: 'snapshot' });
-  }
-
-  snapshotPcsx2(): void {
-    this.bridge.postMessage({ command: 'snapshotPcsx2' });
   }
 
   openGsViewer(): void {

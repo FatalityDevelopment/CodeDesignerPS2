@@ -14,7 +14,7 @@ using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 
 // ── Active profile + connection args ───────────────────────────────────────
-// Profile gating: --profile core|lite|re|live-debug|packets|patching|cheats|media|pcsx2|multi-agent|admin|all,
+// Profile gating: --profile core|lite|re|packets|patching|cheats|media|multi-agent|admin|all,
 //                 --readonly, --dangerous-tools false
 // Agent identity: --agent-id <n> [--parent-session <n>] (cd_session_init auto-surfaces SessionBegin)
 var profile = ToolProfile.FromArgs(args);
@@ -38,7 +38,7 @@ var dbOptions = DatabaseInitialiser.BuildDbOptions(connectionString);
 
 // ── Infrastructure (shared bridge + DB-backed context) ─────────────────────
 var socket = new SocketBridgeClient(host, port);
-IEmulatorBridge bridge = new EmulatorBridge(socket);
+IWorkspaceBridge bridge = new WorkspaceBridge(socket);
 ICdContextProvider context = new DbContextProvider(new McpDatabaseService(dbOptions, socket));
 IAgentCoordinator coordinator = new DbAgentCoordinator(dbOptions);
 IOrchestrationCoordinator orchestrator = new DbOrchestrationCoordinator(dbOptions);

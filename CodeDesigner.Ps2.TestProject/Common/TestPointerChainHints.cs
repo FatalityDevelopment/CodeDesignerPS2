@@ -4,7 +4,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 using CodeDesigner.Ps2.Bridge.Services;
 using CodeDesigner.Ps2.Common;
 using CodeDesigner.Ps2.Common.CPU;
-using CodeDesigner.Ps2.EmulatorCore;
+using CodeDesigner.Ps2.TestProject.TestSupport;
 
 namespace CodeDesigner.Ps2.TestProject
 {
@@ -18,9 +18,9 @@ namespace CodeDesigner.Ps2.TestProject
         private const uint Code = 0x00100000;
 
         /// <summary>0x300010 -> 0x300100 -> 0x300200 -> 0x300300 "PlayerClass"; 0x300020 -> "Weapon".</summary>
-        private static PS2MemoryBus Memory()
+        private static TestRamBus Memory()
         {
-            var bus = new PS2MemoryBus();
+            var bus = new TestRamBus();
             bus.WriteWord(0x00300010, 0x00300100);
             bus.WriteWord(0x00300100, 0x00300200);
             bus.WriteWord(0x00300200, 0x00300300);

@@ -1,7 +1,7 @@
 namespace CodeDesigner.Ps2.Bridge
 {
     /// <summary>
-    /// Describes one memory region written by a SNAPSHOT command.
+    /// Describes one memory region of a snapshot (a .bin file in its folder).
     /// </summary>
     public class SnapshotRegion
     {

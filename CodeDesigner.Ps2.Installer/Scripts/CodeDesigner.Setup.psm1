@@ -218,7 +218,7 @@ function Start-LocalDbInstance {
 
 # ---- Running CodeDesigner processes --------------------------------------------------
 
-# Files in the install directory are locked while the Bridge, emulator or MCP server run.
+# Files in the install directory are locked while the Bridge or MCP server run.
 # Never stop them for the user (the Bridge belongs to the extension's terminal).
 function Assert-NotRunningFrom {
     param([string]$Dir)

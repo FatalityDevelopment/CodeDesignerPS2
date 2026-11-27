@@ -66,7 +66,7 @@ function cheatKey(item: { name: string; section?: string }): string {
           <app-icon name="play" [size]="12" /> {{ busy() === 'send' ? 'Sending…' : (mode() === 'engine' ? 'Send to engine' : 'Send once') }}
         </button>
         <select class="cl-split-select" title="How to send" [value]="mode()" (change)="setMode(asSelect($event).value)">
-          <option value="once" [selected]="mode() === 'once'">Once (PCSX2 write)</option>
+          <option value="once" [selected]="mode() === 'once'">Once (memory write)</option>
           <option value="engine" [selected]="mode() === 'engine'">Cheat engine (every frame)</option>
         </select>
       </div>

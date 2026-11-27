@@ -210,8 +210,6 @@ namespace CodeDesigner.Ps2.Bridge.Services
             using (doc)
             {
                 var root = doc.RootElement;
-                if (_ctx.Client is null)
-                    return Responses.Error("No live memory backend — start with --run or --pcsx2.");
 
                 var baseAddr = ParseAddr(Str(root, "address"));
                 int length   = Int(root, "length") ?? 0;
@@ -219,12 +217,13 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 if (length <= 0 || length > MaxScanLength)
                     return Responses.Error($"'length' must be between 1 and {MaxScanLength}.");
 
-                bool useIop = string.Equals(Str(root, "region"), "iop", StringComparison.OrdinalIgnoreCase);
                 int? discId = ResolveDisc(Str(root, "gameId"));
 
+                // The code segment's bytes, read from the emulator by the client.
                 byte[] bytes;
-                try { bytes = _ctx.Memory.ReadLiveBytesChunked(baseAddr.Value, length, useIop); }
-                catch (Exception ex) { return Responses.Error($"Memory read failed: {ex.Message}"); }
+                try { bytes = Convert.FromBase64String(Str(root, "bytes") ?? ""); }
+                catch (FormatException) { return Responses.Error("'bytes' is not valid base64."); }
+                if (bytes.Length == 0) return Responses.Error("'bytes' (the code segment, base64) is required.");
 
                 var edges = new List<CallEdge>();
                 var now   = DateTime.UtcNow;

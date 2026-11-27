@@ -15,8 +15,8 @@ export type GameCheatsLoader = () => Promise<Array<{ name: string; codes: string
 
 /**
  * Webview panel that ports cheat codes from one EE RAM image to another.
- * Sources are the current game's PCSX2 save states, browsed dumps (.bin,
- * .p2s, snapshot folders) or the emulator's live EE RAM; the bridge's
+ * Sources are the current game's snapshots, browsed dumps (.bin,
+ * snapshot folders) or the emulator's live EE RAM; the bridge's
  * PORTCHEATS command does the relocation on resolved raw dump files.
  */
 export class CheatPorterProvider {
@@ -77,7 +77,7 @@ export class CheatPorterProvider {
                     canSelectFiles:   true,
                     canSelectFolders: false,
                     canSelectMany:    false,
-                    filters:          { 'Memory dumps': ['bin', 'raw', 'dump', 'p2s'], 'All Files': ['*'] },
+                    filters:          { 'Memory dumps': ['bin', 'raw', 'dump'], 'All Files': ['*'] },
                     title:            side === 'source'
                         ? 'Select the EE RAM dump the codes were made for'
                         : 'Select the EE RAM dump to port the codes to',

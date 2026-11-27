@@ -8,14 +8,12 @@ public enum ToolDomain
 {
     /// <summary>Always-on essentials (session, status, tool discovery, context, progress, labels).</summary>
     Core,
+    /// <summary>Analysis of bytes the agent supplies (strings, functions, pointers…) and snapshot records.</summary>
     Memory,
-    Debug,
     Labels,
     Network,
     Patching,
     Cheats,
-    Pcsx2,
-    Pad,
     Media,
     /// <summary>Server/admin operations (DB queries, agent/orchestration CRUD, settings). Never in default profiles.</summary>
     Admin,

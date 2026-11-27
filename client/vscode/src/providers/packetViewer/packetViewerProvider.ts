@@ -340,7 +340,6 @@ function frameOptions(action: Record<string, unknown>): NetFrameOptions {
     return {
         payload:     (action['payload'] as string | undefined) || undefined,
         fix:         action['fix'] === true,
-        tcpContinue: action['tcpContinue'] === true,
     };
 }
 

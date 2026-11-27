@@ -178,6 +178,18 @@ export type DirectPadButton =
     | 'l2' | 'r2' | 'l1' | 'r1' | 'triangle' | 'circle' | 'cross' | 'square'
     | 'select' | 'l3' | 'r3' | 'start' | 'up' | 'right' | 'down' | 'left';
 
+/** A watchpoint: EE loads and/or stores to [start, end) stop emulation. */
+export interface DirectWatch {
+    id: number;
+    start: number;
+    end: number;
+    access: 'read' | 'write' | 'read+write';
+    hits: number;
+}
+
+/** Physical address spaces, read and written by offset. */
+export type DirectSpace = 'EE_RAM' | 'SCRATCHPAD' | 'BIOS' | 'IOP_RAM';
+
 /** The network adapter (DEV9) and its traffic. */
 export interface DirectNetworkStatus {
     attached: boolean;
@@ -286,6 +298,17 @@ export interface DirectEmulator {
     /** `length` bytes at each address, in one round trip; unmapped ones are left out. */
     readMemoryBatch(addresses: number[], length: number, region: string): Promise<Map<number, Buffer>>;
     writeMemory(address: number, data: Buffer, region: string): Promise<void>;
+    /** Watches EE accesses to [start, end) of EE virtual memory: stops when one happens. */
+    setWatchpoint(start: number, end: number, access: DirectWatch['access']): Promise<number>;
+    listWatchpoints(): Promise<DirectWatch[]>;
+    /** Removes the watchpoints covering exactly [start, end), or all of them. */
+    clearWatchpoints(range?: { start: number; end: number }): Promise<void>;
+    /** Reads an address space by offset: `EE_RAM`, `SCRATCHPAD`, `BIOS` or `IOP_RAM` (physical). */
+    readSpace(space: DirectSpace, offset: number, length: number): Promise<Buffer>;
+    /** Writes an address space by offset (`BIOS` is read-only). */
+    writeSpace(space: DirectSpace, offset: number, data: Buffer): Promise<void>;
+    /** The frame displayed now (also while paused), as RGBA8 rows. */
+    screenshot(): Promise<DirectFrame>;
 
     getRegisters(): Promise<RegisterDump>;
     /** BridgeClient.setRegister's names: GPR, PC, HI, LO, HI1, LO1, COP0, FPR. */

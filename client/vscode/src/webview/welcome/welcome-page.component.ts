@@ -64,13 +64,13 @@ interface StatusMsg {
 
       <p class="cd-hero-blurb">
         Live disassembly, hex inspection, CDS patching, and static recompilation
-        for the PlayStation 2 Emotion Engine — wired straight into PCSX2.
+        for the PlayStation 2 Emotion Engine — wired straight into Ps2Emulator.
       </p>
 
       <div class="cd-hero-actions">
-        <button class="cd-btn cd-btn-primary" (click)="connect()" title="Connect to a running PCSX2 / PINE bridge">
+        <button class="cd-btn cd-btn-primary" (click)="connect()" title="Run Ps2Emulator with the selected BIOS and game">
           <app-icon name="plug" [size]="13" />
-          <span>Connect to PCSX2</span>
+          <span>Run Ps2Emulator</span>
         </button>
         <button class="cd-btn" (click)="openProject()" title="Open a folder as a CodeDesigner project">
           <app-icon name="bookopen" [size]="13" />
@@ -139,8 +139,8 @@ interface StatusMsg {
             <button class="cd-listrow" (click)="connect()">
               <app-icon class="cd-listrow-ico" name="plug" [size]="14" />
               <span class="cd-listrow-main">
-                <span class="cd-listrow-title">Connect emulator…</span>
-                <span class="cd-listrow-sub">PCSX2 over TCP</span>
+                <span class="cd-listrow-title">Run emulator…</span>
+                <span class="cd-listrow-sub">Ps2Emulator</span>
               </span>
               <button class="browse-btn" type="button"
                       (click)="browseEmulator($event)"
@@ -317,7 +317,6 @@ export class WelcomePageComponent implements AfterViewInit {
 
   emulatorProcessLabel = computed<string>(() => {
     const label = this.emulatorLabel().toLowerCase();
-    if (label.includes('pcsx2')) { return 'PCSX2'; }
     if (this.emulatorLabel()) { return this.emulatorLabel(); }
     return 'Emulator';
   });

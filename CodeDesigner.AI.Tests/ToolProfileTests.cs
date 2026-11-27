@@ -19,27 +19,28 @@ public class ToolProfileTests
     public void Core_BlocksNonCoreDomain_AndOverCapRisk()
     {
         var core = Profile("core");
-        Assert.IsFalse(core.Allows("memory_read", ToolDomain.Memory, ToolRisk.ReadOnly)); // domain not allowed
+        Assert.IsFalse(core.Allows("get_strings", ToolDomain.Memory, ToolRisk.ReadOnly)); // domain not allowed
         Assert.IsFalse(core.Allows("x", ToolDomain.Core, ToolRisk.WritesDisk));           // exceeds MutatesDatabase cap
     }
 
     [TestMethod]
-    public void Re_AllowsMemoryUpToWritesMemory_BlocksNetwork()
+    public void Re_AllowsAnalysisAndLabels_BlocksNetworkAndDiskWrites()
     {
         var re = Profile("re");
-        Assert.IsTrue(re.Allows("memory_write", ToolDomain.Memory, ToolRisk.WritesMemory));
+        Assert.IsTrue(re.Allows("get_functions", ToolDomain.Memory, ToolRisk.ReadOnly));
         Assert.IsTrue(re.Allows("label_add", ToolDomain.Labels, ToolRisk.MutatesDatabase));
-        Assert.IsFalse(re.Allows("net_capture", ToolDomain.Network, ToolRisk.ReadOnly));            // domain not in profile
-        Assert.IsFalse(re.Allows("net_inject", ToolDomain.Memory, ToolRisk.NetworkInjection));      // exceeds WritesMemory cap
+        Assert.IsTrue(re.Allows("decompile_to_cds", ToolDomain.Patching, ToolRisk.ReadOnly));
+        Assert.IsFalse(re.Allows("net_disassemble", ToolDomain.Network, ToolRisk.ReadOnly));       // domain not in profile
+        Assert.IsFalse(re.Allows("x", ToolDomain.Memory, ToolRisk.WritesDisk));                     // exceeds MutatesDatabase cap
     }
 
     [TestMethod]
     public void Lite_CuratedList_IgnoresDomainButHonoursRiskCap()
     {
         var lite = Profile("lite");
-        Assert.IsTrue(lite.Allows("get_pc", ToolDomain.Debug, ToolRisk.ReadOnly));    // in list though Debug isn't a lite domain
-        Assert.IsTrue(lite.Allows("memory_read", ToolDomain.Memory, ToolRisk.ReadOnly));
-        Assert.IsFalse(lite.Allows("scan_value", ToolDomain.Memory, ToolRisk.ReadOnly)); // not in curated list
+        Assert.IsTrue(lite.Allows("disassemble", ToolDomain.Patching, ToolRisk.ReadOnly)); // in list though Patching isn't a lite domain
+        Assert.IsTrue(lite.Allows("label_list", ToolDomain.Core, ToolRisk.ReadOnly));
+        Assert.IsFalse(lite.Allows("get_strings", ToolDomain.Memory, ToolRisk.ReadOnly)); // not in curated list
         Assert.IsFalse(lite.Allows("progress_save", ToolDomain.Core, ToolRisk.WritesMemory)); // in list but over cap
     }
 
@@ -56,7 +57,7 @@ public class ToolProfileTests
     {
         var p = ToolProfile.FromArgs(new[] { "--profile", "re" });
         Assert.AreEqual("re", p.Name);
-        Assert.AreEqual(ToolRisk.WritesMemory, p.MaxRisk);
+        Assert.AreEqual(ToolRisk.MutatesDatabase, p.MaxRisk);
     }
 
     [TestMethod]
@@ -72,8 +73,8 @@ public class ToolProfileTests
     {
         var p = ToolProfile.FromArgs(new[] { "--profile", "re", "--readonly" });
         Assert.AreEqual(ToolRisk.ReadOnly, p.MaxRisk);
-        Assert.IsFalse(p.Allows("memory_write", ToolDomain.Memory, ToolRisk.WritesMemory));
-        Assert.IsTrue(p.Allows("memory_read", ToolDomain.Memory, ToolRisk.ReadOnly));
+        Assert.IsFalse(p.Allows("label_add", ToolDomain.Labels, ToolRisk.MutatesDatabase));
+        Assert.IsTrue(p.Allows("get_strings", ToolDomain.Memory, ToolRisk.ReadOnly));
     }
 
     [TestMethod]
@@ -83,6 +84,6 @@ public class ToolProfileTests
         Assert.AreEqual(ToolRisk.NetworkInjection, all.MaxRisk); // was Dangerous
 
         var re = ToolProfile.FromArgs(new[] { "--profile", "re", "--dangerous-tools", "false" });
-        Assert.AreEqual(ToolRisk.WritesMemory, re.MaxRisk);      // unchanged (wasn't Dangerous)
+        Assert.AreEqual(ToolRisk.MutatesDatabase, re.MaxRisk);   // unchanged (wasn't Dangerous)
     }
 }

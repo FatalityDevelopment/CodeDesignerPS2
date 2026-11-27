@@ -17,7 +17,7 @@ public sealed class CdToolAttribute : Attribute
         ShortDescription = shortDescription;
     }
 
-    /// <summary>MCP tool name (domain-prefixed snake_case, e.g. <c>memory_read</c>).</summary>
+    /// <summary>MCP tool name (domain-prefixed snake_case, e.g. <c>label_add</c>).</summary>
     public string Name { get; }
 
     public ToolDomain Domain { get; }

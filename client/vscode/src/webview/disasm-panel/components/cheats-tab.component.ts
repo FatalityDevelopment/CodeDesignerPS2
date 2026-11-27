@@ -68,7 +68,7 @@ type Busy = '' | 'cheatsCompile' | 'cheatsSend' | 'cheatsSaveBin' | 'cds';
  * CheatsTabComponent — the sidebar Cheats tab (the old Cheats and CDS tabs merged).
  *
  *  1. Cheat tools — Cheat List page, archive editor, Converter, Porter, Scanner.
- *  2. Archive cheats (PCSX2 mode) — toggle and apply cheats from CheatCodeArchive.
+ *  2. Archive cheats (a game running) — toggle and apply cheats from CheatCodeArchive.
  *  3. Cheat source — raw codes and Code Designer Source in one textarea (`#Name`
  *     lines separate cheats). Compile shows the resulting codes; Send writes them
  *     once or through the cheat engine; Save writes a raw-pair or engine .bin.
@@ -117,8 +117,8 @@ type Busy = '' | 'cheatsCompile' | 'cheatsSend' | 'cheatsSaveBin' | 'cds';
         </div>
       </div>
 
-      <!-- ── Archive cheats section (PCSX2 mode) ─────────────────────────── -->
-      @if (isPcsx2()) {
+      <!-- ── Archive cheats section (a game running) ─────────────────────────── -->
+      @if (gameRunning()) {
         <div class="archive-section">
           <div class="archive-header">
             <span class="archive-title">
@@ -270,8 +270,8 @@ export class CheatsTabComponent implements OnDestroy {
   private _messageTimer: ReturnType<typeof setTimeout> | undefined;
 
   readonly isConnected = input(false);
-  /** True when the sidebar is connected in PCSX2 PINE bridge mode. */
-  readonly isPcsx2 = input(false);
+  /** True while a game runs in Ps2Emulator, connected. */
+  readonly gameRunning = input(false);
 
   // ── Tool outputs (relayed to panel parent → panel provider) ────────────────
   readonly openConverterClick    = output<void>();

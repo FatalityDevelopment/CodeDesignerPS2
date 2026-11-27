@@ -7,19 +7,9 @@ namespace CodeDesigner.AI.Tools.Cheats;
 // PS2 cheat tooling: apply / port / detect / convert / live engine inject.
 // Commands match legacy CodeDesigner.Ps2.McpServer/Tools/Cheats.cs.
 
-[CdTool("apply_cheats", ToolDomain.Cheats, ToolRisk.WritesMemory,
-    "Apply GameShark/Action Replay cheat codes to live emulator memory. Risk: writes memory.")]
-public sealed class ApplyCheatsTool(IEmulatorBridge bridge)
-{
-    [ToolEntryPoint] public async Task<string> InvokeAsync(
-        [Description("Multi-line cheat codes in raw format (e.g. '20123456 000003E8').")] string cheatCodes,
-        CancellationToken ct = default)
-        => CdText.Message(await bridge.SendAsync(new { Command = "APPLYCHEATS", Data = cheatCodes }, ct));
-}
-
 [CdTool("port_cheats", ToolDomain.Cheats, ToolRisk.ReadOnly,
     "Port cheats between game revisions by scanning two memory dumps for matching patterns. Risk: read-only.")]
-public sealed class PortCheatsTool(IEmulatorBridge bridge)
+public sealed class PortCheatsTool(IWorkspaceBridge bridge)
 {
     [ToolEntryPoint] public async Task<string> InvokeAsync(
         [Description("Multi-line cheat codes to port.")] string cheatCodes,
@@ -90,50 +80,3 @@ public sealed class ConvertCheatTool
     }
 }
 
-[CdTool("inject_cheat_engine", ToolDomain.Cheats, ToolRisk.WritesMemory,
-    "Inject the CDS cheat engine and activate a cheat set. Risk: writes memory + installs hook.")]
-public sealed class InjectCheatEngineTool(IEmulatorBridge bridge)
-{
-    [ToolEntryPoint] public async Task<string> InvokeAsync(
-        [Description("Hook address in game code (hex, e.g. '0x001A3BC0'). Choose a per-frame call site.")] string hookAddress,
-        [Description("CDS source defining cheats (preferred when both supplied).")] string? cdsSource = null,
-        [Description("Raw cheat codes to activate (used when cdsSource is null).")] string? cheatCodes = null,
-        [Description("Optional engine base address in EE RAM (default 0x000C0000).")] string? engineBase = null,
-        CancellationToken ct = default)
-    {
-        if (string.IsNullOrWhiteSpace(hookAddress)) return CdText.Error("hookAddress is required.");
-        if (string.IsNullOrWhiteSpace(cdsSource) && string.IsNullOrWhiteSpace(cheatCodes))
-            return CdText.Error("provide cdsSource or cheatCodes.");
-        var hook = CdText.TryParseAddress(hookAddress);
-        if (hook is null) return CdText.Error($"cannot parse hookAddress '{hookAddress}'.");
-        var baseA = engineBase != null ? CdText.TryParseAddress(engineBase) : null;
-        return CdText.Message(await bridge.SendAsync(new
-        {
-            Command = "INJECTCHEATENGINE", Data = cheatCodes, CdsSource = cdsSource,
-            HookAddress = hook, EngineBase = baseA,
-        }, ct));
-    }
-}
-
-[CdTool("update_cheat_engine", ToolDomain.Cheats, ToolRisk.WritesMemory,
-    "Update the active cheat table in the already-injected engine (no re-hook). Risk: writes memory.")]
-public sealed class UpdateCheatEngineTool(IEmulatorBridge bridge)
-{
-    [ToolEntryPoint] public async Task<string> InvokeAsync(
-        [Description("CDS source with updated cheats (preferred when both supplied).")] string? cdsSource = null,
-        [Description("Raw cheat codes (used when cdsSource is null).")] string? cheatCodes = null,
-        CancellationToken ct = default)
-    {
-        if (string.IsNullOrWhiteSpace(cdsSource) && string.IsNullOrWhiteSpace(cheatCodes))
-            return CdText.Error("provide cdsSource or cheatCodes.");
-        return CdText.Message(await bridge.SendAsync(new { Command = "UPDATECHEATENGINE", Data = cheatCodes, CdsSource = cdsSource }, ct));
-    }
-}
-
-[CdTool("remove_cheat_engine", ToolDomain.Cheats, ToolRisk.WritesMemory,
-    "Remove the injected CDS cheat engine and restore original instructions at the hook point. Risk: writes memory.")]
-public sealed class RemoveCheatEngineTool(IEmulatorBridge bridge)
-{
-    [ToolEntryPoint] public async Task<string> InvokeAsync(CancellationToken ct = default)
-        => CdText.Message(await bridge.SendAsync(new { Command = "REMOVECHEATENGINE" }, ct));
-}

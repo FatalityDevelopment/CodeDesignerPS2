@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import * as net from 'net';
 import { getOutputChannel } from '../../extension';
 import { SocketClient } from '../../socketClient';
 import { getNonce } from '../../utils/nonce';
@@ -7,50 +6,18 @@ import { applyCodeDesignerPanelIcon } from '../../utils/webviewPanel';
 import type { StopStream } from '../../ps2debug/directEmulator';
 
 /**
- * GS framebuffer viewer.
- *
- * Opens a webview showing the live PCSX2 display, sourced from the bridge's
- * dedicated binary fan-out socket on port 8766 (separate from the JSON
- * channel on 8765 to avoid choking command/response under 60fps frame load).
- *
- * Architecture:
- * ```
- *   PCSX2 GSStreamServer  ──TCP──▶  Bridge GSStreamForwarder  ──TCP──▶  this provider
- *                                        (port 8766, binary frames)
- *                                                                        │
- *                                                                        ▼
- *                                                                webview <canvas>
- *                                                            (createImageBitmap+draw)
- * ```
- *
- * Wire format on the inbound socket (little-endian, per frame):
- * ```
- *   u32 size       // bytes following this field
- *   u8  msg_type   // 1 = frame
- *   u32 frame_idx
- *   u16 width
- *   u16 height
- *   u8  codec      // 1 = MJPEG
- *   u8  flags
- *   bytes payload  // complete JPEG when codec=1
- * ```
- *
- * When Ps2Emulator is connected directly (BridgeClient.getDirect()), frames
- * come from its `Media.Frames` stream instead, as raw RGBA (codec 2).
+ * GS framebuffer viewer: Ps2Emulator's display, from its `Media.Frames`
+ * stream (raw RGBA, codec 2), drawn on the webview's canvas.
  */
 export class GsViewerProvider {
     public static readonly viewType = 'codedesigner.gsViewer';
 
-    private static readonly DEFAULT_HOST = '127.0.0.1';
-    private static readonly DEFAULT_PORT = 8766;
     /** Frame rate asked of a directly connected Ps2Emulator (raw RGBA is ~1 MB a frame). */
     private static readonly DIRECT_MAX_FPS = 30;
 
     private _panel: vscode.WebviewPanel | undefined;
-    private _socket: net.Socket | undefined;
     /** Stops the direct emulator's frame stream, while one is open. */
     private _stopFrames: StopStream | undefined;
-    private _readBuf: Buffer = Buffer.alloc(0);
     private _frameCount = 0;
 
     constructor(
@@ -58,9 +25,8 @@ export class GsViewerProvider {
         private readonly _socketClient?: SocketClient,
     ) {}
 
-    /** Re-read PCSX2's mute state when the bridge connection changes. */
+    /** Follows Ps2Emulator's frames when a direct connection comes or goes. */
     public notifyConnectionChanged(): void {
-        // Switch frame sources when a direct Ps2Emulator connection comes or goes.
         const direct = !!this._socketClient?.getDirect();
         if (this._panel && direct !== !!this._stopFrames) {
             this._teardownSocket();
@@ -70,17 +36,17 @@ export class GsViewerProvider {
     }
 
     /**
-     * Open (or focus) the GS frame viewer panel and connect to the bridge's
-     * binary frame channel. Safe to call repeatedly — re-uses an existing
-     * panel and re-establishes the socket if it dropped.
+     * Open (or focus) the GS frame viewer panel and follow Ps2Emulator's frames.
+     * Safe to call repeatedly — re-uses an existing panel and re-opens the
+     * stream if it dropped.
      */
     public open(): void {
         const log = getOutputChannel();
 
         if (this._panel) {
             this._panel.reveal(vscode.ViewColumn.Active);
-            // Re-arm the socket if it died while the panel was idle.
-            if (!this._stopFrames && (!this._socket || this._socket.destroyed)) {
+            // Re-open the stream if it ended while the panel was idle.
+            if (!this._stopFrames) {
                 this._connect();
             }
             return;
@@ -106,15 +72,11 @@ export class GsViewerProvider {
             log.info('[GsViewer] panel closed');
         });
 
-        // The webview asks for "reconnect" if it sees stale frames, so accept
-        // those messages and re-establish the socket.
+        // The webview asks for "reconnect" if it sees stale frames.
         this._panel.webview.onDidReceiveMessage((msg) => {
             if (msg?.type === 'reconnect') {
                 log.info('[GsViewer] webview requested reconnect');
                 this._teardownSocket();
-                // Defer the new connect by a microtask so the OS-side close
-                // for the old socket finishes draining before we bind a new one
-                // on the same loopback peer. Avoids transient EADDRNOTAVAIL.
                 setImmediate(() => {
                     if (this._panel) this._connect();
                 });
@@ -135,50 +97,13 @@ export class GsViewerProvider {
     }
 
     private _connect(): void {
-        const log = getOutputChannel();
-        this._readBuf = Buffer.alloc(0);
         this._frameCount = 0;
-
         const direct = this._socketClient?.getDirect();
         if (direct) {
             this._connectDirect(direct);
-            return;
+        } else {
+            this._panel?.webview.postMessage({ type: 'status', connected: false, error: 'Ps2Emulator is not running: Run it from the panel.' });
         }
-
-        const sock = new net.Socket();
-        sock.setNoDelay(true);
-
-        // Each event handler captures `sock` in its closure and checks against
-        // `this._socket` before mutating state. Without this, the `'close'`
-        // event from a torn-down OLD socket fires on next tick — AFTER a NEW
-        // socket has connected — and clobbers the new socket's "connected"
-        // status. Result: the user sees the red dot one tick after a successful
-        // reconnect.
-        sock.on('connect', () => {
-            if (this._socket !== sock) return;
-            log.info(`[GsViewer] connected to bridge ${GsViewerProvider.DEFAULT_HOST}:${GsViewerProvider.DEFAULT_PORT}`);
-            this._panel?.webview.postMessage({ type: 'status', connected: true });
-        });
-
-        sock.on('data', (chunk) => {
-            if (this._socket !== sock) return;
-            this._onData(chunk);
-        });
-
-        sock.on('error', (err) => {
-            if (this._socket !== sock) return;
-            log.warn(`[GsViewer] socket error: ${err.message}`);
-            this._panel?.webview.postMessage({ type: 'status', connected: false, error: err.message });
-        });
-
-        sock.on('close', () => {
-            if (this._socket !== sock) return;
-            log.info('[GsViewer] socket closed');
-            this._panel?.webview.postMessage({ type: 'status', connected: false });
-        });
-
-        sock.connect(GsViewerProvider.DEFAULT_PORT, GsViewerProvider.DEFAULT_HOST);
-        this._socket = sock;
     }
 
     /** Frames from a directly connected Ps2Emulator (raw RGBA, codec 2). */
@@ -203,103 +128,15 @@ export class GsViewerProvider {
         this._stopFrames = stop;
     }
 
-    /**
-     * Length-prefixed framing reassembly. The bridge may deliver multiple
-     * frames per chunk or split a single frame across chunks; we accumulate
-     * into _readBuf and parse out as many complete frames as fit.
-     */
-    private _onData(chunk: Buffer): void {
-        this._readBuf = this._readBuf.length === 0
-            ? chunk
-            : Buffer.concat([this._readBuf, chunk]);
-
-        // Header: u32 size + u8 type + u32 idx + u16 w + u16 h + u8 codec + u8 flags = 15 bytes
-        const HEADER = 15;
-
-        while (this._readBuf.length >= 4) {
-            const payloadSize = this._readBuf.readUInt32LE(0);
-            const totalSize = 4 + payloadSize;
-            if (this._readBuf.length < totalSize) {
-                break; // wait for more
-            }
-
-            // Sanity: refuse implausible sizes (defensive — a corrupted size
-            // header would otherwise allocate gigabytes).
-            if (payloadSize < (HEADER - 4) || payloadSize > 16 * 1024 * 1024) {
-                getOutputChannel().error(`[GsViewer] implausible frame size ${payloadSize}; resetting socket`);
-                this._teardownSocket();
-                return;
-            }
-
-            const type = this._readBuf.readUInt8(4);
-            if (type === 1) {
-                const frameIdx = this._readBuf.readUInt32LE(5);
-                const width    = this._readBuf.readUInt16LE(9);
-                const height   = this._readBuf.readUInt16LE(11);
-                const codec    = this._readBuf.readUInt8(13);
-                // const flags = this._readBuf.readUInt8(14);
-                const payload  = this._readBuf.subarray(HEADER, totalSize);
-
-                if (this._frameCount === 0) {
-                    getOutputChannel().info(`[GsViewer] first frame received: ${width}x${height} codec=${codec} ${payload.length}B`);
-                }
-                this._frameCount++;
-
-                // Copy to a fresh buffer so we can hand its underlying ArrayBuffer
-                // to postMessage as a transferable. (slice() over a shared
-                // pool would keep _readBuf pinned.)
-                const out = Buffer.from(payload);
-                // VS Code webview message passing does not preserve Node's
-                // Buffer type. Send a plain ArrayBuffer slice so the webview
-                // receives stable binary bytes (instead of an object that can
-                // decode as zero-length data).
-                const payloadBuffer = out.buffer.slice(
-                    out.byteOffset,
-                    out.byteOffset + out.byteLength,
-                );
-
-                this._panel?.webview.postMessage(
-                    { type: 'frame', frameIdx, width, height, codec, payload: payloadBuffer },
-                );
-            }
-
-            this._readBuf = this._readBuf.subarray(totalSize);
-        }
-    }
-
-    /**
-     * Post PCSX2's audio state to the webview, muting/unmuting first when
-     * `muted` is given. Sound control rides the JSON bridge (PINE 0x45/0x46),
-     * not the frame socket, so it needs a PCSX2 connection.
-     */
-    private async _sendAudioState(muted?: boolean): Promise<void> {
-        if (!this._panel) { return; }
-        const client = this._socketClient;
-        if (!client?.isConnected()) {
-            this._panel.webview.postMessage({ type: 'audio', available: false, error: 'Connect to PCSX2 to control sound.' });
-            return;
-        }
-        try {
-            const state = muted === undefined
-                ? await client.pineGetAudioState()
-                : await client.pineSetAudioMuted(muted);
-            this._panel?.webview.postMessage({ type: 'audio', available: true, ...state });
-        } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
-            getOutputChannel().warn(`[GsViewer] sound toggle: ${message}`);
-            this._panel?.webview.postMessage({ type: 'audio', available: false, error: message });
-        }
+    /** Sound control: Ps2Emulator makes no sound yet (its SPU2 does not synthesise), so there is none. */
+    private async _sendAudioState(_muted?: boolean): Promise<void> {
+        this._panel?.webview.postMessage({ type: 'audio', available: false, error: 'Ps2Emulator has no sound yet.' });
     }
 
     private _teardownSocket(): void {
         const stopFrames = this._stopFrames;
         this._stopFrames = undefined;
         stopFrames?.();
-        if (this._socket) {
-            try { this._socket.destroy(); } catch { /* ignore */ }
-            this._socket = undefined;
-        }
-        this._readBuf = Buffer.alloc(0);
     }
 
     private _buildHtml(webview: vscode.Webview): string {
@@ -354,12 +191,12 @@ export class GsViewerProvider {
         <div id="status" class="connection"><span class="dot" id="dot"></span><span id="text">connecting…</span></div>
         <div class="actions">
             <button id="smoothing" title="Toggle pixel smoothing"><span>Smoothing</span></button><button id="fullscreen" title="Toggle fullscreen stage"><span>Fullscreen</span></button>
-            <button id="sound" title="Toggle PCSX2 sound" disabled><svg id="soundIcon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></svg><span id="soundText">Sound</span></button>
-            <button id="screenshot" class="primary" title="Save a screenshot in PCSX2"><span>Screenshot</span></button><button id="controller" title="Open the virtual controller"><span>Controller</span></button><button id="reconnect" title="Reconnect to the GS bridge"><span>Reconnect</span></button>
+            <button id="sound" title="Sound (Ps2Emulator has none yet)" disabled><svg id="soundIcon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></svg><span id="soundText">Sound</span></button>
+            <button id="screenshot" class="primary" title="Save the displayed frame as a PNG"><span>Screenshot</span></button><button id="controller" title="Open the virtual controller"><span>Controller</span></button><button id="reconnect" title="Reconnect to the GS bridge"><span>Reconnect</span></button>
         </div>
     </header>
     <main id="stage"><div class="frame-shell"><canvas id="canvas" width="640" height="480"></canvas><div id="resolution">640 × 480</div></div><div id="overlay"><div class="box" id="overlayBox">Waiting for connection to bridge…</div></div></main>
-    <footer id="footer"><span>GS stream :8766</span><span>MJPEG decoder</span><span id="meta">waiting for frames</span></footer>
+    <footer id="footer"><span>Ps2Emulator frames</span><span>RGBA</span><span id="meta">waiting for frames</span></footer>
 
     <script nonce="${nonce}">
         const vscode = acquireVsCodeApi();
@@ -373,13 +210,12 @@ export class GsViewerProvider {
         const overlayBox = document.getElementById('overlayBox');
         const resolution = document.getElementById('resolution');
 
-        // Bridge socket state, separate from frame-flow state below.
+        // Stream state, separate from frame-flow state below.
         let connected = false;
         let lastErr = '';
 
-        // Frame-flow tracking — used to colour the dot yellow when the socket
-        // is up but no frames are arriving (PCSX2 not running, or its build
-        // pre-dates GSStreamServer, or no game is rendering yet).
+        // Frame-flow tracking — used to colour the dot yellow when the stream
+        // is open but no frames are arriving (nothing displayed yet).
         let firstFrameAt = 0;
         let lastFrameAt = 0;
         let framesShown = 0;
@@ -422,19 +258,17 @@ export class GsViewerProvider {
             // Overlay
             if (!connected) {
                 showOverlay(
-                    'Bridge socket disconnected',
-                    'Make sure CodeDesigner.Ps2.Bridge is running. Click <b>Reconnect</b> to retry.'
+                    'Ps2Emulator is not connected',
+                    'Run Ps2Emulator from the panel, then click <b>Reconnect</b>.'
                 );
             } else if (framesShown === 0) {
                 showOverlay(
-                    'Waiting for frames from PCSX2…',
-                    'Connected to the bridge on :8766, but no frames have arrived yet.<br>' +
-                    'Check that: PCSX2 is running with the GSStreamServer-enabled build, ' +
-                    'PINE is attached (use the disasm panel\\'s Run / STARTPCSX2), and a game is actually rendering.'
+                    'Waiting for frames from Ps2Emulator…',
+                    'Connected, but nothing has been displayed yet (the BIOS or game may still be starting).'
                 );
             } else if (ageMs >= STALE_MS) {
                 showOverlay('No frames for ' + (ageMs / 1000).toFixed(1) + 's',
-                            'PCSX2 may have paused, lost focus, or stopped streaming.');
+                            'Ps2Emulator may be paused.');
             } else {
                 hideOverlay();
             }
@@ -523,7 +357,7 @@ export class GsViewerProvider {
             vscode.postMessage({ type: 'controller' });
         });
 
-        // Sound toggle: PCSX2's own audio output (the stream carries no audio).
+        // Sound toggle: Ps2Emulator has no sound yet, so it stays disabled.
         const soundBtn = document.getElementById('sound');
         const soundIcon = document.getElementById('soundIcon');
         const soundText = document.getElementById('soundText');
@@ -538,10 +372,8 @@ export class GsViewerProvider {
             soundIcon.innerHTML = SPEAKER + (state.available && audioMuted ? CROSS : WAVES);
             soundText.textContent = !state.available ? 'Sound' : (audioMuted ? 'Muted' : 'Sound on');
             soundBtn.title = !state.available
-                ? (state.error || 'Connect to PCSX2 to control sound.')
-                : state.mutedInSettings
-                    ? 'Muted by "Mute All Sound" in PCSX2 settings. Turn that off in PCSX2 to unmute here.'
-                    : (audioMuted ? 'PCSX2 sound is muted. Click to unmute.' : 'PCSX2 sound is on. Click to mute.');
+                ? (state.error || 'No sound.')
+                : (audioMuted ? 'Sound is muted. Click to unmute.' : 'Sound is on. Click to mute.');
         }
         soundBtn.addEventListener('click', () => {
             renderSound({ available: true, muted: audioMuted, pending: true });

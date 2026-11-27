@@ -503,9 +503,16 @@ service Media {
   // The displayed frame, at most `max_fps` times a second. A slow client
   // gets the latest frame, never a backlog.
   rpc Frames(FramesRequest) returns (stream FrameImage);
+  // The frame displayed now, also while paused. FAILED_PRECONDITION
+  // while nothing is displayed.
+  rpc Screenshot(Empty) returns (FrameImage);
 }
 
-message ConsoleRequest {}
+message ConsoleRequest {
+  // First send the recent text the server keeps (the last 64 KiB), then
+  // what follows. Nothing is sent twice or lost in between.
+  bool backlog = 1;
+}
 
 message ConsoleText {
   enum Source {
