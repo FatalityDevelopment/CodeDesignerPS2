@@ -33,12 +33,12 @@ keep everyone in their lane and on track.
   auto-surfaces the active orchestration plan, so coordinate per that plan without being asked.
 - Drive the VS Code UI with `navigate_to` at every major focus change so the user sees the
   current address/function/view.
-- Prefer the label tools (`label_list`, `label_resolve_strings`, `get_functions`) over
+- Prefer the label tools (`label_list`, `label_search`, `get_functions`) over
   `query_db` for label lookups — cheaper and indexed.
-- `debug_thread_list` / `pcsx2_get_modules` / `get_registers` / call stack need the emulator PAUSED
+- Everything live is Ps2Emulator's MCP (`ps2_*`). `ps2_threads` / `ps2_modules` / `ps2_registers` / `ps2_stack` are consistent while PAUSED
   (hit a breakpoint first); they're empty on a running game.
 - Pad input is press THEN release: set the button to 1, advance a few frames, then set 0.
-- Preview the screen with `pcsx2_save_screenshot`; reserve the GS stream for deeper analysis.
+- Preview the screen with `ps2_screenshot`.
 - After applying a CDS patch / cheat, display the final code + result to the user.
 
 ## Guidelines

@@ -2,9 +2,11 @@
 
 # MCP Server — User Guide
 
-`CodeDesigner.AI` is CodeDesigner's MCP (Model Context Protocol) server. It gives AI assistants such as Claude, GitHub Copilot or any other MCP client the same toolset a human has in VS Code: emulator control, memory and disassembly, breakpoints, labels, CDS patches, cheats, controller input, packet capture, disc/card/HDD images, and the Zipper asset editors.
+`CodeDesigner.AI` is CodeDesigner's MCP (Model Context Protocol) server: the **workspace**. It gives AI assistants such as Claude, GitHub Copilot or any other MCP client the project data a human has in VS Code: labels and data formats, notes and progress reports, CDS compile, cheats and converters, disc/card/HDD images, the Zipper asset editors, the SOCOM II network protocols, and multi-agent coordination.
 
-It exposes **242 tools** in 11 domains. A **profile** picks which domains and how much risk a client sees, so a small session doesn't pay for the whole tool list.
+Everything **live** — run control, breakpoints and watchpoints, memory and registers, disassembly with state hints, cross-references, value and pointer scans, traces, threads, patches, controller input, network capture, screenshots — is **Ps2Emulator's MCP** (`ps2_*` tools: `ps2 mcp`, or `/mcp` on its debug server with `--mcp`). Agents attach both servers; see [Emulator](emulator.md).
+
+It exposes **149 tools** in 8 domains. A **profile** picks which domains and how much risk a client sees, so a small session doesn't pay for the whole tool list.
 
 > The older `CodeDesigner.Ps2.McpServer` project has been removed. `CodeDesigner.AI` is the only MCP server.
 
@@ -14,19 +16,18 @@ It exposes **242 tools** in 11 domains. A **profile** picks which domains and ho
 
 ```
 AI client (Claude / Copilot / ...)
-        │  stdio JSON-RPC (MCP)
-        ▼
-CodeDesigner.AI   (%LOCALAPPDATA%\CodeDesigner\AI\CodeDesigner.AI.exe)
-        │                                 │
-        │ TCP localhost:8765 (JSON lines)  │ EF Core (direct, no emulator needed)
-        ▼                                 ▼
-CodeDesigner.Ps2.Bridge              SQL Server LocalDB (Database=CodeDesigner)
-    ├── PINE → PCSX2 (live memory, breakpoints, registers, pad, DEV9, GS stream)
-    └── built-in emulator (when PCSX2 is not used)
+   │ stdio JSON-RPC (MCP)                           │ stdio or HTTP (MCP)
+   ▼                                                ▼
+CodeDesigner.AI                                 Ps2Emulator's MCP (ps2_* tools)
+   │                        │                       │ gRPC (ps2debug protocol)
+   │ TCP localhost:8765      │ EF Core               ▼
+   ▼                        ▼                   Ps2Emulator (the running game)
+CodeDesigner.Ps2.Bridge   SQL Server LocalDB
+(the workspace service)   (Database=CodeDesigner)
 ```
 
-- **Live work** (memory, registers, run state, pad, packets) goes through the **Bridge** socket on `localhost:8765`. The Bridge must be running; the VS Code extension starts it for you.
-- **Coordination state** (labels, progress reports, agent profiles, orchestration plans, sessions, messages) is read and written **directly in LocalDB**, so those tools work with no emulator running.
+- **Workspace work** (compiling, converting, dissecting, disc and asset files) goes through the **Bridge** socket on `localhost:8765`. The Bridge must be running; the VS Code extension starts it for you.
+- **Coordination state** (labels, progress reports, agent profiles, orchestration plans, sessions, messages) is read and written **directly in LocalDB**, so those tools work without the Bridge.
 
 For the full system map see [Architecture](ARCHITECTURE.md).
 
@@ -79,17 +80,15 @@ There are three ways to run it:
 
 | Profile | Domains | Max risk | Tools |
 |---|---|---|---|
-| `lite` | curated list (session, progress, labels, read/disasm/scan, PC) | database | 18 |
+| `lite` | curated list (session, progress, labels, disassemble, compile) | database | 17 |
 | `core` | Core | database | 25 |
 | `multi-agent` | Core + Admin | database | 49 |
-| `packets` | Core + Network, Labels | network | 64 |
-| `live-debug` | Core + Memory, Debug | memory | 67 |
-| `cheats` | Core + Memory, Patching, Cheats | memory | 76 |
-| `media` | Core + Media, Labels | disk | 101 |
-| `re` | Core + Memory, Debug, Labels, Pcsx2, Pad | memory | 133 |
-| `pcsx2` | Core + Pcsx2, Memory, Debug, Labels, Pad | memory | 133 |
-| `patching` | Core + Memory, Debug, Labels, Patching, Cheats, Pcsx2 | memory | 152 |
-| `admin` / `all` | everything | dangerous | 242 |
+| `cheats` | Core + Memory, Patching, Cheats | database | 50 |
+| `packets` | Core + Labels, Network | database | 52 |
+| `re` | Core + Memory, Labels, Patching | database | 60 |
+| `patching` | Core + Memory, Labels, Patching, Cheats | database | 73 |
+| `media` | Core + Labels, Media | disk | 94 |
+| `admin` / `all` | everything | dangerous | 149 |
 
 A session can widen itself without relaunching: `cd_enable_domain` adds a domain (within the launch risk cap) and the client receives `tools/list_changed`. `cd_list_domains` shows what is on.
 
@@ -99,10 +98,10 @@ A session can widen itself without relaunching: `cd_enable_domain` adds a domain
 
 ## Starting a session
 
-Start every session with **`cd_session_init`**. It returns a compact summary: the active profile, bridge and game status, matching progress reports to resume, the agent's onboarding (when `--agent-id` is set), core rules and suggested next calls.
+Start every session with **`cd_session_init`**. It returns a compact summary: the active profile, bridge status, matching progress reports to resume, the agent's onboarding (when `--agent-id` is set), core rules and suggested next calls.
 
 ```
-cd_session_init                      → profile, bridge/game status, resume candidates
+cd_session_init                      → profile, bridge status, resume candidates
 progress_search "socom2 health"      → find earlier work
 progress_get "socom2-player-health"  → read it
 cd_set_goal "map the player struct"  → keeps the session on task
@@ -132,7 +131,7 @@ Always on. Session start, status, tool discovery, goals, progress reports, multi
 | `cd_active_sessions` | read-only | List currently active (sub-)agent sessions. |
 | `cd_check_session_health` | read-only | Report session age, last progress save, labels added, current goal, milestones, recommendations. |
 | `cd_context_get` | read-only | Fetch one context doc on demand (agent_profile, orchestration_plan, progress_report, db_schema, *_workflow). Keeps session_init small. |
-| `cd_enable_domain` | read-only | Expose another tool domain at runtime without relaunching (memory\|debug\|labels\|network\|patching\|cheats\|pcsx2\|pad\|media\|admin). Honours the launch risk cap. |
+| `cd_enable_domain` | read-only | Expose another tool domain at runtime without relaunching (memory\|labels\|network\|patching\|cheats\|media\|admin). Honours the launch risk cap. |
 | `cd_get_goal` | read-only | Return the current session goal (or hint to set one). |
 | `cd_inbox_pop` | database | Pull unread messages addressed to your session (or your agent persona). Marks them read. |
 | `cd_list_domains` | read-only | List tool domains and whether each is currently enabled (launch profile + any widened at runtime). |
@@ -146,7 +145,7 @@ Always on. Session start, status, tool discovery, goals, progress reports, multi
 | `cd_session_status` | read-only | Read full details for one (sub-)agent session by id. |
 | `cd_session_summary` | read-only | Recap the session so far: goal, age, labels/saves, and the milestone narrative. The 'where are we?' view. |
 | `cd_set_goal` | read-only | Declare the current session goal (one line). Helps keep the AI on task. |
-| `cd_status` | read-only | Compact backend status: profile, bridge connectivity, emulator/game info. |
+| `cd_status` | read-only | Compact backend status: profile and workspace (Bridge) connectivity. The emulator is Ps2Emulator's MCP (ps2_status). |
 | `cd_tool_help` | read-only | Full description and parameter schema for one tool. Use when the one-line summary isn't enough. |
 | `cd_tool_index` | read-only | List the tools in the current profile (names grouped by domain; verbose:true adds one-line descriptions). |
 | `label_add` | database | Create or update a label at an address. |
@@ -155,110 +154,26 @@ Always on. Session start, status, tool discovery, goals, progress reports, multi
 | `progress_save` | database | Create or overwrite a progress report. Use at milestones and before ending a session. |
 | `progress_search` | read-only | Search saved progress reports by text; returns matching report names. |
 
-### Memory (27)
+### Memory (6)
 
-Read, write, scan and disassemble EE/IOP memory; snapshots; ELF loading; cross-references and function lookup.
+Analysis of bytes you supply (a file, a dump, or memory read with Ps2Emulator's `ps2_read_memory`): strings, functions, pointers, floats, integers; and snapshot records.
 
 | Tool | Risk | Description |
 |------|------|-------------|
-| `file_load_elf` | memory | Load a PS2 ELF32 executable into the internal emulator at its PT_LOAD addresses (paused). |
-| `file_load_snapshot` | memory | Load a memory snapshot into the internal emulator (paused). Inspect with read_memory then resume. |
-| `file_set_pc` | memory | Set the EE PC in the internal emulator (call after file_load_*). |
-| `find_code_references` | read-only | Find every MIPS instruction in live RAM that references a target address (J/JAL/branches/LUI+ADDIU pairs). |
 | `get_floats` | read-only | Scan a base64 binary blob for plausible single-precision floats. |
-| `get_function` | read-only | Return the detected function containing an address: entry, last instruction, size and how many places call or point to it. Functions come from the cross-reference index (call targets and stack-frame prologues after jr ra). |
 | `get_functions` | read-only | Scan a base64 binary blob for MIPS function entry points. |
 | `get_integers` | read-only | Scan a base64 binary blob for non-zero 4-byte aligned integers. |
 | `get_pointers` | read-only | Scan a base64 binary blob for confirmed EE RAM pointers. |
 | `get_snapshots` | read-only | List saved memory snapshots for a game (lookup by ISO filename or title). |
 | `get_strings` | read-only | Scan a base64 binary blob for printable ASCII strings. |
-| `get_xrefs` | read-only | List cross-references to an address from the bridge's index: calls, jumps, branches, lui-built addresses, loads, stores and data pointers (optionally ASCII/CRC32 matches of a string there). The index is built once per region and reused; the first call may take a few seconds. |
-| `load_bin` | memory | Load a raw binary file from disk into live emulator memory at an address (inject code/data). |
-| `load_snapshot` | memory | Reload a previously saved memory snapshot into the running emulator. |
-| `memory_capture_range` | read-only | Capture a large memory range server-side and return a handle + preview. Alias of memory_read(large:true). |
-| `memory_disasm` | read-only | Disassemble a window of EE memory to MIPS. Use for reading code. Returns instructions. |
-| `memory_read` | read-only | Read an EE/IOP memory range as inline hex; set large=true (or length>4096) to get a capture handle + preview instead. |
-| `memory_scan` | read-only | Scan EE/IOP RAM for a byte pattern ('?' wildcards) and return match addresses. |
-| `memory_write` | memory | Write hex bytes to EE/IOP memory. Use for patches/pokes. Returns confirmation. |
-| `rebuild_xrefs` | read-only | Rebuild the cross-reference index for a region after the game loads new code or data. Waits for the build. |
-| `scan_floats` | read-only | Scan live RAM for plausible IEEE-754 single-precision floats. |
-| `scan_functions` | read-only | Scan live EE/IOP RAM for likely MIPS function entry points (ADDIU $sp,$sp,-N prologues). |
-| `scan_integers` | read-only | Scan live RAM for non-zero 4-byte aligned 32-bit integers. |
-| `scan_pointers` | read-only | Scan live RAM for 4-byte aligned values that are confirmed EE RAM pointers. |
-| `scan_strings` | read-only | Scan live EE/IOP RAM for null-terminated ASCII strings. |
-| `scan_value` | read-only | Scan live RAM for a specific value (u8/u16/u32/u64/f32) with a comparison operator. |
-| `snapshot` | disk | Save a full memory snapshot to disk; optionally associate with isoName for later lookup. |
 
-### Debug (15)
-
-Run control, breakpoints, stepping, registers and threads. Works on the built-in emulator and PCSX2.
-
-| Tool | Risk | Description |
-|------|------|-------------|
-| `debug_breakpoint_clear` | memory | Remove a breakpoint at a specific address. |
-| `debug_breakpoint_clear_all` | memory | Remove every breakpoint currently set in the emulator. |
-| `debug_breakpoint_set` | memory | Set an execution breakpoint at an address. |
-| `debug_pause` | memory | Pause emulator execution. |
-| `debug_restart` | memory | Full hardware reset of the emulator (reloads BIOS, restarts game). |
-| `debug_resume` | memory | Resume emulator execution from a pause or breakpoint. |
-| `debug_run_until_pc` | memory | Resume execution and block until EE PC reaches targetPc, then pause. Returns final CPU state. |
-| `debug_step` | memory | Execute exactly one EE instruction while paused. Returns new PC + any per-instruction analysis. |
-| `debug_thread_list` | read-only | List EE threads with status, PC, SP, priority, entry. Requires the emulator PAUSED (hit a breakpoint or pause first) — empty on a running game. |
-| `debug_trace_calls` | memory | Step the emulator from current PC to endPc and record every JAL/JALR call seen. |
-| `get_pc` | read-only | Get current EE PC and pause state (also reports last breakpoint hit). |
-| `get_registers` | read-only | Full EE CPU register dump (GPRs, HI/LO, COP0, COP1 FPU, VU0). Meaningful only when the emulator is PAUSED (hit a breakpoint or pause first). |
-| `pcsx2_game_info` | read-only | Query running game title, serial, UUID, version via PINE. |
-| `pcsx2_status` | read-only | Query PCSX2 status via PINE (Running/Paused, game loaded). |
-| `set_register` | memory | Write a value to a named EE CPU register (GPR/PC/HI/LO/COP0_x/COP1_x). |
-
-### Pcsx2 (33)
-
-PCSX2-only PINE extensions: save states, screenshots, symbols, watches, stepping, audio and speed.
-
-| Tool | Risk | Description |
-|------|------|-------------|
-| `pcsx2_add_watch` | memory | Add a hardware memory watchpoint (PINE opcode 0x2E). JIT-only. |
-| `pcsx2_clear_all_watches` | memory | Clear all hardware watchpoints on all CPUs (PINE opcode 0x31). |
-| `pcsx2_disassemble` | read-only | Disassemble instructions on EE/IOP via PINE live-memory. |
-| `pcsx2_extract_p2s` | disk | Extract EEmem.bin / IOPmem.bin from a .p2s archive. |
-| `pcsx2_frame_advance` | memory | Advance a fixed number of video frames then pause. |
-| `pcsx2_get_audio_state` | read-only | Read whether PCSX2's audio output is muted (PINE opcode 0x46). |
-| `pcsx2_get_call_stack` | read-only | Walk the EE call stack and return each frame (entry, PC, SP, symbol). Requires the emulator PAUSED (hit a breakpoint first) — meaningless on a running game. |
-| `pcsx2_get_fps` | read-only | Read current emulated framerate via PINE. |
-| `pcsx2_get_iop_threads` | read-only | List all IOP OS threads via PINE. |
-| `pcsx2_get_locals` | read-only | List parameters + locals for the EE function containing an address (DWARF). |
-| `pcsx2_get_modules` | read-only | List loaded IOP modules (IRX) via PINE. |
-| `pcsx2_get_paths` | read-only | Return the absolute on-disk directories PCSX2 is using for this session, captured from the emu log on connection. Use this whenever you need to read or write a PCSX2-managed file (memory cards, save states, screenshots, cheats, patches, logs, textures, ISO covers, per-game .ini overrides, etc.) instead of guessing or hardcoding %DOCUMENTS%\\PCSX2.\nReturned keys (each value is an absolute directory):\n  pcsx2.path.dataRoot         — root of the user's PCSX2 data tree (parent of inis/, memcards/, sstates/, ...).\n  pcsx2.path.bios             — BIOS image search path.\n  pcsx2.path.snapshots        — in-game screenshot captures.\n  pcsx2.path.savestates       — .p2s save-state files.\n  pcsx2.path.memoryCards      — virtual PS2 memory card images (.ps2).\n  pcsx2.path.logs             — emulog.txt and other diagnostic logs.\n  pcsx2.path.cheats           — per-game .pnach cheat files.\n  pcsx2.path.patches          — built-in compatibility patches.\n  pcsx2.path.covers           — cover-art images shown in the game list.\n  pcsx2.path.gameSettings     — per-disc .ini overrides keyed by serial+CRC.\n  pcsx2.path.resources        — bundled, read-only resource tree shipped with PCSX2.\n  pcsx2.path.userResources    — user-overridable copy of the Resources tree.\n  pcsx2.path.cache            — shader/program/state caches (regenerated as needed).\n  pcsx2.path.textures         — HD-texture replacement / dump folder.\n  pcsx2.path.inputProfiles    — saved controller mapping profiles.\n  pcsx2.path.videos           — GS-dump / video capture output.\n  pcsx2.path.debuggerLayouts  — saved debugger window layouts.\n  pcsx2.path.debuggerSettings — per-game persisted debugger state.\n  pcsx2.path.discovered       — JSON array of every other path-shaped string seen in the emu log (diagnostics only).\nValues are populated automatically the first time PCSX2 connects in a session; empty values mean PCSX2 has not yet been launched (or the emu log line for that key has not been seen). |
-| `pcsx2_get_register` | read-only | Read any EE/IOP register by category and index via PINE. |
-| `pcsx2_get_symbol` | read-only | Look up EE function symbol name at an address via PINE. |
-| `pcsx2_get_symbol_by_name` | read-only | Look up an EE symbol address and size by demangled name via PINE. |
-| `pcsx2_list_breakpoints` | read-only | List active PC breakpoints in PCSX2 via PINE. |
-| `pcsx2_list_functions` | read-only | Paginated list of EE function symbols from PCSX2's symbol DB. |
-| `pcsx2_list_globals` | read-only | Paginated list of EE global variable symbols from PCSX2's symbol DB. |
-| `pcsx2_list_watches` | read-only | List active hardware memory watchpoints (PINE opcode 0x30). |
-| `pcsx2_load_state_file` | memory | Load a PCSX2 .p2s state file. |
-| `pcsx2_load_state_slot` | memory | Load PCSX2 save state from a numbered slot (0-9). |
-| `pcsx2_remove_watch` | memory | Remove a hardware memory watchpoint (PINE opcode 0x2F). |
-| `pcsx2_reset` | memory | Send a CPU reset to the emulator (no BIOS reload). |
-| `pcsx2_save_screenshot` | disk | Preferred way to preview the screen: take a screenshot via PINE (saved to PCSX2's configured screenshot directory). Use this over get_gs_frame for routine 'what's on screen' checks. |
-| `pcsx2_save_state_file` | disk | Save PCSX2 state to a named .p2s file. |
-| `pcsx2_save_state_slot` | disk | Save PCSX2 emulator state to a numbered slot (0-9). |
-| `pcsx2_set_audio_muted` | memory | Mute or unmute PCSX2's audio output (PINE opcode 0x45, same as the Toggle Mute hotkey). Replies with the resulting state; PCSX2's 'Mute All Sound' setting blocks unmuting. |
-| `pcsx2_set_limiter_mode` | memory | Set speed limiter mode: 0=Nominal, 1=Turbo, 2=Slomo, 3=Unlimited. |
-| `pcsx2_set_register` | memory | Write any EE/IOP register by category and index via PINE. |
-| `pcsx2_step_into` | memory | Step into the next EE instruction (follows calls). |
-| `pcsx2_step_out` | memory | Step out of the current EE subroutine (run to JR $ra). |
-| `pcsx2_step_over` | memory | Step over the next EE instruction (skips into calls). |
-| `pcsx2_version` | read-only | Query the PINE IPC protocol version string. |
-
-### Labels (28)
+### Labels (23)
 
 Label sets, pointer structs, groups, data formats, call graphs and IOP module labels.
 
 | Tool | Risk | Description |
 |------|------|-------------|
 | `callgraph_query` | read-only | Return callers/callees of a focus function, up to a depth. Requires a prior callgraph_scan. |
-| `callgraph_scan` | read-only | Scan a code region for JAL/JALR call edges and persist them. Run once before callgraph_query. |
 | `data_format_clear` | database | Remove data-format overrides covering an address range (reverts to instruction decoding). |
 | `data_format_list` | read-only | List data-format overrides for a game (optionally within an address range). |
 | `data_format_set` | database | Tag a memory range as a data type (Byte\|Half\|Word\|DWord\|QWord\|Float\|Double) for disassembler rendering. |
@@ -267,8 +182,6 @@ Label sets, pointer structs, groups, data formats, call graphs and IOP module la
 | `group_delete` | database | Delete a label group (its members are detached, not deleted). |
 | `group_list` | read-only | List label groups in a set with their members (for the Structure Visualizer). |
 | `group_remove_member` | database | Remove the member at an address from a label group. |
-| `iop_labels_refresh` | database | Refresh every 'IOP: <module>' label set from loaded IOP modules (PCSX2 PINE mode). Idempotent. |
-| `iop_labels_refresh_module` | database | Refresh the 'IOP: <module>' label set for a single IOP module. PINE mode required. |
 | `label_add_batch` | database | Create/update many labels at once from a JSON array. |
 | `label_add_pointer` | database | Define a struct: a named base address whose fields you then map with label_add_pointer_member. |
 | `label_add_pointer_member` | database | Add/update a struct field: a named member at a byte offset from the (dereferenced) base. |
@@ -280,33 +193,29 @@ Label sets, pointer structs, groups, data formats, call graphs and IOP module la
 | `label_list_functions` | read-only | List only Function-typed labels (FNC_ prefix) from the active label set. |
 | `label_list_sets` | read-only | List all label sets for a game (including the built-in set). |
 | `label_repair_orphan_members` | database | Repair labels whose address contains ':+...' but whose ParentId/Offset relationship is missing. |
-| `label_resolve_linked_list` | read-only | Walk a linked list in live PCSX2 memory from a head, using a per-node next-offset. |
-| `label_resolve_strings` | database | Read live PCSX2 memory for each String-typed label and update with the null-terminated ASCII found there. |
 | `label_search` | read-only | Search labels by name, address, comment, value type, or label type across a game/set. Returns compact hits; fetch full set only when needed. |
 | `label_search_sets` | read-only | Search label-set names and count matching labels inside each set. Use before fetching full sets to keep token usage low. |
 | `label_set_active` | database | Mark a label set as active (merged with built-in for lookups). |
 
-### Patching (7)
+### Patching (6)
 
 Assemble/disassemble and compile, validate, explain or apply CDS scripts.
 
 | Tool | Risk | Description |
 |------|------|-------------|
-| `apply_cds_patch` | memory | Compile a CDS source and atomically apply the resulting patch to live emulator memory (with assert/sidecar checks). After it runs, show the user the applied code + result. |
 | `assemble` | read-only | Assemble PS2 MIPS64 EE assembly (one instruction per line) into hex opcodes. |
 | `compile_cds` | read-only | Compile a Code Designer Script (.cds) into GameShark/AR codes + MIPS memory patches. |
-| `decompile_to_cds` | read-only | Read live memory, disassemble it, and emit a re-compilable .cds source (branch targets become :target_ labels). |
+| `decompile_to_cds` | read-only | Disassemble code words and emit a re-compilable .cds source (branch targets become :target_ labels). Read the words from the running game with Ps2Emulator's MCP (ps2_read_memory). |
 | `disassemble` | read-only | Disassemble PS2 MIPS64 EE hex opcodes (space/newline separated) into assembly. |
 | `explain_cds` | read-only | Parse a .cds source locally and describe each directive in human-readable terms (no emit, no bridge call). |
 | `validate_cds` | read-only | Parse a CDS source without emitting; returns diagnostics (errors + warnings). |
 
-### Cheats (17)
+### Cheats (13)
 
 Cheat lists, archive search, format conversion and porting, and the frame-loop cheat engine.
 
 | Tool | Risk | Description |
 |------|------|-------------|
-| `apply_cheats` | memory | Apply GameShark/Action Replay cheat codes to live emulator memory. |
 | `cheat_list_builds` | read-only | List the saved cheat lists ('builds') for a game. |
 | `cheat_list_create` | database | Create a new empty cheat list/build for a game. |
 | `cheat_list_delete` | database | Delete a cheat list/build by id. |
@@ -319,42 +228,20 @@ Cheat lists, archive search, format conversion and porting, and the frame-loop c
 | `cheat_search` | read-only | Search cheat labels, section headers, descriptions, and code text. Returns compact hits; fetch a section afterward for full codes. |
 | `convert_cheat` | read-only | Convert cheat codes between raw and device-specific formats (CodeBreaker / GameShark / Action Replay). Offline. |
 | `detect_cheat_format` | read-only | Detect the encryption format of a cheat-code block (offline). |
-| `inject_cheat_engine` | memory | Inject the CDS cheat engine and activate a cheat set. |
 | `port_cheats` | read-only | Port cheats between game revisions by scanning two memory dumps for matching patterns. |
-| `remove_cheat_engine` | memory | Remove the injected CDS cheat engine and restore original instructions at the hook point. |
-| `update_cheat_engine` | memory | Update the active cheat table in the already-injected engine (no re-hook). |
 
-### Pad (5)
+### Network (4)
 
-Controller input over PINE.
-
-| Tool | Risk | Description |
-|------|------|-------------|
-| `pad_get_state` | read-only | Read full input state of a pad: buttons bitmask, sticks, pressures. |
-| `pad_get_type` | read-only | Query the controller type installed in a pad slot (NotConnected/DualShock2/Guitar/...). |
-| `pad_set_analog` | memory | Set raw analog stick positions (bypasses deadzone). |
-| `pad_set_button` | memory | Set a single button/axis to a normalized value. PRESS THEN RELEASE: set 1, advance a few frames, then set 0 — a held value with no release never fires as a button event in-game. |
-| `pad_set_state` | memory | Atomically replace the complete pad input state (suitable for TAS). |
-
-### Network (11)
-
-DEV9 packet capture and injection, Medius decoding and message building.
+SOCOM II network protocols: dissect frames (SCERT, Medius, DME), decrypt SCERT records, build messages from the catalog. Capture frames with Ps2Emulator's `ps2_capture bytes=true`.
 
 | Tool | Risk | Description |
 |------|------|-------------|
 | `medius_decode` | read-only | Decode a raw Medius payload (bytes after the class+type prefix) against the registered struct schema. Returns named fields. |
 | `net_build_message` | read-only | Encode one multiplayer-server message (SCERT, Lobby, LobbyExt, MGCL, DME or SOCOM II Game, see NETCATALOG) from field values into a plaintext SCERT record, returned as base64 for net_inject's payloadBase64. |
-| `net_capture` | read-only | Enable or disable DEV9 packet capture (ring buffer). Use net_recv_capture to drain. |
 | `net_decrypt_scert` | read-only | Decrypt every encrypted SCERT record in a captured Ethernet frame using an RC4 session key, then dissect to layers + fields. |
 | `net_disassemble` | read-only | Dissect a raw Ethernet frame into a structured layer tree (Ethernet/ARP/IPv4/ICMP/TCP/UDP/SCERT/Medius) with field-level Medius decoding. |
-| `net_get_stats` | read-only | Cumulative TX/RX counters + capture queue stats for the DEV9 adapter. |
-| `net_get_status` | read-only | DEV9 adapter status: enabled flag, adapter type, PS2 MAC, PS2 IP. |
-| `net_inject` | network | Inject a raw Ethernet frame into the PS2 RX path (as if from network). Optionally swap its TCP/UDP payload (e.g. a SCERT record from net_build_message), fix lengths/checksums and continue a live TCP flow's seq/ack. |
-| `net_inject_tx` | network | Inject a raw Ethernet frame out the TX adapter (as if PS2 sent it). Same payload/fix/TCP options as net_inject. |
-| `net_recv_capture` | read-only | Drain captured packets from the DEV9 queue. Returns metadata table (no/time/dir/src/dst/proto/len/info). |
-| `net_set_filter` | read-only | Set the capture filter (none / protocol / port / IPv4). Applied in addition to direction filter. |
 
-### Media (48)
+### Media (46)
 
 Disc, memory card and HDD images; the Zipper asset editors; weapon authoring; GS frames; compatibility list; recompiler.
 
@@ -383,8 +270,6 @@ Disc, memory card and HDD images; the Zipper asset editors; weapon authoring; GS
 | `compat_details` | read-only | Get the compatibility details for one game by serial and/or title. |
 | `compat_list` | read-only | List every game disc that carries a PCSX2 compatibility status, by title. |
 | `compat_sync` | disk | Download the latest PCSX2 compatibility database and update local game statuses. |
-| `get_gs_frame` | read-only | Get the latest PCSX2 GS frame as base64 JPEG (in-memory snapshot). For a quick visual check prefer pcsx2_save_screenshot; reserve this for deeper frame analysis / streaming. |
-| `get_gs_stream_status` | read-only | Report GS streaming pipeline health (connection, port, subscribers, frame counters, drops). |
 | `hdd_create` | disk | Create a new blank HDD image with an APA table (overwrites if exists). |
 | `hdd_delete` | disk | Delete a partition from an HDD image (irreversible). |
 | `hdd_export` | disk | Export a file from an HDD partition to disk. |
@@ -449,49 +334,50 @@ Settings, raw DB queries, agent profiles, orchestration plans, navigation histor
 ### Find and label a value
 
 ```
-scan_value scanValue=100 dataType=uint32 comparison=eq       # player health at full
+ps2_scan value=100 type=u32                             # player health at full   (Ps2Emulator)
                                                           # take damage in game, then narrow:
-scan_value scanValue=85 dataType=uint32 comparison=eq previousAddresses=<hits from the first scan>
-memory_write address=0x0045A1B0 hexData=64000000           # confirm by writing it back
-label_add address=0x0045A1B0 label=player_health
+ps2_scan scan=<id> compare=decreased
+ps2_find_pointers target=<hit>                           # a chain that survives restarts
+label_add address=<hit> label=player_health              # (Code Designer)
 progress_save name=socom2-player-health content=<markdown>
 ```
 
 ### Read code around a hit
 
 ```
-get_pc
-memory_disasm address=<pc> count=32
-get_function address=<pc>                 # boundaries + name
-get_xrefs targetAddress=<function start>  # callers, branches, loads/stores, pointers
-debug_breakpoint_set address=<function start>
-debug_resume                       # trigger it in game
-get_registers
-debug_trace_calls
+ps2_build_index                                # once per session      (Ps2Emulator)
+ps2_functions containing=<address>             # boundaries + name
+ps2_disassemble address=<start> count=32       # with state hints
+ps2_xrefs address=<start>                      # callers, branches, loads/stores, pointers
+ps2_set_breakpoint address=<start>
+ps2_wait_for_pause                             # trigger it in game
+ps2_registers
+ps2_stack
+label_add_batch …                              # name what you found   (Code Designer)
 ```
 
 ### Apply a CDS patch
 
 ```
-validate_cds sourceCode=...
-compile_cds sourceCode=...       # inspect the codes and patch words first
-snapshot                         # safety copy
-apply_cds_patch sourceCode=...
+validate_cds sourceCode=...                    # (Code Designer)
+compile_cds sourceCode=...                     # the raw codes, plus assert/breakpoint/watchpoint sidecars
+ps2_read_values addresses=[…]                  # check the asserts      (Ps2Emulator)
+ps2_set_patch name=<patch> codes=<raw codes>   # applied every field
 ```
+
+The `cd-cds-patch` skill walks through it.
 
 ### Drive the game
 
-Use `pad_set_state` (full pad state) or `pad_set_button`, then check the screen with `pcsx2_save_screenshot` or `get_gs_frame`. `pcsx2_frame_advance` steps a fixed number of frames. To build a button activator ("joker") code for a cheat, use the Controller page in VS Code (see [VS Code Extension](vscode-extension.md#controller)).
+`ps2_press` (a button for some fields) or `ps2_hold` / `ps2_release`, `ps2_frame_advance` to let it take effect, and `ps2_screenshot` to see the result. To build a button activator ("joker") code for a cheat, use the Controller page in VS Code (see [VS Code Extension](vscode-extension.md#controller)).
 
 ### Capture packets
 
 ```
-net_get_status
-net_set_filter protocol=udp
-net_capture enable=true
-net_recv_capture                      # after playing online for a bit
-net_disassemble frameBase64=<frame>   # or medius_decode for Medius messages
-net_capture enable=false
+ps2_network                                    # adapter and address    (Ps2Emulator, started with --network)
+ps2_capture seconds=10 port=10075 bytes=true   # while the user plays
+net_disassemble frameBase64=<frame>            # SCERT/Medius layers    (Code Designer)
+medius_decode …                                # one Medius message
 ```
 
 `cd_tool_help <tool>` gives each tool's full parameter schema.
@@ -526,9 +412,8 @@ Progress reports are the persistent memory between sessions, stored in the `McpM
 
 | Symptom | Fix |
 |---|---|
-| `cd_status` says the bridge is offline | Start the Bridge (the extension's Connect, or its *CodeDesigner* terminal). It listens on `localhost:8765`. |
-| PINE timeouts | Use the CodeDesigner PCSX2 build with PINE enabled (Settings → Advanced → Enable PINE). The extension's **Run** launches it correctly. |
-| PCSX2-only tool fails on a PINE opcode | The PCSX2 build predates that opcode. Rebuild the fork in `pcsx2/`. |
+| `cd_status` says the bridge is offline | Start the Bridge (the extension starts it with Run, or its *CodeDesigner* terminal). It listens on `localhost:8765`. |
+| `ps2_*` tools cannot reach the emulator | Run the game (the panel's **Run**, or `ps2 … --debug-server 28100`); `ps2 mcp --attach <address>` if it listens elsewhere. |
 | A tool you expect is missing | It isn't in your profile. `cd_list_domains`, then `cd_enable_domain`, or relaunch with a wider `--profile`. A risk cap (`--readonly`) can still hide it. |
 | `CodeDesigner.AI not found` in VS Code | Build `CodeDesigner.AI` so it deploys to `%LOCALAPPDATA%\CodeDesigner\AI\`. |
 | Database errors at startup | LocalDB isn't running. `sqllocaldb start MSSQLLocalDB`, or pass `--connection-string`. |

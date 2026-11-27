@@ -10,7 +10,7 @@
 
 ---
 
-CodeDesigner assembles and disassembles the Emotion Engine (MIPS R5900), debugs games live in its own PCSX2 fork or PX86, builds and ports cheats, edits game assets, and runs online servers. Its MCP server exposes many of the same capabilities to compatible AI assistants, so a developer and an assistant can work within the same reverse-engineering workflow. Enable AI mode in the client to observe supported AI actions as they happen.
+CodeDesigner assembles and disassembles the Emotion Engine (MIPS R5900), debugs games live in Ps2Emulator (PS2) or PX86 (NDS), builds and ports cheats, edits game assets, and runs online servers. Its MCP server exposes many of the same capabilities to compatible AI assistants, so a developer and an assistant can work within the same reverse-engineering workflow. Enable AI mode in the client to observe supported AI actions as they happen.
 
 > **Get started:** run `CodeDesignerInstaller.exe` from the [latest release](https://github.com/FatalityDevelopment/CodeDesignerPS2/releases/latest). See [Getting started](#getting-started).
 
@@ -36,10 +36,10 @@ CodeDesigner assembles and disassembles the Emotion Engine (MIPS R5900), debugs 
 | Area | Highlights |
 |---|---|
 | **Disassembler** | Live views of every memory region; comment hints, function and table detection, cross-references, breakpoints, watches, registers. Full R5900 ISA including MMI, FPU, VU0 macro and VU1. |
-| **Emulators** | Debugs commercial games in CodeDesigner's **PCSX2 fork** over PINE (breakpoints, stepping, symbols, save states, pad, network, live picture, sound), or in the built-in dual-CPU emulator. |
+| **Emulator** | Debugs commercial games in **[Ps2Emulator](https://github.com/TylerDev888/Ps2Emulator)** over its debug protocol: breakpoints and watchpoints, stepping, state hints, cross-references, scans and pointer chains, traces, patches, pad, network and live picture, with the analysis running inside the emulator. |
 | **CDS language** | A patch scripting language that compiles to MIPS, GameShark codes or a frame-loop cheat table. |
 | **Cheats** | Cheat lists and the CheatCodeArchive, format conversion, a cheat porter between game versions, a frame-loop cheat engine and a joker (button activator) code builder. |
-| **Memory tools** | Memory Diff, PCSX2 save states, scanners, labels, pointer structs and structure diagrams. |
+| **Memory tools** | Memory Diff, memory snapshots, scanners, labels, pointer structs and structure diagrams. |
 | **Assets** | Viewer, Model, Map and Animation editors for SOCOM II (and SOCOM: Combined Assault, read-only). |
 | **Network** | DEV9 packet capture with every Medius / DME / SOCOM II message labelled, plus packet building and injection. |
 | **Online** | SOCOM II online servers (DNAS, Medius, DME, NAT, patch download), verified on real hardware. |
@@ -50,13 +50,11 @@ CodeDesigner assembles and disassembles the Emotion Engine (MIPS R5900), debugs 
 ## How it fits together
 
 ```
-VS Code extension ──JSON lines :8765──▶ CodeDesigner.Ps2.Bridge ──PINE──▶ PCSX2 fork / built-in emulator
-        ▲                                   ▲   └─ GS stream → relayed on :8766 (Preview)
-        └─── Preview ◀── :8766              │
-                                     CodeDesigner.AI (MCP, stdio) ◀── your assistant
+VS Code extension ──gRPC (frames, memory, debugging)──▶ Ps2Emulator ◀── Ps2Emulator MCP (ps2_*) ◀──┐
+        └──JSON lines :8765──▶ CodeDesigner.Ps2.Bridge ◀── CodeDesigner.AI (MCP, stdio) ◀──────── your assistant
 ```
 
-The Bridge is the runtime hub: the extension, the MCP server and scripts all talk to it. See [Architecture](docs/ARCHITECTURE.md) and [Projects](docs/projects.md).
+Ps2Emulator runs the game and serves everything live; the Bridge is the workspace service the extension, the MCP server and scripts share. See [Emulator](docs/emulator.md), [Architecture](docs/ARCHITECTURE.md) and [Projects](docs/projects.md).
 
 ## Feature Showcase
 
@@ -72,7 +70,7 @@ Explore the main workspace for inspecting game memory, navigating code, and acce
 
 ### Live PS2 Debugger and Disassembler
 
-Inspect the Emotion Engine while a game is running. Work with live memory regions and disassembly, follow execution, investigate registers, and use debugging features provided by the CodeDesigner PCSX2 fork.
+Inspect the Emotion Engine while a game is running. Work with live memory regions and disassembly, follow execution, investigate registers, and use the debugging features Ps2Emulator serves.
 
 The disassembler supports the R5900 instruction set, including MMI, FPU, VU0 macro, and VU1 instructions. Breakpoints, watches, labels, and cross-references help connect raw addresses to useful discoveries.
 
@@ -135,7 +133,7 @@ Attempt to port codes between game revisions and related titles, such as SOCOM I
 
 ### Memory Diff and Save-State Comparison
 
-Compare memory dumps from different save states, or compare a save-state dump against live emulator memory. Use the differences to narrow down which addresses changed and investigate how game state is represented.
+Compare memory dumps from different snapshots, or compare a snapshot against live emulator memory. Use the differences to narrow down which addresses changed and investigate how game state is represented.
 
 <img src="docs/images/rm_ (14).png" alt="Memory Diff comparing memory snapshots" width="850">
 <img src="docs/images/rm_ (15).png" alt="Memory Diff results for save-state and emulator memory analysis" width="850">
@@ -198,7 +196,7 @@ You need Windows 10 or 11 (64-bit) and a BIOS dumped from your own PS2. Everythi
 
 <img src="docs/images/installer.png" alt="CodeDesigner installer welcome page with Install CodeDesigner and Developer setup options" width="480">
 
-The installer adds anything missing (.NET 8 runtime, VS Code, SQL Server LocalDB, the VC++ runtime) and skips what is already installed. It then downloads CodeDesigner, the PCSX2 fork and the cheat archive into `%LOCALAPPDATA%\CodeDesigner\`, creates the database, and installs the VS Code extension. Windows may ask for administrator approval while prerequisites install. If a step fails, the log is at `%TEMP%\CodeDesignerSetup\install.log`.
+The installer adds anything missing (.NET 8 runtime, VS Code, SQL Server LocalDB, the VC++ runtime) and skips what is already installed. It then downloads CodeDesigner and the cheat archive into `%LOCALAPPDATA%\CodeDesigner\`, creates the database, and installs the VS Code extension. Windows may ask for administrator approval while prerequisites install. If a step fails, the log is at `%TEMP%\CodeDesignerSetup\install.log`.
 
 ### Developer setup
 
@@ -221,15 +219,15 @@ dotnet build CodeDesigner.sln          # builds and deploys to %LOCALAPPDATA%\Co
 dotnet test CodeDesigner.Ps2.TestProject/
 ```
 
-To work on the extension, open `client/vscode` in VS Code, run `npm ci`, and press **F5**. The [building guide](docs/building.md) covers the details, including building the PCSX2 fork.
+To work on the extension, open `client/vscode` in VS Code, run `npm ci`, and press **F5**. The [building guide](docs/building.md) covers the details.
 
-> Building deploys the Bridge, the emulator and the MCP server into `%LOCALAPPDATA%\CodeDesigner\`. If the Bridge is running, stop it first so the copy does not hit locked files.
+> Building deploys the Bridge and the MCP server into `%LOCALAPPDATA%\CodeDesigner\`. If the Bridge is running, stop it first so the copy does not hit locked files.
 
 ### First run
 
 1. Open the **CodeDesigner** sidebar in VS Code.
-2. In the **Emulator** tab, pick PCSX2 (or the built-in emulator), your BIOS and a game.
-3. Click **Run**. The extension starts the emulator and the Bridge and connects.
+2. In the **Emulator** tab, pick Ps2Emulator (`ps2.exe`, built from its repository), your BIOS and a game.
+3. Click **Run**. The extension starts the Bridge and Ps2Emulator and connects to both.
 4. Open **EE RAM** under *Memory Region* to start disassembling.
 
 ## AI assistants (MCP)
@@ -255,8 +253,7 @@ Profiles pick which tools a client sees (`lite`, `core`, `re`, `patching`, `pack
 | Path | What |
 |---|---|
 | `CodeDesigner.Ps2.Common` | The EE R5900 ISA: assembler, disassembler, encoder and decoder |
-| `CodeDesigner.Ps2.EmulatorCore`, `.Emulator` | The built-in PS2 emulator and the process that hosts it |
-| `CodeDesigner.Ps2.Bridge` | Socket server and PINE bridge, the runtime hub |
+| `CodeDesigner.Ps2.Bridge` | Socket server: the workspace service (labels, cheats, CDS, files, database) |
 | `CodeDesigner.Ps2.CdsLanguage` | The CDS patch language compiler |
 | `CodeDesigner.Ps2.CheatEngine` | Cheat parsing, conversion, porting and the frame-loop engine |
 | `CodeDesigner.Ps2.FileFormats` | SOCOM, SOCOM CA and GTA SA asset formats |
@@ -264,7 +261,7 @@ Profiles pick which tools a client sees (`lite`, `core`, `re`, `patching`, `pack
 | `CodeDesigner.AI`, `.AI.Abstractions` | The MCP server and its tool framework |
 | `client/vscode` | The VS Code extension (Angular webviews) |
 | `client/cd-app` | The standalone app, in progress (React) |
-| `pcsx2/` | CodeDesigner's PCSX2 fork (submodule) |
+| `pcsx2/` | PCSX2 sources (submodule), read by the label generators in `tools/scripts/` |
 | `CheatCodeArchive/` | The cheat database (submodule) |
 | `docs/` | [Documentation index](docs/README.md) |
 
@@ -285,8 +282,8 @@ Start at the **[documentation index](docs/README.md)**. Good first reads:
 |---|---|
 | [CodeDesigner NDS](https://github.com/FatalityDevelopment/CodeDesignerNDS) | The same toolset for the Nintendo DS: ARM/Thumb disassembler, debugger, labels, CDS and an MCP server |
 | [PX86](https://github.com/FatalityDevelopment/PX86-NintendoDS) | The Nintendo DS emulator that CodeDesigner NDS drives |
-| [PCSX2 fork](https://github.com/FatalityDevelopment/pcsx2) | PCSX2 with CodeDesigner's debugger, pad, network and audio PINE opcodes |
+| [Ps2Emulator](https://github.com/TylerDev888/Ps2Emulator) | The PS2 emulator CodeDesigner debugs games in, with its debug server and MCP |
 
 ## Continuous integration
 
-`.github/workflows/build.yml` builds every project, runs the test suite, packages the release assets with [`tools/scripts/Build-Release.ps1`](tools/scripts/Build-Release.ps1) and builds the PCSX2 fork on each push and pull request to `master`. Pushing a `v*` tag also publishes a GitHub release with `CodeDesigner.zip`, `PCSX2.zip`, `CheatCodeArchive.zip`, `codedesigner.vsix` and `CodeDesignerInstaller.exe`; see [Releases](docs/building.md#releases). Another workflow rejects committed `bin/` and `obj/` folders.
+`.github/workflows/build.yml` builds every project, runs the test suite, packages the release assets with [`tools/scripts/Build-Release.ps1`](tools/scripts/Build-Release.ps1) on each push and pull request to `master`. Pushing a `v*` tag also publishes a GitHub release with `CodeDesigner.zip`, `CheatCodeArchive.zip`, `codedesigner.vsix` and `CodeDesignerInstaller.exe`; see [Releases](docs/building.md#releases). Another workflow rejects committed `bin/` and `obj/` folders.

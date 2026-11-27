@@ -32,11 +32,11 @@ Pull-based coordination over the shared database, with optional push over the me
 | Stage | Agent | Profile | Lane |
 |------|-------|---------|------|
 | 1 | **Raiden** (lead) | `multi-agent` / `admin` | Orchestrate, dispatch, advance stages, route messages |
-| 2 | **Johnny Cage** | `pcsx2` | Reach the target game state (savestates, snapshots, pad input) |
+| 2 | **Johnny Cage** | `core` + Ps2Emulator MCP | Reach the target game state (snapshots, pad input) |
 | 3 | **Sub-Zero** | `re` | Isolate candidate addresses fast (scanning) |
 | 4 | **Scorpion** | `re` | Map execution (disasm, call graph, tracing, function labels) |
 | 5 | **Kitana** | `re` | Model data (structs, pointers, data formats, groups) |
-| 6 | **Sonya** | `live-debug` | Verify behaviour (breakpoints, watchpoints, registers, screenshots) |
+| 6 | **Sonya** | `core` + Ps2Emulator MCP | Verify behaviour (breakpoints, watchpoints, registers, screenshots) |
 | 7 | **Kano** | `patching` / `cheats` | Modify safely (CDS, cheats) under snapshot gates |
 | 8 | **Liu Kang** | `re` / `admin` | Persist & migrate (label sets, progress reports, survive rebuilds) |
 

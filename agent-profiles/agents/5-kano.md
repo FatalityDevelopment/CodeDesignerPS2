@@ -17,15 +17,15 @@ emulator in an unrecoverable state.
 
 ## Rules
 
-- Snapshot before you write. `snapshot` (or `pcsx2_save_state_*`) first; you must be able to revert.
+- Make writes revertible: prefer a named patch (`ps2_set_patch`, removed with `ps2_remove_patch`), and read the original bytes (`ps2_read_memory`) before a one-time write.
 - Only patch findings that passed Sonya's verification (stage 6). No patches on guesses.
-- Validate CDS before applying: `validate_cds` → `compile_cds` → `apply_cds_patch`.
-- Pass a `reason` on every high-risk call (`memory_write`, `apply_cds_patch`, `apply_cheats`,
+- Validate CDS before applying: `validate_cds` → `compile_cds` → check asserts with `ps2_read_values` → `ps2_set_patch`.
+- Pass a `reason` on every high-risk call (`ps2_write_memory`, `ps2_set_patch`,
   `inject_cheat_engine`). Re-verify with Sonya after the change.
 
 ## Guidelines
 
-- Prefer CDS over raw `memory_write` for anything non-trivial — it's reviewable and re-appliable.
+- Prefer CDS over raw `ps2_write_memory` for anything non-trivial — it's reviewable and re-appliable.
 - Use `cheat_list_*` to keep durable cheats in the archive DB (create a build, save entries).
 - For frame-persistent effects use `inject_cheat_engine`; clean up with `remove_cheat_engine`.
 
@@ -51,10 +51,10 @@ emulator in an unrecoverable state.
 ## Recommended Workflow
 
 1. `snapshot` the current state.
-2. Write the change as CDS: `validate_cds` → `compile_cds` → `apply_cds_patch` (with a `reason`).
+2. Write the change as CDS: `validate_cds` → `compile_cds` → `ps2_set_patch` with the codes (with a `reason`).
 3. Confirm the effect in-game; hand to Sonya for behavioural re-verification.
 4. Persist durable cheats via `cheat_list_create` / `cheat_list_save`; save the progress report.
 
 ## Research
 
-Skills `/cd-cds-patch` and `/cd-cheat-port`; `cd_tool_help "apply_cds_patch"` for assertion gates.
+Skills `/cd-cds-patch` (assertion gates included) and `/cd-cheat-port`.

@@ -8,7 +8,7 @@ The disassembler (the **memory editor**) is a live, scrollable view of PS2 memor
 
 ## Opening a panel
 
-1. Connect to an emulator from the sidebar's **Emulator** tab (PCSX2 or the built-in emulator).
+1. Run a game from the sidebar's **Emulator** tab (Ps2Emulator; see [Emulator](emulator.md)).
 2. Open a memory region from **Memory Region** in the same tab. Each region opens its own panel:
 
    | Region | | Region | |
@@ -71,7 +71,7 @@ The **Hints** dropdown in the toolbar picks **Full**, **Addresses** (calls, bran
 | Bottom panel (breakpoints, watches, threads, modules, call stack) | `Ctrl+Alt+T` |
 | Data format | `B` `H` `W` `F` `D` `Q`, `A` = auto |
 
-Pause, resume, **Step**, **Step Over** and **Step Into** are in the sidebar's status bar. Step Over and Step Into need PCSX2.
+Pause, resume, **Step**, **Step Over** and **Step Into** are in the sidebar's status bar. Step Over runs a call to its return.
 
 ---
 
@@ -112,7 +112,7 @@ Matches are highlighted; `F3` and `Shift+F3` move between them.
 ## Breakpoints and watches
 
 - `F9` or right-click → **Set Breakpoint** toggles an execution breakpoint. When it hits, the emulator pauses and the panel scrolls to the row.
-- Right-click → **Add Watch** adds a memory watchpoint (PCSX2).
+- Right-click → **Add Watch** adds a memory watchpoint: the game stops on an access.
 - The bottom panel (`Ctrl+Alt+T`) lists breakpoints, watches, threads, modules and the call stack, with **Clear All**.
 
 ---

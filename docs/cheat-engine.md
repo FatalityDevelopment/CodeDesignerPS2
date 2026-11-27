@@ -22,7 +22,7 @@ To build a button activator for a cheat, use the [Controller](vscode-extension.m
 
 ### Archive cheats
 
-When you're connected to PCSX2, the tab loads the running game's cheats from the cheat archive (the lists the cheat archive editor edits). **List** picks which of the game's cheat lists to use — your own (e.g. `r0001`, `r0004`) or ones imported from the repository; the choice is remembered per game and shared with the Cheat List page. Toggle the cheats you want; enabling a cheat writes its codes straight away, and **Apply All Enabled** writes every enabled cheat again.
+While a game runs in Ps2Emulator, the tab loads its cheats from the cheat archive (the lists the cheat archive editor edits). **List** picks which of the game's cheat lists to use — your own (e.g. `r0001`, `r0004`) or ones imported from the repository; the choice is remembered per game and shared with the Cheat List page. Toggle the cheats you want; enabling a cheat writes its codes straight away, and **Apply All Enabled** writes every enabled cheat again.
 
 If the game has no lists yet, **Import from repository** imports the game's text files from the cheat repository (CheatCodeArchive `Database/*.CMP.txt`) into cheat lists — one per database folder (GSHI, CodeBreaker, CMP, Xploder (EU)). Imported lists are attached to the game that already has a disc with the serial, so they sit next to your own lists in the cheat archive editor. The import uses the `CheatCodeArchive` checkout in your workspace, or otherwise a clone of the repository that the extension keeps up to date.
 

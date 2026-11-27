@@ -1,143 +1,84 @@
 [← Back to Documentation Index](README.md)
 
-# CodeDesigner.Ps2.EmulatorCore — PS2 Hardware Emulation
+# The emulator: Ps2Emulator
 
-The `CodeDesigner.Ps2.EmulatorCore` project provides a complete software emulation of the Sony PlayStation 2 console, including the Emotion Engine (EE) CPU, I/O Processor (IOP), and all major hardware peripherals.
+Code Designer debugs games running in **Ps2Emulator**, a PlayStation 2
+emulator written in Rust (its own repository). Code Designer has no emulator
+of its own any more: the built-in C# emulator, the PCSX2/PINE client and the
+Bridge's emulator commands were retired in favour of Ps2Emulator's debug
+server.
 
-## Overview
-
-This emulator accurately simulates PS2 hardware to run commercial games and homebrew software. It integrates with the core library for CPU execution and adds comprehensive peripheral emulation.
-
-## Architecture
-
-### CPU Cores
-
-#### Emotion Engine (EE)
-- **MIPS64 R5900** at 294 MHz
-- 128-bit SIMD multimedia instructions (MMI)
-- Vector Units (VU0/VU1) for 3D graphics acceleration
-- FPU with PS2-specific denormal handling (flush to zero)
-- TLB and COP0 exception handling
-
-#### I/O Processor (IOP)
-- **MIPS32 R3000A** at 36 MHz
-- Handles I/O: CD/DVD, controllers, memory cards, SPU2, DEV9, USB, i.LINK
-- Loads IRX modules (`IopModuleLoader`)
-
-### Memory System
-
-#### Main RAM
-- 32 MB at physical `0x00000000`
-- KSEG0/KSEG1 mirrors handled by `PS2MemoryBus`
-
-#### BIOS ROM
-- 4 MB flash memory
-- KSEG1 mirror at 0xBFC00000
-- Contains PS2 system software
-
-#### Scratchpad
-- 16 KB fast RAM for EE
-- Uncached access for performance-critical code
-
-### Hardware Peripherals
-
-#### Graphics Synthesizer (GS)
-- 128×64-bit internal registers
-- Handles rendering commands from EE via GIF
-- Simulates frame buffer and texture memory
-
-#### DMA Controller
-- 10 EE channels + 13 IOP channels
-- Supports all transfer modes (normal, chain, interleaved)
-- Accurate interrupt generation
-
-#### Vector Interface (VIF0/VIF1)
-- Unpacks vertex data for VU processing
-- Supports all 14 UNPACK formats
-- MPG, MSCAL, STROW/STCOL, STMASK operations
-
-#### Graphics Interface (GIF)
-- Receives display lists from EE
-- PACKED, REGLIST, IMAGE modes
-- PATH1/2/3 routing to GS/DMAC/VIF
-
-#### Timer Units
-- 4×16-bit timers (EE T0-T3)
-- Configurable clock sources and modes
-- Interrupt generation on compare/overflow
-
-#### Interrupt Controller (INTC)
-- `INTC_STAT` (write-1-to-clear) and `INTC_MASK` (write-1-to-toggle)
-- Timer, DMAC, VBLANK and peripheral interrupt bits
-
-#### Serial I/O (SIO2)
-- Controller communication
-- Pad state simulation
-- INTC bit 17 signaling
-
-#### CD/DVD Drive
-- ISO-9660 filesystem support
-- Sector reading and caching
-- DMAC integration for data transfer
-
-#### Memory Card
-- Card protocol over SIO2 (`MemoryCard`)
-- Card images are managed separately by [Memory Card Manager](memory-card-manager.md)
-
-#### Sound Processing Unit (SPU2)
-- Two cores × 24 voices (48 channels)
-- Voice and core register banks at IOP `0x1F900000`
-
-## Execution Model
-
-### Step-by-Step Emulation
-- `PS2Emulator.Step()` advances by one EE instruction
-- Handles branch delay slots correctly
-- Processes hardware events between instructions
-
-### Event System
-- `UnknownInstruction`: Invalid opcode encountered
-- `SyscallRaised`: SYSCALL instruction executed
-- `InterruptPending`: Hardware interrupt ready
-- `DmaChannelComplete`: DMA transfer finished
-
-### ELF Loading
-- `ElfLoader.Load()` parses ELF32 MIPS images
-- Loads PT_LOAD segments into memory
-- Sets entry point for execution
-
-## Running it
-
-The emulator runs in its own process, `CodeDesigner.Ps2.Emulator.exe`, which hosts `PS2Emulator` behind `InternalPineSocket`: a server that speaks PCSX2's PINE wire format on port `28012`. The Bridge drives it with the same client code it uses for PCSX2, so the disassembler, breakpoints, stepping and memory tools work the same on both. In VS Code, pick the built-in emulator in the sidebar and click **Run**.
+## How they talk
 
 ```
-CodeDesigner.Ps2.Emulator.exe --bios <bios.bin> [--disc <game.iso|zip>]
-CodeDesigner.Ps2.Emulator.exe --file <game.elf|bin> [--load-address 0xN]
+VS Code extension ──gRPC (ps2debug protocol)──▶ Ps2Emulator  (ps2 --debug-server 127.0.0.1:28100)
+        │
+        └──JSON over TCP :8765──▶ CodeDesigner.Ps2.Bridge  (the workspace service)
 ```
 
-See [Command-line tools](console-app.md).
+- **Ps2Emulator** owns everything live: run control, breakpoints and
+  watchpoints, memory and registers, disassembly with state hints, the code
+  index and cross-references, value and pointer scans, traces and coverage,
+  threads and modules, stack walks, patches (cheats applied every field),
+  pads, the network adapter, frames, screenshots and console output. Analysis
+  runs inside the emulator; only results cross the wire.
+- **The Bridge** is the workspace service: labels and data formats, notes,
+  cheat lists and the cheat archive, CDS compile, converters and the porter,
+  discs, memory cards, HDD images, assets, the packet dissector, agents and
+  memories. It pushes label sets to the emulator, so disassembly shows them.
 
-## Limits
+The extension's live calls (`BridgeClient` methods for memory, registers,
+breakpoints, stepping, pads, network, …) go to Ps2Emulator only; without it
+they fail with "Ps2Emulator is not connected".
 
-- Built for debugging, not speed, and not a replacement for PCSX2: commercial games generally need PCSX2.
-- No save states; use PCSX2 for those.
-- Step Over / Step Into and the PCSX2-only PINE extensions (symbols, GS stream, DEV9 capture, audio) are not available.
+## Running a game
 
-## Testing
+1. In the panel's **Connection** section, select `ps2.exe` as the emulator
+   (browse to your Ps2Emulator build), a BIOS and a game.
+2. **Run** starts the Bridge if needed, launches Ps2Emulator in a terminal
+   (`ps2 bios <bios> --disc <game> --debug-server <address> --window`),
+   waits for its debug server and connects. The live memory views, the
+   Preview (game view) and the archive cheats for the disc follow.
+3. **Kill** closes it; **Restart** closes it and runs again.
 
-About 600 tests in `CodeDesigner.Ps2.TestProject/Emulator/` cover the CPUs, TLB, exceptions, memory buses, timers, INTC, DMAC, GIF/GS, VIF, VU0/VU1, SIF, CDVD, SIO2, SPU2 and the loaders. See [Test Project](test-project.md).
+Settings:
 
-## Usage
+| Setting | Meaning |
+|---|---|
+| `codedesigner.ps2Emulator.debugServer` | The debug server's address (default `127.0.0.1:28100`) |
+| `codedesigner.ps2Emulator.network` | Start with the network adapter (`--network`): DHCP, DNS and the internet through a user-mode NAT |
 
-```csharp
-using CodeDesigner.Ps2.EmulatorCore;
+The NVRAM (BIOS settings) and the memory card live in the extension's
+storage. The NVRAM starts as a copy of the `.NVM` beside the BIOS, so the
+BIOS does not stop at its language screen.
 
-var emulator = new PS2Emulator();
-emulator.Reset();                                         // PC = 0xBFC00000 (BIOS)
+**CodeDesigner: Connect to Ps2Emulator** attaches to an emulator started by
+hand (`ps2 … --debug-server <port>`). **Open in Ps2Emulator** on an `.elf`
+runs it as a program (`ps2 elf <file>`).
 
-uint entry = ElfLoader.LoadIntoEmulator(File.ReadAllBytes("game.elf"), emulator);
-emulator.SyscallRaised += (_, pc) => Console.WriteLine($"syscall at {pc:X8}");
+## What maps where
 
-for (int i = 0; i < 1_000_000; i++)
-    emulator.Step();                                      // one EE instruction, with delay slots
-```
+| Feature | Ps2Emulator service |
+|---|---|
+| Disassembler, memory views, registers, stepping, breakpoints | `Code`, `Memory`, `Registers`, `Execution`, `Breakpoints` |
+| Watchpoints (disassembler Inspect tab, CDS `watchpoint`) | `Breakpoints.SetWatchpoint` |
+| Cross-references, functions | `Index` |
+| Cheat Scanner, pointer chains | `Search` |
+| Snapshots (memory dumps in `snapshots/<game>/<date>/<name>/`) | `Memory` reads, plus `Media.Screenshot` for the preview |
+| Traces, coverage, call stacks, threads, modules | `Trace`, `Os` |
+| Cheat engine, cheat lists, CDS patches | `Patches` |
+| Controller | `Pads` |
+| Packets panel (capture, filters, inject) | `Network` (frames dissected by the Bridge) |
+| Preview | `Media.Frames` |
+| Ps2Emulator Console output channel | `Media.Console` |
+
+Not available yet: save states (a project of their own in Ps2Emulator),
+audio (its SPU2 does not synthesise), reset (Restart relaunches instead),
+speed limits, IOP module export labels, and PCSX2 `.p2s` files.
+
+## AI
+
+Agents use two MCP servers: Ps2Emulator's (`ps2 mcp`, or `/mcp` on the debug
+server with `--mcp`) for everything live, and `CodeDesigner.AI` for the
+workspace. See [MCP Server](mcp-server.md) and the skills in
+`.github/skills/`.

@@ -26,7 +26,7 @@ and grouped labels that survive beyond a single session.
 
 ## Guidelines
 
-- Resolve dynamic data with `label_resolve_strings` and `label_resolve_linked_list` before
+- Read dynamic data with Ps2Emulator's `ps2_read_values` / `ps2_read_memory` (strings, list nodes) before
   hand-modelling it.
 - Group related labels with `group_create` + `group_add_member` (Class/Module/Subsystem/VTable)
   so the Structure Visualizer shows the subsystem coherently.

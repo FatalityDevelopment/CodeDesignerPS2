@@ -19,27 +19,19 @@ Guides for using CodeDesigner, and references for working on it. New here? Read 
 | [Memory Card Manager](memory-card-manager.md) | PS2 memory card images |
 | [HDD Manager](hdd-manager.md) | PS2 HDD images: APA partitions and PFS files |
 | [Recompiler](recompiler.md) | Static ELF → C++ recompilation |
-| [MCP Server](mcp-server.md) | `CodeDesigner.AI`: setup, profiles and all 242 tools |
+| [MCP Server](mcp-server.md) | `CodeDesigner.AI`: setup, profiles and its workspace tools (live debugging is Ps2Emulator's MCP) |
 | [Multiplayer Servers](multiplayer-servers.md) | SOCOM II online servers: DNAS, Medius, DME, NAT, patch download, configuration |
-
-## PCSX2
-
-| Document | What it covers |
-|---|---|
-| [PCSX2 documentation index](pcsx2-docs-index.md) | Setup, BIOS, configuration, troubleshooting and building PCSX2 |
-| [PINE debugger extension](pine-debugger-extension.md) | The fork's PINE opcodes `0x10`–`0x46`, with packet formats |
-| [PINE batch memory design](pcsx2_pine_readmembatch_design.md) | `MsgReadMemBatch` / `MsgWriteMemBatch` |
 
 ## Working on CodeDesigner
 
 | Document | What it covers |
 |---|---|
-| [Building](building.md) | Prerequisites, building, deploying, tests, the extension and the PCSX2 fork |
+| [Building](building.md) | Prerequisites, building, deploying, tests and the extension |
 | [Architecture](ARCHITECTURE.md) | Processes, ports, data flow and the AI layer |
 | [Projects](projects.md) | Every project in the solution |
 | [Socket Communication](socket-communication.md) | The Bridge's JSON-over-TCP protocol |
 | [Common Library](common.md) | The R5900 ISA, assembler and disassembler |
-| [Emulator](emulator.md) | The built-in PS2 emulator |
+| [Emulator](emulator.md) | Ps2Emulator: running games, the debug protocol, what maps where |
 | [Console App](console-app.md) | The Bridge's command line |
 | [Test Project](test-project.md) | The test suite |
 | [Zipper model format](zipper-model-format.md) | How SOCOM II models, textures, palettes and GEO scenes are decoded |
@@ -77,7 +69,7 @@ CodeDesigner is developed by **TylerDev888** (lead developer and maintainer).
 
 - **Bug reports**: [GitHub Issues](https://github.com/TylerDev888/CodeDesigner/issues)
 - **Feature requests**: [GitHub Discussions](https://github.com/TylerDev888/CodeDesigner/discussions)
-- **Pull requests**: fork and open a PR against `master`. For changes to the PCSX2 fork, see the [PCSX2 Contributing Guide](pcsx2-contributing.md).
+- **Pull requests**: fork and open a PR against `master`.
 
 ---
 
@@ -89,7 +81,7 @@ CodeDesigner builds on the work of the PlayStation 2 homebrew and reverse engine
 - **Gtlcpimp** — creator of the original CodeDesigner tool that inspired this project
 
 ### Core technologies
-- **[PCSX2](https://pcsx2.net/)** — the PS2 emulator whose behaviour is the reference for CodeDesigner's emulation, and the base of its fork
+- **[PCSX2](https://pcsx2.net/)** — the PS2 emulator whose behaviour and sources are the reference for PS2 hardware details
 - **MIPS R5900 documentation** — community research on the Emotion Engine
 - **PS2SDK** — the open-source PS2 development kit
 

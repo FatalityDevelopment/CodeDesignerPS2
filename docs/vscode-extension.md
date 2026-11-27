@@ -10,10 +10,10 @@ This page is a tour of what's there. The deeper guides are linked from each sect
 
 ## Getting started
 
-1. Build the backend once (`dotnet build CodeDesigner.sln`; see [Building](building.md)). This deploys the Bridge, the built-in emulator and the MCP server to `%LOCALAPPDATA%\CodeDesigner\`.
+1. Build the backend once (`dotnet build CodeDesigner.sln`; see [Building](building.md)). This deploys the Bridge and the MCP server to `%LOCALAPPDATA%\CodeDesigner\`.
 2. Open the extension: press **F5** in `client/vscode` for a development host, or install a packaged `.vsix`.
 3. Open the **CodeDesigner** sidebar (activity bar) and the **Emulator** tab.
-4. Under **Connection**, pick PCSX2 (or the built-in emulator), a BIOS and a game, then click **Run**. The extension launches the emulator, starts the Bridge in its *CodeDesigner* terminal and attaches to it.
+4. Under **Connection**, pick Ps2Emulator (`ps2.exe`, built from [its repository](https://github.com/TylerDev888/Ps2Emulator)), a BIOS and a game, then click **Run**. The extension starts the Bridge in its *CodeDesigner* terminal, launches Ps2Emulator in a *Ps2Emulator* terminal and connects to its debug server. See [Emulator](emulator.md).
 
 The **Welcome** page (`CodeDesigner: Open Welcome`) has quick links to every tool, keyboard tips and the What's New notes.
 
@@ -58,18 +58,18 @@ Lists the ELFs on the game disc and statically recompiles one to C++. See [Recom
 
 One panel per memory region: disassembly, hex, labels, comment hints, function and table detection, cross-references (`X`), breakpoints (`F9`), watches and the register panel. See the **[Disassembler guide](disassembler.md)**.
 
-Opening an `.elf`, `.bin` or `.raw` file loads it into the built-in emulator in file mode and opens a static view.
+Opening an `.elf` runs it in Ps2Emulator (`ps2 elf`); a `.bin` or `.raw` file can be imported into the running game (Actions → Import).
 
 ### Preview
 
-**Preview** shows the live PCSX2 picture inside VS Code, streamed from the PCSX2 fork's GS stream server through the Bridge (port 8766). The toolbar has **Sound** (mute/unmute PCSX2), **Smoothing**, **Fullscreen**, **Screenshot**, **Controller** and **Reconnect**. It needs the CodeDesigner PCSX2 build; Sound needs a build with PINE opcodes 0x45/0x46.
+**Preview** shows Ps2Emulator's picture inside VS Code, from its frame stream. The toolbar has **Smoothing**, **Fullscreen**, **Screenshot** (saves a PNG), **Controller** and **Reconnect**. **Sound** stays off: Ps2Emulator makes no sound yet.
 
 ### Controller
 
 The **Controller** page is a virtual PS2 controller and a joker (button activator) code builder.
 
 - **Build code** mode: click buttons on the controller, or press keys, to toggle them into a combo. **Capture from pad** records a combo you press on the real controller. Nothing is sent to the game.
-- **Play** mode: hold buttons, drag the sticks (right-click or Shift+click a stick for L3/R3) and the input goes to PCSX2. Everything is released when you switch mode or close the page.
+- **Play** mode: hold buttons, drag the sticks (right-click or Shift+click a stick for L3/R3) and the input goes to Ps2Emulator. Everything is released when you switch mode or close the page.
 - **Live pad** mirrors the real controller in orange, sticks included.
 - The **joker address** is found from the running game's cheats. The page ranks the addresses their D/E compare lines use, detects whether the game stores presses as 0 or 1, and lists the combos already in use. You can also type an address, and swap bytes for games that store the pad word big-endian.
 - Paste code lines to get the finished activator: a `D` line for one line, an `E0nn` block for several, or a `D` line before each line.
@@ -78,11 +78,11 @@ Keys: arrows, `W A S D` (face buttons), `Q E 1 3` (shoulders), `Z C` (L3/R3), `E
 
 ### Snapshots
 
-Lists the current game's PCSX2 save states with their screenshots. Load or delete a state, compare two, or extract their memory into the hex viewer.
+Lists the current game's snapshots (Actions → Snapshot: Ps2Emulator's memory, and the frame shown) with their screenshots. Reload one's RAM into the running game, delete it, compare two, or open its memory in the hex viewer. (Full save states come with Ps2Emulator's save-state support.)
 
 ### Memory Diff
 
-Compares two memory dumps (snapshots, `.bin`/`.raw`/`.p2s`) or live EE RAM against a dump, shown as a GitHub-style diff: unified or split, Bytes / Words / Instructions views, adjustable context, expanders and a hunk navigator. Each hunk can be copied as write codes or opened in the disassembler.
+Compares two memory dumps (snapshots, `.bin`/`.raw`) or live EE RAM against a dump, shown as a GitHub-style diff: unified or split, Bytes / Words / Instructions views, adjustable context, expanders and a hunk navigator. Each hunk can be copied as write codes or opened in the disassembler.
 
 ### Debug
 
@@ -102,7 +102,7 @@ A three-pane editor: pick a game, one of its cheat lists, and edit the cheat fil
 
 ### Cheat Porter
 
-Moves cheat codes from one game version's EE RAM to another's. Pick the **From** and **To** images (the game's save states, live EE RAM, or browsed dumps), paste codes or **Load game cheats**, and review the results per cheat (Ported / Review / Not found, with confidence and a picker for ambiguous matches). See [Cheat Porter](cheat-porter.md).
+Moves cheat codes from one game version's EE RAM to another's. Pick the **From** and **To** images (the game's snapshots, live EE RAM, or browsed dumps), paste codes or **Load game cheats**, and review the results per cheat (Ported / Review / Not found, with confidence and a picker for ambiguous matches). See [Cheat Porter](cheat-porter.md).
 
 ---
 
@@ -160,7 +160,7 @@ All commands are under **CodeDesigner:** in the command palette. The main ones:
 | `Connect / Disconnect Emulator` | Toggles the emulator connection |
 | `Compile CDS File` | Compiles the active `.cds` file |
 | `Recompile Game ELF from Disc` | Recompiler |
-| `Open Preview (Live PCSX2 Display)` | Preview |
+| `Open Preview (Ps2Emulator Display)` | Preview |
 | `Open Controller` | Controller |
 | `Open PS2 Cheats Editor` | Cheats editor |
 | `Open Asset Viewer (Zipper)`, `Open Model Editor`, `Open Map Editor`, `Open Animation Editor` | Asset tools |
@@ -196,7 +196,7 @@ New pages follow the disassembler panel's look: VS Code theme variables, bordere
 |---|---|
 | Sidebar shows *offline* | Click **Run**, or check the *CodeDesigner* terminal for Bridge errors. |
 | Bridge exits on startup | LocalDB didn't start. `sqllocaldb start MSSQLLocalDB`, then reload the window. |
-| Preview stays on "Waiting for frames" | Use the CodeDesigner PCSX2 build, launched from **Run**, with a game rendering. |
-| Step Over / Into do nothing | They need PCSX2 (PINE). The built-in emulator only supports Step. |
+| Preview stays on "Waiting for frames" | Run a game from the panel; the frames start once the BIOS or game displays something. |
+| Live views say "Ps2Emulator is not connected" | Run a game from the panel, or **CodeDesigner: Connect to Ps2Emulator** for one started by hand. |
 | A page looks stale after rebuilding | `Developer: Reload Window`. |
 | Logs | The **CodeDesigner** output channel; webview errors also go there. |

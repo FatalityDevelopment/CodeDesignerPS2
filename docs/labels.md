@@ -48,7 +48,7 @@ Each label has a `type` field that controls how it is displayed in the disassemb
 | `Array` | 3 | Pointer to a contiguous array. Expanded to `Name[0]`, `Name[1]`, … using `elementStride` and `elementCount`. |
 | `ArrayOfPointers` | 4 | Pointer to an array of pointers. The base address is labelled; individual element pointers are not expanded statically. |
 | `LinkedList` | 5 | First node of a linked list. Runtime traversal via `label_resolve_linked_list` walks the chain using `nodeNextOffset` and `nodeSize`, assigning indexed labels to each node. |
-| `String` | 6 | Pointer to a null-terminated ASCII string. Runtime resolution via `label_resolve_strings` reads the content from live PCSX2 memory and displays it alongside the label. |
+| `String` | 6 | Pointer to a null-terminated ASCII string. The disassembler shows the string beside the label. |
 | `Pointer` | 7 | The address holds a 32-bit pointer whose dereferenced value is a base address. Child entries hang off that base address using `offset`. Live display shows the current dereferenced value. |
 | `Float` | 8 | Single-precision IEEE-754 float. Live display renders the 32-bit memory content as a decimal float. |
 | `Value` | 9 | Generic integer. Live display renders the 32-bit content as an unsigned decimal. |
@@ -207,33 +207,9 @@ label_delete_pointer pointerName="PlayerState"
 
 ---
 
-## Runtime Resolution
+## Runtime values
 
-Two label types support **live resolution** against the running emulator (requires PCSX2 PINE mode):
-
-### String labels
-
-`label_resolve_strings` reads each `String`-typed label's memory content from PCSX2 and updates the label value with the null-terminated ASCII string found at that address:
-
-```
-label_resolve_strings
-→ Resolved 3 string labels:
-    0x0031A200  mapName       = "Abandoned Village"
-    0x0031A280  playerName    = "PAPA SMRF"
-    0x0031A300  gameModeName  = "DEATHMATCH"
-```
-
-### Linked list labels
-
-`label_resolve_linked_list` walks a linked list in live PCSX2 memory, starting from a given address, and assigns indexed labels to each node:
-
-```
-label_resolve_linked_list address="0x00360000" nextOffset=0
-→ Node [0]  0x00360000
-→ Node [1]  0x00360084
-→ Node [2]  0x00360108
-→ Node [3]  0x0036018C
-```
+Labels are pushed to Ps2Emulator, so its disassembly hints show what a label points at in the running game: strings, pointer chains and values. For a structure's current contents, read its address with Ps2Emulator's MCP (`ps2_read_values`, `ps2_read_memory`) or the hex views.
 
 ---
 

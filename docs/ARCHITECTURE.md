@@ -13,35 +13,28 @@ the *system* — processes, data flow, and the agent/skills stack layered on top
 
 CodeDesigner is a PS2 Emotion Engine toolset whose capabilities are reachable three
 ways: a **VS Code extension** (human GUI), a **socket bridge** (machine protocol),
-and **MCP servers** (AI agents). They all front the same engine and database.
+and **MCP servers** (AI agents). The game itself runs in **Ps2Emulator**, a separate
+emulator with its own debug server and MCP (see [Emulator](emulator.md)).
 
 ```
-        ┌──────────────────┐     ┌──────────────────────┐     ┌───────────────────┐
-        │  VS Code          │     │  AI agent host        │     │  Other MCP client │
-        │  extension (GUI)  │     │  (Copilot / Claude /  │     │  (CLI, cloud)     │
-        │                   │     │   Grok chat)          │     │                   │
-        └────────┬─────────┘     └──────────┬───────────┘     └─────────┬─────────┘
-                 │ JSON/TCP                   │ MCP (stdio)               │ MCP (stdio)
-                 │                            ▼                           │
-                 │            ┌───────────────────────────────┐          │
-                 │            │  MCP server                    │◄─────────┘
-                 │            │  CodeDesigner.AI               │  (242 tools, profile-driven)
-                 │            │                                │
-                 │            └───────┬───────────────┬───────┘
-                 │                    │ socket         │ EF Core (direct)
-                 ▼                    ▼                ▼
-        ┌───────────────────────────────────┐   ┌───────────────────────────┐
-        │  CodeDesigner.Ps2.Bridge           │   │  SQL Server LocalDB        │
-        │  TCP socket server (port 8765)     │   │  Database=CodeDesigner     │
-        │  + PCSX2 PINE client               │   │  (EF: CodeDesigner.Ps2.    │
-        └───────┬───────────────────┬───────┘   │   Database)                │
-                ▼                   ▼            └───────────────────────────┘
-        ┌──────────────┐    ┌──────────────┐
-        │ Built-in PS2 │    │  PCSX2 fork   │
-        │ emulator     │    │  PINE :28011  │
-        │ (own process,│    │  + GS stream  │
-        │  PINE :28012)│    │               │
-        └──────────────┘    └──────────────┘
+   ┌──────────────────┐        ┌──────────────────────┐
+   │  VS Code          │        │  AI agent host        │
+   │  extension (GUI)  │        │  (Copilot / Claude)   │
+   └──┬────────────┬──┘        └──────┬─────────┬─────┘
+      │ gRPC        │ JSON/TCP          │ MCP     │ MCP (stdio)
+      │             │                   ▼         ▼
+      │             │   ┌─────────────────────┐  ┌──────────────────────────┐
+      │             │   │ Ps2Emulator's MCP    │  │ CodeDesigner.AI           │
+      │             │   │ (ps2_* tools)        │  │ (workspace tools, profiles)│
+      │             │   └─────────┬───────────┘  └──────┬───────────┬───────┘
+      ▼             │             │ gRPC                 │ socket     │ EF Core
+ ┌─────────────────────────────────▼─┐                   ▼            ▼
+ │ Ps2Emulator (the running game)     │   ┌──────────────────────┐ ┌──────────────────┐
+ │ debug server (default :28100)      │   │ CodeDesigner.Ps2.     │ │ SQL Server LocalDB│
+ └────────────────────────────────────┘   │ Bridge (:8765)        │ │ Database=         │
+                    ▲                      │ the workspace service │ │ CodeDesigner      │
+                    └───── label sets ─────┤                       │ └──────────────────┘
+                                           └──────────────────────┘
 ```
 
 Ports at a glance:
@@ -49,22 +42,21 @@ Ports at a glance:
 | Port | What |
 |---|---|
 | `8765` | Bridge JSON command socket (extension, MCP server, scripts) |
-| `8766` | Bridge GS stream fan-out (Preview window frames) |
-| `28011` | PCSX2 PINE (default slot) |
-| `28012` | Built-in emulator's PINE-compatible socket |
+| `28100` | Ps2Emulator's debug server (gRPC, and `/mcp` with `--mcp`); `codedesigner.ps2Emulator.debugServer` |
 
-The VS Code extension starts the Bridge in its *CodeDesigner* terminal and launches the
-emulator (PCSX2 or `CodeDesigner.Ps2.Emulator.exe`) for you; the Bridge then attaches
-to it with `STARTPCSX2` / `STARTEMULATOR` / `STARTFILEMODE`.
+The VS Code extension starts the Bridge in its *CodeDesigner* terminal and, on **Run**,
+Ps2Emulator in a *Ps2Emulator* terminal (`ps2 bios … --debug-server …`), then connects to
+its debug server directly.
 
 Two facts drive most of the design:
 
-- **The bridge needs a live emulator; the database does not.** Anything that touches
-  PS2 memory, registers, or run state goes through the socket to the Bridge (and on
-  to the built-in emulator or PCSX2). Anything that is *coordination* state — labels,
-  progress reports, agent personas, orchestration plans, sub-agent sessions, the
-  inter-agent message bus — lives in SQL Server LocalDB and is reachable **directly
-  via EF Core**, with no emulator running.
+- **Everything live is Ps2Emulator; the Bridge is the workspace.** Memory, registers,
+  run state, breakpoints, disassembly hints, xrefs, scans, traces, patches, pads,
+  network and frames are served by Ps2Emulator, with the analysis inside it. The
+  Bridge compiles, converts, dissects and keeps files and project data; it has no
+  emulator. Coordination state — labels, progress reports, agent personas,
+  orchestration plans, sub-agent sessions, the inter-agent message bus — lives in SQL
+  Server LocalDB and is reachable **directly via EF Core**.
 - **The AI server is a coordination layer, not a spawner.** `CodeDesigner.AI` never
   launches child processes. Sub-agents are spun up by the *host's* chat-side mechanism
   (e.g. Claude Code's Task tool, Copilot subagents); each child is just another
@@ -90,18 +82,17 @@ Every tool is a class annotated with `[CdTool(name, domain, risk, shortDescripti
 and a `[ToolEntryPoint]` method. At startup `ToolRegistry.DiscoverAll` reflects over
 the assembly, and the active **profile** filters what is exposed:
 
-- **`ToolDomain`** — the feature area: `Core, Memory, Debug, Labels, Network, Patching,
-  Cheats, Pcsx2, Pad, Media, Admin`. `Core` is always on.
+- **`ToolDomain`** — the feature area: `Core, Memory, Labels, Network, Patching,
+  Cheats, Media, Admin`. `Core` is always on. (Live tools are Ps2Emulator's MCP.)
 - **`ToolRisk`** (severity order) — `ReadOnly(0) < MutatesDatabase(1) < WritesDisk(2) <
   WritesMemory(3) < NetworkInjection(4) < Dangerous(5)`. A profile sets a max risk cap.
 - **`ToolProfile`** — a named domain set + risk cap (or a curated allow-list). See
   [`ToolProfile.Known`](../CodeDesigner.AI.Abstractions/ToolProfile.cs):
-  `core, lite, re, live-debug, packets, patching, cheats, media, pcsx2, multi-agent,
-  admin, all`. Launch with `--profile <name>`, `--readonly` (caps at ReadOnly), or
+  `core, lite, re, packets, patching, cheats, media, multi-agent, admin, all`. Launch with `--profile <name>`, `--readonly` (caps at ReadOnly), or
   `--dangerous-tools false`.
 
 The point is **token economy**: a client only ever sees the tools its profile allows
-(`lite` is 18 tools, `core` 25, `re` 133, `all` 242; `--list-tools` prints any profile). Profiles can also be
+(`lite` is 17 tools, `core` 25, `re` 60, `all` 149; `--list-tools` prints any profile). Profiles can also be
 **widened at runtime** with `cd_enable_domain`, which mutates the live tool collection
 and fires `tools/list_changed`.
 

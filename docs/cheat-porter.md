@@ -10,9 +10,9 @@ The Cheat Porter moves cheat codes from one version of a game to another, for ex
 
 Two EE RAM images taken at a comparable point in each game (same level or menu is best):
 
-- PCSX2 save states (`.p2s`) of the current game,
+- snapshots of the current game (panel → Actions → Snapshot),
 - the live EE RAM of the running emulator,
-- or dumps you browse to: `.bin` files, `.p2s` files or snapshot folders.
+- or dumps you browse to: `.bin` files or snapshot folders.
 
 ---
 
@@ -20,7 +20,7 @@ Two EE RAM images taken at a comparable point in each game (same level or menu i
 
 Open it from the sidebar (**Emulator → Tools → Porter**, or **Cheats → Cheat Tools → Porter**).
 
-1. Pick **From** (the version the codes were written for) and **To** (the version you want them for). Both lists show the game's save states, live EE RAM and any dumps you've browsed. The same picker is used by Memory Diff.
+1. Pick **From** (the version the codes were written for) and **To** (the version you want them for). Both lists show the game's snapshots, live EE RAM and any dumps you've browsed. The same picker is used by Memory Diff.
 2. Paste the codes, or click **Load game cheats** to fill the input from the current game's archive. Cheats are separated by name lines as usual.
 3. Run the port. Results are grouped per cheat:
 

@@ -2,14 +2,12 @@
 
 # CodeDesigner — Project Reference
 
-Every project in `CodeDesigner.sln`, plus the VS Code extension and the PCSX2 fork. For how they talk to each other at runtime, see [Architecture](ARCHITECTURE.md).
+Every project in `CodeDesigner.sln`, plus the VS Code extension. Games run in [Ps2Emulator](emulator.md), which has its own repository. For how they talk to each other at runtime, see [Architecture](ARCHITECTURE.md).
 
 | Project | Kind | One line |
 |---|---|---|
 | [CodeDesigner.Ps2.Common](#codedesignerps2common) | library | EE MIPS R5900 ISA: assembler, disassembler, encoder/decoder |
-| [CodeDesigner.Ps2.EmulatorCore](#codedesignerps2emulatorcore) | library | PS2 hardware emulation (EE, IOP, peripherals) |
-| [CodeDesigner.Ps2.Emulator](#codedesignerps2emulator) | exe | Runs the built-in emulator as its own process |
-| [CodeDesigner.Ps2.Bridge](#codedesignerps2bridge) | exe | Socket server and PCSX2 PINE bridge; the runtime hub |
+| [CodeDesigner.Ps2.Bridge](#codedesignerps2bridge) | exe | Socket server: the workspace service |
 | [CodeDesigner.Ps2.CdsLanguage](#codedesignerps2cdslanguage) | library | CDS patch language compiler |
 | [CodeDesigner.Ps2.CheatEngine](#codedesignerps2cheatengine) | library | Cheat parsing, applying, conversion, porting, frame-loop engine |
 | [CodeDesigner.Ps2.LabelManager](#codedesignerps2labelmanager) | library | Label sets, imports, IOP module exports |
@@ -31,7 +29,7 @@ Every project in `CodeDesigner.sln`, plus the VS Code extension and the PCSX2 fo
 | [client/vscode](#clientvscode) | VS Code extension | The user interface |
 | [client/cd-app](#clientcd-app) | React app | Standalone user interface |
 | [client/website](#clientwebsite) | Angular app | Project website |
-| [pcsx2](#pcsx2-fork) | submodule | CodeDesigner's PCSX2 fork |
+| [pcsx2](#pcsx2) | submodule | PCSX2 sources, read by the label generators |
 
 ---
 
@@ -45,27 +43,12 @@ The foundation every other project uses: the complete EE MIPS R5900 instruction 
 
 See [Common Library](common.md).
 
-## CodeDesigner.Ps2.EmulatorCore
-
-PS2 system emulation: the EE (R5900 with 128-bit GPRs, FPU, VU0 macro mode, MMI), the IOP (R3000A), the memory bus (32 MB RAM, scratchpad, I/O, GS privileged registers, BIOS ROM), timers, INTC, DMAC, GIF, GS registers, VIF0/1, SIF, CDVD, SIO2, SPU2, an ELF loader, BIOS and game loaders, and the dual-CPU scheduler. See [Emulator](emulator.md).
-
-## CodeDesigner.Ps2.Emulator
-
-A small exe that hosts `EmulatorCore` in its own process. The Bridge talks to it over a PINE-compatible socket on port `28012`, the same way it talks to PCSX2.
-
-```
-CodeDesigner.Ps2.Emulator.exe --bios <bios.bin> [--disc <game.iso|zip>] [--port 28012]
-CodeDesigner.Ps2.Emulator.exe --file <game.elf|bin> [--load-address 0xN]
-```
-
 ## CodeDesigner.Ps2.Bridge
 
-The runtime hub. The VS Code extension, the MCP server and scripts all talk to it.
+The workspace service. The VS Code extension, the MCP server and scripts all talk to it; it has no emulator (games run in Ps2Emulator, which the extension talks to directly).
 
-- **Socket server** on TCP `8765`: newline-delimited JSON commands, dispatched to one service per feature area under `Services/` (assembly, emulator control, stepping, memory and scans, cheats, labels, data formats, snapshots and save states, cross-references, pad, network capture, GS stream, disc/card/HDD, assets, compatibility, agents and AI activity, …). See [Socket Communication](socket-communication.md).
-- **PINE client** for PCSX2, including the fork's debugger, pad, DEV9, GS stream, batch memory and audio opcodes.
-- **GS stream forwarder** on `8766`, which feeds the Preview window.
-- **Code analysis**: cross-reference index, function boundary and data table detection, comment hints.
+- **Socket server** on TCP `8765`: newline-delimited JSON commands, dispatched to one service per feature area under `Services/` (assembly and CDS, analysis of bytes clients send, cheats and the archive, labels, data formats, snapshot records, the network dissector and frame builder, disc/card/HDD, assets, compatibility, agents and AI activity, …). See [Socket Communication](socket-communication.md).
+- **Code analysis** of the bytes it is given: strings, functions, pointers, references, the call graph, comment hints.
 - **Asset sessions** for the Zipper editors (`ZipperAssetService`).
 
 Also runs the static recompiler (`--recompile`). See [Console App](console-app.md) for the command line.
@@ -178,6 +161,6 @@ The standalone CodeDesigner app, an alternative to the VS Code extension: a Reac
 
 An Angular project website (`client/website/`, `npm start`).
 
-## pcsx2 (fork)
+## pcsx2
 
-CodeDesigner's PCSX2 fork (submodule). It adds PINE opcodes `0x10`–`0x46` (debugger, symbols, save states, pad, DEV9 network, GS stream, batched memory, audio) and the GS stream server. See [PINE debugger extension](pine-debugger-extension.md) and [PCSX2 integration](pcsx2-docs-index.md).
+PCSX2's sources (a submodule). The generators in `tools/scripts/` read its syscall table, IOP module names and hardware register names to build Code Designer's label resources. Nothing runs PCSX2 any more.

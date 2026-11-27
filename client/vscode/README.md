@@ -1,13 +1,13 @@
 # CodeDesigner for VS Code
 
-PS2 reverse engineering and modding inside VS Code: a live Emotion Engine disassembler, PCSX2 debugging, CDS patches, cheats, asset editors, packet capture and an AI agent panel. The extension is the front end for the CodeDesigner backend, which it starts and talks to over a local socket (`localhost:8765`).
+PS2 reverse engineering and modding inside VS Code: a live Emotion Engine disassembler, Ps2Emulator debugging, CDS patches, cheats, asset editors, packet capture and an AI agent panel. The extension is the front end for the CodeDesigner backend, which it starts and talks to over a local socket (`localhost:8765`).
 
 ---
 
 ## Features
 
 - **Disassembler** — one panel per memory region (EE RAM, IOP RAM, BIOS, scratchpad, VU memory, hardware registers). Comment hints, function and switch/pointer/float table detection, cross-references (`X`), breakpoints (`F9`), watches, registers (`Ctrl+Alt+R`), search (`Ctrl+F`), go to address (`Ctrl+Alt+A`), data formats (`B H W F D Q`).
-- **PCSX2 integration** — run, pause and step PCSX2 over PINE; save states with screenshots; a live **Preview** of the game with a sound toggle; a virtual **Controller**.
+- **Ps2Emulator integration** — run, pause and step games in Ps2Emulator over its debug protocol; memory snapshots with screenshots; a live **Preview** of the game; a virtual **Controller**.
 - **Cheats** — the game's known codes from the CheatCodeArchive, a cheats editor, converter, scanner, **Cheat Porter** and a **joker code builder**.
 - **CDS** — syntax highlighting, snippets and a compiler for Code Designer Script patches.
 - **Memory tools** — Memory Diff (GitHub-style), Snapshots, Label Manager, Structure diagrams, struct offset calculator.
@@ -22,7 +22,7 @@ PS2 reverse engineering and modding inside VS Code: a live Emotion Engine disass
 
 - The CodeDesigner backend, built from the repository (`dotnet build CodeDesigner.sln`). The build deploys it to `%LOCALAPPDATA%\CodeDesigner\`.
 - SQL Server LocalDB.
-- PCSX2 with PINE enabled. CodeDesigner's PCSX2 fork (`pcsx2/`) is needed for breakpoints, stepping, Preview and Sound.
+- [Ps2Emulator](https://github.com/TylerDev888/Ps2Emulator) (`ps2.exe`), selected in the panel's Connection section.
 
 ---
 

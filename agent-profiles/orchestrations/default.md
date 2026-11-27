@@ -36,7 +36,7 @@ you can resume later via `cd_session_init(resume:true)`.
 
 - Save a progress report before ending the session (`cd_session_summary` first to recap).
 - Verify before you modify; snapshot before you patch.
-- Pass a `reason` on high-risk tools (memory_write, apply_cds_patch, cheats).
+- Pass a `reason` on high-risk tools (ps2_write_memory, ps2_set_patch, cheats).
 
 ## Notes
 

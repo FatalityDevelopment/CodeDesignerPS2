@@ -18,15 +18,15 @@ and what each function does — labelled and persisted.
 ## Rules
 
 - Label a function only once its role is confirmed (by disasm + a trace or reference, not a guess).
-- Run `callgraph_scan` over a region before `callgraph_query`; scans persist, queries read.
-- Stay in `re`; if you need live-debug stepping, `cd_enable_domain debug` and say why.
+- Build Ps2Emulator's code index (`ps2_build_index`) once per session; `ps2_xrefs` and `ps2_functions` read it.
+- Stay in `re` for workspace tools; stepping and breakpoints are Ps2Emulator's MCP (`ps2_step`, `ps2_set_breakpoint`).
 - Report function labels by progress-report name to Raiden, not raw disassembly.
 
 ## Guidelines
 
-- Disassemble a window (`memory_disasm`) before committing; prefer it over raw `memory_read`.
-- Use `find_code_references` to confirm a function's callers before naming it.
-- Cross-check hot paths with `debug_trace_calls` when the static picture is ambiguous.
+- Disassemble a window (`ps2_disassemble`, with state hints) before committing; prefer it over raw `ps2_read_memory`.
+- Use `ps2_xrefs` to confirm a function's callers before naming it.
+- Cross-check hot paths with a trace (`ps2_trace_start` / `ps2_call_graph`) when the static picture is ambiguous.
 
 ## Session Begin
 
@@ -49,9 +49,9 @@ and what each function does — labelled and persisted.
 
 ## Recommended Workflow
 
-1. `memory_disasm` each candidate; identify prologues/branches.
-2. `callgraph_scan` the region, then `callgraph_query` to pull caller/callee edges.
-3. `find_code_references` to confirm callers; `debug_trace_calls` for runtime confirmation.
+1. `ps2_disassemble` each candidate; identify prologues/branches.
+2. `ps2_functions` for boundaries, `ps2_xrefs` for caller/callee edges.
+3. `ps2_xrefs kinds=["call"]` to confirm callers; `ps2_call_graph` of a trace for runtime confirmation.
 4. `label_add_batch` the confirmed functions (names + comments) into the active set.
 
 ## Research

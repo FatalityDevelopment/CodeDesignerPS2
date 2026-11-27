@@ -1,6 +1,6 @@
 ---
 name: cd-cheat-port
-description: Port PS2 GameShark/Action Replay cheats between game revisions — detect format, decrypt to raw, scan source vs target dumps for matching patterns, recalculate addresses, output ported codes. Offline (no live emulator needed).
+description: Port PS2 GameShark/Action Replay cheats between game revisions — detect format, decrypt to raw, scan source vs target dumps for matching patterns, recalculate addresses, output ported codes. Offline (no live emulator needed); optionally verified in Ps2Emulator.
 argument-hint: <source-dump-path> <target-dump-path>
 ---
 
@@ -12,8 +12,9 @@ working on another (different region/version) without re-finding addresses.
 ## Required inputs
 
 - A block of cheat codes (paste in chat).
-- Path to an EE RAM dump from the **source** revision (often `EEmem.bin` from
-  a memory snapshot).
+- Path to an EE RAM dump from the **source** revision (`EEmem.bin` from a
+  Code Designer snapshot — panel → Actions → Snapshot while Ps2Emulator
+  runs that revision).
 - Path to an EE RAM dump from the **target** revision.
 
 ## Steps
@@ -31,10 +32,10 @@ working on another (different region/version) without re-finding addresses.
 4. **Re-encrypt** (optional) to the user's preferred device format:
    `convert_cheat codes=<ported_raw> direction=toEngine targetFormat=<format>`.
 
-5. **Apply + verify** (live, optional): if the user has the target revision
-   running, run `apply_cheats codes=<ported>` and ask them to confirm the
-   effect in-game. Then `memory_read` at each new address to spot-check
-   the byte pattern matches what you expect.
+5. **Apply + verify** (live, optional): with the target revision running in
+   Ps2Emulator, `ps2_set_patch name=<cheat> codes=<ported raw>` and ask the
+   user to confirm the effect in-game (`ps2_screenshot` helps). Then
+   `ps2_read_values` at each new address to spot-check the values.
 
 6. **Persist**: `progress_save` named `<target-game>-<cheats-name>`
    with the ported block + a note on confidence (ambiguous-match warnings,

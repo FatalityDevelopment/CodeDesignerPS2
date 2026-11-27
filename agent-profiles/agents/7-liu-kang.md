@@ -26,7 +26,7 @@ reports saved and discoverable, nothing lost between sessions.
 ## Guidelines
 
 - Name sets by purpose (`socom2-netcode`, `<game>-ui`) so `progress_search` and resume find them.
-- Refresh IOP module labels with `iop_labels_refresh` after a module (re)loads so symbols stay valid.
+- Check IOP modules with Ps2Emulator's `ps2_modules` after a module (re)loads; re-base its labels if it moved.
 - Keep one consolidated end-of-run report linking the per-stage reports by name.
 
 ## Session Begin
@@ -51,7 +51,7 @@ reports saved and discoverable, nothing lost between sessions.
 ## Recommended Workflow
 
 1. `label_create_set "<game>-<purpose>"` and `label_set_active` it.
-2. Migrate the confirmed labels/structs into it; `iop_labels_refresh` if modules moved.
+2. Migrate the confirmed labels/structs into it; re-check `ps2_modules` if modules moved.
 3. Reload (or rebuild) and confirm the labels still resolve.
 4. `progress_save` the consolidated, linked final report.
 

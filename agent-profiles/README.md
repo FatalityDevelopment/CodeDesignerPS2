@@ -67,6 +67,7 @@ get full fidelity, set each column **manually** (SQL, the AI Config webview, or 
    `cd_orch_current_step`, message via `cd_send_message` / `cd_inbox_pop`, and the lead
    moves the team forward with `cd_orch_advance`.
 4. Each agent gets only the tools its **profile** allows (`re`, `patching`, `cheats`,
-   `pcsx2`, `multi-agent`, …) and can widen at runtime with `cd_enable_domain`.
+   `multi-agent`, …) and can widen at runtime with `cd_enable_domain`. Live work (the
+   running game) is Ps2Emulator's MCP (`ps2_*`), attached alongside.
 
 See `docs/ARCHITECTURE.md` (§4 Multi-agent coordination) for the full picture.
